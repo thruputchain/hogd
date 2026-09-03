@@ -48,10 +48,10 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
   case Prefix::kBalance:
     handle_balance_change(before, after);
     return;
-  case Prefix::kWasmCode:
+  case Prefix::kContractCode:
   case Prefix::kGlobalMetadata:
   case Prefix::kHogAge:
-  case Prefix::kWasmCodeRefcount:
+  case Prefix::kContractRefcount:
     // This doesn't pay storage costs;
     return;
   case Prefix::kAddressAuthData:

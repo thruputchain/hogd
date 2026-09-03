@@ -130,6 +130,15 @@ make_dummy_context()
 }
 
 inline LockContext
+make_balance_context()
+{
+  static HogDbDAO *dummy_dao = nullptr;
+  static ItemKey balance_key =
+      make_address_balance_item_key(make_address(3809));
+  return LockContext(dummy_dao, 0, balance_key, &kTestCostModel);
+}
+
+inline LockContext
 make_rcq_context()
 {
   static std::optional<Directory> dir;
@@ -677,6 +686,31 @@ TEST(ItemLockTest, FinalizeExclusive)
   ASSERT_TRUE(inner != nullptr);
   EXPECT_EQ(inner->get_base_and_delta(),
             (std::pair<int128_t, int128_t>(200, 20)));
+}
+
+// Regression test for #3809. A missing snapshot balance is cached as the
+// INT128_MIN sentinel; prepare_lock_contents must decode it to an absent
+// balance so the BalanceLock reserves aggregate credit capacity against a
+// logical base of 0 (add capacity INT128_MAX). Previously the sentinel leaked
+// through as a present base, granting near-unlimited capacity so that two
+// individually valid credits could wrap the aggregate delta and overflow at
+// block close.
+TEST(ItemLockTest, MissingBalanceSnapshotIsFresh)
+{
+  ItemLock lock({0, ItemLockCacheData::from_balance(std::nullopt)});
+
+  // A fresh balance can absorb at most INT128_MAX in aggregate credits.
+  ItemChange max_credit = Balance(std::numeric_limits<int128_t>::max());
+  ASSERT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &max_credit, make_balance_context())
+          .has_value());
+
+  // A concurrent second credit would push the aggregate delta past INT128_MAX
+  // and must be rejected.
+  ItemChange extra_credit = Balance(kTestCostModel.get_balance_cost());
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &extra_credit,
+                                           make_balance_context())
+                   .has_value());
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)

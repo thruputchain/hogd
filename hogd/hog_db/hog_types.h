@@ -97,7 +97,7 @@ make_address(std::integral auto val)
 
 // This is a superset of the StorageKeyTypes.
 // Every StorageKeyType belongs to an Address,
-// but some ItemTypes, like wasm code, do not.
+// but some ItemTypes, like contract code, do not.
 enum class ItemKeyType {
   kItemKeyTypeContractData = 0,
   kItemKeyTypeFreeNativeTokenBalance = 1,

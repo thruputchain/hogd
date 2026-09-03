@@ -187,7 +187,7 @@ TEST(TestBindingsTest, AdvanceCommitsTheTimepointItRanWith)
   ASSERT_EQ(advance_new_block(db, &next), kTestFFIErrorCodeNone);
 
   auto *typed_db = reinterpret_cast<DBContext *>(db);
-  auto tip = typed_db->get_snapshot().try_get_db_tip();
+  auto tip = typed_db->get_snapshot().try_get_db_tip()();
   ASSERT_TRUE(tip.has_value());
   ASSERT_NE(*tip, nullptr);
   EXPECT_EQ((*tip)->value.proposal_header.block_timepoint, pinned);

@@ -38,13 +38,6 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
 
 ## Manual Installation (All Platforms)
 
-1. Install the `wat2wasm` utility from the [WebAssembly Binary
-   Toolkit](https://github.com/WebAssembly/wabt).  Most OS package
-   managers let you do this by installing a package called `wabt`.
-
-1. Install the `wasm-opt` utility from [Binaryen](https://github.com/WebAssembly/binaryen).
-   Most package managers let you do this by installing the `binaryen` package.
-
 1. Install python-yaml, either with your OS package manager (e.g.,
    `pacman -S python-yaml`) or with `pip install pyyaml`.
 
@@ -62,8 +55,9 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
 
 1. Install [`rustup`](https://rustup.rs/) if you haven't already.  It
    generally won't suffice to have your OS distribution's rust
-   packages installed, because they won't support WASM.  You can
-   install rustup with:
+   packages installed, because the contract fixtures need a pinned
+   nightly toolchain with the `riscv32im-unknown-none-elf` target.
+   You can install rustup with:
 
     ~~~~ .sh
     curl -sSf https://sh.rustup.rs | sh
@@ -128,6 +122,29 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     * clippy (for rust)
     * flake8 (for python)
     * shfmt
+
+## Building `hog-devnode` for contract development
+
+Contract authors normally do not build this repository. The `groundhog` CLI
+(from [groundhog-rpc](https://github.com/groundhogchain/groundhog-rpc)) drives
+a local node through the `hog-devnode` binary, which ships in the
+`groundhog-client` release archive; see
+[Develop Locally](https://docs.groundhog.dev/tutorials/develop-locally/) on the
+developer docs site.
+
+If you do want to build `hog-devnode` from source, configure as above and build
+just that target:
+
+~~~~ .sh
+make -C build -j$(nproc) hog_devnode
+export GROUNDHOG_DEVNODE_BINARY="$PWD/build/hogd/devnode/hog_devnode"
+groundhog node
+~~~~
+
+`hog-devnode` itself serves only hogd's internal x23 RPC on loopback and prints
+one readiness line on stdout. The public JSON-RPC endpoint that clients and the
+CLI talk to (port 9545 by default) is served by `groundhog node`, which
+supervises the devnode process. Run `hog_devnode --help` for its options.
 
 ## Update instructions
 

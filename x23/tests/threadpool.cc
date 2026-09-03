@@ -96,3 +96,29 @@ TEST(ThreadPoolOnQuiesce, DestructionWakeupStress)
     pool.reset();
   }
 }
+
+TEST(ThreadPoolOnQuiesce, RepeatedWakeups)
+{
+  constexpr unsigned kCoroutines = 64;
+  std::atomic_bool stop{false};
+  std::atomic_uint done{0};
+  ThreadPool pool(8);
+
+  for (unsigned i = 0; i < kCoroutines; ++i)
+    [](ThreadPool &pool, std::atomic_bool &stop,
+       std::atomic_uint &done) -> Detached {
+      do {
+        co_await pool.bg();
+      } while (!stop.load(std::memory_order_relaxed));
+      done.fetch_add(1, std::memory_order_release);
+      done.notify_all();
+    }(pool, stop, done);
+
+  for (unsigned i = 0; i < 10'000; ++i)
+    pool.quiesce();
+
+  stop.store(true, std::memory_order_relaxed);
+  for (unsigned count = done.load(std::memory_order_acquire);
+       count != kCoroutines; count = done.load(std::memory_order_acquire))
+    done.wait(count, std::memory_order_relaxed);
+}

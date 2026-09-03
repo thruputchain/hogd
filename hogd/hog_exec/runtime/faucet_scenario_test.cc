@@ -234,7 +234,7 @@ protected:
 
     auto handler = make_new_system_call_handler(stx, *ctx_);
     TxOutcome out;
-    out.root_success = handler.root_invoke().is_root_success();
+    out.root_success = handler.root_invoke()().is_root_success();
     auto frame_output = handler.get_most_recent_frame_output();
     out.status = frame_output.status_code();
     switch (out.status) {
@@ -249,7 +249,7 @@ protected:
     case InvocationFrameStatusCode::Fault:
       break;
     }
-    out.commit = handler.try_commit_transaction();
+    out.commit = handler.try_commit_transaction()();
     if (out.commit == ExecResult::ExecResultOK) {
       EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
                                       ProposedTransaction{.signed_tx = stx})());

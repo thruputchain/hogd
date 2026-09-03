@@ -68,7 +68,7 @@ TEST_F(SyscallParseHardeningRv32Test, VerifySignatureRejectsNoncanonicalScheme)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // OOB optional pointer that's not u64 max must fault in syscall parsing.
@@ -82,7 +82,7 @@ TEST_F(SyscallParseHardeningRv32Test, ChangePubkeyOptionalPointerFaults)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // only uint64_max is a valid sentinel for optional pointer
@@ -98,7 +98,7 @@ TEST_F(SyscallParseHardeningRv32Test,
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // The signature half of VerifySignature's size check: 63-byte signature with
@@ -113,7 +113,7 @@ TEST_F(SyscallParseHardeningRv32Test, VerifySignatureRejectsWrongSizeSignature)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // A zero-length span with an out-of-range pointer faults; the valid-pointer
@@ -129,7 +129,7 @@ TEST_F(SyscallParseHardeningRv32Test, ZeroLenSpanOobPointerFaults)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // The span end (ptr + len) must be computed wider than 32 bits; a u32-wrapping
@@ -145,7 +145,7 @@ TEST_F(SyscallParseHardeningRv32Test, SpanEndU32WrapFaults)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 } // namespace hogd

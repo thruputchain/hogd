@@ -668,7 +668,7 @@ open_mocked_syscall_handler(void *db, void *rc,
           // Report a failed abort -- whether it returns an error status or
           // throws -- rather than silently dropping it.
           try {
-            auto abort_res = handler->to_handler().abort_transaction();
+            auto abort_res = handler->to_handler().abort_transaction()();
             if (!abort_res.has_value()) {
               best_effort_log([&] {
                 error("error aborting transaction during traced "
@@ -748,7 +748,7 @@ close_syscall_handler(void *syscall_handler) noexcept
     // attempt a second abort.
     if (!owned->is_committed_or_aborted()) {
       owned->mark_committed_or_aborted();
-      auto res = owned->to_handler().abort_transaction();
+      auto res = owned->to_handler().abort_transaction()();
       if (!res.has_value()) {
         error("error aborting transaction during close: {}", res.error());
         db.poison_lifecycle();
@@ -956,7 +956,7 @@ try_commit_transaction(void *syscall_handler) noexcept
       error("try_commit_transaction after a failed finish-result handoff");
       return kUnrecoverableError;
     }
-    auto res = context->to_handler().try_commit_transaction();
+    auto res = context->to_handler().try_commit_transaction()();
     context->mark_committed_or_aborted();
 
     // Always serialize the full DbConflictResult (including the None arm) so
@@ -1044,7 +1044,7 @@ abort_transaction(void *syscall_handler) noexcept
   }
 
   try {
-    auto res = context->to_handler().abort_transaction();
+    auto res = context->to_handler().abort_transaction()();
     // SystemCallHandler::abort_transaction() marks its transaction aborted
     // before issuing the abort RPC, so the context must record the abort even
     // when the RPC reports or throws an error; otherwise the destructor in
@@ -1116,7 +1116,7 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     return kTestFFIErrorCodeDeserializeError;
   } catch (std::exception const &e) {
     // Deserializing a well-formed contract still allocates (e.g. resizing the
-    // ContractBlob::wasm vector), so std::bad_alloc can be thrown here on valid
+    // ContractBlob::data vector), so std::bad_alloc can be thrown here on valid
     // input. Catch it so it doesn't cross the noexcept FFI boundary (#2490).
     log_error("unrecoverable: error deserializing contract: {}", e);
     return kTestFFIErrorCodeUnrecoverableError;
@@ -1134,8 +1134,8 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     }
 
     // Verify runtime-backed contracts before storing — reject contracts that
-    // would fail during instantiation (e.g., wasm memory exceeding limits, an
-    // RV32 artifact that cannot be translated, or an unknown native id).
+    // would fail during instantiation (e.g., an RV32 artifact that cannot be
+    // translated, or an unknown native id).
     // kMockTest is excluded because it has no production runtime to verify
     // against (the base context only registers the real runtimes); its
     // registration is checked above via has_mock_contract().
@@ -1178,7 +1178,8 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   auto &dao = db_cast->get_base_db().get_db();
   Contract contract;
   try {
-    // read_wasm_code() copies the stored row out of RAMDB (make_byte_buffer()
+    // read_contract_code() copies the stored row out of RAMDB
+    // (make_byte_buffer()
     // allocates the returned byte buffer, #2765) and x23::deserialize() resizes
     // the opaque-vector destination (#2642/#2766); both can throw
     // std::bad_alloc on a valid stored contract. setup_deploy_contract() is
@@ -1186,7 +1187,7 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
     // boundary -- mirroring setup_create_contract() -- rather than letting an
     // allocation failure cross the noexcept boundary and terminate an honest
     // caller.
-    auto res = dao.read_wasm_code(h);
+    auto res = dao.read_contract_code(h);
     if (!res) {
       // best_effort_log keeps the not-found diagnostic non-throwing so it still
       // returns the structured missing-contract code (#2584, same pattern as

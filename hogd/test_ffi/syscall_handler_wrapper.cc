@@ -115,7 +115,7 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
   // consumed early in SystemCallHandler::root_invoke(), so even a pre-frame
   // throw must block a later retry (issue #2643).
   root_invoke_attempted_ = true;
-  auto res = to_handler().root_invoke();
+  auto res = to_handler().root_invoke()();
 
   if (res.result_.has_value() ||
       res.result_.error().code() == InvokeErrorCode::Deterministic ||
@@ -321,7 +321,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   // Clamp the child's budget to what the parent still has, mirroring
-  // production kInvoke: syscall_Invoke_inner() hands
+  // production kInvoke: syscall_Invoke_inner()() hands
   // SystemCallHandler::invoke() min(requested gas_limit, remaining_gas), so a
   // child frame can never be admitted with a larger budget than its caller can
   // pay for. Without the clamp a mock child could spend past the parent's
@@ -363,6 +363,14 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // caller's synthetic kInvoke is traced with production's syscall error and
   // charged only the crossing, matching a refused kInvoke. Closed before the
   // error() log, which can throw.
+  // The depth bound below is a plain load off the pinned tip, so pin it first.
+  // Completing it here is legal for the same reason the rest of this path
+  // blocks: the FFI entrypoint is not an x23 ThreadPool worker, which
+  // Async::operator() asserts.
+  if (auto pinned = to_handler().init_db_tip()(); !pinned.has_value()) {
+    error("mock invocation frame admission failed: {}", pinned.error());
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   auto admitted =
       to_handler().validate_new_invocation(invocation.invoked_address,
                                            frame_flags,
@@ -378,6 +386,19 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     error("invalid argument: mock invocation frame not admitted: {}",
           admitted->error().code());
     return kTestFFIErrorCodeInvalidArgument;
+  }
+
+  // The frame's hash-buffer limit, which start_frame() takes rather than
+  // reading: the tip read may suspend and start_frame() is a noexcept boundary.
+  // Completed with operator() -- this is the off-pool FFI thread, never an x23
+  // pool worker. Read here, with the other admission checks, so it lands before
+  // the throwing allocations below and a failure still pushes no frame.
+  auto max_buffers = db_.get_snapshot().try_get_max_sha256_buffers()();
+  if (!max_buffers.has_value()) {
+    finish_pending_trace(max_buffers.error().to_host_fn_error());
+    error("unrecoverable: could not read the hash-buffer limit for a mock "
+          "invocation frame");
+    return kTestFFIErrorCodeUnrecoverableError;
   }
 
   // TODO(geoff): current API does not support passing auth tokens via the mock
@@ -400,7 +421,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // closed above.
   auto stashed_parent_trace =
       to_handler().start_frame(std::move(frame_invocation), frame_flags,
-                               std::span<uint32_t const>{});
+                               std::span<uint32_t const>{}, *max_buffers);
   if (!stashed_parent_trace.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back, so the handler has no new frame; skip publishing the mock-runtime
@@ -543,7 +564,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // finish the frame
   auto res = to_handler().finish_frame(result.result_,
-                                       std::move(stashed_parent_trace));
+                                       std::move(stashed_parent_trace))();
   if (!res.has_value()) {
     error("unrecoverable: finish_mock_invocation_frame failed: {}",
           res.error());

@@ -27,7 +27,7 @@
 // derived as (ip - base) * 4 only by the control-flow handlers and when
 // materializing observable state.
 //
-// Gas is metered at *start of run* (block granularity, like the wasm engines):
+// Gas is metered at *start of run* (block granularity):
 // a "run" is a maximal straight-line sequence whose continuation is known at
 // lowering time. enter_run() charges the whole run's gas in one check; the
 // handlers inside do no gas work. Control-flow instructions and host-boundary
@@ -470,7 +470,7 @@ capture(const Ctx c)
 // (the continuation isn't known). Its
 // gas is charged individually. Loads/stores are NOT barriers: they're
 // straight-line, so they fold into runs; a mid-run fault is terminal and has
-// already paid the run's gas (block-granular metering, like the wasm engines).
+// already paid the run's gas (block-granular metering).
 // The conditional branches (B-type). Their taken target is PC-relative and
 // static, so PreInstantiation::create resolves it the same way as jal.
 inline bool

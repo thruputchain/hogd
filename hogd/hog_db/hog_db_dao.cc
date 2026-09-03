@@ -244,9 +244,9 @@ HogDbDAO::read_address_metadata(const Address &addr)
 }
 
 HogDbStatus<OwningSpan<const std::byte>>
-HogDbDAO::read_wasm_code(const SHA256Hash &hash)
+HogDbDAO::read_contract_code(const SHA256Hash &hash)
 {
-  auto key = make_wasm_code_key(hash);
+  auto key = make_contract_code_key(hash);
 
   // One lookup covers both layouts: get() returns the type byte and the
   // value together, so the inline path (every pre-chunking row, and the
@@ -254,9 +254,9 @@ HogDbDAO::read_wasm_code(const SHA256Hash &hash)
   auto item = db_.get(std::as_bytes(std::span(key)));
   if (!item)
     return item.error(); // kNotFound passes through unchanged
-  if (item->type == kWasmCodeInline)
+  if (item->type == kContractCodeInline)
     return std::move(item->value);
-  if (item->type != kWasmCodeChunkedHead)
+  if (item->type != kContractCodeChunkedHead)
     return HogDbError(HogDbCode::kCorruption);
 
   // The chunked head's value is the XDR uint32 total serialized length.
@@ -275,8 +275,8 @@ HogDbDAO::read_wasm_code(const SHA256Hash &hash)
   if (Database::item_fits(key.size(), total))
     return HogDbError(HogDbCode::kCorruption);
   const size_t chunk_count =
-      (static_cast<size_t>(total) + kWasmCodeChunkPayloadSize - 1) /
-      kWasmCodeChunkPayloadSize;
+      (static_cast<size_t>(total) + kContractCodeChunkPayloadSize - 1) /
+      kContractCodeChunkPayloadSize;
   if (chunk_count > 255)
     return HogDbError(HogDbCode::kCorruption);
 
@@ -284,13 +284,14 @@ HogDbDAO::read_wasm_code(const SHA256Hash &hash)
   OwningSpan<const std::byte> out(std::span<const std::byte>(data, total),
                                   [data] { delete[] data; });
   for (size_t i = 0; i < chunk_count; ++i) {
-    auto chunk_key = make_wasm_code_chunk_key(hash, static_cast<uint8_t>(i));
-    const size_t off = i * kWasmCodeChunkPayloadSize;
-    const size_t len = std::min(kWasmCodeChunkPayloadSize, total - off);
+    auto chunk_key =
+        make_contract_code_chunk_key(hash, static_cast<uint8_t>(i));
+    const size_t off = i * kContractCodeChunkPayloadSize;
+    const size_t len = std::min(kContractCodeChunkPayloadSize, total - off);
     // The exact-size get_if_type overload also rejects a wrong-sized chunk.
-    if (auto chunk =
-            db_.get_if_type(std::as_bytes(std::span(chunk_key)), kWasmCodeChunk,
-                            std::span<std::byte>(data + off, len));
+    if (auto chunk = db_.get_if_type(std::as_bytes(std::span(chunk_key)),
+                                     kContractCodeChunk,
+                                     std::span<std::byte>(data + off, len));
         !chunk)
       return HogDbError(HogDbCode::kCorruption);
   }
@@ -514,17 +515,17 @@ HogDbDAO::write_address_metadata(Address const &addr,
 }
 
 HogDbStatus<void>
-HogDbDAO::write_wasm_code(const SHA256Hash &hash,
-                          std::span<const std::byte> buf)
+HogDbDAO::write_contract_code(const SHA256Hash &hash,
+                              std::span<const std::byte> buf)
 {
   HogDbStatus<void> ret;
-  for_each_wasm_code_item(hash, buf,
-                          [this, &ret](std::span<const std::byte> key,
-                                       uint8_t type,
-                                       std::span<const std::byte> value) {
-                            if (ret)
-                              ret = db_.put(key, type, value);
-                          });
+  for_each_contract_code_item(hash, buf,
+                              [this, &ret](std::span<const std::byte> key,
+                                           uint8_t type,
+                                           std::span<const std::byte> value) {
+                                if (ret)
+                                  ret = db_.put(key, type, value);
+                              });
   return ret;
 }
 

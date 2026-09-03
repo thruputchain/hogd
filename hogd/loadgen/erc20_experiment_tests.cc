@@ -43,11 +43,11 @@ protected:
     for (auto const &tx : block) {
       check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
+      auto invoke_res = handler.root_invoke()();
       ASSERT_TRUE(invoke_res.is_root_success())
           << "invoke error: " << invoke_res.result_.error().raw_code()
           << ", gas consumed: " << invoke_res.gas_consumed_;
-      auto res = handler.try_commit_transaction();
+      auto res = handler.try_commit_transaction()();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
       ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
                                       ProposedTransaction{.signed_tx = tx})());
@@ -93,9 +93,9 @@ protected:
     for (auto &tx : work_txs) {
       check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
+      auto invoke_res = handler.root_invoke()();
       ASSERT_TRUE(invoke_res.is_root_success());
-      auto res = handler.try_commit_transaction();
+      auto res = handler.try_commit_transaction()();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
       if (!gas_used) {
         gas_used = invoke_res.gas_consumed_;
@@ -141,9 +141,9 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
   for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
-    auto invoke_res = handler.root_invoke();
+    auto invoke_res = handler.root_invoke()();
     ASSERT_TRUE(invoke_res.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_TRUE(res == ExecResult::ExecResultOK);
     if (!gas_used) {
       gas_used = invoke_res.gas_consumed_;
@@ -196,9 +196,9 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
   for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
-    auto invoke_res = handler.root_invoke();
+    auto invoke_res = handler.root_invoke()();
     ASSERT_TRUE(invoke_res.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_TRUE(res == ExecResult::ExecResultOK);
     if (!gas_used) {
       gas_used = invoke_res.gas_consumed_;

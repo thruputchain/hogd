@@ -26,12 +26,14 @@
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -76,7 +78,7 @@ public:
 
   // Mark the current frame as failed.
   // Used to clean up failed try_invoke frames.
-  SystemStatus<void>
+  x23::Async<SystemStatus<void>>
   mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
@@ -130,18 +132,18 @@ public:
 
   // returned pointer is invalidated by any call to add_item_view
   // Does not create a new view if it does not exist
-  auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
+  auto *get_item_view(this auto &self, FrameItemKey const &key)
   {
-    auto it = self.modified_items_.find(addrkey);
+    auto it = self.modified_items_.find(key);
     if (it != self.modified_items_.end()) {
       return &(it->second);
     }
     return static_cast<decltype(&(it->second))>(nullptr);
   }
   // returns pointer to the newly created view
-  ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
+  ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
-  SystemStatus<bool> try_acquire_frame_locks(
+  x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
       std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
 
@@ -259,7 +261,9 @@ private:
   uint32_t total_try_invoke_depth_;
 
   // elements modified during the current call frame (and child frames)
-  std::unordered_map<AddressAndKey, ItemView> modified_items_;
+  // Keyed by the flat, pre-hashed form: a first touch probes every open frame
+  // with one key, and the hash is computed once for all of them.
+  std::unordered_map<FrameItemKey, ItemView, FrameItemKeyHash> modified_items_;
 
   // newly deployed contracts during the current call frame (and child frames)
   std::unordered_map<ContractAddress, DeployedContractHash, SipHash24Hasher>
@@ -327,7 +331,7 @@ public:
   // is still popped and an Unrecoverable SystemError is returned, so the
   // noexcept caller (SystemCallHandler::finish_frame) is never terminated
   // (#3378).
-  SystemStatus<std::pair<InvokeResult, bool>>
+  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data,
                DbConflictResult *try_invoke_conflict_out = nullptr);
@@ -420,6 +424,17 @@ public:
   // The returned pointer is never null
   ItemView *get_item_view(StorageKeyContractData const &data_key);
   ItemView *get_item_view(AddressAndKey const &addrkey);
+  ItemView *get_item_view(FrameItemKey const &key);
+
+  // The frame key for `data_key` under the active frame's address, laid out
+  // and hashed once. A syscall that may reach the snapshot cache builds this,
+  // probes the frames with it, and hands the same key to UnmodifiedItem::load,
+  // so the key is hashed once per syscall rather than once per structure.
+  FrameItemKey frame_item_key(StorageKeyContractData const &data_key) const
+  {
+    assert(!frame_stack_.empty());
+    return FrameItemKey::contract_data(frame_stack_.back().address(), data_key);
+  }
 
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {

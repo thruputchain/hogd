@@ -30,6 +30,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -92,31 +93,32 @@ protected:
     return std::make_unique<NativeContext>(std::move(cmap));
   }
 
-  static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
+  static x23::Async<HostFnStatus<SyscallErrorCode>>
+  try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
   {
     CopyableInvokeInputs inputs{
         .entrypoint_id = method,
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
-                                           std::span<uint32_t>{}, inputs,
-                                           CopyableInvokeOutputs{});
+    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+        kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+        CopyableInvokeOutputs{});
   }
 
   static std::unique_ptr<RuntimeContext> make_rcq_insert_context()
   {
     auto contract = build_contract(
-        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
-            auto res = ctx.handler().retrocausal_queue_insert(
+            auto res = co_await ctx.handler().retrocausal_queue_insert(
                 key, std::as_bytes(std::span(&val, 1)));
             if (!res.has_value())
-              return res.error().to_invoke_error();
+              co_return res.error().to_invoke_error();
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
     cmap.emplace(1, std::move(contract));
@@ -171,45 +173,46 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *insert_ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
     insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   bool marker_branch_taken = false;
   auto consume_then_peek_marker_contract = build_contract(
       [&marker_branch_taken](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         QueueEntry expected_entry;
         expected_entry.push_back(10);
 
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        auto consume_res =
+            co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
+          co_return consume_res.error().to_invoke_error();
 
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
 
         if (!consume_res.value().has_value() || !peek_res.value().has_value() ||
             consume_res.value().value() != expected_entry ||
             peek_res.value().value() != expected_entry) {
-          return {};
+          co_return InvokeStatus<void>{};
         }
 
         marker_branch_taken = true;
         auto marker_key = make_storage_key("marker");
         uint8_t marker[] = {0xEE};
-        auto ws = ctx.handler().set_bytestring(marker_key,
-                                               std::as_bytes(std::span(marker)),
-                                               std::to_underlying(
-                                                   StorageDeltaFlags::None));
+        auto ws = co_await ctx.handler().set_bytestring(
+            marker_key, std::as_bytes(std::span(marker)),
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value())
-          return ws.error().to_invoke_error();
+          co_return ws.error().to_invoke_error();
         if (!ws.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   // The PoC contract runs at kAddrB (same address as the RCQ inserts).
@@ -220,9 +223,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto tx_b = make_invoke_b_tx(0);
   auto honest_proposal_b = [&] {
     auto ha = make_new_system_call_handler(tx_b, *native_ctx);
-    EXPECT_TRUE(ha.root_invoke().is_root_success());
+    EXPECT_TRUE(ha.root_invoke()().is_root_success());
     auto p = ha.get_proposal_data();
-    EXPECT_TRUE(ha.abort_transaction().has_value());
+    EXPECT_TRUE(ha.abort_transaction()().has_value());
     return p;
   }();
   ASSERT_FALSE(marker_branch_taken)
@@ -244,17 +247,17 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
                                                       insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler =
       make_new_system_call_handler_validation(tx_b, *native_ctx,
                                               std::move(doctored_proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
   EXPECT_TRUE(marker_branch_taken);
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // With the fix, block close rejects the doctored data because
   // per-TX demand (1 consume + 1 observe = 2) exceeds insert_count (1).
@@ -279,37 +282,37 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData insert_p1, insert_p2;
   {
     auto h1 = make_new_system_call_handler(tx_insert_1, *insert_ctx);
-    ASSERT_TRUE(h1.root_invoke().is_root_success());
+    ASSERT_TRUE(h1.root_invoke()().is_root_success());
     insert_p1 = h1.get_proposal_data();
-    ASSERT_EQ(h1.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h1.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h2 = make_new_system_call_handler(tx_insert_2, *insert_ctx);
-    ASSERT_TRUE(h2.root_invoke().is_root_success());
+    ASSERT_TRUE(h2.root_invoke()().is_root_success());
     insert_p2 = h2.get_proposal_data();
-    ASSERT_EQ(h2.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h2.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // B method 0: two destructive consumes from "rcq0", then deterministic
   // error to force the try_invoke child frame to revert.
   auto b_double_consume_fault = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto r1 = ctx.handler().retrocausal_queue_consume(key, false);
+        auto r1 = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!r1.has_value())
-          return r1.error().to_invoke_error();
-        auto r2 = ctx.handler().retrocausal_queue_consume(key, false);
+          co_return r1.error().to_invoke_error();
+        auto r2 = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!r2.has_value())
-          return r2.error().to_invoke_error();
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return r2.error().to_invoke_error();
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   // A method 0: try_invoke B.0 (which reverts after 2 consumes).
   auto a_try_invoke = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto tx_a_ctx = make_ab_context(std::move(a_try_invoke),
@@ -319,9 +322,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData proposal_a;
   {
     auto ha = make_new_system_call_handler(tx_a, *tx_a_ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
     proposal_a = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     // 2 consume bits (both found entries), child errors deterministically
     // so no try_invoke bit.  2 observations at indices 0 and 1.
@@ -331,15 +334,15 @@ TEST_F(RcqDoctoredProposalDataTest,
 
   // TX_B: honest consume + peek at kAddrB.
   auto b_consume_peek = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto r1 = ctx.handler().retrocausal_queue_consume(key, false);
+        auto r1 = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!r1.has_value())
-          return r1.error().to_invoke_error();
-        auto r2 = ctx.handler().retrocausal_queue_consume(key, true);
+          co_return r1.error().to_invoke_error();
+        auto r2 = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!r2.has_value())
-          return r2.error().to_invoke_error();
-        return {};
+          co_return r2.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cp_cmap;
   cp_cmap.emplace(1, std::move(b_consume_peek));
@@ -349,9 +352,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData proposal_b;
   {
     auto hb = make_new_system_call_handler(tx_b, *tx_b_ctx);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
     proposal_b = hb.get_proposal_data();
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     // 2 bits (consume found, peek found).  Both the consume and peek log
     // observations to ProposalModeData; the consumed prefix is stripped at
@@ -366,26 +369,26 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h1 = make_new_system_call_handler_validation(tx_insert_1, *insert_ctx,
                                                       insert_p1);
-    ASSERT_TRUE(h1.root_invoke().is_root_success());
-    ASSERT_EQ(h1.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h1.root_invoke()().is_root_success());
+    ASSERT_EQ(h1.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h2 = make_new_system_call_handler_validation(tx_insert_2, *insert_ctx,
                                                       insert_p2);
-    ASSERT_TRUE(h2.root_invoke().is_root_success());
-    ASSERT_EQ(h2.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h2.root_invoke()().is_root_success());
+    ASSERT_EQ(h2.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   {
     auto ha = make_new_system_call_handler_validation(tx_a, *tx_a_ctx,
                                                       std::move(proposal_a));
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto hb = make_new_system_call_handler_validation(tx_b, *tx_b_ctx,
                                                       std::move(proposal_b));
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Block close: insert_count=2, consume_count=1, observe_count=max(2,1)=2.
@@ -419,17 +422,17 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
 {
   // B method 0: set_bytestring on "shared" with ExclusiveLock.
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
             std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> excl_cmap;
@@ -441,25 +444,25 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   // "shared" (modifies the key, so the child frame needs lock
   // acquisition at commit time).
   auto b_peek_and_insert = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek.has_value())
-          return peek.error().to_invoke_error();
+          co_return peek.error().to_invoke_error();
         uint8_t val = 10;
-        auto ins = ctx.handler().retrocausal_queue_insert(
+        auto ins = co_await ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
-          return ins.error().to_invoke_error();
-        return {};
+          co_return ins.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
 
   auto a_try_peek_insert = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto obs_ctx = make_ab_context(std::move(a_try_peek_insert),
@@ -470,9 +473,9 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   NondeterministicProposalData excl_p;
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     excl_p = h.get_proposal_data();
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_OBS: A try_invokes B (peek + insert on "shared").  The peek
@@ -484,12 +487,12 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   NondeterministicProposalData obs_p;
   {
     auto h = make_new_system_call_handler(tx_obs, *obs_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     obs_p = h.get_proposal_data();
     ASSERT_EQ(obs_p.nondeterministic_bit_count, 2U);
     ASSERT_EQ(obs_p.nondeterministic_bits[0], uint8_t{0x00})
         << "Honest proposal: peek=false (bit 0), try_invoke=false (bit 1)";
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // === Validation roundtrip with honest proposal data ===
@@ -498,13 +501,13 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   {
     auto h =
         make_new_system_call_handler_validation(tx_excl, *excl_ctx, excl_p);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto h = make_new_system_call_handler_validation(tx_obs, *obs_ctx, obs_p);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_NO_THROW(
@@ -521,17 +524,17 @@ TEST_F(RcqDoctoredProposalDataTest,
        PermExclusiveWriteBlocksDoctoredPeekOnlyObservation)
 {
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
             std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> excl_cmap;
@@ -541,20 +544,20 @@ TEST_F(RcqDoctoredProposalDataTest,
   // B method 0: peek only — no insert, so the child frame has no
   // modified items and try_invoke lock acquisition trivially succeeds.
   auto b_peek_only = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek.has_value())
-          return peek.error().to_invoke_error();
-        return {};
+          co_return peek.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
 
   auto a_try_peek = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto obs_ctx = make_ab_context(std::move(a_try_peek), std::move(b_peek_only));
@@ -563,9 +566,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData excl_p;
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     excl_p = h.get_proposal_data();
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Honest proposal: peek=false (bit 0), try_invoke=true (bit 1, no
@@ -574,13 +577,13 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData obs_p;
   {
     auto h = make_new_system_call_handler(tx_obs, *obs_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     obs_p = h.get_proposal_data();
     ASSERT_EQ(obs_p.nondeterministic_bit_count, 2U);
     ASSERT_EQ(obs_p.nondeterministic_bits[0], uint8_t{0x02})
         << "Honest: peek=false (bit 0), try_invoke=true (bit 1)";
     ASSERT_EQ(obs_p.observed_queue_entry_sequence.size(), 0U);
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Honest roundtrip in validation.
@@ -588,13 +591,13 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h =
         make_new_system_call_handler_validation(tx_excl, *excl_ctx, excl_p);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto h = make_new_system_call_handler_validation(tx_obs, *obs_ctx, obs_p);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   // Discard (rather than commit) the honest validation block: the doctored
   // replay below reuses the same tx_excl/tx_obs, so committing the honest block
@@ -618,15 +621,15 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h =
         make_new_system_call_handler_validation(tx_excl, *excl_ctx, excl_p);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_obs, *obs_ctx,
                                                          std::move(doctored));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   EXPECT_EQ(commit_res, ExecResult::ExecResultTxNonDeterministicError)
       << "Observation-only delta must collide with perm-exclusive lock";
 }
@@ -646,17 +649,17 @@ TEST_F(RcqDoctoredProposalDataTest,
 {
   // B method 0: set_bytestring on "shared" with ExclusiveLock.
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
             std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> excl_cmap;
@@ -667,20 +670,20 @@ TEST_F(RcqDoctoredProposalDataTest,
   // goes through the concurrent-entry path and consumes a nondeterministic
   // bit + observation).
   auto b_peek = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek.has_value())
-          return peek.error().to_invoke_error();
-        return {};
+          co_return peek.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
 
   auto a_try_peek = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto obs_ctx = make_ab_context(std::move(a_try_peek), std::move(b_peek));
@@ -690,9 +693,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData excl_p;
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     excl_p = h.get_proposal_data();
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_OBS: A try_invokes B (peek on "shared").  The peek produces a
@@ -703,13 +706,13 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData honest_p;
   {
     auto h = make_new_system_call_handler(tx_obs, *obs_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     honest_p = h.get_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 2U);
     ASSERT_EQ(honest_p.nondeterministic_bits[0], uint8_t{0x02})
         << "Honest bits: peek=false (bit 0), try_invoke=true (bit 1)";
     ASSERT_EQ(honest_p.observed_queue_entry_sequence.size(), 0U);
-    ASSERT_TRUE(h.abort_transaction().has_value());
+    ASSERT_TRUE(h.abort_transaction()().has_value());
   }
 
   // Doctor the proposal: claim peek found {10} AND try_invoke succeeded.
@@ -725,8 +728,8 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h =
         make_new_system_call_handler_validation(tx_excl, *excl_ctx, excl_p);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Replay TX_OBS with doctored data.  Both nondeterministic bits are
@@ -736,9 +739,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   // which collides with the perm-exclusive lock → NonDeterministicError.
   auto handler = make_new_system_call_handler_validation(tx_obs, *obs_ctx,
                                                          std::move(doctored));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   EXPECT_EQ(commit_res, ExecResult::ExecResultTxNonDeterministicError)
       << "Observation delta must collide with perm-exclusive lock";
 }
@@ -753,17 +756,17 @@ TEST_F(RcqDoctoredProposalDataTest,
 {
   // TX_EXCL: B method 0 does set_bytestring with ExclusiveLock on "shared".
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
             std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> excl_cmap;
@@ -774,28 +777,28 @@ TEST_F(RcqDoctoredProposalDataTest,
   // it triggers manual root-frame revert.  Otherwise it writes a marker.
   static constexpr uint8_t kForgedVal = 0xAB;
   auto b_peek_and_maybe_revert = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek.has_value())
-          return peek.error().to_invoke_error();
+          co_return peek.error().to_invoke_error();
 
         if (peek.value().has_value() && peek.value().value().size() == 1 &&
             peek.value().value()[0] == kForgedVal) {
           ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-          return {};
+          co_return InvokeStatus<void>{};
         }
 
         auto marker_key = make_storage_key("marker");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), marker_key,
             std::as_bytes(std::span(std::string_view("honest"))),
             std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> obs_cmap;
@@ -807,21 +810,21 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData excl_p;
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     excl_p = h.get_proposal_data();
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_OBS honest proposal: peek finds no concurrent entry (bit=false).
   auto tx_obs = make_invoke_b_tx(0);
   {
     auto h = make_new_system_call_handler(tx_obs, *obs_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     auto honest_p = h.get_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_p.nondeterministic_bits[0] & uint8_t{1}, 0U);
     ASSERT_EQ(honest_p.observed_queue_entry_sequence.size(), 0U);
-    ASSERT_TRUE(h.abort_transaction().has_value());
+    ASSERT_TRUE(h.abort_transaction()().has_value());
   }
 
   // Doctor the proposal: claim peek found {kForgedVal}, triggering revert.
@@ -835,8 +838,8 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h =
         make_new_system_call_handler_validation(tx_excl, *excl_ctx, excl_p);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Replay TX_OBS with forged data.  The peek consumes the doctored
@@ -845,10 +848,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   // but the key is perm-exclusively locked → NonDeterministicError.
   auto handler = make_new_system_call_handler_validation(tx_obs, *obs_ctx,
                                                          std::move(forged));
-  auto obs_res = handler.root_invoke();
+  auto obs_res = handler.root_invoke()();
   ASSERT_TRUE(obs_res.is_root_success())
       << "The forged observation is consumed and triggers manual revert";
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   EXPECT_EQ(commit_res, ExecResult::ExecResultTxNonDeterministicError)
       << "Observation delta must collide with perm-exclusive lock";
 }
@@ -912,9 +915,9 @@ TEST_F(RcqDoctoredProposalDataTest,
         RetrocausalQueueInsertDelta{.added_entries = {entry}};
     tx_a.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-    auto r = tx_a.try_push_current_subtransaction();
+    auto r = tx_a.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx_a.commit_transaction().has_value());
+    ASSERT_TRUE(tx_a.commit_transaction()().has_value());
   }
 
   // TX_B: try to consume {10} from the same key — must fail because
@@ -928,11 +931,11 @@ TEST_F(RcqDoctoredProposalDataTest,
         .current_block_consumed = {entry}};
     tx_b.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx_b.try_push_current_subtransaction();
+    auto r = tx_b.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
         << "Consume must fail: key is permanently exclusively locked";
-    ASSERT_TRUE(tx_b.abort_transaction().has_value());
+    ASSERT_TRUE(tx_b.abort_transaction()().has_value());
   }
 
   // TX_C: try to push an observation-only delta (what a doctored
@@ -943,12 +946,12 @@ TEST_F(RcqDoctoredProposalDataTest,
     delta.retrocausal_queue().observed_concurrent_entries = {entry};
     tx_c.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx_c.try_push_current_subtransaction();
+    auto r = tx_c.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
         << "Observation-only delta must fail: key is permanently exclusively "
            "locked";
-    ASSERT_TRUE(tx_c.abort_transaction().has_value());
+    ASSERT_TRUE(tx_c.abort_transaction()().has_value());
   }
 
   advance_block();
@@ -977,9 +980,9 @@ TEST_F(RcqDoctoredProposalDataTest,
         RetrocausalQueueInsertDelta{.added_entries = {entry}};
     tx_a.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-    auto r = tx_a.try_push_current_subtransaction();
+    auto r = tx_a.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx_a.commit_transaction().has_value());
+    ASSERT_TRUE(tx_a.commit_transaction()().has_value());
   }
 
   // TX_B: observation-only delta claiming to have seen {10} from the
@@ -991,12 +994,12 @@ TEST_F(RcqDoctoredProposalDataTest,
     delta.retrocausal_queue().observed_concurrent_entries = {entry};
     tx_b.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx_b.try_push_current_subtransaction();
+    auto r = tx_b.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
         << "Observation-only delta on a perm-exclusive key must be rejected "
            "at the lock level";
-    ASSERT_TRUE(tx_b.abort_transaction().has_value());
+    ASSERT_TRUE(tx_b.abort_transaction()().has_value());
   }
 
   advance_block();
@@ -1027,9 +1030,9 @@ TEST_F(RcqDoctoredProposalDataTest,
     delta.retrocausal_queue().observed_concurrent_entries = {entry};
     tx_b.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx_b.try_push_current_subtransaction();
+    auto r = tx_b.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx_b.commit_transaction().has_value());
+    ASSERT_TRUE(tx_b.commit_transaction()().has_value());
   }
 
   // TX_A: RCQ insert {10} with ExclusiveLock — must fail because
@@ -1041,11 +1044,11 @@ TEST_F(RcqDoctoredProposalDataTest,
         RetrocausalQueueInsertDelta{.added_entries = {entry}};
     tx_a.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-    auto r = tx_a.try_push_current_subtransaction();
+    auto r = tx_a.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
         << "Exclusive lock must fail: TX_B already holds a non-exclusive ref";
-    ASSERT_TRUE(tx_a.abort_transaction().has_value());
+    ASSERT_TRUE(tx_a.abort_transaction()().has_value());
   }
 
   // TX_B's observation is committed with no matching insert —
@@ -1080,9 +1083,9 @@ TEST_F(RcqDoctoredProposalDataTest,
         RetrocausalQueueInsertDelta{.added_entries = {entry}};
     tx_a.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-    auto r = tx_a.try_push_current_subtransaction();
+    auto r = tx_a.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx_a.commit_transaction().has_value());
+    ASSERT_TRUE(tx_a.commit_transaction()().has_value());
   }
 
   // TX_B: destructive consume of {10} + observation.  This is the delta
@@ -1098,11 +1101,11 @@ TEST_F(RcqDoctoredProposalDataTest,
     delta.retrocausal_queue().observed_concurrent_entries = {entry};
     tx_b.add_delta(addrkey, std::move(delta),
                    std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx_b.try_push_current_subtransaction();
+    auto r = tx_b.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
         << "Destructive consume + observation must fail on perm-exclusive key";
-    ASSERT_TRUE(tx_b.abort_transaction().has_value());
+    ASSERT_TRUE(tx_b.abort_transaction()().has_value());
   }
 
   advance_block();
@@ -1118,17 +1121,17 @@ TEST_F(RcqDoctoredProposalDataTest,
 {
   // B method 0: set_bytestring on "shared" with ExclusiveLock.
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
             std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> excl_cmap;
@@ -1137,12 +1140,12 @@ TEST_F(RcqDoctoredProposalDataTest,
 
   // B method 0: destructive consume (peek=false) on "shared".
   auto b_consume = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        auto res = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cons_cmap;
@@ -1153,21 +1156,21 @@ TEST_F(RcqDoctoredProposalDataTest,
   NondeterministicProposalData excl_p;
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     excl_p = h.get_proposal_data();
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Honest proposal: destructive consume finds nothing (bit=false).
   auto tx_cons = make_invoke_b_tx(0);
   {
     auto h = make_new_system_call_handler(tx_cons, *cons_ctx);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
     auto honest_p = h.get_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_p.nondeterministic_bits[0] & uint8_t{1}, 0U);
     ASSERT_EQ(honest_p.observed_queue_entry_sequence.size(), 0U);
-    ASSERT_TRUE(h.abort_transaction().has_value());
+    ASSERT_TRUE(h.abort_transaction()().has_value());
   }
 
   // Doctor: claim consume found {10}.
@@ -1183,8 +1186,8 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h =
         make_new_system_call_handler_validation(tx_excl, *excl_ctx, excl_p);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Root-frame consume with doctored data.  The consume persists into
@@ -1193,8 +1196,8 @@ TEST_F(RcqDoctoredProposalDataTest,
   // The perm-exclusive lock blocks the push → NonDeterministicError.
   auto handler = make_new_system_call_handler_validation(tx_cons, *cons_ctx,
                                                          std::move(doctored));
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  auto commit_res = handler.try_commit_transaction()();
   EXPECT_EQ(commit_res, ExecResult::ExecResultTxNonDeterministicError)
       << "Root-frame consume delta must collide with perm-exclusive lock";
 }
@@ -1221,9 +1224,9 @@ TEST_F(RcqDoctoredProposalDataTest,
         RetrocausalQueueInsertDelta{.added_entries = {entry_a}};
     tx_excl.add_delta(addrkey, std::move(delta),
                       std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-    auto r = tx_excl.try_push_current_subtransaction();
+    auto r = tx_excl.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx_excl.commit_transaction().has_value());
+    ASSERT_TRUE(tx_excl.commit_transaction()().has_value());
   }
 
   // Three independent observers — all must fail.
@@ -1233,10 +1236,10 @@ TEST_F(RcqDoctoredProposalDataTest,
     delta.retrocausal_queue().observed_concurrent_entries = {obs_entry};
     tx.add_delta(addrkey, std::move(delta),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value()) << "Observer must fail on perm-exclusive key";
-    ASSERT_TRUE(tx.abort_transaction().has_value());
+    ASSERT_TRUE(tx.abort_transaction()().has_value());
   }
 
   advance_block();
@@ -1265,9 +1268,9 @@ TEST_F(RcqDoctoredProposalDataTest,
         RetrocausalQueueInsertDelta{.added_entries = {entry}};
     tx.add_delta(addrkey, std::move(delta),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
   advance_block();
 
@@ -1277,9 +1280,9 @@ TEST_F(RcqDoctoredProposalDataTest,
     auto tx = make_new_per_tx_db_proxy(UINT64_MAX);
     tx.add_delta(addrkey, make_bytestring_delta("excl"),
                  std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
 
   // TX_B: try to consume the prior-block entry via past_block_consume.
@@ -1294,11 +1297,11 @@ TEST_F(RcqDoctoredProposalDataTest,
         .current_block_consumed = {}};
     tx.add_delta(addrkey, std::move(delta),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
         << "Prior-block consume must fail: key is perm-exclusively locked";
-    ASSERT_TRUE(tx.abort_transaction().has_value());
+    ASSERT_TRUE(tx.abort_transaction()().has_value());
   }
 
   // TX_C: observation-only on the same key — also blocked.
@@ -1308,11 +1311,11 @@ TEST_F(RcqDoctoredProposalDataTest,
     delta.retrocausal_queue().observed_concurrent_entries = {entry};
     tx.add_delta(addrkey, std::move(delta),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
         << "Observation on prior-block key must fail: perm-exclusively locked";
-    ASSERT_TRUE(tx.abort_transaction().has_value());
+    ASSERT_TRUE(tx.abort_transaction()().has_value());
   }
 
   advance_block();
@@ -1333,17 +1336,18 @@ TEST_F(RcqDoctoredProposalDataTest,
   uint32_t consumes_succeeded = 0;
   auto consumer_contract = build_contract(
       [&consumes_succeeded](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         for (uint32_t i = 0; i < kOverCap; ++i) {
-          auto res = ctx.handler().retrocausal_queue_consume(key, false);
+          auto res =
+              co_await ctx.handler().retrocausal_queue_consume(key, false);
           if (!res.has_value())
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
           if (!res.value().has_value())
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           ++consumes_succeeded;
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -1368,11 +1372,11 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto tx = make_invoke_b_tx(0);
   auto handler = make_new_system_call_handler_validation(tx, *native_ctx,
                                                          std::move(doctored));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
   EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
   EXPECT_EQ(consumes_succeeded, kRetrocausalQueueBlockEntriesMaxLen);
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure);
 }
 

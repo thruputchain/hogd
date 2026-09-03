@@ -454,7 +454,7 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
 
   // A *value* argument slot (a by-value integral/enum, as opposed to a memory
   // offset) whose value does not fit a 32-bit slot could never have been
-  // produced by the real wasm32 runtime, which delivers 32-bit value slots.
+  // produced by the real RV32 runtime, which delivers 32-bit value slots.
   // Such a value means the test harness leaked an out-of-range value into the
   // syscall -- an FFI usage error, surfaced here as an unrecoverable (FFI)
   // error rather than a contract-observable syscall fault. Offset slots (spans,
@@ -486,7 +486,10 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
 
     // The mock entrypoint is an extern "C" ABI the Rust test harness calls
     // synchronously, so it blocks on the syscall result rather than awaiting
-    // it.  Its database is a local mock, so nothing suspends anyway.
+    // it.  The body really can suspend -- LocalMockDB is a hog_db on a
+    // localhost socket, not an in-process fake -- but blocking is legal here
+    // because the harness thread is never an x23 ThreadPool worker
+    // (Async::operator() asserts exactly that).
     auto [inner_res, gas] =
         wrap_after_parse<SyscallMeta>(guard.check(), handler->to_handler(),
                                       gas_runtime->gas_remaining(), syscall_no,

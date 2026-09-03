@@ -78,6 +78,9 @@ public:
           TestDB::kHogDb)
   {}
 
+  // The chain sets max_sha256_buffers; these tests only need a valid limit.
+  static constexpr uint32_t kTestMaxSha256Buffers = 8;
+
   constexpr static Invocation kPlaceholderInvocation = {
       .invoked_address = make_contract_address(0),
       .entrypoint = ContractEntrypointID{},
@@ -103,7 +106,7 @@ public:
     ASSERT_TRUE(handler
                     .start_frame(kPlaceholderInvocation,
                                  std::to_underlying(InvokeFlag::None),
-                                 std::span<uint32_t>{})
+                                 std::span<uint32_t>{}, kTestMaxSha256Buffers)
                     .has_value());
 
     auto [syscall_res, gas_consumed] =
@@ -121,7 +124,7 @@ public:
     ASSERT_EQ(syscall_res2.error().code(), Code);
     ASSERT_EQ(gas_consumed2, 10);
 
-    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
 
   template<HostFnErrorCode Code> void run_gas_limit_supercedes_test()
@@ -135,7 +138,7 @@ public:
     ASSERT_TRUE(handler
                     .start_frame(kPlaceholderInvocation,
                                  std::to_underlying(InvokeFlag::None),
-                                 std::span<uint32_t>{})
+                                 std::span<uint32_t>{}, kTestMaxSha256Buffers)
                     .has_value());
 
     auto [syscall_res, gas_consumed] =
@@ -154,7 +157,7 @@ public:
     ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
     ASSERT_EQ(gas_consumed2, 10);
 
-    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
 
   // See the #1759 block at the bottom of this file. A frame with no gas left
@@ -168,7 +171,7 @@ public:
     ASSERT_TRUE(handler
                     .start_frame(kPlaceholderInvocation,
                                  std::to_underlying(InvokeFlag::None),
-                                 std::span<uint32_t>{})
+                                 std::span<uint32_t>{}, kTestMaxSha256Buffers)
                     .has_value());
 
     auto [syscall_res, gas_consumed] =
@@ -178,7 +181,7 @@ public:
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
-    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
 };
 
@@ -237,7 +240,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -281,7 +284,7 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -320,7 +323,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -363,7 +366,7 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::ReadOnly),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -408,7 +411,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   // Create a buffer larger than kMaxReturnBufferLen (1024)
@@ -426,7 +429,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   // The gas consumed must be 0, not an error code value
   ASSERT_EQ(gas.get(), 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // Test that syscall_Return_inner with a valid buffer returns 0 gas consumed
@@ -438,7 +441,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   std::array<std::byte, 10> valid_buffer{};
@@ -454,7 +457,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
   // The gas consumed must be 0
   ASSERT_EQ(gas.get(), 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 namespace {
@@ -499,7 +502,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowingSyscallTranslatedToUnrecoverable)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -510,7 +513,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowingSyscallTranslatedToUnrecoverable)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 TEST_F(SyscallErrorHandlingTest, NonStdExceptionTranslatedToUnrecoverable)
@@ -521,7 +524,7 @@ TEST_F(SyscallErrorHandlingTest, NonStdExceptionTranslatedToUnrecoverable)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -532,7 +535,7 @@ TEST_F(SyscallErrorHandlingTest, NonStdExceptionTranslatedToUnrecoverable)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 TEST_F(SyscallErrorHandlingTest,
@@ -544,22 +547,23 @@ TEST_F(SyscallErrorHandlingTest,
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::ReadOnly),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   NativeSyscallContext ctx(handler, 10000);
-  auto status = ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
+  auto status =
+      ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1})();
   ASSERT_TRUE(status.has_value());
   ASSERT_EQ(*status, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // ---------------------------------------------------------------------------
 // A syscall entered with the frame's gas already exhausted must not succeed.
 //
-// A wasm engine can enter `marmot.syscall` with host-visible fuel already
-// saturated to zero: the fuel checkpoint that would have trapped the contract
+// A guest runtime can enter a syscall with host-visible gas already
+// saturated to zero: the gas checkpoint that would have trapped the contract
 // sits after the call boundary, not before it, so the first over-budget
 // operation the host sees is the syscall itself. wrap_after_parse is the
 // backstop -- it rewrites any handleable syscall result to OutOfGas once the
@@ -653,7 +657,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtZeroGasIsOutOfGas)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -664,7 +668,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtZeroGasIsOutOfGas)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // Just under what the call costs. A zero-cost body still owes the crossing, so
@@ -679,7 +683,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallBelowCrossingIsOutOfGas)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   constexpr GasAmount kBudget = kSyscallBaseCost - 1;
@@ -691,7 +695,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallBelowCrossingIsOutOfGas)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, kBudget);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // Exactly what the call costs, which is the inclusive edge: `>=` rejects it and
@@ -706,7 +710,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtCrossingIsOutOfGas)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -718,7 +722,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtCrossingIsOutOfGas)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // The second half of the #1759 chain: Return is what carries the child frame's
@@ -732,7 +736,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostReturnAtZeroGasIsOutOfGas)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -743,7 +747,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostReturnAtZeroGasIsOutOfGas)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // The other side of the boundary: the rewrite must not swallow syscalls the
@@ -761,7 +765,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallSucceedsWithGasRemaining)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   constexpr GasAmount kCallCost = kSyscallBaseCost;
@@ -774,7 +778,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallSucceedsWithGasRemaining)
   ASSERT_EQ(*syscall_res, SyscallErrorCode::kSyscallErrorCodeNone);
   ASSERT_EQ(gas_consumed, kCallCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // Pins the comparison itself at a nonzero cost: a syscall that costs exactly
@@ -787,7 +791,7 @@ TEST_F(SyscallErrorHandlingTest, SyscallGasBoundaryIsInclusive)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   // What the call costs: the body's fixed charge plus the crossing every
@@ -811,11 +815,11 @@ TEST_F(SyscallErrorHandlingTest, SyscallGasBoundaryIsInclusive)
   ASSERT_EQ(*above_cost, SyscallErrorCode::kSyscallErrorCodeNone);
   ASSERT_EQ(gas_above_cost, kCallCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
-// The wasmtime trampoline does `set_fuel(gas_remaining - gas_consumed)` behind
-// an `assert!(gas_consumed <= gas_remaining)`. wrap_after_parse is what makes
+// A runtime trampoline that debits `gas_remaining - gas_consumed` behind an
+// `assert!(gas_consumed <= gas_remaining)` depends on wrap_after_parse to make
 // that subtraction safe: the gas it reports back is clamped to the gas the
 // frame actually had. Uncapped, a syscall entered on an over-consumed store
 // would abort the process from inside the FFI boundary.
@@ -827,7 +831,7 @@ TEST_F(SyscallErrorHandlingTest, ReportedGasNeverExceedsGasRemaining)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   // error_syscall_func reports 1000 gas regardless of what the frame has left.
@@ -842,7 +846,7 @@ TEST_F(SyscallErrorHandlingTest, ReportedGasNeverExceedsGasRemaining)
         << "gas_remaining = " << gas_remaining;
   }
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // An exhausted frame is not a licence to downgrade a transaction-fatal error
@@ -873,10 +877,14 @@ TEST_F(SyscallErrorHandlingTest, MintAuthTokenAtZeroGasIsOutOfGas)
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
+  // MintAuthToken reads the executing height off the pinned tip, and
+  // start_frame() takes its buffer limit as an argument rather than pinning,
+  // so this test pins for itself. Off-pool, so completing it here is legal.
+  ASSERT_TRUE(handler.init_db_tip()().has_value());
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   AuthTokenNode root_node{.consumer_address =
@@ -892,12 +900,12 @@ TEST_F(SyscallErrorHandlingTest, MintAuthTokenAtZeroGasIsOutOfGas)
       std::span<const std::byte>{reinterpret_cast<const std::byte *>(
                                      serialized_root.data()),
                                  serialized_root.size()},
-      token_id);
+      token_id)();
 
   ASSERT_FALSE(mint_res.has_value());
   ASSERT_EQ(mint_res.error().code(), HostFnErrorCode::OutOfGas);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 TEST_F(SyscallErrorHandlingTest, ReturnAtZeroGasIsOutOfGas)
@@ -908,20 +916,20 @@ TEST_F(SyscallErrorHandlingTest, ReturnAtZeroGasIsOutOfGas)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   NativeSyscallContext ctx(handler, 0);
   std::array<std::byte, 4> ret_buf{};
   auto ret_res =
       ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{ret_buf},
-                                      false, std::span<const std::byte>{});
+                                      false, std::span<const std::byte>{})();
 
   // OutOfGas, not Return: Return is what commits the frame to its parent.
   ASSERT_FALSE(ret_res.has_value());
   ASSERT_EQ(ret_res.error().code(), HostFnErrorCode::OutOfGas);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 namespace {
@@ -958,7 +966,7 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyRoundTrips)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -969,7 +977,7 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyRoundTrips)
   ASSERT_EQ(*syscall_res, SyscallErrorCode::kSyscallErrorCodeNone);
   ASSERT_EQ(gas_consumed, 1000 + kSyscallBaseCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // The gas epilogue is the part a suspension could most easily skip past, so
@@ -983,7 +991,7 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyStillMeteredOnResume)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -994,7 +1002,7 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyStillMeteredOnResume)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, 10);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
@@ -1005,7 +1013,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
-                               std::span<uint32_t>{})
+                               std::span<uint32_t>{}, kTestMaxSha256Buffers)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
@@ -1016,7 +1024,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 } // namespace hogd

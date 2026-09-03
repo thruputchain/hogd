@@ -1093,7 +1093,6 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   co_await default_coropoll().pool_.bg();
 
   static SynchronizedMap<ContractAddress, char, SipHash24Hasher> accounts;
-  accounts.clear();
 
   ElapsedTimer timer;
 
@@ -1105,6 +1104,9 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
+  // [accounts] is static and therefore used by multiple threads, so we wait to
+  // call [clear()] on it until after we have acquired the lock.
+  accounts.clear();
 
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -1169,7 +1171,15 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
+      // We do not CHECK that the account is removed from [ready_accounts_]
+      // because the account may not be currently in [ready_accounts_]. For
+      // example, if a tx is submitted that the contract does not have enough
+      // hogs for, the contract is removed from [ready_accounts_]. If other txs
+      // for that contract are committed in this block (maybe the contract had
+      // enough hogs for some of the txs but not all of them), then the line
+      // below will not remove [account] from [ready_accounts_] because the
+      // contract is already not in [ready_accounts_].
+      ready_accounts_.erase(get_account_key(account));
     }
   });
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);

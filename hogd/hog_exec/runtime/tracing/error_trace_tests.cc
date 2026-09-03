@@ -113,7 +113,7 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(98'922, tx.tx.invocation.calldata));
@@ -153,7 +153,7 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(98'938, tx.tx.invocation.calldata));
