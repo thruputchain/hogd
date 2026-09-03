@@ -134,12 +134,8 @@ namespace {
 struct TouchesPoolWhenDestroyed {
   ThreadPool *pool_;
 
-  explicit TouchesPoolWhenDestroyed(ThreadPool *pool) noexcept : pool_(pool) {}
-  TouchesPoolWhenDestroyed(const TouchesPoolWhenDestroyed &) = default;
   ~TouchesPoolWhenDestroyed()
   {
-    if (!pool_)
-      return;
     std::this_thread::sleep_for(500us);
     pool_->on_quiesce([]() noexcept {});
   }
