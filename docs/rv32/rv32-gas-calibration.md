@@ -444,9 +444,11 @@ snapshot cache. Keeping them apart preserves that property and yields two
 independent estimates of the seam, which is how the decomposition below gets
 checked rather than assumed.
 
-The pricing has not changed: `gas_cost_table.h` still prices one syscall family
-(SHA256) and returns zero direct host gas for the rest. What follows is the
-input to changing that.
+This section was written when `gas_cost_table.h` priced one syscall family
+(SHA256) and returned zero direct host gas for the rest, and it describes the
+measurement that changed that. Since then the schedule has gained
+`kVerifySignature*` and `kStorageAccessCost`; the syscalls still returning
+nothing of their own are the ones no measurement has reached yet.
 
 ### The seam
 
@@ -1258,7 +1260,10 @@ a transitional entry until the lowerer that stamps the new one has rolled out.
 before storage access was priced.
 
 These are charges *on top of* the syscall table, which prices `NNIntGet` at
-100 gas (the 50-gas shared crossing base plus 50 of its own). Nothing is
+125 gas since `kStorageAccessCost` landed -- the 50-gas shared crossing base
+plus 75 of its own. (An earlier draft of this section said 100 gas, "the base
+plus 50 of its own". That was wrong twice over: the call charged only the base
+at the time, nothing of its own, and it charges 125 now.) Nothing is
 adopted here: the schedule is unchanged, and these are the input to that
 decision.
 
@@ -1296,9 +1301,9 @@ So pricing at the top of the sweep is not attractive: it would charge an
 ordinary transaction touching a handful of keys 3-4x what it costs. Pricing at
 the knee instead leaves a transaction touching hundreds of thousands of keys
 underpaying, and what bounds that is the gas budget it has to burn getting
-there -- at the 200 gas a first touch costs under the settled constant (the
-syscall's 100 plus a 100 surcharge), 262144 of them is about 52M gas before the
-contract does anything else. Which point to price at is a policy call about
+there -- at the 225 gas a first touch would cost under the settled constant
+(the syscall's 125 plus a 100 surcharge), 262144 of them is about 59M gas
+before the contract does anything else. Which point to price at is a policy call about
 that budget rather than something the measurement settles.
 
 **Two caveats on the table above.** The knee's location is a property of the
