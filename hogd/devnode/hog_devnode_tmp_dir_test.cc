@@ -1,5 +1,3 @@
-#include "hogd/devnode/hog_devnode_tmp_dir.h"
-
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdlib.h>
 #include <unistd.h>
@@ -16,6 +14,9 @@
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
+#include "hogd/init.h"
 
 namespace hogd {
 namespace {
@@ -238,3 +239,14 @@ TEST(HogDevnodeDirectories, PartialFailureNamesTheOffendingPath)
 
 } // namespace
 } // namespace hogd
+
+int
+main(int argc, char *argv[])
+{
+  auto ret = hogd::hogd_init(argc, argv, false);
+  if (ret != 0) {
+    return ret;
+  }
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
