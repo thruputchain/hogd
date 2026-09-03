@@ -142,7 +142,7 @@ static_assert(kMessageAddress + kMaxMessageBytes <= kInputAddress,
 constexpr uint32_t kHashSlot = 0;
 constexpr uint32_t kHashSlotCopy = 1;
 // The limit start_frame() fixes on the frame it admits: passed in rather than
-// read off the db tip, so this fixture needs no pinned tip.
+// read off the db tip, so this constant does not depend on the pin.
 constexpr uint32_t kMaxSha256Buffers = 8;
 
 // NNInt argument block, above VerifySignature's material and below the hashing
@@ -289,6 +289,22 @@ public:
         PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
         PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
         ProposalModeCtor{}, *runtime_context_);
+
+    // Pin the db tip. Production entry paths (invoke(), root_invoke()) await
+    // init_db_tip() before dispatching anything, because the pin is the
+    // transaction's one fallible tip read and every later height read is then a
+    // plain load. This harness calls syscall_entry() directly, so it has to do
+    // the same pinning those entry paths do -- otherwise GetBlockHeight reads
+    // through a null tip. Held rather than checked here: the ctor runs inside
+    // the first benchmark row, so panicking in it truncates the JSON and costs
+    // the whole run, which is exactly the failure this file already contains
+    // per row elsewhere.
+    if (auto pinned = handler_->init_db_tip()(); !pinned.has_value()) {
+      setup_error_ = std::format("could not pin the db tip: system error {}",
+                                 pinned.error().raw_code());
+      return;
+    }
+
     // A syscall runs inside an invocation frame; without one the handler has no
     // current address, no calldata and no gas budget, and every call under
     // measurement would take an early error path instead of doing its work.
@@ -311,6 +327,10 @@ public:
 
   ~SyscallBenchFixture()
   {
+    // Nothing to unwind when setup bailed before pushing the frames.
+    if (!setup_error_.empty()) {
+      return;
+    }
     // Completed, not discarded: finish_frame() returns a MaybeAsync, and
     // dropping one on its Async arm abandons the coroutine unrun.
     (void)handler_->finish_frame(InvokeStatus<void>{},
@@ -325,6 +345,12 @@ public:
   SyscallBenchFixture &operator=(SyscallBenchFixture &&) = delete;
 
   [[nodiscard]] SystemCallHandler &handler() { return *handler_; }
+
+  // Why the fixture is unusable, if it is. Empty when setup completed. Every
+  // row checks this before touching the handler: a fixture that could not be
+  // built fails all of them by name instead of aborting the process partway
+  // through writing the JSON.
+  [[nodiscard]] const std::string &setup_error() const { return setup_error_; }
 
   // Distinct, deterministic addresses so caller and callee differ.
   static ContractAddress make_address(uint8_t seed)
@@ -460,6 +486,7 @@ private:
   std::unique_ptr<SystemCallHandler> handler_;
   std::unique_ptr<InvocationFrameTrace> outer_trace_;
   std::unique_ptr<InvocationFrameTrace> inner_trace_;
+  std::string setup_error_;
   bool cold_pool_seeded_ = false;
   uint64_t next_cold_key_ = 0;
   uint64_t seeded_first_touch_keys_ = 0;
@@ -775,6 +802,21 @@ shared_fixture()
   return fixture;
 }
 
+// The fixture, or nullptr with this row already failed. Every benchmark starts
+// here: fixture construction is lazy and shared, so a setup step that could not
+// complete surfaces on whichever row ran first and would otherwise take the
+// process down with it.
+SyscallBenchFixture *
+fixture_or_fail(benchmark::State &state)
+{
+  SyscallBenchFixture &fixture = shared_fixture();
+  if (!fixture.setup_error().empty()) {
+    state.SkipWithError(fixture.setup_error());
+    return nullptr;
+  }
+  return &fixture;
+}
+
 // Fail one benchmark row, naming the syscall and the code, and leave the rest
 // of the run alone.
 void
@@ -790,7 +832,11 @@ fail_row(benchmark::State &state, const SyscallCall &call,
 void
 bm_syscall_entry(benchmark::State &state, SyscallCall call)
 {
-  SyscallBenchFixture &fixture = shared_fixture();
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
 
@@ -841,7 +887,11 @@ bm_syscall_entry_sequence(benchmark::State &state,
                           std::vector<SyscallCall> setup,
                           std::vector<SyscallCall> timed)
 {
-  SyscallBenchFixture &fixture = shared_fixture();
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
 
@@ -1178,7 +1228,11 @@ pop_frames(SyscallBenchFixture &fixture, FrameTraces &traces,
 void
 bm_frame_push(benchmark::State &state, uint32_t depth)
 {
-  SyscallBenchFixture &fixture = shared_fixture();
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
   FrameTraces traces;
   traces.reserve(depth);
 
@@ -1206,7 +1260,11 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
                SyscallCall call, KeySpace space, bool commit_innermost,
                bool needs_seeded_keys)
 {
-  SyscallBenchFixture &fixture = shared_fixture();
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
   // Only the rows that actually read the snapshot seed it. Seeding is not
   // free to the measurement: every seeded key is a StorageItemWrapper in the
   // mock's map, and at the top of the sweep that is ~90 MB resident competing
@@ -1303,7 +1361,11 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
 void
 bm_nnint_cold(benchmark::State &state)
 {
-  SyscallBenchFixture &fixture = shared_fixture();
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
   fixture.seed_cold_pool();
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
