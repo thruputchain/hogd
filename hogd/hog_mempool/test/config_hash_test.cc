@@ -105,8 +105,31 @@ TEST(ConfigHashTest, RejectsNonCanonicalParamList)
       detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
   EXPECT_FALSE(config_params_canonical(descending));
 
+  // A gap is refused even though the ids ascend: the canonical form is a
+  // prefix, so being absent can only mean being past the end.
+  NetworkConfigV1 gap;
+  gap.params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
+  gap.params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxNewContractsPerTx, 4));
+  EXPECT_FALSE(config_params_canonical(gap));
+
+  // Nor may the list start past the first parameter.
+  NetworkConfigV1 offset;
+  offset.params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
+  EXPECT_FALSE(config_params_canonical(offset));
+
   NetworkConfigV1 empty;
   EXPECT_TRUE(config_params_canonical(empty));
+
+  // Setting a later parameter fills the ones before it rather than leaving a
+  // gap behind.
+  NetworkConfig fresh;
+  fresh.v(1);
+  set_config_param(fresh, ConfigParamID::kConfigParamMaxNewContractsPerTx, 4);
+  EXPECT_TRUE(config_params_canonical(fresh.v1()));
+  EXPECT_EQ(fresh.v1().params.size(), 3U);
 }
 
 // A chain predating a parameter runs under the node's default for it rather
@@ -127,7 +150,10 @@ TEST(ConfigHashTest, LegacyConfigTakesDefaults)
   ASSERT_EQ(legacy.v(), 1);
   EXPECT_TRUE(config_params_canonical(legacy.v1()));
   EXPECT_EQ(max_sha256_buffers(legacy), 2U);
+  // v0 stated this one; promotion must carry it rather than fall back to the
+  // default for an unstated parameter.
   EXPECT_EQ(max_cross_invoke_depth(legacy), 64U);
+  EXPECT_NE(max_cross_invoke_depth(legacy), kDefaultMaxCrossInvokeDepth);
   EXPECT_EQ(max_new_contracts_per_tx(legacy), kDefaultMaxNewContractsPerTx);
 }
 

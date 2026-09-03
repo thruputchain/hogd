@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 #include "hogd/base/log.h"
 #include "network_config.hh"
@@ -14,10 +16,11 @@ namespace hogd {
 // The value in force for a parameter the configuration does not state.
 //
 // A configuration names only the parameters its version knew about: a v0 chain
-// predates some of them outright, and a v1 list may omit any of them. These
-// are what a node runs under in that case, which makes them consensus-critical
-// in the same way the stated values are -- two node versions disagreeing here
-// would disagree about a chain's rules while agreeing on its config hash.
+// predates some of them outright, and a v1 list runs out before the ones added
+// after it was written. These are what a node runs under in that case, which
+// makes them consensus-critical in the same way the stated values are -- two
+// node versions disagreeing here would disagree about a chain's rules while
+// agreeing on its config hash.
 //
 // Once a chain has run under one of these, it cannot change: doing so would
 // silently rewrite the rules that chain has been executing under. A new value
@@ -30,6 +33,13 @@ inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 256;
 // without bound, which is the condition #2190 describes. Deliberately below
 // what the executor->storage message cap admits.
 inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
+
+// The highest parameter this build can name. Adding one means extending this
+// alongside the ConfigParamID arm, so promoting a configuration still
+// materialises every parameter rather than silently truncating at the old
+// highest.
+inline constexpr ConfigParamID kHighestConfigParam =
+    ConfigParamID::kConfigParamMaxNewContractsPerTx;
 
 namespace detail {
 
@@ -72,48 +82,26 @@ make_param(ConfigParamID id, uint32_t value)
   return out;
 }
 
-/// Replaces the value stated for `id`, or inserts it in id order.
-inline void
-put_param(NetworkConfigV1 &config, ConfigParamID id, uint32_t value)
-{
-  for (auto &param : config.params) {
-    if (param.param() == id) {
-      param = make_param(id, value);
-      return;
-    }
-  }
-  NetworkConfigV1 rebuilt;
-  bool placed = false;
-  for (auto const &param : config.params) {
-    if (!placed && id < param.param()) {
-      rebuilt.params.push_back(make_param(id, value));
-      placed = true;
-    }
-    rebuilt.params.push_back(param);
-  }
-  if (!placed) {
-    rebuilt.params.push_back(make_param(id, value));
-  }
-  config = std::move(rebuilt);
-}
-
 } // namespace detail
 
 /// Whether a v1 list is in the canonical form the protocol requires.
 ///
-/// Parameters must be strictly ascending by id. The list is hashed into
-/// ProposalHeader::config_hash, so two orderings of one set of parameters
-/// would be two hashes for a configuration the nodes agree on; strict ascent
-/// also rules out a repeated id resolving to whichever copy a node read first.
+/// Ids must run 0, 1, 2, ... with no gaps, so the list is a prefix of the
+/// parameter space. That settles three things at once: the order is fixed, an
+/// id cannot repeat, and a parameter cannot be skipped over. The list is
+/// hashed as written, so without a single permitted form one configuration
+/// would have several hashes; and because the only way to be absent is to be
+/// past the end, an absent parameter always means one newer than this
+/// configuration rather than one it chose to omit.
 inline bool
 config_params_canonical(NetworkConfigV1 const &config)
 {
-  std::optional<ConfigParamID> previous;
+  int32_t expected = 0;
   for (auto const &param : config.params) {
-    if (previous.has_value() && param.param() <= *previous) {
+    if (std::to_underlying(param.param()) != expected) {
       return false;
     }
-    previous = param.param();
+    ++expected;
   }
   return true;
 }
@@ -149,8 +137,6 @@ max_cross_invoke_depth(NetworkConfig const &config)
                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth)
         .value_or(kDefaultMaxCrossInvokeDepth);
   default:
-    // The union declares no other arm, so an unknown version fails to decode
-    // rather than reaching here.
     panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
   }
 }
@@ -168,34 +154,8 @@ max_new_contracts_per_tx(NetworkConfig const &config)
                                 ConfigParamID::kConfigParamMaxNewContractsPerTx)
         .value_or(kDefaultMaxNewContractsPerTx);
   default:
-    // The union declares no other arm, so an unknown version fails to decode
-    // rather than reaching here.
     panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
   }
-}
-
-/// States `value` for `id`, leaving the list canonical.
-///
-/// A v0 configuration is promoted to v1 first, carrying forward the values it
-/// was running under -- including the ones it never stated -- so setting one
-/// parameter never quietly moves another.
-inline void
-set_config_param(NetworkConfig &config, ConfigParamID id, uint32_t value)
-{
-  if (config.v() != 1) {
-    const uint32_t buffers = max_sha256_buffers(config);
-    const uint32_t depth = max_cross_invoke_depth(config);
-    const uint32_t contracts = max_new_contracts_per_tx(config);
-    config.v(1);
-    detail::put_param(config.v1(), ConfigParamID::kConfigParamMaxSHA256Buffers,
-                      buffers);
-    detail::put_param(config.v1(),
-                      ConfigParamID::kConfigParamMaxCrossInvokeDepth, depth);
-    detail::put_param(config.v1(),
-                      ConfigParamID::kConfigParamMaxNewContractsPerTx,
-                      contracts);
-  }
-  detail::put_param(config.v1(), id, value);
 }
 
 /// The parameters in force, resolved from whatever version a chain states them
@@ -220,6 +180,63 @@ resolve_config_params(NetworkConfig const &config)
       .max_cross_invoke_depth = max_cross_invoke_depth(config),
       .max_new_contracts_per_tx = max_new_contracts_per_tx(config),
   };
+}
+
+namespace detail {
+
+/// The value in force for `id` among already-resolved parameters.
+inline uint32_t
+in_force(NetworkConfigParams const &params, ConfigParamID id)
+{
+  switch (id) {
+  case ConfigParamID::kConfigParamMaxSHA256Buffers:
+    return params.max_sha256_buffers;
+  case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
+    return params.max_cross_invoke_depth;
+  case ConfigParamID::kConfigParamMaxNewContractsPerTx:
+    return params.max_new_contracts_per_tx;
+  }
+  panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
+}
+
+} // namespace detail
+
+/// States `value` for `id`, leaving the list canonical.
+///
+/// Rebuilds the list as the prefix 0..N, carrying every other parameter's
+/// value in force -- a v0 configuration's included, so promotion never drops
+/// what it was running under. N covers whatever the configuration already
+/// stated and the parameter being set, so a v1 chain stating only a prefix
+/// keeps its length rather than gaining parameters it never named. Promoting
+/// an older arm instead materialises every parameter, since that arm's values
+/// live in fields rather than in the list.
+inline void
+set_config_param(NetworkConfig &config, ConfigParamID id, uint32_t value)
+{
+  const NetworkConfigParams params = resolve_config_params(config);
+
+  int32_t highest = std::to_underlying(id);
+  if (config.v() == 1) {
+    for (auto const &param : config.v1().params) {
+      highest = std::max(highest, std::to_underlying(param.param()));
+    }
+  }
+  else {
+    // Promotion rewrites the configuration wholesale, so materialise every
+    // parameter this build knows rather than a prefix ending at `id`: the
+    // older arm states values of its own, and truncating would silently
+    // replace one with a default.
+    highest = std::max(highest, std::to_underlying(kHighestConfigParam));
+  }
+
+  NetworkConfig rebuilt;
+  rebuilt.v(1);
+  for (int32_t i = 0; i <= highest; ++i) {
+    const auto param_id = static_cast<ConfigParamID>(i);
+    rebuilt.v1().params.push_back(detail::make_param(
+        param_id, param_id == id ? value : detail::in_force(params, param_id)));
+  }
+  config = std::move(rebuilt);
 }
 
 } // namespace hogd
