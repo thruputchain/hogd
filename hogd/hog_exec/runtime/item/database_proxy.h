@@ -12,8 +12,8 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "retrocausal_queue.hh"
@@ -54,7 +54,7 @@ public:
   // which racing server threads also read (same reasoning as
   // EventServerProxy).
   DatabaseProxy(DatabaseIdentifier identifier,
-                size_t max_message_size = kExecToDbTransportCap);
+                size_t max_message_size = kBulkRpcMaxMessageSize);
 
   DatabaseProxy(DatabaseProxy const &) = delete;
   DatabaseProxy &operator=(DatabaseProxy const &) = delete;

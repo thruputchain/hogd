@@ -26,7 +26,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
@@ -122,42 +121,18 @@ load_stock_genesis_root_contract()
   return contract;
 }
 
-// RV32 contracts have a 64 KiB address space. Keep the decoded distribution
-// vector comfortably below that limit, including allocator and contract stack
-// space. A ceremony is one atomic height-1 block, but it may contain several
-// root transactions.
-constexpr std::size_t kDistributionsPerTransaction = 16;
-
-// max_new_contracts_per_tx for this repository's dev and test chains.
-//
-// Well under what the executor can commit in one message: the bound exists to
-// keep a transaction's commit batch small, and nothing legitimate attaches
-// many contracts at once.
-//
-// A ceremony transaction attaches one contract per DISTINCT artifact among the
-// kDistributionsPerTransaction accounts it funds, so a genesis distributing to
-// more than this many distinct wallet implementations in one batch would build
-// a transaction its own chain refuses. That is not expressible as a static
-// assertion -- it depends on the genesis being built -- so
-// try_make_genesis_ceremony_transactions checks it and fails loudly.
+// max_new_contracts_per_tx for this repository's dev and test chains. Nothing
+// legitimate attaches many contracts at once, and a ceremony transaction
+// attaches one per distinct wallet artifact it funds.
 constexpr uint32_t kStockMaxNewContractsPerTx = 4;
-
-static_assert(kStockMaxNewContractsPerTx <=
-                  max_new_contracts_for_message_cap(kExecToDbMessageCap),
-              "the largest commit batch this admits must fit the executor's "
-              "message cap to storage");
 
 NetworkConfig
 stock_network_config()
 {
   // Values this repository's dev and test chains run under. They are a choice,
   // not a protocol default: nothing inherits them, and a real chain passes its
-  // own to build().
-  //
-  // Every parameter is stated outright rather than left to the value a node
-  // supplies for an omission, so a change to either is visible as a change to
-  // the config hash rather than silently absorbed by the other. Ascending by
-  // id, which is the form the protocol requires of the list.
+  // own to build(). Every parameter is stated outright rather than left to a
+  // node's default, so changing either is visible in the config hash.
   NetworkConfig config;
   config.v(1);
   set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 8);
@@ -194,6 +169,11 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
   root_client_t client(kGenesisRootContractAddress);
   constexpr static GasAmount kDistributionGas =
       std::numeric_limits<GasAmount>::max();
+  // RV32 contracts have a 64 KiB address space. Keep the decoded distribution
+  // vector comfortably below that limit, including allocator and contract
+  // stack space. A ceremony is one atomic height-1 block, but it may contain
+  // several root transactions.
+  constexpr static std::size_t kDistributionsPerTransaction = 16;
 
   // Every transaction executes independently against the height-0 snapshot,
   // so make each one self-funding. The minted funding is consumed by the rows

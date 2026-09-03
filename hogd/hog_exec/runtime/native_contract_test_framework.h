@@ -25,6 +25,7 @@
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -263,7 +264,7 @@ public:
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
           std::nullopt,
       std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
-      size_t db_max_message_size = kExecToDbTransportCap)
+      size_t db_max_message_size = kBulkRpcMaxMessageSize)
     : db_wrapper_(make_db_wrapper(test_db))
   {
     bool logging_enabled = log || do_logging_env();
@@ -732,7 +733,7 @@ private:
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
           std::nullopt,
       std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
-      size_t db_max_message_size = kExecToDbTransportCap)
+      size_t db_max_message_size = kBulkRpcMaxMessageSize)
   {
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },

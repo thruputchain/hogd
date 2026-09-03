@@ -357,11 +357,12 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   }
   // A chain states max_new_contracts_per_tx itself, so a genesis can name a
   // count whose worst-case commit batch the executor could not send to storage
-  // in one message. Reject it here, where the chain is being created, rather
-  // than let every oversized transaction fail as unrecoverable at commit
-  // (#2190).
+  // in one message. Reject it here rather than let every oversized transaction
+  // fail as unrecoverable at commit (#2190). A KiB covers the request's own
+  // header and arguments.
+  constexpr size_t kBatchOverhead = 1_KiB;
   if (const size_t admissible =
-          max_new_contracts_for_message_cap(kExecToDbMessageCap);
+          (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
       max_new_contracts_per_tx(genesis_configuration.network_config) >
       admissible) {
     error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
