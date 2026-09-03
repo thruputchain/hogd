@@ -51,6 +51,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -97,7 +98,9 @@ public:
 
   // Handshake between the peeking transaction (on its own thread) and the
   // test body: the contract signals peek_done_ after its peek and parks on
-  // sibling_committed_ until the test has committed the sibling.  The flags
+  // sibling_committed_ until the test has committed the sibling.  The park
+  // happens on a thread outside the coroutine pool, because the contract
+  // frame resumes on a pool worker after the peek (see method 1).  The flags
   // are deliberately not reset between the proposal run and the validation
   // replay, so the replayed contract passes straight through the park.
   inline static std::atomic<bool> peek_done_ = false;
@@ -157,7 +160,16 @@ public:
           // failed peek; the assertions run after the join.
           peek_done_ = true;
           peek_done_.notify_all();
-          sibling_committed_.wait(false);
+
+          // Park on a thread outside the pool.  The peek above resumes this
+          // body by symmetric transfer straight from the RPC reply, so the
+          // frame is running on the thread pool worker that drains that
+          // stream.  Blocking that worker here stalls the transport, so the
+          // sibling transaction the test body runs never completes and never
+          // sets the flag -- a deadlock, not just a parked worker.  (Same
+          // park as the concurrent-insert case in rcq_delete_test.cc.)
+          co_await default_coropoll().pool_.async(
+              [] { sibling_committed_.wait(false); });
 
           if (!peek.has_value()) {
             co_return peek.error().to_invoke_error();
