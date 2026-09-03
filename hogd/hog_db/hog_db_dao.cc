@@ -200,6 +200,16 @@ HogDbDAO::read_address_replay_cache_data(Address const &addr,
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
   }
+
+  // The protocol requires nonces to be a sorted, duplicate-free list
+  // (protocol/storage_item.x). ReplayCacheLock trusts that invariant when it
+  // runs binary_search and set_union over this row, so a recovered on-disk
+  // row that is unsorted or contains duplicates is corrupt state that must be
+  // rejected before it can violate those algorithms' preconditions.
+  if (!std::ranges::is_sorted(data.nonces) ||
+      std::ranges::adjacent_find(data.nonces) != data.nonces.end()) {
+    return HogDbError(HogDbCode::kCorruption);
+  }
   return data;
 }
 

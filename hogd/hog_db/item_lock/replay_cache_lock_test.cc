@@ -909,4 +909,51 @@ TEST(ReplayConflictSetTraitsTest, HashMixesExpiryLimb)
   EXPECT_EQ(h50, ReplayConflictSetTraits::hash(packed(50, kNonce)));
 }
 
+// #3835: ReplayCacheLock trusts that a recovered nonce row is sorted and
+// duplicate-free (protocol/storage_item.x) when it runs binary_search and
+// set_union over it. A corrupt on-disk row that breaks that invariant must be
+// rejected on read so it can never reach those algorithms with an input that
+// violates their preconditions.
+TEST(ReplayCacheDataRecovery, RejectsUnsortedOrDuplicateNonceRows)
+{
+  auto dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+
+  auto db = Database::open(dir->get_path(),
+                           Database::estimate_heap_size(10_MiB), 0);
+  ASSERT_TRUE(db);
+  HogDbDAO dao(RAMDB(std::move(*db)));
+
+  const Address addr = make_address(0xabc123);
+  constexpr BlockHeight kUnsorted = 20;
+  constexpr BlockHeight kDuplicate = 21;
+  constexpr BlockHeight kValid = 22;
+
+  // write_address_replay_cache_data serializes whatever it is given, so it can
+  // stand in for a tampered/corrupted durable row.
+  ASSERT_TRUE(dao.write_address_replay_cache_data(
+      addr, kUnsorted, ReplayCacheData{.nonces = {100, 1}}));
+  ASSERT_TRUE(dao.write_address_replay_cache_data(
+      addr, kDuplicate, ReplayCacheData{.nonces = {1, 1, 2}}));
+  ASSERT_TRUE(dao.write_address_replay_cache_data(
+      addr, kValid, ReplayCacheData{.nonces = {1, 50, 100}}));
+  ASSERT_TRUE(dao.commit());
+
+  auto unsorted = dao.read_address_replay_cache_data(addr, kUnsorted);
+  ASSERT_FALSE(unsorted.has_value());
+  EXPECT_EQ(HogDbError(HogDbCode::kCorruption), unsorted.error());
+
+  auto duplicate = dao.read_address_replay_cache_data(addr, kDuplicate);
+  ASSERT_FALSE(duplicate.has_value());
+  EXPECT_EQ(HogDbError(HogDbCode::kCorruption), duplicate.error());
+
+  // A well-formed sorted, duplicate-free row still reads back unchanged.
+  auto valid = dao.read_address_replay_cache_data(addr, kValid);
+  ASSERT_TRUE(valid.has_value());
+  ASSERT_EQ(3U, valid->nonces.size());
+  EXPECT_EQ(1U, valid->nonces[0]);
+  EXPECT_EQ(50U, valid->nonces[1]);
+  EXPECT_EQ(100U, valid->nonces[2]);
+}
+
 } // namespace hogd
