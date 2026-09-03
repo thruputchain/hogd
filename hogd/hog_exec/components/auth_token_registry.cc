@@ -10,6 +10,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 
 namespace hogd {
 
@@ -48,6 +49,16 @@ AuthTokenRegistry::register_auth_token(AuthToken auth_token)
       auth_tokens_.emplace(token_id, std::move(auth_token));
   assert(success);
   return token_id;
+}
+
+bool
+AuthTokenRegistry::try_begin_mint_attempt()
+{
+  if (mint_attempts_ >= kMaxAuthTokensPerTransaction) {
+    return false;
+  }
+  ++mint_attempts_;
+  return true;
 }
 
 AuthToken const *
