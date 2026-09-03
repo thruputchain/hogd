@@ -919,8 +919,8 @@ TEST(ReplayCacheDataRecovery, RejectsUnsortedOrDuplicateNonceRows)
   auto dir = Directory::open_temporary();
   ASSERT_TRUE(static_cast<bool>(dir));
 
-  auto db = Database::open(dir->get_path(),
-                           Database::estimate_heap_size(10_MiB), 0);
+  auto db =
+      Database::open(dir->get_path(), Database::estimate_heap_size(10_MiB), 0);
   ASSERT_TRUE(db);
   HogDbDAO dao(RAMDB(std::move(*db)));
 
@@ -931,8 +931,9 @@ TEST(ReplayCacheDataRecovery, RejectsUnsortedOrDuplicateNonceRows)
 
   // write_address_replay_cache_data serializes whatever it is given, so it can
   // stand in for a tampered/corrupted durable row.
-  ASSERT_TRUE(dao.write_address_replay_cache_data(
-      addr, kUnsorted, ReplayCacheData{.nonces = {100, 1}}));
+  ASSERT_TRUE(
+      dao.write_address_replay_cache_data(addr, kUnsorted,
+                                          ReplayCacheData{.nonces = {100, 1}}));
   ASSERT_TRUE(dao.write_address_replay_cache_data(
       addr, kDuplicate, ReplayCacheData{.nonces = {1, 1, 2}}));
   ASSERT_TRUE(dao.write_address_replay_cache_data(
