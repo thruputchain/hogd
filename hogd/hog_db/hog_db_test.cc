@@ -1033,34 +1033,15 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenGroupCountsOverflow)
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
-TEST_F(HogDbTest, HogAgeValueOmitsAddressAndReadsBothFormats)
+TEST_F(HogDbTest, HogAgeValueOmitsAddressAndReconstructsFromKey)
 {
   const Address key_addr = make_address(kAddress);
-  const Address other_addr = make_address(kAddress + 1);
-
   const auto key = make_address_key(key_addr, Prefix::kHogAge);
+  constexpr size_t kValueSize =
+      x23::detail::size_of_fixed<HogAge>() - kAddressSize;
 
-  // Legacy on-disk layout: the whole struct is serialized, address included --
-  // and here the embedded address is a *different* address than the key, the
-  // drift that crashed the scheduler in issue #3812. The read reconstructs the
-  // address from the key, so it hands back key_addr regardless of the stale
-  // embedded value, and the group fields survive.
-  const HogAge legacy = make_hog_age(other_addr, /*to_schedule=*/5,
-                                     /*already_scheduled=*/0, /*received=*/0,
-                                     /*to_schedule_age=*/7,
-                                     /*already_scheduled_age=*/0,
-                                     /*received_age=*/0);
-  const auto legacy_encoded = x23::serialize(legacy);
-  ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(key)), 0,
-                                  std::as_bytes(std::span(legacy_encoded))));
-
-  HogDbStatus<HogAge> from_legacy = db_.read_address_average_hog_age(key_addr);
-  ASSERT_TRUE(from_legacy);
-  EXPECT_EQ(Address(from_legacy->address), key_addr);
-  EXPECT_EQ(from_xdr(from_legacy->num_hogs[kHogAgeGroupToSchedule]), 5U);
-
-  // Writing re-persists in the new layout: the value drops the address, so it
-  // is exactly kAddressSize bytes shorter than the full struct encoding.
+  // A write drops the address: the persisted value is exactly kAddressSize
+  // bytes shorter than the full struct encoding.
   ASSERT_TRUE(db_.write_address_average_hog_age(
       make_hog_age(key_addr, /*to_schedule=*/9, /*already_scheduled=*/0,
                    /*received=*/0, /*to_schedule_age=*/3,
@@ -1068,13 +1049,26 @@ TEST_F(HogDbTest, HogAgeValueOmitsAddressAndReadsBothFormats)
   HogDbStatus<size_t> stored_size =
       db_.get_ramdb().get_size(std::as_bytes(std::span(key)));
   ASSERT_TRUE(stored_size);
-  EXPECT_EQ(*stored_size, legacy_encoded.size() - kAddressSize);
+  EXPECT_EQ(*stored_size, kValueSize);
 
-  // The new layout round-trips, again with the address taken from the key.
-  HogDbStatus<HogAge> from_new = db_.read_address_average_hog_age(key_addr);
-  ASSERT_TRUE(from_new);
-  EXPECT_EQ(Address(from_new->address), key_addr);
-  EXPECT_EQ(from_xdr(from_new->num_hogs[kHogAgeGroupToSchedule]), 9U);
+  // The read reconstructs the address from the key. Craft an address-less value
+  // (a full HogAge encoding minus its leading address bytes) whose stripped-off
+  // address differs from the key, and confirm the read reports key_addr -- the
+  // drift that crashed the scheduler in issue #3812 is now impossible.
+  const auto encoded =
+      x23::serialize(make_hog_age(make_address(kAddress + 1), /*to_schedule=*/5,
+                                  /*already_scheduled=*/0, /*received=*/0,
+                                  /*to_schedule_age=*/7,
+                                  /*already_scheduled_age=*/0,
+                                  /*received_age=*/0));
+  ASSERT_TRUE(db_.get_ramdb().put(
+      std::as_bytes(std::span(key)), 0,
+      std::as_bytes(std::span(encoded)).subspan(kAddressSize)));
+
+  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(Address(age->address), key_addr);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 5U);
 }
 
 TEST_F(HogDbTest, HogAgeReadRejectsUnexpectedValueSize)
@@ -1082,13 +1076,28 @@ TEST_F(HogDbTest, HogAgeReadRejectsUnexpectedValueSize)
   const Address key_addr = make_address(kAddress);
   const auto key = make_address_key(key_addr, Prefix::kHogAge);
 
-  // A row that is neither the legacy nor the new fixed size is corrupt.
+  // Only the address-less layout is accepted; there is no backward
+  // compatibility with the legacy full-struct encoding. A junk size and the
+  // legacy full-struct size are both corruption.
   const std::array<std::byte, 7> junk{};
   ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(key)), 0, junk));
+  {
+    HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+    ASSERT_FALSE(age);
+    EXPECT_EQ(age.error(), HogDbCode::kCorruption);
+  }
 
-  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
-  ASSERT_FALSE(age);
-  EXPECT_EQ(age.error(), HogDbCode::kCorruption);
+  const auto legacy = x23::serialize(
+      make_hog_age(key_addr, /*to_schedule=*/1, /*already_scheduled=*/0,
+                   /*received=*/0, /*to_schedule_age=*/1,
+                   /*already_scheduled_age=*/0, /*received_age=*/0));
+  ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(key)), 0,
+                                  std::as_bytes(std::span(legacy))));
+  {
+    HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+    ASSERT_FALSE(age);
+    EXPECT_EQ(age.error(), HogDbCode::kCorruption);
+  }
 }
 
 TEST_F(HogDbTest, TwoTransfersToSameAddressCostOnce)

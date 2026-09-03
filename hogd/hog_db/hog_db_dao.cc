@@ -165,25 +165,22 @@ HogDbDAO::read_address_average_hog_age(const Address &addr)
   // excluded from the consensus db_hash), which crashed the scheduler's
   // CHECK_EQ(age.address, account) (issue #3812).
   //
-  // Accept both layouts by size: the legacy full encoding (address embedded)
-  // and the new address-less one. address is HogAge's first XDR field, so in
-  // either case the fields we want are the last kValueSize bytes; splice them
-  // after the key address and decode the whole struct. Taking the key as the
-  // authoritative address makes a stale or mismatched embedded address a
-  // no-op rather than something to propagate or crash on.
+  // Only this address-less layout is accepted; a value of any other size is
+  // corruption. address is HogAge's first XDR field, so splicing the stored
+  // fields after the key address reproduces the full struct encoding, which
+  // decodes with the key as the authoritative address.
   constexpr size_t kFullSize = x23::detail::size_of_fixed<HogAge>();
   constexpr size_t kValueSize = kFullSize - kAddressSize;
 
   std::span<const std::byte> stored = *raw;
-  if (stored.size() != kValueSize && stored.size() != kFullSize) {
+  if (stored.size() != kValueSize) {
     return HogDbError(HogDbCode::kCorruption);
   }
 
   std::array<std::byte, kFullSize> full{};
   auto out = std::as_writable_bytes(std::span(full));
   std::ranges::copy(addr.as_bytes(), std::begin(out));
-  std::ranges::copy(stored.subspan(stored.size() - kValueSize),
-                    std::begin(out) + kAddressSize);
+  std::ranges::copy(stored, std::begin(out) + kAddressSize);
 
   HogAge age;
   try {
