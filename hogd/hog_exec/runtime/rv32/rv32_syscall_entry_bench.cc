@@ -742,7 +742,14 @@ make_ecall_program(const SyscallCall &call, uint32_t iterations)
 void
 bm_syscall_vm(benchmark::State &state, SyscallCall call)
 {
+  // Its own fixture, not the shared one, so it needs its own setup check: a
+  // fixture whose tip did not pin has no frames either, and running the guest
+  // against it aborts in exactly the place this error path exists to contain.
   SyscallBenchFixture fixture;
+  if (!fixture.setup_error().empty()) {
+    state.SkipWithError(fixture.setup_error());
+    return;
+  }
   // Enough iterations per run that the program's fixed setup does not show, and
   // few enough that one run stays short next to the benchmark's own timing.
   constexpr uint32_t kIterationsPerRun = 512;
