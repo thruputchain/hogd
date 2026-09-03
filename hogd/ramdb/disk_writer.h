@@ -149,11 +149,13 @@ private:
   // used to wake commit().
   std::condition_variable commit_cv_;
 
-  // True while sync() runs; write_record() CHECKs it is clear, in release
-  // builds too, since an overlapping write corrupts the WAL undetectably
-  // (#3397). Relaxed loads catch a write that starts during the sync; one
-  // already inside write_record() when the flag is set is caught by the
-  // try_lock CHECK in sync()'s head drain.
+  // True while sync() runs; ScopedDiskWrite CHECKs it is clear after
+  // acquiring its head lock, in release builds too, since an overlapping
+  // write corrupts the WAL undetectably (#3397). Together with the try_lock
+  // CHECK in sync()'s head drain this covers every overlap: a writer that
+  // locks its head first fails the drain's try_lock, and one that locks
+  // after the drain sees the flag through the head mutex's happens-before,
+  // so relaxed loads suffice.
   std::atomic<bool> sync_active_{false};
 
   // loglets that are currently being filled with changes to log to disk
@@ -195,7 +197,14 @@ class ScopedDiskWrite {
 public:
   ScopedDiskWrite(DiskWriter &w, size_t hash)
     : w_(w), head_(w.get_head(hash)), ul_(head_.lock)
-  {}
+  {
+    // Checked under the head lock: if sync() already drained this head, its
+    // unlock happens-before this acquisition, so the load must see true. A
+    // check before the lock would leave a gap — a writer paused between
+    // checking and locking evades both this and the drain's try_lock CHECK.
+    // No write may overlap sync(); see sync_active_.
+    CHECK(!w_.sync_active_.load(std::memory_order_relaxed));
+  }
   ~ScopedDiskWrite() = default;
 
   // Disable move and copy.
@@ -232,8 +241,6 @@ private:
 inline ScopedDiskWrite
 DiskWriter::write_record(size_t hash)
 {
-  // No write may overlap sync(); see sync_active_.
-  CHECK(!sync_active_.load(std::memory_order_relaxed));
   return ScopedDiskWrite(*this, hash);
 }
 
