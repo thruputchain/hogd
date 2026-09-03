@@ -171,8 +171,8 @@ SystemCallHandler::pin_db_tip() const
   co_return SystemStatus<void>{};
 }
 
-// TODO(geoff): Setup configuration parameters for alternative wasm engines
-// and/or shared contexts.
+// TODO(geoff): Setup configuration parameters for alternative contract
+// runtimes and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
     Transaction const &tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy db_proxy,
@@ -287,16 +287,16 @@ SystemCallHandler::perform_initial_validation()
   // TODO(geoff): Adjust if some assumption on the rest of the system changes
   //
   // At this point, we do not know the provenance of signed_tx_.  As such,
-  // an attached wasm may or may not have been validated by this point.
+  // an attached contract may or may not have been validated by this point.
   //
-  // We should validate wasms as they are sent to us from clients (before
+  // We should validate contracts as they are sent to us from clients (before
   // broadcasting to other nodes) and we may wish to validate them as they are
   // broadcast to us from other nodes. But until we have a concrete design of
   // the coordinator and know what is is and is not doing, we conservatively
-  // validate wasms here.
+  // validate contracts here.
   //
-  // If we make the assumption that all wasms are validated by the time they get
-  // to the executor, this check could be removed.
+  // If we make the assumption that all contracts are validated by the time they
+  // get to the executor, this check could be removed.
 
   for (auto const &[hash, contract] : newly_created_contracts_) {
     // Enforce the contract size limit before verification: the limit is
@@ -1243,7 +1243,7 @@ SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
     } catch (std::exception &e) {
       // Trace data is best-effort diagnostics. start_syscall_trace() runs from
       // wrap_after_parse() just before the noexcept syscall body, and on the
-      // real WASM path the syscall dispatches through wrap_outer() noexcept, so
+      // real RV32 path the syscall dispatches through wrap_outer() noexcept, so
       // an escaping std::bad_alloc here would terminate an honest test FFI
       // caller (#2644). Drop this frame's trace and continue untraced,
       // mirroring start_frame()'s drop-and-continue (#2473).

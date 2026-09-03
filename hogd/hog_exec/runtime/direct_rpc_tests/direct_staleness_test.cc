@@ -228,7 +228,7 @@ TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
   // write, returning kStaleBlock -- the Abandon path is identical to the
   // small-contract case.
   ASSERT_FALSE(Database::item_fits(
-      make_wasm_code_key(deployed_contract_hash.hash).size(),
+      make_contract_code_key(deployed_contract_hash.hash).size(),
       x23::xdr_size(contract)));
 
   constexpr TransactionID kTxId = 43;

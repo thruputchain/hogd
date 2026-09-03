@@ -11,7 +11,7 @@
 //     with no catch. make_fd() now guards the env lookup and disables the fd on
 //     failure, so create_db() stays best-effort.
 //   * #2765: setup_deploy_contract() read the stored contract row
-//     (read_wasm_code() -> RAMDB make_byte_buffer() allocates) before any
+//     (read_contract_code() -> RAMDB make_byte_buffer() allocates) before any
 //     catch.
 //   * #2642/#2766: setup_deploy_contract() then decoded the stored bytes in a
 //     block that caught only x23::XdrException, so a std::bad_alloc from the

@@ -176,9 +176,10 @@ public:
     std::shared_ptr<Contract> contract = load_rv32_contract(artifact_filename);
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
-    CHECK(get_db()
-              .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
-              .has_value());
+    CHECK(
+        get_db()
+            .write_contract_code(contract_hash, std::as_bytes(std::span(bytes)))
+            .has_value());
     CHECK(get_db()
               .write_address_metadata(
                   address,
@@ -323,9 +324,10 @@ private:
     // Write contract to hog_db.
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
-    CHECK(get_db()
-              .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
-              .has_value());
+    CHECK(
+        get_db()
+            .write_contract_code(contract_hash, std::as_bytes(std::span(bytes)))
+            .has_value());
 
     for (const ContractAddress &address : kAccountAddresses) {
       // Write deployment.

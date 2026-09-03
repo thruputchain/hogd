@@ -49,11 +49,11 @@ namespace hogd {
 
 class StorageSnapshotCache;
 
-// TODO(geoff): root_invoke() validates any incoming wasm blobs.
+// TODO(geoff): root_invoke() validates any incoming contract code blobs.
 // We may later do that validation preemptively in the coordinator.
-// We may also wish to add checks to make sure that a wasm that's created
-// is actually deployed, and/or put limits on the size of an individual wasm.
-// What's done here is only check well-formedness of the wasm.
+// We may also wish to add checks to make sure that a contract that's created
+// is actually deployed, and/or put limits on the size of an individual
+// contract. What's done here is only check well-formedness of the code.
 
 // Data structure that manages all system calls and state associated with a
 // running transaction.
@@ -65,8 +65,8 @@ class StorageSnapshotCache;
 //   pushes its state changes into its parent frame.
 //   - Storage Snapshot Cache reference: Object in which lookups to the database
 //   are cached (reads).
-//   - Wasmi Context: Stores any relevant state internal to Wasmi.  Can be
-//   shared across runtime instances and across transactions.
+//   - Runtime Context: Stores any relevant state internal to the contract
+//   runtime.  Can be shared across runtime instances and across transactions.
 //   Not implemented to be threadsafe.
 class SystemCallHandler {
 public:
@@ -550,7 +550,7 @@ private:
   bool replay_uniquifier_expired() const;
 
   // Validate that the transaction can be run safely.
-  // Ensures, for example, that the wasms are valid, and that the replay
+  // Ensures, for example, that the contracts are valid, and that the replay
   // uniquifier has not already expired.
   // Sets cumulative_invoke_result_ to the appropriate error on a deterministic
   // validation failure; returns a system error (e.g. an unreadable db tip)
@@ -566,7 +566,7 @@ private:
   static InvokeStatus<void> handle_root_host_fn_status(
       SystemStatus<SyscallStatus<InvocationFrameStatusCode>> status);
 
-  // Resolve the WasmiRuntime associated with the queried address.
+  // Resolve the Runtime associated with the queried address.
   // Creates a new runtime if contract is deployed at
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was

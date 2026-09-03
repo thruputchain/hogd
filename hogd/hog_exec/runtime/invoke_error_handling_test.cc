@@ -816,7 +816,7 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
 // wrap_after_parse turns into HostFnErrorCode::Unrecoverable -- so the pre-fix
 // ordering fails this test with a structured error rather than a crash, and the
 // span itself is never read either way. Only a native caller can build a span
-// that long (wasm and rv32 spans are u32-bounded), which is exactly why it
+// that long (rv32 spans are u32-bounded), which is exactly why it
 // works as an ordering probe rather than as a reachable guest input.
 //
 // The span still has to describe real memory: forming one over a range that

@@ -1218,7 +1218,7 @@ TEST_F(Rv32RuntimeContextTest, DirectInvokeNormalizesOutOfGasConsumption)
   EXPECT_EQ(result.gas_consumed_, 10U);
 }
 
-TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
+TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToInvokeOutcomes)
 {
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
@@ -1276,8 +1276,8 @@ TEST_F(Rv32RuntimeContextTest, ZeroReturnHaltCodeMapsToSuccess)
 
 TEST_F(Rv32RuntimeContextTest, ExitPanicMapsToDeterministicRegardlessOfCode)
 {
-  // Parity with the wasm runtime and production Rv32Runtime: Exit is always a
-  // deterministic failure; the trampoline result_code is not an exit status.
+  // Parity with production Rv32Runtime: Exit is always a deterministic
+  // failure; the trampoline result_code is not an exit status.
   auto expect_deterministic = [&](SyscallFunction entry) {
     auto rv32_context = rv32::RuntimeContext(
         {{kRv32ContractId, make_single_ecall_image(entry)}});

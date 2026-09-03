@@ -75,7 +75,7 @@ HogdbWrapper::write_contract(ContractAddress const &addr,
   assert(contract);
   auto bytes = x23::serialize(*contract);
   auto ret =
-      ctx_.get_db().write_wasm_code(addr, std::as_bytes(std::span(bytes)));
+      ctx_.get_db().write_contract_code(addr, std::as_bytes(std::span(bytes)));
   CHECK(ret.has_value());
 }
 
