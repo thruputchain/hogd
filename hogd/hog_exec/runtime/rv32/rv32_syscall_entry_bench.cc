@@ -1597,6 +1597,9 @@ register_benchmarks()
   const std::array<uint64_t, 4> key_counts = {1, 16, 256, 4096};
   const std::array<uint64_t, 7> deep_key_counts = {
       1, 16, 256, 4096, 16384, 65536, kFirstTouchKeys};
+  // The tail of the long sweep, split out because the loaded family runs its
+  // depth axis first: see the ordering note there.
+  const std::array<uint64_t, 3> deep_key_tail = {16384, 65536, kFirstTouchKeys};
   for (const uint32_t depth : depths) {
     benchmark::RegisterBenchmark(std::format("frame/Push/{}", depth),
                                  bm_frame_push, depth);
@@ -1638,18 +1641,36 @@ register_benchmarks()
                                  /*needs_seeded_keys=*/false);
   }
 
+  // The depth axis first, every depth over the same short key sweep, and only
+  // then the long sweep at depth 1.
+  //
+  // Order matters here and getting it wrong is not visible in the numbers as a
+  // failure -- it reads as a depth term that is not there. The loaded rows are
+  // the only ones that fault keys into the block's snapshot cache, which is
+  // shared by every row and never reset. Running depth 1 over the long sweep
+  // first left a quarter-million entries in that cache for depths 8, 16 and
+  // 254 to probe, and those rows then measured a cache two orders of magnitude
+  // larger than the one depth 1 saw. It looked like a ~280 ns step in the
+  // parent walk between depth 1 and depth 8, holding flat after; it was the
+  // cache. With the depth axis run first, every depth in it sees the same
+  // cache and the walk measures about 1 ns per frame at every depth.
+  auto register_loaded = [](uint32_t depth, uint64_t keys) {
+    benchmark::RegisterBenchmark(std::format("frame/NNIntGetFirstTouch/{}/{}",
+                                             depth, keys),
+                                 bm_frame_sweep, depth, keys,
+                                 nnint_get_call(true), KeySpace::kFirstTouch,
+                                 /*commit_innermost=*/false,
+                                 /*needs_seeded_keys=*/true);
+  };
   for (const uint32_t depth : depths) {
-    const std::span<const uint64_t> sweep =
-        depth == 1 ? std::span<const uint64_t>(deep_key_counts)
-                   : std::span<const uint64_t>(key_counts);
-    for (const uint64_t keys : sweep) {
-      benchmark::RegisterBenchmark(std::format("frame/NNIntGetFirstTouch/{}/{}",
-                                               depth, keys),
-                                   bm_frame_sweep, depth, keys,
-                                   nnint_get_call(true), KeySpace::kFirstTouch,
-                                   /*commit_innermost=*/false,
-                                   /*needs_seeded_keys=*/true);
+    for (const uint64_t keys : key_counts) {
+      register_loaded(depth, keys);
     }
+  }
+  // Depth 1 only: here the question is how the frame's own map scales, not the
+  // walk, so this runs last among the sweeps and takes the cache with it.
+  for (const uint64_t keys : deep_key_tail) {
+    register_loaded(1, keys);
   }
 
   // Last, because it leaves the shared snapshot cache a quarter-million
