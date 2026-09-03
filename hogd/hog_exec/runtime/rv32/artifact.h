@@ -124,8 +124,11 @@ struct AcceptedGasSchedule {
   uint64_t digest;
 };
 
-inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
+inline constexpr std::array<AcceptedGasSchedule, 3> kAcceptedGasSchedules = {{
     {.version = kGasTableVersion, .digest = kGasScheduleDigest},
+    // The pre-#3819 v4 schedule (no FrameMergeElement). Kept so any contract
+    // stamped against it stays invokable, metered under the current schedule.
+    {.version = 4, .digest = 0x86dd48334941726cULL},
     // groundhog-cli <= 0.11.0 still stamps v3. Remove once the lowerer stamps
     // the current schedule.
     {.version = 3, .digest = 0x918317c21c46bb60ULL},
