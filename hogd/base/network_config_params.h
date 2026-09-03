@@ -44,17 +44,20 @@ inline constexpr ConfigParamID kHighestConfigParam =
 namespace detail {
 
 /// The value a v1 list states for `id`, or nullopt when the list is shorter
-/// than `id` because the configuration predates that parameter.
+/// than `id` and so does not state it.
 ///
 /// A canonical list is the prefix 0..N of the parameter space, so a parameter
 /// sits at the index its id names and this is a lookup rather than a search.
-/// Running off the end is the one absence with a meaning: the configuration
-/// was written before this parameter existed, and the caller supplies the
-/// protocol default. Everything else about the entry is an invariant of a
-/// list that has already been checked for canonical form, so a mismatched
-/// discriminant is this node being wrong rather than a configuration to
-/// interpret -- fail loudly instead of quietly handing back a default that
-/// would look like an old chain.
+/// Running off the end is the one legitimate absence -- the configuration
+/// predates the parameter, or whatever created it declined to state one it
+/// knew about, which the encoding does not distinguish -- and the caller
+/// supplies the protocol default for it.
+///
+/// Everything else about the entry is an invariant of a list already checked
+/// for canonical form, so a parameter sitting anywhere but its own index is
+/// this node being wrong rather than a configuration to interpret. Fail
+/// loudly: quietly handing back a default would dress a bug up as a
+/// parameter the configuration merely does not state.
 inline std::optional<uint32_t>
 stated_param(NetworkConfigV1 const &config, ConfigParamID id)
 {
