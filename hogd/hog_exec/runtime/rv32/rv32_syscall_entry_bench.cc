@@ -186,6 +186,24 @@ public:
         PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
         PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
         ProposalModeCtor{}, *runtime_context_);
+
+    // Pin the db tip. Production entry paths (invoke(), root_invoke()) await
+    // init_db_tip() before dispatching anything, because the pin is the
+    // transaction's one fallible tip read and every later height read is then
+    // a plain load. This harness calls syscall_entry() directly, so it has to
+    // do the pinning those entry paths do -- without it GetBlockHeight reads
+    // through a null tip and db_tip()'s CHECK aborts the process.
+    //
+    // Held rather than checked here: this fixture is a lazily constructed
+    // static, so its constructor runs inside whichever benchmark row runs
+    // first, and panicking there truncates the JSON mid-write and costs every
+    // row in the run.
+    if (auto pinned = handler_->init_db_tip()(); !pinned.has_value()) {
+      setup_error_ = std::format("could not pin the db tip: system error {}",
+                                 pinned.error().raw_code());
+      return;
+    }
+
     // A syscall runs inside an invocation frame; without one the handler has no
     // current address, no calldata and no gas budget, and every call under
     // measurement would take an early error path instead of doing its work.
@@ -202,6 +220,10 @@ public:
 
   ~SyscallBenchFixture()
   {
+    // Nothing to unwind when setup bailed before pushing the frames.
+    if (!setup_error_.empty()) {
+      return;
+    }
     // Completed, not discarded: finish_frame() returns a MaybeAsync, and
     // dropping one on its Async arm abandons the coroutine unrun.
     (void)handler_->finish_frame(InvokeStatus<void>{},
@@ -216,6 +238,12 @@ public:
   SyscallBenchFixture &operator=(SyscallBenchFixture &&) = delete;
 
   [[nodiscard]] SystemCallHandler &handler() { return *handler_; }
+
+  // Why the fixture is unusable, if it is. Empty when setup completed. Every
+  // row checks this before touching the handler, so a fixture that could not
+  // be built fails all of them by name instead of aborting the process partway
+  // through writing the JSON.
+  [[nodiscard]] const std::string &setup_error() const { return setup_error_; }
 
 private:
   // Distinct, deterministic addresses so caller and callee differ.
@@ -243,6 +271,7 @@ private:
     return std::move(stashed).value();
   }
 
+  std::string setup_error_;
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
   TestEventAggregator event_server_;
   TestEventAggregatorExecServer event_server_exec_server_ =
@@ -517,6 +546,21 @@ shared_fixture()
   return fixture;
 }
 
+// The fixture, or nullptr with this row already failed. Every benchmark starts
+// here: fixture construction is lazy and shared, so a setup step that could not
+// complete surfaces on whichever row ran first and would otherwise take the
+// process down with it.
+SyscallBenchFixture *
+fixture_or_fail(benchmark::State &state)
+{
+  SyscallBenchFixture &fixture = shared_fixture();
+  if (!fixture.setup_error().empty()) {
+    state.SkipWithError(fixture.setup_error());
+    return nullptr;
+  }
+  return &fixture;
+}
+
 // Fail one benchmark row, naming the syscall and the code, and leave the rest
 // of the run alone.
 void
@@ -532,7 +576,11 @@ fail_row(benchmark::State &state, const SyscallCall &call,
 void
 bm_syscall_entry(benchmark::State &state, SyscallCall call)
 {
-  SyscallBenchFixture &fixture = shared_fixture();
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
 
@@ -583,7 +631,11 @@ bm_syscall_entry_sequence(benchmark::State &state,
                           std::vector<SyscallCall> setup,
                           std::vector<SyscallCall> timed)
 {
-  SyscallBenchFixture &fixture = shared_fixture();
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
 
