@@ -16,13 +16,6 @@ namespace hogd {
 
 namespace {
 
-// Creates the process's scratch directory, or throws.
-//
-// This fails for ordinary reasons -- an unwritable or missing $TMPDIR, a full
-// filesystem -- so it must not be a CHECK: aborting turns an operator's
-// environment problem into a crash with no explanation. Both callers run
-// inside the try scope of hog-devnode's main() (hog_devnode.cc), which prints
-// what() and exits.
 std::string
 open_temporary_dir()
 {
