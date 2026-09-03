@@ -24,6 +24,10 @@ namespace hogd {
 enum class GenesisCeremonyError {
   kNegativeDistribution,
   kSupplyExceeded,
+  // One ceremony transaction would attach more distinct contracts than the
+  // chain admits per transaction -- too many distinct wallet artifacts among
+  // the accounts funded together.
+  kTooManyDistinctContracts,
 };
 
 constexpr static ContractAddress

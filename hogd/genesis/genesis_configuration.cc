@@ -130,17 +130,18 @@ constexpr std::size_t kDistributionsPerTransaction = 16;
 
 // max_new_contracts_per_tx for this repository's dev and test chains.
 //
-// Bounded below by kDistributionsPerTransaction -- a ceremony transaction
-// attaches one contract per distinct wallet artifact it distributes to, so
-// anything less would reject a chain's own genesis -- and above by what the
-// executor can commit in one message, which at the current cap is 63. Sitting
-// between them, 32 leaves a ceremony room to grow and still commits an
-// all-max-size batch at half the cap.
-constexpr uint32_t kStockMaxNewContractsPerTx = 32;
+// Well under what the executor can commit in one message: the bound exists to
+// keep a transaction's commit batch small, and nothing legitimate attaches
+// many contracts at once.
+//
+// A ceremony transaction attaches one contract per DISTINCT artifact among the
+// kDistributionsPerTransaction accounts it funds, so a genesis distributing to
+// more than this many distinct wallet implementations in one batch would build
+// a transaction its own chain refuses. That is not expressible as a static
+// assertion -- it depends on the genesis being built -- so
+// try_make_genesis_ceremony_transactions checks it and fails loudly.
+constexpr uint32_t kStockMaxNewContractsPerTx = 4;
 
-static_assert(kStockMaxNewContractsPerTx >= kDistributionsPerTransaction,
-              "a genesis ceremony transaction must not exceed the attached "
-              "contract count its own chain admits");
 static_assert(kStockMaxNewContractsPerTx <=
                   max_new_contracts_for_message_cap(kExecToDbMessageCap),
               "the largest commit batch this admits must fit the executor's "
@@ -262,6 +263,14 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
       if (attached_contract_hashes.insert(entry.contract_hash).second) {
         contracts_to_deploy.push_back(*entry.deployed_contract);
       }
+    }
+
+    // The chain refuses a transaction attaching more contracts than it admits,
+    // so a ceremony that built one would produce a genesis its own rules
+    // reject. Fail here, where the artifact is being built, rather than at the
+    // height-1 block that cannot execute.
+    if (contracts_to_deploy.size() > kStockMaxNewContractsPerTx) {
+      return std::unexpected(GenesisCeremonyError::kTooManyDistinctContracts);
     }
 
     transactions.push_back(SignedTransaction{

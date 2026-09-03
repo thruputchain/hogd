@@ -29,7 +29,7 @@ inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 256;
 // permissive: a chain predating the parameter would otherwise attach contracts
 // without bound, which is the condition #2190 describes. Deliberately below
 // what the executor->storage message cap admits.
-inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 32;
+inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
 
 namespace detail {
 
@@ -158,8 +158,8 @@ max_new_contracts_per_tx(NetworkConfig const &config)
     // v0 predates the parameter, so such a chain runs under the default.
     return kDefaultMaxNewContractsPerTx;
   case 1:
-    return detail::stated_param(
-               config.v1(), ConfigParamID::kConfigParamMaxNewContractsPerTx)
+    return detail::stated_param(config.v1(),
+                                ConfigParamID::kConfigParamMaxNewContractsPerTx)
         .value_or(kDefaultMaxNewContractsPerTx);
   }
   panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
@@ -178,8 +178,8 @@ set_config_param(NetworkConfig &config, ConfigParamID id, uint32_t value)
     const uint32_t depth = max_cross_invoke_depth(config);
     const uint32_t contracts = max_new_contracts_per_tx(config);
     config.v(1);
-    detail::put_param(config.v1(),
-                      ConfigParamID::kConfigParamMaxSHA256Buffers, buffers);
+    detail::put_param(config.v1(), ConfigParamID::kConfigParamMaxSHA256Buffers,
+                      buffers);
     detail::put_param(config.v1(),
                       ConfigParamID::kConfigParamMaxCrossInvokeDepth, depth);
     detail::put_param(config.v1(),
