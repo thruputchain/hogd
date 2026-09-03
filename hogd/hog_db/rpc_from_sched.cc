@@ -337,13 +337,14 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
   // Checked before the config hash, which may only be taken over a canonical
-  // configuration: a list that repeats or misorders a parameter would give one
-  // configuration several hashes, so hashing refuses it outright. This genesis
-  // is untrusted, so the refusal has to be a rejection here rather than the
-  // internal-inconsistency check compute_config_hash makes.
+  // configuration: a list that repeats, misorders, or skips a parameter would
+  // give one configuration several hashes, so hashing refuses it outright.
+  // This genesis is untrusted, so the refusal has to be a rejection here
+  // rather than the internal-inconsistency check compute_config_hash makes.
   if (genesis_configuration.network_config.v() == 1 &&
       !config_params_canonical(genesis_configuration.network_config.v1())) {
-    error("genesis network config parameters are not strictly ascending by id");
+    error("genesis network config parameters are not the gapless prefix 0, 1, "
+          "2, ... of the parameter ids");
     co_return DbSchedResult::DbSchedResultError;
   }
   if (value.proposal_header.block_height != kGenesisBlockHeight ||

@@ -43,35 +43,40 @@ inline constexpr ConfigParamID kHighestConfigParam =
 
 namespace detail {
 
-/// The value a v1 list states for `id`, or nullopt when the list omits it.
+/// The value a v1 list states for `id`, or nullopt when the list is shorter
+/// than `id` because the configuration predates that parameter.
 ///
 /// A canonical list is the prefix 0..N of the parameter space, so a parameter
 /// sits at the index its id names and this is a lookup rather than a search.
-/// The discriminant is checked anyway: every list reaching here has been
-/// checked for canonical form, but reading the wrong arm of a union is worth
-/// one comparison to rule out. A list that fails it is treated as one that ran
-/// out early, which is the reading that leaves the caller on defaults rather
-/// than on another parameter's value.
+/// Running off the end is the one absence with a meaning: the configuration
+/// was written before this parameter existed, and the caller supplies the
+/// protocol default. Everything else about the entry is an invariant of a
+/// list that has already been checked for canonical form, so a mismatched
+/// discriminant is this node being wrong rather than a configuration to
+/// interpret -- fail loudly instead of quietly handing back a default that
+/// would look like an old chain.
 inline std::optional<uint32_t>
 stated_param(NetworkConfigV1 const &config, ConfigParamID id)
 {
   const int32_t index = std::to_underlying(id);
-  if (index < 0 || static_cast<size_t>(index) >= config.params.size()) {
+  CHECK_GE(index, 0);
+
+  if (std::cmp_greater_equal(index, config.params.size())) {
     return std::nullopt;
   }
 
   ConfigParam const &param = config.params[static_cast<size_t>(index)];
-  if (param.param() == id) {
-    switch (id) {
-    case ConfigParamID::kConfigParamMaxSHA256Buffers:
-      return param.max_sha256_buffers();
-    case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
-      return param.max_cross_invoke_depth();
-    case ConfigParamID::kConfigParamMaxNewContractsPerTx:
-      return param.max_new_contracts_per_tx();
-    }
+  CHECK_EQ(std::to_underlying(param.param()), index);
+
+  switch (id) {
+  case ConfigParamID::kConfigParamMaxSHA256Buffers:
+    return param.max_sha256_buffers();
+  case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
+    return param.max_cross_invoke_depth();
+  case ConfigParamID::kConfigParamMaxNewContractsPerTx:
+    return param.max_new_contracts_per_tx();
   }
-  return std::nullopt;
+  panic("Unrecoverable; unknown ConfigParamID: {}", index);
 }
 
 /// A parameter carrying `value`.
