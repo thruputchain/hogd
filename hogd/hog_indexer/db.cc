@@ -43,6 +43,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/key_format.h"
 #include "hogd/hog_indexer/status.h"
@@ -1458,6 +1459,16 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
     const int64_t watermark =
         highest_indexed_block_.load(std::memory_order_acquire);
     if (watermark == kNoBlocksIndexed || record.height > watermark) {
+      return IndexerError(IndexerErrorCode::kDBNotFound);
+    }
+    // Durable tx_index rows are not authenticated during recovery, so a
+    // tampered value could bind a different transaction body and event log
+    // to this key. Re-check the write-time invariant (enforced by
+    // validate_indexer_committed_payload) that the stored record hashes to
+    // the requested key before serving it, and hide the row otherwise.
+    if (record.events.tx_hash != tx_hash ||
+        sha256(record.tx.signed_tx.tx) != tx_hash) {
+      error("tx_index row does not match its transaction-hash key");
       return IndexerError(IndexerErrorCode::kDBNotFound);
     }
     return record;

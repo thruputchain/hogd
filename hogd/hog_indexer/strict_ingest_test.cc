@@ -796,5 +796,46 @@ TEST_F(StrictIndexerTest,
             block.identity.consensus_hash);
 }
 
+TEST_F(StrictIndexerTest, TamperedTransactionRowIsHiddenUnderUnrelatedHash)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction original_body = make_body(1100, 0x11);
+  IndexerCommittedBlock block =
+      make_block(1, origin.first_prev_hash, {original_body});
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  const TransactionHash original_hash = sha256(original_body.signed_tx.tx);
+
+  // Forge a well-formed row for a different transaction and store it under the
+  // original transaction's key, as a data-directory tamperer could.
+  ProposedTransaction substituted_body = make_body(2200, 0x22);
+  TxEventLog substituted_log = make_log(substituted_body, 0x23);
+  ASSERT_NE(sha256(substituted_body.signed_tx.tx), original_hash);
+  const BlockHeight substituted_height = 1;
+  std::string substituted_value(
+      reinterpret_cast<const char *>(&substituted_height),
+      sizeof(substituted_height));
+  const x23::Buf body_bytes = x23::serialize(substituted_body);
+  substituted_value.append(reinterpret_cast<const char *>(body_bytes.data()),
+                           body_bytes.size());
+  const x23::Buf log_bytes = x23::serialize(substituted_log);
+  substituted_value.append(reinterpret_cast<const char *>(log_bytes.data()),
+                           log_bytes.size());
+  std::string original_key;
+  IndexerKeyFormat::make_tx_key(original_key, original_hash);
+
+  db_.reset();
+  overwrite_column_family(path_, IndexerKeyFormat::kTxIndexColumnFamily,
+                          original_key, substituted_value);
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+
+  // The tampered row does not hash to its key, so it must be hidden.
+  EXPECT_FALSE(reopened->get_tx_record(original_hash).has_value());
+  EXPECT_FALSE(reopened->get_tx_events(original_hash).has_value());
+}
+
 } // namespace
 } // namespace hogd
