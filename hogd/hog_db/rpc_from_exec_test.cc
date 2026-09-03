@@ -25,6 +25,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -420,6 +421,37 @@ TEST_F(RpcFromExecDiagnosticsTest, MalformedContractRowReportsCorruption)
 
   ExpectedContract result = rpc_->get_contract(BlockID{1}, hash);
   EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
+}
+
+// A persistent kNNInt128 contract-data row whose value is not a 16-byte XDR
+// integer (e.g. tampered on-disk state) must surface as a structured
+// corruption error from the snapshot read, not abort the process at the
+// fixed-width NNInt128 assertion. The control row proves the read path is
+// otherwise valid. See #3816.
+TEST_F(RpcFromExecDiagnosticsTest, MalformedNNInt128RowReportsCorruption)
+{
+  AddressAndKey malformed = make_data_key(addr_, 0x11);
+  AddressAndKey control = make_data_key(addr_, 0x12);
+
+  RAMDB &db = ctx_->get_db().get_ramdb();
+  constexpr std::array<std::byte, 1> kUndersizedNNInt128{std::byte{0x7f}};
+  ASSERT_TRUE(db.put(make_contract_data_key(make_item_key(malformed)),
+                     kNNInt128, kUndersizedNNInt128));
+
+  auto control_value = int128_to_xdr_bytes(int128_t{42});
+  ASSERT_TRUE(db.put(make_contract_data_key(make_item_key(control)), kNNInt128,
+                     control_value));
+
+  ExpectedStorageItem malformed_item =
+      rpc_->get_snapshot_item(BlockID{1}, malformed);
+  EXPECT_EQ(malformed_item.error(), RPCError::kRPCUnrecoverable);
+
+  ExpectedStorageItem control_item =
+      rpc_->get_snapshot_item(BlockID{1}, control);
+  ASSERT_EQ(control_item.error(), RPCError::kRPCNone);
+  EXPECT_EQ(control_item.item().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(control_item.item().nnint()), int128_t{42});
 }
 
 } // namespace

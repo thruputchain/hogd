@@ -420,8 +420,18 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
     switch (item->type) {
     case kNNInt128:
     {
+      // A persistent kNNInt128 row whose value is not exactly a 16-byte XDR
+      // integer (e.g. tampered on-disk state) is corrupt. Report it as a
+      // structured corruption error -- the same way the retrocausal-queue
+      // and contract-code paths do -- rather than aborting the process at
+      // the fixed-width assertion.
+      if (item->value.size() != sizeof(int128_xdr)) [[unlikely]] {
+        error("persistent kNNInt128 row has {} bytes, expected {}",
+              item->value.size(), sizeof(int128_xdr));
+        return ExpectedStorageItem(
+            to_rpc_error(HogDbError(HogDbCode::kCorruption)));
+      }
       out.type(StorageItemType::kItemTypeNonnegativeInt);
-      CHECK(item->value.size() == sizeof(int128_xdr));
       auto encoded =
           std::span<const std::byte, sizeof(int128_xdr)>(item->value.data(),
                                                          sizeof(int128_xdr));
