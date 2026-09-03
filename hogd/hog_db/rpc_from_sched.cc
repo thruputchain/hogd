@@ -382,9 +382,8 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
       genesis_configuration,
       [&](auto const &contract) {
         const auto bytes = x23::serialize(*contract);
-        if (auto r =
-                ctx_.get_db().write_wasm_code(sha256(*contract),
-                                              std::as_bytes(std::span(bytes)));
+        if (auto r = ctx_.get_db().write_contract_code(
+                sha256(*contract), std::as_bytes(std::span(bytes)));
             !r) {
           error("failed to write genesis contract: {}", r.error());
           failure = true;

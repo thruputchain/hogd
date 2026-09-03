@@ -416,7 +416,7 @@ TEST_F(RpcFromExecDiagnosticsTest, MalformedContractRowReportsCorruption)
   constexpr std::array<std::byte, 3> kTruncatedContractXdr{std::byte{0},
                                                            std::byte{0},
                                                            std::byte{0}};
-  ASSERT_TRUE(ctx_->get_db().write_wasm_code(hash, kTruncatedContractXdr));
+  ASSERT_TRUE(ctx_->get_db().write_contract_code(hash, kTruncatedContractXdr));
 
   ExpectedContract result = rpc_->get_contract(BlockID{1}, hash);
   EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);

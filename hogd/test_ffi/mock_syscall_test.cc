@@ -346,7 +346,8 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
-  // Under the wasm32 ABI a value slot is a bare 32-bit word, so int32_t -1 is
+  // Under the 32-bit syscall ABI a value slot is a bare 32-bit word, so
+  // int32_t -1 is
   // encoded as 0xFFFFFFFF in the low 32 bits. Verify the mock decodes that bare
   // slot back to int32_t -1 (signed_i32_type_test asserts the decoded value is
   // -1). Every 32-bit pattern is a valid i32, so there is no "non-canonical"
@@ -370,7 +371,7 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
 }
 
 // A value-typed (non-pointer/offset) slot whose value does not fit a 32-bit
-// slot can never have come from the real wasm32 runtime, so it signifies the
+// slot can never have come from the real RV32 runtime, so it signifies the
 // test harness leaking an out-of-range value into the syscall. The mock reports
 // that as an FFI error (a host-level panic), NOT a contract-observable syscall
 // fault. (Offset slots keep the full u64 to carry host pointers and sentinels.)

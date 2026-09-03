@@ -3651,7 +3651,7 @@ TEST(TestBindingsTest, ConcurrentCreateDB)
 }
 
 // Regression test for #2683: setup_create_contract must run the runtime
-// verifier for RV32 contracts (not just Wasmi) before storing them. An invalid
+// verifier for RV32 contracts before storing them. An invalid
 // RV32 artifact that do_verify_contract rejects must be rejected here too with
 // a structured ContractVerificationFailed error, rather than being stored and
 // surfacing later as an Unrecoverable error during invocation.

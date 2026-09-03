@@ -907,7 +907,7 @@ TEST_F(BalanceCostTrackingTest,
 
 // Pins the native-side sequential in-tx semantics: tokens received earlier in
 // the same transaction are spendable by the receiver in that same transaction
-// (available = base + net in-tx delta). The WASM-side counterpart is the
+// (available = base + net in-tx delta). The guest-side counterpart is the
 // SDK's try_get_values_force behaviour.
 TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
 {

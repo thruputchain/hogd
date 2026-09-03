@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <limits>
 #include <optional>
 
@@ -47,7 +48,14 @@ public:
   BalanceLock(std::optional<int128_t> snapshot_value)
     : snapshot_balance_(snapshot_value),
       delta_bounds_(snapshot_value.has_value() ? *snapshot_value : 0)
-  {}
+  {
+    // Balances are always nonnegative, so a present snapshot is a real balance,
+    // never the missing-balance sentinel. Callers must decode that sentinel to
+    // std::nullopt before constructing the lock (see
+    // ItemLock::prepare_lock_contents); otherwise the delta bounds would treat
+    // the sentinel as the base and grant near-unlimited add capacity (#3809).
+    assert(!snapshot_value.has_value() || *snapshot_value >= 0);
+  }
 
   HogDbStatus<int128_t> try_atomic_change_lock(const Balance *before,
                                                const Balance *after,

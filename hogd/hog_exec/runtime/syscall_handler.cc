@@ -39,6 +39,7 @@
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
@@ -173,8 +174,8 @@ SystemCallHandler::pin_db_tip() const
   co_return SystemStatus<void>{};
 }
 
-// TODO(geoff): Setup configuration parameters for alternative wasm engines
-// and/or shared contexts.
+// TODO(geoff): Setup configuration parameters for alternative contract
+// runtimes and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
     Transaction const &tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy db_proxy,
@@ -291,16 +292,16 @@ SystemCallHandler::perform_initial_validation()
   // TODO(geoff): Adjust if some assumption on the rest of the system changes
   //
   // At this point, we do not know the provenance of signed_tx_.  As such,
-  // an attached wasm may or may not have been validated by this point.
+  // an attached contract may or may not have been validated by this point.
   //
-  // We should validate wasms as they are sent to us from clients (before
+  // We should validate contracts as they are sent to us from clients (before
   // broadcasting to other nodes) and we may wish to validate them as they are
   // broadcast to us from other nodes. But until we have a concrete design of
   // the coordinator and know what is is and is not doing, we conservatively
-  // validate wasms here.
+  // validate contracts here.
   //
-  // If we make the assumption that all wasms are validated by the time they get
-  // to the executor, this check could be removed.
+  // If we make the assumption that all contracts are validated by the time they
+  // get to the executor, this check could be removed.
 
   // Rejected rather than deduplicated: two different transaction encodings
   // would otherwise have identical effect.
@@ -1268,7 +1269,7 @@ SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
     } catch (std::exception &e) {
       // Trace data is best-effort diagnostics. start_syscall_trace() runs from
       // wrap_after_parse() just before the noexcept syscall body, and on the
-      // real WASM path the syscall dispatches through wrap_outer() noexcept, so
+      // real RV32 path the syscall dispatches through wrap_outer() noexcept, so
       // an escaping std::bad_alloc here would terminate an honest test FFI
       // caller (#2644). Drop this frame's trace and continue untraced,
       // mirroring start_frame()'s drop-and-continue (#2473).
@@ -1728,7 +1729,9 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 x23::Async<SystemStatus<SyscallStatus<const Bytestring *>>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  const FrameItemKey item_key =
+      invocation_frame_stack_.frame_item_key(storage_key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
@@ -1742,9 +1745,8 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
-      auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
       auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, addrkey);
+          co_await unmodified_item->load(snapshot_cache_, item_key);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -1801,7 +1803,9 @@ x23::Async<
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
                              bool load_from_snapshot)
 {
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  const FrameItemKey item_key =
+      invocation_frame_stack_.frame_item_key(storage_key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
   if (auto const *nnint_item = item_view->get<NNIntItem>()) {
@@ -1815,9 +1819,8 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
       co_return std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_));
     }
 
-    auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
     auto snapshot_value =
-        co_await snapshot_cache_.try_get_snapshot_item(addrkey);
+        co_await snapshot_cache_.try_get_snapshot_item(item_key);
     if (!snapshot_value.has_value()) {
       co_return snapshot_value.error();
     }
@@ -1849,9 +1852,8 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     }
 
     if (!unmodified_item->is_loaded()) {
-      auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
       auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, addrkey);
+          co_await unmodified_item->load(snapshot_cache_, item_key);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -1960,6 +1962,7 @@ get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
 
 x23::Async<SystemStatus<SyscallStatus<RetrocausalQueueItem *>>>
 retrocausal_queue_item_from_view(ItemView *item_view,
+                                 FrameItemKey const &item_key,
                                  AddressAndKey const &addrkey,
                                  StorageSnapshotCache &snapshot_cache,
                                  ExecutionModeData &execution_mode_data)
@@ -1970,7 +1973,7 @@ retrocausal_queue_item_from_view(ItemView *item_view,
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
       auto load_status =
-          co_await unmodified_item->load(snapshot_cache, addrkey);
+          co_await unmodified_item->load(snapshot_cache, item_key);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -1988,7 +1991,7 @@ retrocausal_queue_item_from_view(ItemView *item_view,
 
     UnmodifiedItem unmodified_item;
     assert(!unmodified_item.is_loaded());
-    auto load_status = co_await unmodified_item.load(snapshot_cache, addrkey);
+    auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
     if (!load_status.has_value()) {
       co_return load_status.error();
     }
@@ -2048,6 +2051,7 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 retrocausal_queue_peek_from_view(ItemView *item_view,
+                                 FrameItemKey const &item_key,
                                  AddressAndKey const &addrkey,
                                  StorageSnapshotCache &snapshot_cache,
                                  ExecutionModeData &execution_mode_data)
@@ -2060,7 +2064,7 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
       auto load_status =
-          co_await unmodified_item->load(snapshot_cache, addrkey);
+          co_await unmodified_item->load(snapshot_cache, item_key);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -2073,7 +2077,7 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
 
   if (item_view->get<DeletedItem>()) {
     UnmodifiedItem unmodified_item;
-    auto load_status = co_await unmodified_item.load(snapshot_cache, addrkey);
+    auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
     if (!load_status.has_value()) {
       co_return load_status.error();
     }
@@ -2100,12 +2104,13 @@ SystemCallHandler::retrocausal_queue_insert(
     co_return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
   auto queue_item =
-      co_await retrocausal_queue_item_from_view(item_view, addrkey,
+      co_await retrocausal_queue_item_from_view(item_view, item_key, addrkey,
                                                 snapshot_cache_,
                                                 execution_mode_data_);
   if (!queue_item.has_value()) {
@@ -2125,12 +2130,14 @@ x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                              bool peek)
 {
+  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
   if (peek) {
-    co_return co_await retrocausal_queue_peek_from_view(item_view, addrkey,
+    co_return co_await retrocausal_queue_peek_from_view(item_view, item_key,
+                                                        addrkey,
                                                         snapshot_cache_,
                                                         execution_mode_data_);
   }
@@ -2141,7 +2148,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
       auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, addrkey);
+          co_await unmodified_item->load(snapshot_cache_, item_key);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -2172,7 +2179,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   // key deleted rather than converting it to an empty RCQ.
   if (item_view->get<DeletedItem>()) {
     UnmodifiedItem unmodified_item;
-    auto load_status = co_await unmodified_item.load(snapshot_cache_, addrkey);
+    auto load_status = co_await unmodified_item.load(snapshot_cache_, item_key);
     if (!load_status.has_value()) {
       co_return load_status.error();
     }
@@ -2207,14 +2214,15 @@ SystemCallHandler::get_native_token_balance(
   AddressAndKey addrkey{.address = contract_address,
                         .key =
                             StorageKey(StorageKeyType::FreeNativeTokenBalance)};
+  const FrameItemKey item_key = FrameItemKey::from(addrkey);
 
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
   if (auto *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
       auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, addrkey);
+          co_await unmodified_item->load(snapshot_cache_, item_key);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -2246,7 +2254,7 @@ SystemCallHandler::get_native_token_balance(
   }
   else {
     auto snapshot_value =
-        co_await snapshot_cache_.try_get_snapshot_item(addrkey);
+        co_await snapshot_cache_.try_get_snapshot_item(item_key);
     if (!snapshot_value.has_value()) {
       co_return snapshot_value.error();
     }

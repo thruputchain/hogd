@@ -37,8 +37,8 @@ namespace hogd {
 
 // End-to-end tests for the threaded RV32 runtime: load a real compiled contract
 // artifact (.rv32a) as a kRv32 contract, resolve + translate it through
-// Rv32Context, and invoke it through Rv32Runtime. Mirrors the wasm-side
-// fibonacci tests (fibonacci_test.cc), but exercises the RV32 path.
+// Rv32Context, and invoke it through Rv32Runtime. Mirrors the fibonacci
+// tests (fibonacci_test.cc), but drives the runtime directly.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class Rv32FibonacciTest : public ::testing::TestWithParam<TestDB>,
                           public NativeContractTestFramework {
@@ -562,8 +562,8 @@ TEST_F(Rv32ProductionMappingTest, SelfInvokeIsRejectedAsReentrance)
 
 TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
 {
-  // The rv32 twin of wasm's FollowBadWithGood: two try-invokes of a child
-  // that faults deterministically, then a clean Return from the caller. Both
+  // Two try-invokes of a child that faults deterministically, then a clean
+  // Return from the caller. Both
   // child outputs report Fault and the transaction still succeeds.
   auto trap_addr = deploy_words({kEbreak}, 1);
 

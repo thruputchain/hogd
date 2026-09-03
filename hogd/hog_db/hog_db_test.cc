@@ -242,12 +242,13 @@ make_code_bytes(size_t size)
   return buf;
 }
 
-// Largest value length that stores inline under the 33-byte wasm-code key.
+// Largest value length that stores inline under the 33-byte contract-code key.
 size_t
-max_inline_wasm_code_size()
+max_inline_contract_code_size()
 {
   size_t size = kBigItemThreshold;
-  while (!Database::item_fits(make_wasm_code_key(SHA256Hash{}).size(), size)) {
+  while (
+      !Database::item_fits(make_contract_code_key(SHA256Hash{}).size(), size)) {
     --size;
   }
   return size;
@@ -255,15 +256,15 @@ max_inline_wasm_code_size()
 
 } // namespace
 
-TEST_F(HogDbTest, WasmCodeChunkedRoundtrip)
+TEST_F(HogDbTest, ContractCodeChunkedRoundtrip)
 {
-  const size_t max_inline = max_inline_wasm_code_size();
+  const size_t max_inline = max_inline_contract_code_size();
   const std::array<size_t, 5> sizes = {
       max_inline,                          // largest inline row
       max_inline + 1,                      // smallest chunked row
-      (2 * kWasmCodeChunkPayloadSize),     // exact multiple of chunk payload
-      (2 * kWasmCodeChunkPayloadSize) + 1, // one byte into a final chunk
-      kMaxSerializedContractBytes,         // largest row hog_db accepts
+      (2 * kContractCodeChunkPayloadSize), // exact multiple of chunk payload
+      (2 * kContractCodeChunkPayloadSize) + 1, // one byte into a final chunk
+      kMaxSerializedContractBytes,             // largest row hog_db accepts
   };
   uint8_t which = 0;
   for (size_t size : sizes) {
@@ -272,14 +273,14 @@ TEST_F(HogDbTest, WasmCodeChunkedRoundtrip)
     hash[1] = which++;
     auto buf = make_code_bytes(size);
     auto buf_span = std::as_bytes(std::span(buf));
-    ASSERT_TRUE(db_.write_wasm_code(hash, buf_span)) << size;
-    auto rcode = db_.read_wasm_code(hash);
+    ASSERT_TRUE(db_.write_contract_code(hash, buf_span)) << size;
+    auto rcode = db_.read_contract_code(hash);
     ASSERT_TRUE(rcode) << size;
     EXPECT_TRUE(std::ranges::equal(buf_span, *rcode)) << size;
     // Re-writing the same row is idempotent (content-addressed rows can be
     // staged again by a later transaction deploying the same contract).
-    ASSERT_TRUE(db_.write_wasm_code(hash, buf_span)) << size;
-    auto rcode2 = db_.read_wasm_code(hash);
+    ASSERT_TRUE(db_.write_contract_code(hash, buf_span)) << size;
+    auto rcode2 = db_.read_contract_code(hash);
     ASSERT_TRUE(rcode2) << size;
     EXPECT_TRUE(std::ranges::equal(buf_span, *rcode2)) << size;
   }
@@ -288,55 +289,55 @@ TEST_F(HogDbTest, WasmCodeChunkedRoundtrip)
 // Guards db_hash compatibility: a row that fits one item must keep the exact
 // pre-chunking layout (type 0 at the 33-byte key, no chunk items), so
 // chunking changes nothing for existing state.
-TEST_F(HogDbTest, WasmCodeSmallRowKeepsLegacyInlineLayout)
+TEST_F(HogDbTest, ContractCodeSmallRowKeepsLegacyInlineLayout)
 {
   SHA256Hash hash{};
   hash[0] = 0xC1;
   auto buf = make_code_bytes(100);
-  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+  ASSERT_TRUE(db_.write_contract_code(hash, std::as_bytes(std::span(buf))));
 
-  auto key = make_wasm_code_key(hash);
+  auto key = make_contract_code_key(hash);
   auto type = db_.get_ramdb().get_type(std::as_bytes(std::span(key)));
   ASSERT_TRUE(type);
-  EXPECT_EQ(*type, kWasmCodeInline);
+  EXPECT_EQ(*type, kContractCodeInline);
 
-  auto chunk_key = make_wasm_code_chunk_key(hash, 0);
+  auto chunk_key = make_contract_code_chunk_key(hash, 0);
   EXPECT_FALSE(db_.get_ramdb().get_type(std::as_bytes(std::span(chunk_key))));
 }
 
-TEST_F(HogDbTest, WasmCodeMissingChunkIsCorruption)
+TEST_F(HogDbTest, ContractCodeMissingChunkIsCorruption)
 {
   SHA256Hash hash{};
   hash[0] = 0xC2;
   auto buf = make_code_bytes(kMaxSerializedContractBytes);
-  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+  ASSERT_TRUE(db_.write_contract_code(hash, std::as_bytes(std::span(buf))));
 
-  auto chunk_key = make_wasm_code_chunk_key(hash, 1);
+  auto chunk_key = make_contract_code_chunk_key(hash, 1);
   ASSERT_TRUE(db_.get_ramdb().remove(std::as_bytes(std::span(chunk_key))));
 
-  auto rcode = db_.read_wasm_code(hash);
+  auto rcode = db_.read_contract_code(hash);
   ASSERT_FALSE(rcode);
   EXPECT_EQ(rcode.error().code(), HogDbCode::kCorruption);
 }
 
 // The chunked-head sanity checks (unknown type byte, fits-inline total,
 // out-of-range chunk count) all reject with kCorruption -- and they run
-// before read_wasm_code allocates `total` bytes, so a hostile head cannot
+// before read_contract_code allocates `total` bytes, so a hostile head cannot
 // drive a huge allocation (the 0xFFFFFFFF case would be a 4 GiB buffer).
-TEST_F(HogDbTest, WasmCodeTamperedHeadIsCorruption)
+TEST_F(HogDbTest, ContractCodeTamperedHeadIsCorruption)
 {
   SHA256Hash hash{};
   hash[0] = 0xC3;
   auto buf = make_code_bytes(kMaxSerializedContractBytes);
-  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+  ASSERT_TRUE(db_.write_contract_code(hash, std::as_bytes(std::span(buf))));
 
-  auto key = make_wasm_code_key(hash);
+  auto key = make_contract_code_key(hash);
   auto key_span = std::as_bytes(std::span(key));
 
   auto expect_corrupt_after = [&](uint8_t type,
                                   std::span<const std::byte> value) {
     ASSERT_TRUE(db_.get_ramdb().put(key_span, type, value));
-    auto rcode = db_.read_wasm_code(hash);
+    auto rcode = db_.read_contract_code(hash);
     ASSERT_FALSE(rcode);
     EXPECT_EQ(rcode.error().code(), HogDbCode::kCorruption);
   };
@@ -347,38 +348,38 @@ TEST_F(HogDbTest, WasmCodeTamperedHeadIsCorruption)
 
   // Chunked head describing a row small enough to be stored inline.
   auto small_len = x23::serialize(static_cast<uint32_t>(100));
-  expect_corrupt_after(kWasmCodeChunkedHead,
+  expect_corrupt_after(kContractCodeChunkedHead,
                        std::as_bytes(std::span(small_len)));
 
   // Chunked head describing more chunks than a one-byte index addresses.
   auto huge_len = x23::serialize(static_cast<uint32_t>(0xFFFFFFFF));
-  expect_corrupt_after(kWasmCodeChunkedHead,
+  expect_corrupt_after(kContractCodeChunkedHead,
                        std::as_bytes(std::span(huge_len)));
 }
 
-// for_each_wasm_code_item emits payload chunks before the chunked head, so a
-// reader that observes a head always finds complete chunks. Pin that
+// for_each_contract_code_item emits payload chunks before the chunked head, so
+// a reader that observes a head always finds complete chunks. Pin that
 // ordering: it is documented behavior the read path relies on.
-TEST_F(HogDbTest, WasmCodeChunkedItemsEmitHeadLast)
+TEST_F(HogDbTest, ContractCodeChunkedItemsEmitHeadLast)
 {
   SHA256Hash hash{};
   hash[0] = 0xC4;
-  auto buf = make_code_bytes((2 * kWasmCodeChunkPayloadSize) + 1);
+  auto buf = make_code_bytes((2 * kContractCodeChunkPayloadSize) + 1);
 
   std::vector<std::pair<size_t, uint8_t>> emitted; // (key length, type)
-  for_each_wasm_code_item(hash, std::as_bytes(std::span(buf)),
-                          [&](std::span<const std::byte> key, uint8_t type,
-                              std::span<const std::byte> /*value*/) {
-                            emitted.emplace_back(key.size(), type);
-                          });
+  for_each_contract_code_item(hash, std::as_bytes(std::span(buf)),
+                              [&](std::span<const std::byte> key, uint8_t type,
+                                  std::span<const std::byte> /*value*/) {
+                                emitted.emplace_back(key.size(), type);
+                              });
 
   ASSERT_EQ(emitted.size(), 4U); // 3 chunks + head
   for (size_t i = 0; i + 1 < emitted.size(); ++i) {
     EXPECT_EQ(emitted[i].first, sizeof(SHA256Hash) + 2) << i;
-    EXPECT_EQ(emitted[i].second, kWasmCodeChunk) << i;
+    EXPECT_EQ(emitted[i].second, kContractCodeChunk) << i;
   }
   EXPECT_EQ(emitted.back().first, sizeof(SHA256Hash) + 1);
-  EXPECT_EQ(emitted.back().second, kWasmCodeChunkedHead);
+  EXPECT_EQ(emitted.back().second, kContractCodeChunkedHead);
 }
 
 TEST_F(HogDbTest, DataAccessObject)
@@ -415,8 +416,8 @@ TEST_F(HogDbTest, DataAccessObject)
     EXPECT_EQ(*bal, 10);
   }
 
-  // test wasm hash
-  std::string test_code("wasm contract code is here");
+  // test contract code hash
+  std::string test_code("contract code is here");
   uint32_t contract_size = test_code.size();
   SHA256Hash hash = sha256(std::as_bytes(std::span(test_code)));
   EXPECT_TRUE(db_.write_address_metadata(
@@ -429,9 +430,10 @@ TEST_F(HogDbTest, DataAccessObject)
     EXPECT_EQ(hash, rhash->hash);
   }
 
-  // test wasm code
-  EXPECT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(test_code))));
-  HogDbStatus<OwningSpan<const std::byte>> rcode = db_.read_wasm_code(hash);
+  // test contract code
+  EXPECT_TRUE(
+      db_.write_contract_code(hash, std::as_bytes(std::span(test_code))));
+  HogDbStatus<OwningSpan<const std::byte>> rcode = db_.read_contract_code(hash);
   EXPECT_TRUE(rcode);
   if (rcode) {
     EXPECT_EQ(std::as_bytes(std::span(test_code)), *rcode);
@@ -1451,7 +1453,7 @@ TEST_F(HogDbTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_new_contract(contract));
   });
 
-  auto rcode = db_.read_wasm_code(sha256(contract));
+  auto rcode = db_.read_contract_code(sha256(contract));
   ASSERT_TRUE(rcode);
   auto expected = x23::serialize(contract);
   EXPECT_TRUE(std::ranges::equal(std::as_bytes(std::span(expected)), *rcode));

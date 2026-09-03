@@ -551,9 +551,7 @@ InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
 ItemView *
 InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
 {
-  assert(!frame_stack_.empty());
-  return get_item_view(
-      FrameItemKey::contract_data(frame_stack_.back().address(), data_key));
+  return get_item_view(frame_item_key(data_key));
 }
 
 AuthToken const *

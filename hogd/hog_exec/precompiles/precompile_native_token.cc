@@ -272,7 +272,7 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
     co_return receiver_balance.error().to_invoke_error();
   }
   if (!receiver_balance.value().has_value()) {
-    // Staged-negative balance (system-path state the WASM reference can never
+    // Staged-negative balance (system-path state the RV32 reference can never
     // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
     // carve-out from byte parity, as in transfer_impl.
     co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -416,7 +416,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     co_return owner_avail.error().to_invoke_error();
   }
   if (!owner_avail.value().has_value()) {
-    // Staged-negative balance (system-path state the WASM reference can never
+    // Staged-negative balance (system-path state the RV32 reference can never
     // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
     // carve-out from byte parity.
     co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -504,7 +504,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     co_return owner_avail.error().to_invoke_error();
   }
   if (!owner_avail.value().has_value()) {
-    // Staged-negative balance (system-path state the WASM reference can never
+    // Staged-negative balance (system-path state the RV32 reference can never
     // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
     // carve-out from byte parity.
     co_return InvokeError{InvokeErrorCode::Deterministic};

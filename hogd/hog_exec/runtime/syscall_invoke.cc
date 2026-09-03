@@ -274,7 +274,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_returned_auth_token_ids)
 {
   // If the return buffer is too large, we return a deterministic error`
-  // equivalent to a wasm `unreachable` instruction.
+  // equivalent to a guest trap.
   // This is instead of return a kInvalidSyscallInput error.  The generated
   // contract bindings in the SDK for this call has a signature of (&[u8], bool)
   // -> !, which could lead to UB in the contract code if that function then

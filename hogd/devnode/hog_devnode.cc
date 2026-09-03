@@ -32,6 +32,7 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/hog_exec/shared.h"
@@ -135,9 +136,18 @@ hog_devnode_init(std::string listen_host,
 
   init_hog_exec_metrics();
 
+  // An unusable $TMPDIR or data dir is an operator environment problem, so it
+  // is reported here rather than raised out of the node's construction.
+  std::expected<HogDevnodeDirectories, std::string> directories =
+      HogDevnodeDirectories::create(data_dir);
+  if (!directories) {
+    error("hog-devnode failed before readiness: {}", directories.error());
+    return EXIT_FAILURE;
+  }
+
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      bootstrap_config, data_dir, runtime_network_hash,
-                      ramdb_bytes);
+                      std::move(*directories), bootstrap_config, data_dir,
+                      runtime_network_hash, ramdb_bytes);
   emit_readiness(node, readiness_sink, runtime_network_hash);
   info("hog-devnode initialization complete.");
 
@@ -253,6 +263,15 @@ print_usage(FILE *stream, char *argv[])
 
 Start a local Groundhog development node.
 
+Typical use:
+  hog-devnode serves only hogd's internal x23 RPC, bound to loopback, and prints
+  one readiness JSON line on stdout. It is not the public JSON-RPC endpoint.
+  Contract developers normally run it through the groundhog CLI, which
+  supervises this process and serves JSON-RPC (port 9545 by default):
+
+    export GROUNDHOG_DEVNODE_BINARY=/path/to/hog-devnode
+    groundhog node
+
 Options:
   --listen-host <ip>             Host/interface for internal x23 services
                                  [default: 127.0.0.1]
@@ -272,7 +291,9 @@ Options:
                                  dev-account and wallet shorthand flags
                                  conflict.
   --dev-accounts <count>         Deterministic user accounts, excluding dev-0
-                                 [default: 0]
+                                 [default: 0]. groundhog node passes its own
+                                 count; pass at least 1 when running directly
+                                 so a non-faucet account exists.
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
                                  [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per user account
