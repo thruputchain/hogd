@@ -926,7 +926,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
 
   EXPECT_EQ(kOpCount, 49U);
   EXPECT_EQ(kGasTableVersion, 4U);
-  EXPECT_EQ(kGasScheduleDigest, 0x580c11fd6163ff6eULL);
+  EXPECT_EQ(kGasScheduleDigest, 0x35d721c30a42777bULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
