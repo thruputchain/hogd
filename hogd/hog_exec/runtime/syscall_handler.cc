@@ -299,6 +299,20 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all contracts are validated by the time they
   // get to the executor, this check could be removed.
 
+  // Bound the number of distinct attached contracts before verifying any of
+  // them. Each attachment is verified below outside transaction gas, and for
+  // RV32 that verification zero-fills the artifact's full declared guest-memory
+  // image; without this cap a size-compliant transaction could attach thousands
+  // of tiny maximum-memory artifacts and force cumulative uncharged zero-fill
+  // far larger than the transaction itself (#3815). Same runtime-agnostic,
+  // deterministic classification as the per-contract size cap below.
+  if (newly_created_contracts_.size() > kMaxNewContractsPerTx) {
+    error("Transaction attaches more than kMaxNewContractsPerTx contracts");
+    cumulative_invoke_result_.result_ =
+        InvokeError{InvokeErrorCode::Deterministic};
+    co_return SystemStatus<void>{};
+  }
+
   for (auto const &[hash, contract] : newly_created_contracts_) {
     // Enforce the contract size limit before verification: the limit is
     // runtime-agnostic, and rejecting here -- before any body execution --

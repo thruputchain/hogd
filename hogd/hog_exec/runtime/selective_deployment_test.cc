@@ -1384,6 +1384,70 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
   EXPECT_FALSE(lookup_contract_from_db(oversized_hash).has_value());
 }
 
+// A transaction attaching more than kMaxNewContractsPerTx distinct contracts is
+// rejected deterministically during initial validation, before any attachment
+// is verified and before the body runs: the count cap bounds the uncharged
+// per-attachment verification work (#3815). Exactly kMaxNewContractsPerTx is
+// accepted, so the cap rejects only what exceeds it.
+TEST_P(SelectiveDeploymentTest, RejectsTooManyAttachedContracts)
+{
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  NativeContext native_context(std::move(contract_map));
+  NoopRv32Context noop_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kRv32, {&noop_context, false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+
+  // Attach n distinct rv32 contracts and run initial validation. The bytes are
+  // opaque placeholders -- NoopRv32Context accepts them without parsing -- and
+  // made distinct per index so newly_created_contracts_ holds n entries rather
+  // than deduplicating.
+  auto run = [&](size_t n) {
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = deployer_addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    for (size_t i = 0; i < n; ++i) {
+      Contract contract(ContractType::kRv32);
+      contract.rv32_contract() = ContractBlob{
+          .data = {static_cast<uint8_t>(i), static_cast<uint8_t>(i >> 8),
+                   static_cast<uint8_t>(i >> 16)}};
+      handler_tx.tx.contracts_to_deploy.push_back(std::move(contract));
+    }
+    auto handler = make_new_system_call_handler(handler_tx, context);
+    return handler.root_invoke()();
+  };
+
+  // One over the cap is rejected deterministically; the body never runs.
+  auto too_many = run(kMaxNewContractsPerTx + 1);
+  EXPECT_FALSE(too_many.is_root_success());
+  EXPECT_EQ(too_many.result_.error(),
+            InvokeError{InvokeErrorCode::Deterministic});
+
+  // Exactly the cap passes initial validation (it verifies and returns success
+  // without attempting any deployment).
+  auto at_cap = run(kMaxNewContractsPerTx);
+  EXPECT_TRUE(at_cap.is_root_success());
+}
+
 // A native contract attached to a transaction is rejected during initial
 // validation, even when the body never deploys or invokes it: every native id
 // is refused by deploy_contract's banned-redeploy check, so an attachment
