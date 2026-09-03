@@ -4,6 +4,7 @@
 #include <format>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <system_error>
 
@@ -13,21 +14,32 @@
 
 namespace hogd {
 
-HogDevnodeTmpDir::HogDevnodeTmpDir()
+namespace {
+
+std::string
+open_temporary_dir()
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
-  CHECK(dir.has_value());
-  path_ = std::filesystem::absolute((*dir).get_path()).string();
+  if (!dir) {
+    throw std::runtime_error(std::format(
+        "could not create a hog-devnode temp dir: {} (set TMPDIR to a "
+        "writable directory)",
+        dir.error()));
+  }
+  return std::filesystem::absolute((*dir).get_path()).string();
 }
+
+} // namespace
+
+HogDevnodeTmpDir::HogDevnodeTmpDir() : path_(open_temporary_dir())
+{}
 
 HogDevnodeTmpDir::HogDevnodeTmpDir(
     std::optional<std::filesystem::path> const &data_dir,
     std::string_view subdir)
 {
   if (!data_dir.has_value()) {
-    ErrnoStatus<Directory> dir = Directory::open_temporary();
-    CHECK(dir.has_value());
-    path_ = std::filesystem::absolute((*dir).get_path()).string();
+    path_ = open_temporary_dir();
     return;
   }
 
