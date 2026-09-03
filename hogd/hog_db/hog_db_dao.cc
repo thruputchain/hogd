@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -353,6 +354,18 @@ HogDbDAO::write_address_balance(const Address &addr, int128_t val)
   update_invariants_post(key, before_item);
   return ret;
 }
+
+// read/write_address_average_hog_age slice the address off the front of the
+// HogAge XDR encoding and splice the key address back on. That is valid only
+// while address is HogAge's first field and occupies kAddressSize bytes; guard
+// the layout so a later reordering or resize fails to compile instead of
+// silently corrupting kHogAge rows (issue #3812).
+static_assert(std::is_standard_layout_v<HogAge>,
+              "HogAge must be standard-layout for the offsetof check below");
+static_assert(offsetof(HogAge, address) == 0,
+              "address must be HogAge's first field");
+static_assert(sizeof(HogAge::address) == kAddressSize,
+              "HogAge::address must be kAddressSize bytes");
 
 HogDbStatus<void>
 HogDbDAO::write_address_average_hog_age(const HogAge &age)
