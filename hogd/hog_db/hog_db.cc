@@ -121,6 +121,15 @@ hog_db_init(std::string_view path, size_t ram_bytes,
   // load the tip metadata from the database (won't exist in a new database).
   HogDbStatus<DbTip> tip = ctx.get_db().read_dbtip();
   if (tip) {
+    // Corruption check, not provenance/authentication: the recovered state and
+    // the tip it is compared against both live in this data directory, so this
+    // only proves the recovered state is self-consistent (survived a crash
+    // intact). It cannot authenticate the state against an adversary who can
+    // rewrite the directory and recompute both this hash and the commit CRC;
+    // authenticity is established by consensus (storage_long_hash is validated
+    // by the coordinator at commit). Arbitrary durable-state tampering is
+    // out-of-scope Tier 5 (volume/node loss) in docs/component-failure-model.md
+    // and is recovered by snapshot/clean-chain replacement, not local recovery.
     if (db_hash != tip->storage_long_hash) {
       critical("Root hash doesn't match DbTip");
       return EXIT_FAILURE;
