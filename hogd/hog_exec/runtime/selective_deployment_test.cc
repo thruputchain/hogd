@@ -1450,6 +1450,84 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
   EXPECT_FALSE(lookup_contract_from_db(attached_hash).has_value());
 }
 
+// A persisted native contract row can carry a native id that is not a known
+// precompile -- for example after data-directory tampering that keys a
+// structurally valid native Contract under its real content hash. Such a row is
+// resolved from the snapshot cache (not attached to the transaction, not
+// registered in the NativeContext) when a contract calls DeployContract with
+// its hash. deploy_contract must reject it with a structured
+// kSyscallErrorCodeInvalidSyscallInput -- native contracts are never
+// user-deployable regardless of id -- rather than terminating the executor on
+// an unrecognized native id.
+TEST_P(SelectiveDeploymentTest, CannotDeployPersistedUnknownNativeContract)
+{
+  // A native id that is not a registered precompile.
+  auto unknown_native_contract = make_native_contract(0x7fffffff);
+  const SHA256Hash unknown_native_hash = sha256(*unknown_native_contract);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 77;
+    return nonce;
+  }();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0,
+      [unknown_native_hash](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        // Deploying the persisted unknown-id native contract must fail with a
+        // structured error, not crash the executor.
+        ContractAddress deploy_addr;
+        auto syscall_res = co_await ctx.syscall<SyscallNo::kDeployContract>(
+            kDeployNonce, unknown_native_hash, deploy_addr);
+        if (!syscall_res.has_value() ||
+            syscall_res.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  NativeContext context(std::move(contract_map));
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  const ContractAddress deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  // Persist the unknown-id native contract to the db only, keyed by its real
+  // content hash, so it is reached solely through snapshot-cache resolution.
+  write_contract(unknown_native_contract);
+  auto persisted = lookup_contract_from_db(unknown_native_hash);
+  ASSERT_TRUE(persisted.has_value());
+  ASSERT_EQ(sha256(*persisted), unknown_native_hash);
+
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
+
+  // The contract caught the structured error, so the transaction succeeds.
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+
+  // Nothing was deployed.
+  const ContractAddress deploy_addr =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   unknown_native_hash);
+  EXPECT_FALSE(lookup_deployment_from_db(deploy_addr).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, SelectiveDeploymentTest,

@@ -312,8 +312,8 @@ SystemCallHandler::perform_initial_validation()
       co_return SystemStatus<void>{};
     }
     // Native contracts are registered at genesis, never deployed by a
-    // transaction: is_banned_redeploy_native_contract() rejects every id, so
-    // an attached one could never reach deploy_contract successfully.
+    // transaction: deploy_contract() rejects every native id, so an attached
+    // one could never reach deploy_contract successfully.
     //
     // TODO(geoff): filter these out in the scheduler, which is what should
     // stop one being proposed in the first place. Until then the
@@ -1625,20 +1625,6 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
                                                .contract_hash = contract_hash});
 }
 
-namespace {
-constexpr bool
-is_banned_redeploy_native_contract(
-    HogexecPrecompiledNativeContracts native_contract_id)
-{
-  switch (native_contract_id) {
-  case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
-  case HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet:
-    return true;
-  }
-  panic("Unknown native contract deployed: {}", native_contract_id);
-}
-} // namespace
-
 x23::Async<SystemStatus<SyscallStatus<ContractAddress>>>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
@@ -1662,9 +1648,11 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   auto const &contract = *contract_res.value();
 
   // Native (precompiled) contracts cannot be deployed - they are set up at
-  // genesis and should not be redeployed by user transactions
-  if (contract.contract_type() == ContractType::kNative &&
-      is_banned_redeploy_native_contract(contract.native_contract_id())) {
+  // genesis and should not be redeployed by user transactions. This holds for
+  // any native id, including an unrecognized one on a persisted/recovered
+  // contract row, which must be rejected here rather than reaching code that
+  // assumes a known native id.
+  if (contract.contract_type() == ContractType::kNative) {
     co_return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
