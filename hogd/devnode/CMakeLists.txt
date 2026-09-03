@@ -114,6 +114,27 @@ add_dependencies(
 gtest_discover_tests(bootstrap_manifest_test)
 
 add_executable(
+  hog_devnode_tmp_dir_test
+  hog_devnode_tmp_dir_test.cc
+)
+target_include_directories(
+  hog_devnode_tmp_dir_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(
+  hog_devnode_tmp_dir_test
+  hog_devnode
+  GTest::gtest
+)
+add_dependencies(
+  hog_devnode_tmp_dir_test
+  all_riscv_contracts
+  all_contract_headers
+)
+gtest_discover_tests(hog_devnode_tmp_dir_test)
+
+add_executable(
   hosted_bootstrap_generator_test
   hosted_bootstrap_generator_test.cc
 )
