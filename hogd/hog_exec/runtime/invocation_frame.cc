@@ -21,6 +21,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
@@ -64,9 +65,17 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
   most_recent_child_frame_forwarded_auth_tokens_.clear();
 }
 
-void
+size_t
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
+  // Captured before the moves below consume the child's containers. This is the
+  // number of elements the merge touches, one map insert or append each, which
+  // finish_frame() charges gas against (#3819).
+  const size_t merged_element_count = frame.modified_items_.size() +
+                                      frame.events_.size() +
+                                      frame.new_contract_deployments_.size() +
+                                      frame.returned_auth_token_ids_.size();
+
   child_return_output_ = std::move(frame.to_return_output_);
   event_count_ = frame.event_count_;
 
@@ -100,6 +109,8 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   child_returned_auth_token_ids_ = std::move(frame.returned_auth_token_ids_);
 
   most_recent_child_frame_forwarded_auth_tokens_.clear();
+
+  return merged_element_count;
 }
 
 x23::Async<SystemStatus<void>>
@@ -156,6 +167,21 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
   delta.deployed_contract_hash() = hash;
   return delta;
 }
+
+// Gas charged per element merged from a successful child frame into its parent.
+// commit_successful_child_frame() does one map insert or append per merged
+// element (modified item, event, deployment, or returned auth token), so
+// without a charge a leaf frame's attacker-shaped write set is re-merged
+// through every successful ancestor for free -- an amplification bounded only
+// by the cross-invoke depth (#3819).
+//
+// This is frame-completion accounting added to the child's dynamic runtime gas,
+// not a guest-issued syscall, so it is deliberately not part of the RV32
+// gas-schedule digest: an artifact commits to the instruction and syscall costs
+// it is metered with, never to this post-runtime host work. Priced at the
+// calibrated syscall-crossing cost, a conservative upper bound on one map
+// operation.
+constexpr uint64_t kFrameMergeElementCost = kSyscallBaseCost;
 
 } // namespace
 
@@ -455,8 +481,15 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
             std::move(frame_stack_.back()));
       }
       else {
-        frame_stack_[stack_size - 2].commit_successful_child_frame(
-            std::move(frame_stack_.back()));
+        // Charge the parent for the host work of merging the successful child's
+        // write set, so a leaf's writes are not re-merged through each ancestor
+        // for free (#3819). Billed via the completion result, which
+        // SystemCallHandler::invoke() folds into the Invoke syscall's gas.
+        const size_t merged_element_count =
+            frame_stack_[stack_size - 2].commit_successful_child_frame(
+                std::move(frame_stack_.back()));
+        frame_result.gas_consumed_ =
+            SaturatingCost(0, kFrameMergeElementCost, merged_element_count);
       }
     } catch (...) {
       frame_stack_.pop_back();

@@ -65,8 +65,10 @@ public:
   std::optional<InvocationFrameOutput> child_return_output_ = std::nullopt;
   std::vector<uint32_t> child_returned_auth_token_ids_;
 
-  // merge child invocation frame into self
-  void commit_successful_child_frame(InvocationFrame &&frame);
+  // merge child invocation frame into self. Returns the number of merged
+  // elements (modified items, events, deployments, and returned auth tokens),
+  // which finish_frame() charges frame-completion gas against (#3819).
+  [[nodiscard]] size_t commit_successful_child_frame(InvocationFrame &&frame);
 
   // merge child invocation frame into self
   void commit_manually_reverted_frame(InvocationFrame &&frame);

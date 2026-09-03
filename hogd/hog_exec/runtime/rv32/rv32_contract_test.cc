@@ -611,6 +611,124 @@ TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
   EXPECT_EQ(second.frame_status, InvocationFrameStatusCode::Fault);
 }
 
+TEST_F(Rv32ProductionMappingTest, SuccessfulChildFrameMergesAreGasCharged)
+{
+  // Merging a successful child frame into its parent reinserts the child's
+  // modified items, events, deployments, and returned auth tokens -- host work
+  // proportional to the child's write set, redone at every successful ancestor.
+  // That work is charged as frame-completion gas, so a leaf's write set cannot
+  // be re-merged through each ancestor for free (#3819).
+  //
+  // The check is by construction rather than by an absolute gas figure: a
+  // manually reverted leaf executes the same guest instructions but discards
+  // its writes, so it is the zero-merge baseline. Success minus revert isolates
+  // the merge charge, and an extra successful ancestor adds exactly one more
+  // such charge.
+  constexpr size_t kEntryCount = 32;
+  constexpr size_t kKeySize = StorageKeyContractData{}.size();
+  constexpr int32_t kInvokeSyscallNo = 5;
+  constexpr GasAmount kGasLimit = 5'000'000;
+
+  std::vector<StorageKeyContractData> keys;
+  keys.reserve(kEntryCount);
+  for (size_t i = 0; i < kEntryCount; ++i) {
+    StorageKeyContractData key{};
+    key[0] = 0xa5;
+    key[1] = static_cast<uint8_t>(i);
+    keys.push_back(key);
+  }
+
+  auto deploy_leaf = [&](bool manual_revert, uint8_t seed) {
+    std::vector<uint8_t> memory(kEntryCount * kKeySize + 1);
+    memory.back() = 0x7b;
+    std::vector<uint32_t> program;
+    for (size_t i = 0; i < kEntryCount; ++i) {
+      std::ranges::copy(keys[i], memory.begin() + i * kKeySize);
+      append_syscall(program,
+                     {kBytestringSetSyscallNo,
+                      static_cast<int32_t>(i * kKeySize),
+                      static_cast<int32_t>(memory.size() - 1), /*value_len=*/1,
+                      /*flags=*/0});
+    }
+    append_syscall(program,
+                   {kReturnSyscallNo, 0, 0, manual_revert ? 1 : 0, 0, 0});
+    return deploy_words(program, seed, std::move(memory));
+  };
+
+  auto deploy_parent = [&](ContractAddress const &child, uint8_t seed) {
+    std::vector<uint8_t> memory(256);
+    std::ranges::copy(child, memory.begin());
+    const CopyableInvokeInputs inputs{
+        .entrypoint_id = 0,
+        .gas_limit = 1'000'000,
+        .flags = std::to_underlying(InvokeFlag::None),
+    };
+    std::memcpy(&memory[64], &inputs, sizeof(inputs));
+
+    std::vector<uint32_t> program;
+    append_syscall(program, {kInvokeSyscallNo, /*address_ptr=*/0,
+                             /*calldata_ptr=*/0, /*calldata_len=*/0,
+                             /*tokens_ptr=*/0, /*tokens_len=*/0,
+                             /*inputs_ptr=*/64, /*outputs_ptr=*/96});
+    append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+    return deploy_words(program, seed, std::move(memory));
+  };
+
+  const auto depth1_success_root = deploy_parent(deploy_leaf(false, 10), 11);
+  const auto depth1_revert_root = deploy_parent(deploy_leaf(true, 12), 13);
+  const auto depth2_success_root =
+      deploy_parent(deploy_parent(deploy_leaf(false, 20), 21), 22);
+  const auto depth2_revert_root =
+      deploy_parent(deploy_parent(deploy_leaf(true, 23), 24), 25);
+
+  auto run_and_commit = [&](ContractAddress const &root,
+                            size_t expected_storage_writes) {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = root,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = kGasLimit,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+        runtime_context_);
+    handler.enable_tracing();
+    const auto result = handler.root_invoke()();
+    EXPECT_TRUE(result.is_root_success());
+    EXPECT_EQ(handler.get_trace()->storage_writes.size(),
+              expected_storage_writes);
+    EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+    return result.gas_consumed_;
+  };
+
+  const GasAmount depth1_success_gas =
+      run_and_commit(depth1_success_root, kEntryCount);
+  const GasAmount depth1_revert_gas = run_and_commit(depth1_revert_root, 0);
+  const GasAmount depth2_success_gas =
+      run_and_commit(depth2_success_root, kEntryCount);
+  const GasAmount depth2_revert_gas = run_and_commit(depth2_revert_root, 0);
+
+  // Success retains the write set and pays the merge; the manual-revert variant
+  // discards it and pays nothing for the merge, so success bills strictly more.
+  const GasAmount merge_charge = depth1_success_gas - depth1_revert_gas;
+  EXPECT_GT(merge_charge, 0U);
+
+  // Each successful ancestor re-merges the leaf's write set and is charged for
+  // it, so two successful ancestors cost exactly twice one ancestor's merge
+  // over the identical revert baseline.
+  EXPECT_EQ(depth2_success_gas - depth2_revert_gas, 2 * merge_charge);
+
+  // The only gas an extra successful ancestor adds, beyond the fixed guest and
+  // syscall overhead of that ancestor (which the revert deltas capture), is one
+  // more merge charge.
+  EXPECT_EQ((depth2_success_gas - depth1_success_gas) -
+                (depth2_revert_gas - depth1_revert_gas),
+            merge_charge);
+}
+
 TEST_F(Rv32ProductionMappingTest,
        DeploymentRowWithoutContractRowIsUnrecoverable)
 {
