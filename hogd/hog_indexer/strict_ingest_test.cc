@@ -841,9 +841,19 @@ TEST_F(StrictIndexerTest, TamperedTransactionRowIsHiddenUnderUnrelatedHash)
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
 
-  // The tampered row does not hash to its key, so it must be hidden.
+  // The tampered row does not hash to its key, so it must be hidden from the
+  // point-lookup paths...
   EXPECT_FALSE(reopened->get_tx_record(original_hash).has_value());
   EXPECT_FALSE(reopened->get_tx_events(original_hash).has_value());
+
+  // ...and from the transaction-list pagination path.
+  TransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 0;
+  auto page = reopened->get_transactions(query);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_TRUE(page->transactions.empty());
 }
 
 TEST_F(StrictIndexerTest, TamperedTransactionBodyIsHiddenEvenIfEventLogMatches)

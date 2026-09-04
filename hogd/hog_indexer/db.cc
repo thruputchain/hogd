@@ -1435,6 +1435,27 @@ IndexDB::log_stats() const
   }
 }
 
+bool
+IndexDB::tx_record_matches_key(const TxRecord &record,
+                               SHA256Hash const &tx_hash) const
+{
+  // Every row stores the event log for its own transaction, so its tx_hash
+  // must equal the requested key.
+  if (record.events.tx_hash != tx_hash) {
+    return false;
+  }
+  // Strict ingestion additionally binds the stored transaction body to the
+  // key (sha256(body) == tx_hash, enforced by
+  // validate_indexer_committed_payload). The legacy consume_events path does
+  // not bind bodies to the key, so this check only applies in durable (strict)
+  // mode.
+  if (durable_mode_.load(std::memory_order_acquire) &&
+      sha256(record.tx.signed_tx.tx) != tx_hash) {
+    return false;
+  }
+  return true;
+}
+
 IndexerStatus<IndexDB::TxRecord>
 IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
 {
@@ -1467,21 +1488,10 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
       return IndexerError(IndexerErrorCode::kDBNotFound);
     }
     // Durable tx_index rows are not authenticated during recovery, so a
-    // tampered value could bind a different transaction to this key. Every
-    // row stores the event log for its own transaction, so its tx_hash must
-    // equal the requested key; hide the row otherwise.
-    if (record.events.tx_hash != tx_hash) {
-      error("tx_index row event log does not match its transaction-hash key");
-      return IndexerError(IndexerErrorCode::kDBNotFound);
-    }
-    // Strict ingestion additionally binds the stored transaction body to the
-    // key (sha256(body) == tx_hash, enforced by
-    // validate_indexer_committed_payload), so re-check it to reject a body
-    // swapped in by tampering. The legacy consume_events path does not bind
-    // bodies to the key, so this check only applies in durable (strict) mode.
-    if (durable_mode_.load(std::memory_order_acquire) &&
-        sha256(record.tx.signed_tx.tx) != tx_hash) {
-      error("tx_index row body does not match its transaction-hash key");
+    // tampered value could bind a different transaction to this key. Hide any
+    // row that is not bound to the requested key.
+    if (!tx_record_matches_key(record, tx_hash)) {
+      error("tx_index row does not match its transaction-hash key");
       return IndexerError(IndexerErrorCode::kDBNotFound);
     }
     return record;
@@ -2288,6 +2298,13 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       error("get_transactions: failed to deserialize tx_index value: {}",
             e.what());
       return IndexerError(IndexerErrorCode::kInternal);
+    }
+
+    // Hide tampered rows here too, matching the point-lookup path
+    // (get_tx_record): a row served in a page must be bound to its key.
+    if (!tx_record_matches_key(record, pos.tx)) {
+      error("get_transactions: tx_index row does not match its key");
+      continue;
     }
 
     rows.push_back(TransactionRow{.pos = pos,

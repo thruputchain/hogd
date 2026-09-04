@@ -223,6 +223,14 @@ private:
 
   IndexerStatus<void> initialize_progress_from_db();
 
+  // True iff a stored tx_index row is bound to [tx_hash] (its own key): the
+  // row's event log identifies this transaction, and in durable (strict) mode
+  // the stored body hashes to the same key. Durable recovery does not
+  // re-authenticate rows, so every serve path must re-check this before
+  // returning a row (see get_tx_record).
+  bool tx_record_matches_key(const TxRecord &record,
+                             SHA256Hash const &tx_hash) const;
+
   // True iff `h` is at or below the contiguous watermark or buffered
   // in pending_heights_.  The guard evidences ingest_mutex_ is held.
   bool height_seen(int64_t h, std::unique_lock<std::mutex> const &g) const;
