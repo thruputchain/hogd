@@ -218,7 +218,10 @@ TEST(Mempool, AuthenticatedPubkeyAccountMissingFromHogDbIsRecoverable)
   secret_key.ed25519() = raw_secret_key;
   PubkeyAccountPreimage preimage{.pubkey = public_key, .nonce = 42};
   const std::optional<ContractAddress> address = pubkey_auth_address(preimage);
-  ASSERT_TRUE(address.has_value());
+  if (!address.has_value()) {
+    ADD_FAILURE() << "failed to derive pubkey auth address";
+    return;
+  }
 
   fib_client_t fib_client(*address);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
