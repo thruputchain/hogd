@@ -183,6 +183,23 @@ overwrite_default_metadata(const std::filesystem::path &path,
   overwrite_column_family(path, rocksdb::kDefaultColumnFamilyName, key, value);
 }
 
+// Encode a tx_index row value the way the ingest path does:
+// block_height || serialized ProposedTransaction || serialized TxEventLog.
+std::string
+make_tx_index_value(BlockHeight height, const ProposedTransaction &body,
+                    const TxEventLog &log)
+{
+  std::string value;
+  value.append(reinterpret_cast<const char *>(&height), sizeof(height));
+  const x23::Buf body_bytes = x23::serialize(body);
+  value.append(reinterpret_cast<const char *>(body_bytes.data()),
+               body_bytes.size());
+  const x23::Buf log_bytes = x23::serialize(log);
+  value.append(reinterpret_cast<const char *>(log_bytes.data()),
+               log_bytes.size());
+  return value;
+}
+
 class StrictIndexerTest : public ::testing::Test {
 protected:
   void SetUp() override
@@ -813,16 +830,8 @@ TEST_F(StrictIndexerTest, TamperedTransactionRowIsHiddenUnderUnrelatedHash)
   ProposedTransaction substituted_body = make_body(2200, 0x22);
   TxEventLog substituted_log = make_log(substituted_body, 0x23);
   ASSERT_NE(sha256(substituted_body.signed_tx.tx), original_hash);
-  const BlockHeight substituted_height = 1;
-  std::string substituted_value;
-  substituted_value.append(reinterpret_cast<const char *>(&substituted_height),
-                           sizeof(substituted_height));
-  const x23::Buf body_bytes = x23::serialize(substituted_body);
-  substituted_value.append(reinterpret_cast<const char *>(body_bytes.data()),
-                           body_bytes.size());
-  const x23::Buf log_bytes = x23::serialize(substituted_log);
-  substituted_value.append(reinterpret_cast<const char *>(log_bytes.data()),
-                           log_bytes.size());
+  const std::string substituted_value =
+      make_tx_index_value(1, substituted_body, substituted_log);
   std::string original_key;
   IndexerKeyFormat::make_tx_key(original_key, original_hash);
 
@@ -835,6 +844,39 @@ TEST_F(StrictIndexerTest, TamperedTransactionRowIsHiddenUnderUnrelatedHash)
   // The tampered row does not hash to its key, so it must be hidden.
   EXPECT_FALSE(reopened->get_tx_record(original_hash).has_value());
   EXPECT_FALSE(reopened->get_tx_events(original_hash).has_value());
+}
+
+TEST_F(StrictIndexerTest, TamperedTransactionBodyIsHiddenEvenIfEventLogMatches)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction original_body = make_body(1200, 0x31);
+  IndexerCommittedBlock block =
+      make_block(1, origin.first_prev_hash, {original_body});
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  const TransactionHash original_hash = sha256(original_body.signed_tx.tx);
+
+  // Swap in a different body while leaving the event log (whose tx_hash still
+  // equals the key) untouched. The event-log identity check alone would miss
+  // this, so the strict-mode body-hash check must reject it.
+  ProposedTransaction forged_body = make_body(3300, 0x32);
+  ASSERT_NE(sha256(forged_body.signed_tx.tx), original_hash);
+  const TxEventLog original_log = make_log(original_body, 0xA0);
+  ASSERT_EQ(original_log.tx_hash, original_hash);
+  const std::string tampered_value =
+      make_tx_index_value(1, forged_body, original_log);
+  std::string original_key;
+  IndexerKeyFormat::make_tx_key(original_key, original_hash);
+
+  db_.reset();
+  overwrite_column_family(path_, IndexerKeyFormat::kTxIndexColumnFamily,
+                          original_key, tampered_value);
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+
+  EXPECT_FALSE(reopened->get_tx_record(original_hash).has_value());
 }
 
 } // namespace

@@ -587,7 +587,8 @@ IndexDB::IndexDB(IndexDB &&other) noexcept // NOLINT(bugprone-exception-escape)
     initialize_epoch_test_hook_(std::move(other.initialize_epoch_test_hook_)),
     apply_validation_test_hook_(std::move(other.apply_validation_test_hook_)),
     highest_indexed_block_(
-        other.highest_indexed_block_.load(std::memory_order_acquire))
+        other.highest_indexed_block_.load(std::memory_order_acquire)),
+    durable_mode_(other.durable_mode_.load(std::memory_order_acquire))
 {
   other.tx_cf_handle_ = nullptr;
   other.contract_cf_handle_ = nullptr;
@@ -627,6 +628,8 @@ IndexDB::operator=(IndexDB &&other) noexcept
     highest_indexed_block_.store(other.highest_indexed_block_.load(
                                      std::memory_order_acquire),
                                  std::memory_order_release);
+    durable_mode_.store(other.durable_mode_.load(std::memory_order_acquire),
+                        std::memory_order_release);
     other.tx_cf_handle_ = nullptr;
     other.contract_cf_handle_ = nullptr;
   }
@@ -1158,6 +1161,7 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
   }
 
   durable_progress_ = progress;
+  durable_mode_.store(true, std::memory_order_release);
   highest_indexed_block_.store(progress.contiguous_height,
                                std::memory_order_release);
   return epoch_success(IndexerEpochOutcome::IndexerEpochInitialized, progress);
@@ -1356,6 +1360,7 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     }
 
     durable_progress_ = progress;
+    durable_mode_.store(true, std::memory_order_release);
     highest_indexed_block_.store(height, std::memory_order_release);
     return apply_success(IndexerBlockApplyOutcome::IndexerBlockApplied,
                          progress);
@@ -1469,13 +1474,12 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
       error("tx_index row event log does not match its transaction-hash key");
       return IndexerError(IndexerErrorCode::kDBNotFound);
     }
-    // Strict ingestion additionally stores the transaction body and binds it
-    // to the key (sha256(body) == tx_hash, enforced by
-    // validate_indexer_committed_payload). The legacy event-log-only path
-    // stores a placeholder empty body instead, which carries no served
-    // transaction content, so only re-check the binding for rows that
-    // actually carry a body.
-    if (!xdr_equal(record.tx, ProposedTransaction{}) &&
+    // Strict ingestion additionally binds the stored transaction body to the
+    // key (sha256(body) == tx_hash, enforced by
+    // validate_indexer_committed_payload), so re-check it to reject a body
+    // swapped in by tampering. The legacy consume_events path does not bind
+    // bodies to the key, so this check only applies in durable (strict) mode.
+    if (durable_mode_.load(std::memory_order_acquire) &&
         sha256(record.tx.signed_tx.tx) != tx_hash) {
       error("tx_index row body does not match its transaction-hash key");
       return IndexerError(IndexerErrorCode::kDBNotFound);
@@ -1705,6 +1709,7 @@ IndexDB::initialize_progress_from_db()
   }
 
   durable_progress_ = std::move(progress);
+  durable_mode_.store(true, std::memory_order_release);
   highest_indexed_block_.store(watermark, std::memory_order_release);
   return {};
 }

@@ -275,6 +275,13 @@ private:
   // synchronizing with the ingestion path.  Stored as int64 (the
   // underlying representation of BlockHeight) for atomic access.
   std::atomic<int64_t> highest_indexed_block_{kNoBlocksIndexed};
+
+  // True once durable (strict) epoch initialization has bound this database,
+  // mirroring durable_progress_.has_value(). Strict ingestion binds every
+  // tx_index body to its key (sha256(body) == tx_hash); the legacy
+  // consume_events path does not. Atomic so get_tx_record can decide whether
+  // to re-verify that binding without synchronizing with the ingestion path.
+  std::atomic<bool> durable_mode_{false};
 };
 
 } // namespace hogd
