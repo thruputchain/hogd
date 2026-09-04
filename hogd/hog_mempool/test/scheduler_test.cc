@@ -109,6 +109,45 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   EXPECT_EQ(scheduler->size(), 0UL);
 }
 
+// A tx that [schedule()] discards because the account cannot afford it across
+// all three hog age groups must leave the tx cache along with the runqueue.
+// Every other removal path (expiry sweeps, [remove_from_scheduler()]) pairs
+// the runqueue erase with [txs_.remove()]. If the discard path does not, the
+// runqueue slot is handed back while the cache entry stays pinned with no
+// remaining reclamation path, and the discarded tx remains visible through
+// [find_tx()] forever.
+TEST(Scheduler, LocalSchedulingDiscardReleasesTxFromCache)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({txs[0]})();
+  ASSERT_EQ(scheduler->size(), 1UL);
+  ASSERT_EQ(scheduler->tx_cache_size(), 1UL);
+  ASSERT_NE(scheduler->find_tx(tx_hash), nullptr);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_TRUE(scheduled_hashes.empty());
+  ASSERT_TRUE(scheduled.empty());
+  ASSERT_EQ(scheduler->size(), 0UL);
+
+  // The discard released the runqueue slot, so the cache entry must be
+  // released with it.
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(tx_hash), nullptr);
+}
+
 TEST(Scheduler, AddVettedTxDuplicate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
