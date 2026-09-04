@@ -207,7 +207,13 @@ try_hold_loopback_ports(const EventPorts &ports)
   for (const std::uint16_t port : ports) {
     try {
       holders.push_back(listen_loopback(port));
-    } catch (const std::system_error &) {
+    } catch (const std::system_error &error) {
+      // Only a collision means "try the next block". Anything else -- fd
+      // exhaustion, a permission problem -- is an infrastructure failure, and
+      // reporting it as a port hunt that ran out would bury it.
+      if (error.code() != std::errc::address_in_use) {
+        throw;
+      }
       return std::nullopt;
     }
   }
