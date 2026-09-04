@@ -182,12 +182,15 @@ non_ephemeral_window()
     low = 32768;
     high = 60999;
   }
+  // A window of exactly kEventPortCount ports is enough, so both bounds are
+  // inclusive: [kLowestUsable, low - 1] holds low - kLowestUsable ports, and
+  // [high + 1, 65535] holds 65535 - high.
   constexpr unsigned kLowestUsable = 10000;
-  if (low > kLowestUsable + kEventPortCount) {
+  if (low >= kLowestUsable + kEventPortCount) {
     return PortWindow{.first = static_cast<std::uint16_t>(kLowestUsable),
                       .last = static_cast<std::uint16_t>(low - 1)};
   }
-  if (high + kEventPortCount < 65535) {
+  if (high + kEventPortCount <= 65535) {
     return PortWindow{.first = static_cast<std::uint16_t>(high + 1),
                       .last = 65535};
   }
