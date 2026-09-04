@@ -506,9 +506,10 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
           for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
             if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
               // The DB RPC currently cannot distinguish an unknown account
-              // from a transient or internal read failure. Authentication
-              // rejects unknown accounts before this path, so conservatively
-              // report the ambiguous scheduler-side failure as internal.
+              // from a transient or internal read failure. Standalone-pubkey
+              // claims can authenticate without an on-chain auth entry and
+              // reach this path, so conservatively report the ambiguous
+              // scheduler-side failure as internal.
               info("scheduler: dropping tx after hog-age lookup failed for {}",
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
               outcomes[tx_idx] =

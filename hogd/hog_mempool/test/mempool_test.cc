@@ -34,6 +34,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
@@ -206,6 +207,43 @@ TEST(Mempool, SubmitUnvettedWithOutcomesRejectsMalformedBatch)
   EXPECT_THROW(gateway.schedgateway_submit_tx_batch_with_outcomes(
                    std::move(batch))(),
                std::runtime_error);
+}
+
+TEST(Mempool, AuthenticatedPubkeyAccountMissingFromHogDbIsRecoverable)
+{
+  auto [raw_public_key, raw_secret_key] = ed25519_keygen();
+  PublicKey public_key(CryptographicScheme::Ed25519);
+  public_key.ed25519() = raw_public_key;
+  SecretKey secret_key(CryptographicScheme::Ed25519);
+  secret_key.ed25519() = raw_secret_key;
+  PubkeyAccountPreimage preimage{.pubkey = public_key, .nonce = 42};
+  const std::optional<ContractAddress> address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(address.has_value());
+
+  fib_client_t fib_client(*address);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  claim.pubkey_preimage() = preimage;
+  txs[0].tx.auth_claim = std::move(claim);
+  txs[0].signatures.push_back(make_signature(secret_key, txs[0].tx,
+                                             /*public_key_id=*/0,
+                                             MempoolTestInfra::kNetworkHash));
+
+  MempoolTestInfra server;
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  const ssize_t auth_failures_before =
+      MempoolMetrics::instance().auth_failed_tx_count.value();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(
+          t_to_parallel_batch(std::move(txs))())();
+
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError);
+  EXPECT_EQ(MempoolMetrics::instance().auth_failed_tx_count.value(),
+            auth_failures_before);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
 TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
