@@ -3,6 +3,7 @@
 #include "auth_claim.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -388,19 +389,6 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     return kTestFFIErrorCodeInvalidArgument;
   }
 
-  // The frame's hash-buffer limit, which start_frame() takes rather than
-  // reading: the tip read may suspend and start_frame() is a noexcept boundary.
-  // Completed with operator() -- this is the off-pool FFI thread, never an x23
-  // pool worker. Read here, with the other admission checks, so it lands before
-  // the throwing allocations below and a failure still pushes no frame.
-  auto max_buffers = db_.get_snapshot().try_get_max_sha256_buffers()();
-  if (!max_buffers.has_value()) {
-    finish_pending_trace(max_buffers.error().to_host_fn_error());
-    error("unrecoverable: could not read the hash-buffer limit for a mock "
-          "invocation frame");
-    return kTestFFIErrorCodeUnrecoverableError;
-  }
-
   // TODO(geoff): current API does not support passing auth tokens via the mock
   // frames.
   //
@@ -421,7 +409,8 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // closed above.
   auto stashed_parent_trace =
       to_handler().start_frame(std::move(frame_invocation), frame_flags,
-                               std::span<uint32_t const>{}, *max_buffers);
+                               std::span<uint32_t const>{},
+                               to_handler().config_params().max_sha256_buffers);
   if (!stashed_parent_trace.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back, so the handler has no new frame; skip publishing the mock-runtime

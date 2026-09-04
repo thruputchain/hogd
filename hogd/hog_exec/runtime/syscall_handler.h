@@ -452,6 +452,14 @@ public:
   x23::Async<SystemStatus<const PreparedContract *>>
   resolve_prepared_contract(SHA256Hash hash);
 
+  // The parameters this transaction's chain puts in force, flattened when the
+  // tip was pinned. Callers must have run init_db_tip() first.
+  NetworkConfigParams const &config_params() const
+  {
+    CHECK_PTR(db_tip_);
+    return config_params_;
+  }
+
   // == Error conversion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
   static ExecResult to_exec_result(SystemErrorCode error_code);
@@ -543,13 +551,6 @@ private:
   {
     CHECK_PTR(db_tip_);
     return db_tip_;
-  }
-
-  // The parameters this transaction's chain puts in force. Pinned with the tip.
-  NetworkConfigParams const &config_params() const
-  {
-    CHECK_PTR(db_tip_);
-    return config_params_;
   }
 
   // True if the given replay uniquifier has already expired at the executing
