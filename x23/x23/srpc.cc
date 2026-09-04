@@ -69,21 +69,27 @@ SRpcFd::stop() noexcept
     write_ready();
 
     // Fail every outstanding client callback exactly once.  A callback
-    // is outstanding in one of two places: already registered in
-    // calls_->cbmap_ by write_worker, or still queued in write_queue_
-    // waiting for write_worker to register it.  Both must be drained
-    // here -- dropping a queued callback leaves the synchronous
-    // send_call() that queued it blocked forever on its stack
-    // semaphore, which strands the calling thread (an executor worker,
-    // for contract-originated database RPCs).
+    // is in exactly one of three places: still queued in write_queue_,
+    // held in the batch write_worker has swapped out of write_queue_
+    // but not yet registered, or registered in calls_->cbmap_.  We can
+    // reach the first and third; the second lives on write_worker's
+    // stack, which is why it completes that batch itself rather than
+    // registering it behind this drain.  Dropping any of them leaves
+    // the synchronous send_call() that queued it blocked forever on
+    // its stack semaphore, which strands the calling thread (an
+    // executor worker, for contract-originated database RPCs).
+    //
+    // Empty both containers before invoking anything.  The callbacks
+    // run arbitrary caller code and wake threads blocked in
+    // send_call(), one of which can drop the last reference to this
+    // SRpcFd, so no member may be touched once they start running --
+    // and none is held under a lock while they do.
     Vec<WriteItem> q;
     q.swap(*write_queue_.take());
 
     decltype(PendingCalls::cbmap_) pcs;
     pcs.swap(calls_->cbmap_);
 
-    // Invoke the callbacks with no lock held: they run arbitrary
-    // caller code, and send_call()'s callback wakes another thread.
     for (auto &pc : pcs)
       pc.second(nullptr, {});
     for (auto &it : q)
