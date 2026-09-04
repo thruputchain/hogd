@@ -136,15 +136,17 @@ record_metric_cleanup(F &&f) noexcept
 SchedGatewaySubmitOutcome
 submit_outcome_for_auth(AuthErrorCode code)
 {
-  if (code == AuthErrorCode::kAuthSuccess) {
+  switch (code) {
+  case AuthErrorCode::kAuthSuccess:
     return SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted;
-  }
-  if (code == AuthErrorCode::kAuthFailed) {
+  case AuthErrorCode::kAuthFailed:
     return SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected;
-  }
-  if (code == AuthErrorCode::kAuthStaleBlockHeight) {
+  case AuthErrorCode::kAuthStaleBlockHeight:
     return SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
+  case AuthErrorCode::kAuthInternal:
+    return SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
   }
+  error("Invalid auth error code: {}", static_cast<int>(code));
   return SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
 }
 
