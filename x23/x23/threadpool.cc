@@ -45,6 +45,27 @@ ThreadPool::ThreadPool(size_t nthreads)
 
 ThreadPool::~ThreadPool()
 {
+  // Wait for the detached threads async() spawned.  Such a thread ends
+  // in make_callback(), which resumes the awaiting coroutine by handing
+  // it to a worker from inside go() -- and go() then goes on to call
+  // notify_all() on the runqueue's condition variable.  The resumed
+  // coroutine, and whatever destroys the pool once it completes, race
+  // with that tail: TSAN reports the destructor's pthread_cond_destroy
+  // against the detached thread's still-running pthread_cond_broadcast.
+  //
+  // The wait is a poll rather than nasync_.wait().  A detached thread
+  // that woke us through the atomic would have to touch nasync_ *after*
+  // the decrement that lets this destructor proceed, which is the same
+  // use-after-free one level down.  Keeping the decrement as the
+  // thread's last access to the pool avoids that, and the expected wait
+  // is the tail of one go() call, so the spin is not a real cost.
+  //
+  // This precedes request_stop() so that a thread on its way into
+  // make_callback() does not trip go()'s assertion that the pool is
+  // still running.
+  while (nasync_.load(std::memory_order_acquire))
+    std::this_thread::yield();
+
   ss_.request_stop();
   for (unsigned i = 0; i < nqueues_; ++i) {
     auto ptr = runqueues_[i].take();

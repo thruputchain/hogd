@@ -259,12 +259,27 @@ public:
   {
     using R = std::invoke_result_t<F, Args...>;
     auto [async, cb] = make_async<R>();
+    // Count the thread in before it starts; it counts itself out once
+    // it is done touching the pool.  ~ThreadPool waits for the count to
+    // reach zero, because make_callback() below hands the awaiting
+    // coroutine back to a worker while this thread is still inside
+    // go(), so the coroutine can resume, finish, and destroy the pool
+    // out from under the notify_all() that go() has yet to perform.
+    nasync_.fetch_add(1, std::memory_order_relaxed);
+    // Held by the local until the closure owns it, so that a throw on
+    // the way to starting the thread does not leave the count raised
+    // and ~ThreadPool waiting forever.  Once moved in, it counts out
+    // when the new thread destroys the closure, which is after the
+    // captures -- cb included -- have been destroyed too.
+    Defer _counted_out{
+        [this] { nasync_.fetch_sub(1, std::memory_order_release); }};
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
     // be destroyed before they are used.  That incurs a second move
     // into the new thread, but that's unavoidable for safety.
     std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
-                  ... args = std::forward<Args>(args)] {
+                  ... args = std::forward<Args>(args),
+                  _counted_out = std::move(_counted_out)] {
       if constexpr (std::is_void_v<R>) {
         std::invoke(f, args...);
         make_callback(cb);
@@ -470,6 +485,10 @@ private:
   inline static thread_local size_t my_thread_no{};
 
   std::stop_source ss_;
+
+  // Number of threads spawned by async() that have not yet finished
+  // touching this pool.  See async() and ~ThreadPool.
+  std::atomic_size_t nasync_{0};
 
   std::mutex qcbq_lock_;
   std::condition_variable qcbq_nonempty_;
