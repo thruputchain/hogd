@@ -259,34 +259,28 @@ public:
   {
     using R = std::invoke_result_t<F, Args...>;
     auto [async, cb] = make_async<R>();
-    // Count the thread in before it starts; it counts itself out once
-    // it is done touching the pool.  ~ThreadPool waits for the count to
-    // reach zero, because make_callback() below hands the awaiting
-    // coroutine back to a worker while this thread is still inside
-    // go(), so the coroutine can resume, finish, and destroy the pool
-    // out from under the notify_all() that go() has yet to perform.
-    nasync_.fetch_add(1, std::memory_order_relaxed);
-    // Held by the local until the closure owns it, so that a throw on
-    // the way to starting the thread does not leave the count raised
-    // and ~ThreadPool waiting forever.  Once moved in, it counts out
-    // when the new thread destroys the closure, which is after the
-    // captures -- cb included -- have been destroyed too.
-    Defer _counted_out{
-        [this] { nasync_.fetch_sub(1, std::memory_order_release); }};
+    // Wrapped in an AsyncTask, which keeps this pool's count of
+    // in-flight async() threads raised until the detached thread has
+    // destroyed everything it owns.  ~ThreadPool waits for that count,
+    // because make_callback() below hands the awaiting coroutine back
+    // to a worker while this thread is still inside go(), so the
+    // coroutine can resume, finish, and destroy the pool out from under
+    // the notify_all() that go() has yet to perform.
+    //
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
     // be destroyed before they are used.  That incurs a second move
     // into the new thread, but that's unavoidable for safety.
-    std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
-                  ... args = std::forward<Args>(args),
-                  _counted_out = std::move(_counted_out)] {
+    auto body = [this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
+                 ... args = std::forward<Args>(args)] {
       if constexpr (std::is_void_v<R>) {
         std::invoke(f, args...);
         make_callback(cb);
       }
       else
         make_callback(cb, std::invoke(f, args...));
-    }).detach();
+    };
+    std::jthread(AsyncTask{this, std::move(body)}).detach();
     return std::move(async);
   }
 
@@ -486,9 +480,40 @@ private:
 
   std::stop_source ss_;
 
-  // Number of threads spawned by async() that have not yet finished
-  // touching this pool.  See async() and ~ThreadPool.
+  // Number of live AsyncCounts, and so the number of threads spawned
+  // by async() that may still touch this pool.  See ~ThreadPool.
   std::atomic_size_t nasync_{0};
+
+  // Holds nasync_ up for as long as it exists.  Copies count
+  // separately, so the count covers every copy of a task in flight,
+  // including the ones std::jthread makes on its way to the new
+  // thread; if starting the thread throws, the unwound copies bring it
+  // back down.
+  struct AsyncCount {
+    ThreadPool *pool_;
+    explicit AsyncCount(ThreadPool *pool) noexcept : pool_(pool)
+    {
+      pool_->nasync_.fetch_add(1, std::memory_order_relaxed);
+    }
+    AsyncCount(const AsyncCount &other) noexcept : AsyncCount(other.pool_) {}
+    AsyncCount(AsyncCount &&other) noexcept : AsyncCount(other.pool_) {}
+    ~AsyncCount() { pool_->nasync_.fetch_sub(1, std::memory_order_release); }
+  };
+
+  // What async() actually hands to std::jthread.  AsyncCount is a base
+  // rather than a member because base classes are destroyed after
+  // non-static data members: the count must not drop until body_ --
+  // and so the cb, f and args it captured, whose destructors we do not
+  // control -- is gone.  Capturing the count in body_ itself would not
+  // do, as the declaration order of a closure type's members, and
+  // hence the order they are destroyed in, is unspecified.
+  template<typename Body> struct AsyncTask : AsyncCount {
+    Body body_;
+    AsyncTask(ThreadPool *pool, Body body)
+      : AsyncCount(pool), body_(std::move(body))
+    {}
+    void operator()() { body_(); }
+  };
 
   std::mutex qcbq_lock_;
   std::condition_variable qcbq_nonempty_;
