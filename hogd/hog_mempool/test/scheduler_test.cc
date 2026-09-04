@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -25,6 +29,37 @@ namespace {
 
 constexpr size_t kBlockSize = 100;
 constexpr size_t kNumTxs = 100;
+
+// Polls [pred] until it holds or [timeout] elapses.
+template<typename Pred>
+bool
+wait_until(Pred pred,
+           std::chrono::milliseconds timeout = std::chrono::seconds(10))
+{
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (!pred()) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return true;
+}
+
+// Whether some other thread currently holds [mutex]. [try_lock()] may fail
+// spuriously, so a single failure is not taken as proof.
+bool
+mutex_is_held(std::mutex &mutex)
+{
+  for (int i = 0; i < 3; i++) {
+    if (mutex.try_lock()) {
+      mutex.unlock();
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return true;
+}
 
 } // namespace
 
@@ -972,6 +1007,155 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
     // #1474).
     scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   }
+}
+
+// [add_txs_helper()] looks the tx up in the tx cache under the cache bucket
+// lock, drops that lock, and only then takes the account lock to insert the tx
+// into the runqueue. [schedule()]'s expiry sweep nests the other way: it holds
+// the account lock while it removes expired txs from the cache. So a resubmit
+// of an expired tx that finds it in the cache just as the sweep is removing it
+// re-inserts the tx into the runqueue with no cache entry behind it. The next
+// sweep of that account then fails [CHECK_EQ(txs_.remove(tx_hash), 1UL)].
+//
+// The test stages that interleaving with two txs on one account, both expired.
+// [blocker] sorts first in the runqueue; holding its cache bucket lock parks
+// the sweep after it has taken the account lock but before it reaches [victim].
+// Holding [victim]'s cache bucket lock parks the resubmit inside
+// [add_txs_helper()] before it can take the account lock.
+TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  constexpr char8_t kProgramName[] = u8"slow_fibonacci";
+  constexpr uint32_t kFibonacciN = 10;
+  const BlockHeight start_block = scheduler->current_block();
+
+  auto make_tx = [&](BlockHeight expiry, uint64_t nonce) {
+    return SignedTransaction{
+        .tx = Transaction{
+            .invocation = fib_client.make_invocation<kProgramName>(
+                /*gas_amount=*/200, kFibonacciN),
+            .uniquifier = {.block_expiry_height = expiry, .nonce = nonce},
+            .contracts_to_deploy = {},
+        }};
+  };
+
+  // [blocker] has the lower expiry height, so the sweep removes it before
+  // [victim]. The two need distinct cache buckets so that each can be pinned
+  // on its own.
+  const SignedTransaction blocker = make_tx(start_block + 1, /*nonce=*/0);
+  const TransactionHash blocker_hash = sha256(blocker.tx);
+  std::mutex &blocker_bucket = scheduler->tx_cache_bucket_mutex(blocker_hash);
+
+  std::optional<SignedTransaction> victim;
+  TransactionHash victim_hash{};
+  for (uint64_t nonce = 1; nonce <= 64 && !victim; nonce++) {
+    SignedTransaction candidate = make_tx(start_block + 2, nonce);
+    const TransactionHash candidate_hash = sha256(candidate.tx);
+    if (&scheduler->tx_cache_bucket_mutex(candidate_hash) != &blocker_bucket) {
+      victim = std::move(candidate);
+      victim_hash = candidate_hash;
+    }
+  }
+  ASSERT_TRUE(victim.has_value())
+      << "could not find a tx in a different cache bucket than [blocker]";
+  std::mutex &victim_bucket = scheduler->tx_cache_bucket_mutex(victim_hash);
+
+  scheduler->add_txs({blocker, *victim})();
+  ASSERT_EQ(scheduler->size(), 2);
+  ASSERT_EQ(scheduler->tx_cache_size(), 2UL);
+  ASSERT_NE(scheduler->find_tx(victim_hash), nullptr);
+  // Move the chain past both expiry heights so the next sweep drops them.
+  scheduler->set_current_block(start_block + 3);
+
+  // [add_txs()] refreshes the cached hog age from the db before it runs
+  // [add_txs_helper()]; that refresh is its last touch of the account lock
+  // before the runqueue insert. Stamp a sentinel on the cached age so the test
+  // can tell when the resubmit is past that point.
+  constexpr BlockHeight kSentinelAge = 0x5eed;
+  {
+    auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
+    hog_age->average_ages[kHogAgeGroupReceived] = kSentinelAge;
+  }
+
+  std::unique_lock<std::mutex> pin_resubmit(victim_bucket);
+  std::unique_lock<std::mutex> pin_sweep(blocker_bucket);
+
+  // Resubmit the identical bytes of the expired [victim], as the gateway path
+  // does. The resubmit refreshes the hog age, then parks on [victim_bucket]
+  // inside [add_txs_helper()].
+  std::thread resubmit([&] { scheduler->add_txs({*victim})(); });
+  const bool resubmit_parked = wait_until([&] {
+    auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
+    return hog_age->average_ages[kHogAgeGroupReceived] != kSentinelAge;
+  });
+
+  // Start the nomination sweep. It takes the account lock, finds both txs
+  // expired, and parks on [blocker_bucket] while still holding the account
+  // lock.
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  std::thread sweep([&] {
+    [](Scheduler &scheduler, x23::XdrVec<TransactionHash> &hashes,
+       x23::XdrVec<SignedTransaction> &txs) -> x23::Async<void> {
+      x23::CoroGuard cg;
+      co_await cg(scheduler.global_lock_);
+      scheduler.schedule(kBlockSize, hashes, txs);
+    }(*scheduler, scheduled_hashes, scheduled)();
+  });
+  std::mutex &account_mutex = scheduler->account_bucket_mutex(account);
+  const bool sweep_parked = resubmit_parked && wait_until([&] {
+                              return mutex_is_held(account_mutex);
+                            });
+
+  // Release the resubmit first: it finds [victim] already cached, drops the
+  // cache lock, and blocks on the account lock the sweep holds. There is no
+  // observable signal for the resubmit reaching that wait, so give it time.
+  // If the wait is too short the sweep simply runs first and the test passes
+  // without exercising the race; it never fails for a false reason.
+  pin_resubmit.unlock();
+  if (sweep_parked) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  }
+  // Now let the sweep finish. It removes both txs from the cache and the
+  // runqueue and releases the account lock; the resubmit then inserts [victim]
+  // into the runqueue.
+  pin_sweep.unlock();
+  sweep.join();
+  resubmit.join();
+
+  ASSERT_TRUE(resubmit_parked) << "resubmit never refreshed the hog age";
+  ASSERT_TRUE(sweep_parked) << "schedule() never took the account lock";
+  EXPECT_TRUE(scheduled_hashes.empty());
+
+  // Every runqueue entry must be backed by a cache entry.
+  TransactionHashBatch runqueue_hashes;
+  SignedTransactionBatch runqueue_txs;
+  scheduler->get_txs_for_account(account, runqueue_hashes, runqueue_txs);
+  for (const TransactionHash &tx_hash : runqueue_hashes) {
+    EXPECT_NE(scheduler->find_tx(tx_hash), nullptr)
+        << "tx is on the account runqueue but missing from the tx cache; the "
+           "next schedule() of this account would fail "
+           "CHECK_EQ(txs_.remove(tx_hash), 1UL)";
+  }
+  EXPECT_EQ(static_cast<size_t>(scheduler->size()), runqueue_hashes.size());
+  EXPECT_EQ(scheduler->tx_cache_size(), runqueue_hashes.size());
+  if (HasFailure()) {
+    // The next sweep would abort on the orphaned runqueue entry.
+    return;
+  }
+
+  // A further sweep drains whatever the resubmit left behind.
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 }
 
 } // namespace hogd

@@ -123,6 +123,20 @@ public:
   std::pair<HogAge *, std::unique_lock<std::mutex>>
   get_cached_hog_age(const ContractAddress &address);
 
+  // The [txs_] bucket lock that guards [tx_hash]. Tests hold it to park
+  // [schedule()]'s expiry sweep at a chosen transaction.
+  std::mutex &tx_cache_bucket_mutex(const TransactionHash &tx_hash)
+  {
+    return *txs_.find(tx_hash).second.mutex();
+  }
+
+  // The [accounts_] bucket lock that guards [address]. Tests probe it to
+  // observe when another thread holds the account runqueue.
+  std::mutex &account_bucket_mutex(const ContractAddress &address)
+  {
+    return *accounts_.find(address).second.mutex();
+  }
+
   x23::Async<void> write_all_average_hog_ages_to_db();
 
   struct ReadAverageHogAgesResult {
