@@ -25,6 +25,7 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
@@ -33,12 +34,10 @@
 
 namespace hogd {
 
-MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
-                                   size_t mempool_tx_size_limit)
-  : mempool_coord_server_(
-        RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(),
-                                         mempool_auth_server_->impl(),
-                                         kNetworkHash, mempool_tx_size_limit))
+MempoolTestInfra::MempoolTestInfra(Options options)
+  : mempool_coord_server_(RpcServer<MempoolCoordinatorRpc>(
+        sched_db_server_->impl(), mempool_auth_server_->impl(), kNetworkHash,
+        options.mempool_tx_size_limit))
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration and metrics at the beginning of each test.
@@ -111,9 +110,13 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   // Now have all of the subsystems register themselves with the mempool.
   register_db_with_mempool();
   register_auth_with_mempool();
-  register_coordinator_with_mempool()();
+  if (options.skip_coordinator_intro) {
+    return;
+  }
+  CHECK_EQ(intro_coordinator()(),
+           CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
 
-  if (!skip_genesis_block) {
+  if (!options.skip_genesis_block) {
     const StorageCostModel cost_model = StorageCostModel::default_cost_model();
     GenesisConfigurationBuilder builder;
     auto root_contract = load_stock_genesis_root_contract();
@@ -143,6 +146,19 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
                  .outcome(),
              GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   }
+}
+
+x23::Async<CoordinatorRegistrationOutcome>
+MempoolTestInfra::intro_coordinator()
+{
+  auto client = create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
+                                               mempool_coord_server_.port())()
+                    .value();
+  std::string coord_address =
+      make_address(kAddress, coordinator_sched_server_.port());
+  CoordCard card{.protocol = version::kHogdProtocol(),
+                 .address_for_sched = coord_address.c_str()};
+  co_return co_await client.schedulercoord_intro_coord(card);
 }
 
 } // namespace hogd

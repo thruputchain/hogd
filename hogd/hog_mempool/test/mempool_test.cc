@@ -67,6 +67,7 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
+#include "x23/rpc_common.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -3098,6 +3099,47 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// A recovered database tip carries the network hash of the chain that
+// produced it. Adopting one from another network would publish a foreign tip
+// to the event aggregator and seed the scheduler with it, after which every
+// propose and validate fails on the parent-id gate. The mempool must instead
+// reject the coordinator intro that runs recovery.
+TEST(Mempool, CoordinatorIntroRejectsRecoveredTipFromAnotherNetwork)
+{
+  MempoolTestInfra server(
+      MempoolTestInfra::Options{.skip_coordinator_intro = true});
+
+  NetworkHash other_network = MempoolTestInfra::kNetworkHash;
+  other_network[0] ^= 0x01;
+  DbTip foreign_tip{};
+  foreign_tip.id = 0;
+  foreign_tip.value.proposal_header.block_height = 0;
+  foreign_tip.value.proposal_header.network_hash = other_network;
+  server.set_dbtip(foreign_tip);
+
+  EXPECT_THROW(server.intro_coordinator()(), x23::XdrCallFailed);
+
+  // Nothing downstream saw the foreign tip: the scheduler was never seeded and
+  // the event aggregator still sees no canonical tip to snapshot.
+  EXPECT_FALSE(server.mempool_coord_rpc().scheduler());
+  EXPECT_EQ(server.mempool_coord_rpc().auth_data_height(), -1);
+  EventCard event_card{.protocol = version::kHogdProtocol(),
+                       .address_for_exec = "127.0.0.1:1",
+                       .address_for_sched = "127.0.0.1:2"};
+  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(event_card).outcome(),
+            EventPrepareOutcome::EventPrepareNotReady);
+
+  // The same tip stamped with this network's hash recovers normally, so the
+  // rejection above was the hash and not the staged tip itself.
+  DbTip own_tip = foreign_tip;
+  own_tip.value.proposal_header.network_hash = MempoolTestInfra::kNetworkHash;
+  server.set_dbtip(own_tip);
+  EXPECT_EQ(server.intro_coordinator()(),
+            CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
+  EXPECT_TRUE(server.mempool_coord_rpc().scheduler());
+  EXPECT_EQ(server.mempool_coord_rpc().auth_data_height(), 0);
 }
 
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)

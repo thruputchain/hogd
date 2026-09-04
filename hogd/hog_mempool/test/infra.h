@@ -75,9 +75,25 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
+  struct Options {
+    bool skip_genesis_block = false;
+    size_t mempool_tx_size_limit =
+        MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit;
+    // Leave the coordinator intro, and so the mempool's [finish_init()], to
+    // the test so that it can stage database state the mempool must recover
+    // first. Implies [skip_genesis_block]; the test calls
+    // [intro_coordinator()] itself.
+    bool skip_coordinator_intro = false;
+  };
+
+  explicit MempoolTestInfra(Options options);
+
   MempoolTestInfra(bool skip_genesis_block = false,
                    size_t mempool_tx_size_limit =
-                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
+                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit)
+    : MempoolTestInfra(Options{.skip_genesis_block = skip_genesis_block,
+                               .mempool_tx_size_limit = mempool_tx_size_limit})
+  {}
 
   ~MempoolTestInfra()
   {
@@ -91,14 +107,21 @@ public:
       // we destruct [db_scheduler_server_] below so that [sched_db_server_]
       // does not send an RPC to a stopped server and then throw an exception
       // when the RPC fails.
-      sched_db_server_.impl()->reset_scheduler()();
-      // The scheduler sends RPCs to [db_scheduler_server_] in a detached
-      // coroutine. It is important to call [Scheduler::shut_down()] before we
-      // destroy [db_scheduler_server_] so that we wait for any detached
-      // coroutines to complete. Otherwise, if we destroy [db_scheduler_server_]
-      // first, the detached coroutines may attempt to send RPCs on an invalid
-      // file descriptor, which will cause an exception to be thrown.
-      mempool_coord_server_.impl()->scheduler()->shut_down()();
+      //
+      // Both only exist once the coordinator intro completed [finish_init()];
+      // a test whose intro the mempool rejected has neither.
+      if (std::shared_ptr<Scheduler> scheduler =
+              mempool_coord_server_.impl()->scheduler()) {
+        sched_db_server_.impl()->reset_scheduler()();
+        // The scheduler sends RPCs to [db_scheduler_server_] in a detached
+        // coroutine. It is important to call [Scheduler::shut_down()] before
+        // we destroy [db_scheduler_server_] so that we wait for any detached
+        // coroutines to complete. Otherwise, if we destroy
+        // [db_scheduler_server_] first, the detached coroutines may attempt to
+        // send RPCs on an invalid file descriptor, which will cause an
+        // exception to be thrown.
+        scheduler->shut_down()();
+      }
       // mempool_coord_server_.shut_down();
 
       // TODO(jhumphri): Implement clean shutdown for all RPC servers.
@@ -254,6 +277,11 @@ public:
   }
 
   void register_event_only_after_genesis() { register_event_with_mempool(); }
+
+  // Introduces the fake coordinator to the mempool, which runs the mempool's
+  // [finish_init()] against whatever the database holds. Throws
+  // [x23::XdrCallFailed] when the mempool rejects the intro.
+  x23::Async<CoordinatorRegistrationOutcome> intro_coordinator();
 
   void register_executor_only_after_event()
   {
@@ -427,19 +455,6 @@ private:
         host_port_to_sockaddr(kAddress, sched_exec_server_.port());
     executor_.start(/*bind_ip=*/"127.0.0.1", /*self_port=*/0,
                     coordinator_sockaddr);
-  }
-
-  x23::Async<void> register_coordinator_with_mempool()
-  {
-    auto client = create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
-                                                 mempool_coord_server_.port())()
-                      .value();
-    std::string coord_address =
-        make_address(kAddress, coordinator_sched_server_.port());
-    CoordCard card{.protocol = version::kHogdProtocol(),
-                   .address_for_sched = coord_address.c_str()};
-    CHECK_EQ(co_await client.schedulercoord_intro_coord(card),
-             CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }
 
   // Various backend components required by the database.
