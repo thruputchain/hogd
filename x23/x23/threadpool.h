@@ -478,6 +478,12 @@ private:
   inline static thread_local ThreadPool *my_thread_pool{};
   inline static thread_local size_t my_thread_no{};
 
+  // The pool whose async() task this thread was spawned to run, if
+  // any.  Never cleared: a detached async() thread runs one task and
+  // then exits, and ~ThreadPool needs this to still read true while
+  // that task's captures are being destroyed.
+  inline static thread_local ThreadPool *my_async_pool{};
+
   std::stop_source ss_;
 
   // Number of live AsyncCounts, and so the number of threads spawned
@@ -507,12 +513,19 @@ private:
   // control -- is gone.  Capturing the count in body_ itself would not
   // do, as the declaration order of a closure type's members, and
   // hence the order they are destroyed in, is unspecified.
+  //
+  // The flip side of holding the count that long is that a task must
+  // not own the pool it runs on: see the note in ~ThreadPool.
   template<typename Body> struct AsyncTask : AsyncCount {
     Body body_;
     AsyncTask(ThreadPool *pool, Body body)
       : AsyncCount(pool), body_(std::move(body))
     {}
-    void operator()() { body_(); }
+    void operator()()
+    {
+      my_async_pool = pool_;
+      body_();
+    }
   };
 
   std::mutex qcbq_lock_;

@@ -63,6 +63,16 @@ ThreadPool::~ThreadPool()
   // This precedes request_stop() so that a thread on its way into
   // make_callback() does not trip go()'s assertion that the pool is
   // still running.
+  //
+  // A task must not own the pool it runs on.  The count covers a task
+  // until everything it captured has been destroyed, so if destroying
+  // those captures is what drops the pool's last reference, we are
+  // being run from a task whose own count cannot go away until we
+  // return, and the wait below would never finish.  Destroying a pool
+  // from inside its own async() task is unsupported for the same
+  // reason drain() and quiesce() refuse to run in a pool thread, and
+  // is caught the same way.
+  x23assert(my_async_pool != this);
   while (nasync_.load(std::memory_order_acquire))
     std::this_thread::yield();
 
