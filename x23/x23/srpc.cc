@@ -80,14 +80,7 @@ SRpcFd::stop() noexcept
     q.swap(*write_queue_.take());
 
     decltype(PendingCalls::cbmap_) pcs;
-    {
-      auto cs = calls_.take();
-      // Tell write_worker this one-shot drain has happened, so that
-      // callbacks it already took out of write_queue_ get failed by it
-      // rather than registered in a cbmap_ nobody will drain again.
-      cs->stopped_ = true;
-      pcs.swap(cs->cbmap_);
-    }
+    pcs.swap(calls_->cbmap_);
 
     // Invoke the callbacks with no lock held: they run arbitrary
     // caller code, and send_call()'s callback wakes another thread.
@@ -252,11 +245,16 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
     }
 
     auto calls = calls_.take();
-    if (calls->stopped_) {
-      // stop() has already run its one-shot failure drain, so anything
-      // registered now would never be completed.  These callbacks were
-      // taken out of write_queue_ before that drain, so stop() did not
-      // see them either: fail them here, once the lock is dropped.
+    // Check stop_requested while holding calls_, as stop() drains
+    // calls_->cbmap_ under this same lock.  The two critical sections
+    // cannot interleave, and request_stop() precedes stop()'s, so an
+    // unset flag here means stop()'s drain is still ahead of us and
+    // will complete whatever we register.  A set flag means that drain
+    // may already have happened, and these callbacks -- taken out of
+    // write_queue_ before stop() flushed it, so unseen there too --
+    // would never be completed: fail them here, once the lock is
+    // dropped.  (Symmetric with the check in write_call().)
+    if (ss_.stop_requested()) {
       calls.reset();
       for (auto &it : q)
         if (it.replycb_)

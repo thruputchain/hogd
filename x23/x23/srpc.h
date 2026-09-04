@@ -138,12 +138,6 @@ private:
   struct PendingCalls {
     Xid lastxid_;
     std::unordered_map<Xid, CallCB> cbmap_;
-    // Set by stop(), under the calls_ lock, once it has performed its
-    // one-shot failure drain of cbmap_.  write_worker checks it under
-    // the same lock so that a callback it has already removed from
-    // write_queue_ is never registered behind that drain, which would
-    // leave the send_call() waiting on it blocked forever.
-    bool stopped_{false};
   };
   MVar<PendingCalls> calls_;
 
