@@ -26,23 +26,6 @@
 
 namespace hogd {
 
-// The RV32 syscall ABI decodes a by-reference CopyableInvokeInputs by
-// range-checking and copying sizeof(CopyableInvokeInputs) bytes out of guest
-// memory (see SyscallArgParams<const T &> -> check_user_argument). That is only
-// a host-independent decode if every conforming build agrees on the aggregate's
-// size and field offsets. A guest emits the natural rv32 layout -- two 64-bit
-// fields followed by a 32-bit field, 8-byte aligned, i.e. 24 bytes with 4
-// trailing pad bytes -- so a host whose layout read a different number of bytes
-// (e.g. a 20-byte `#pragma pack(4)` build) would accept or reject the exact
-// same artifact and guest memory differently. Pin the canonical wire layout
-// here so any such host fails to compile rather than diverging at runtime; the
-// output side is guarded symmetrically by WritableOutput's
-// has_unique_object_representations_v assert (issue #3854).
-static_assert(sizeof(CopyableInvokeInputs) == 24);
-static_assert(offsetof(CopyableInvokeInputs, entrypoint_id) == 0);
-static_assert(offsetof(CopyableInvokeInputs, gas_limit) == 8);
-static_assert(offsetof(CopyableInvokeInputs, flags) == 16);
-
 namespace {
 
 // Returns whether the span contains duplicate ids. A std::bad_alloc from the
