@@ -419,6 +419,29 @@ public:
     propose_batch_result_test_hook_ = std::move(hook);
   }
 
+  // Outcome of the joint DB/event commit of one block.
+  struct JointCommitResult {
+    DbBlockResult db;
+    RPCError event_commit = RPCError::kRPCUnrecoverable;
+  };
+
+  // Runs inside [commit_block()] once the joint DB/event commit has returned,
+  // before its result is checked by the commit DAG. Throwing from the hook
+  // models a joint-commit fault.
+  void set_commit_block_result_test_hook(
+      std::function<void(JointCommitResult &)> hook)
+  {
+    commit_block_result_test_hook_ = std::move(hook);
+  }
+
+  // Reads [last_committed_block_] without taking [commit_lock_], so a test
+  // hook running inside the commit DAG (which holds that lock) can observe the
+  // tip mid-commit.
+  const DbTip &test_last_committed_block() const
+  {
+    return last_committed_block_;
+  }
+
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
@@ -447,11 +470,6 @@ private:
         transaction_nomination_chunks;
     x23::XdrVec<TransactionHash> failed_tx_hashes;
   };
-  struct JointCommitResult {
-    DbBlockResult db;
-    RPCError event_commit = RPCError::kRPCUnrecoverable;
-  };
-
   struct NominationTelemetry {
     bool succeeded = false;
     double duration = 0.0;
@@ -737,6 +755,7 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
+  std::function<void(JointCommitResult &)> commit_block_result_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;

@@ -1942,6 +1942,91 @@ TEST(Mempool, UnknownParentBlockReleasesValidationGate)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
+// [schedulercoord_commit_block()] must not publish the new tip (as read by
+// [schedcoord_get_tip()]) before the joint DB/event commit has been checked.
+// Otherwise a failed commit would leave the node reporting a tip HogDB never
+// committed. The hook runs inside [commit_block()], after the joint commit has
+// returned but before "finalize commit" runs.
+TEST(Mempool, CommitPublishesTipOnlyAfterJointCommit)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, parent_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  std::optional<DbTip> tip_during_joint_commit;
+  server.mempool_coord_rpc().set_commit_block_result_test_hook(
+      [&](MempoolCoordinatorRpc::JointCommitResult &) {
+        tip_during_joint_commit =
+            server.mempool_coord_rpc().test_last_committed_block();
+      });
+  ASSERT_EQ(commit_block(server, parent_tip, res_nominate.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().set_commit_block_result_test_hook({});
+
+  // While the joint commit was in flight, the tip was still the parent.
+  ASSERT_TRUE(tip_during_joint_commit.has_value());
+  EXPECT_EQ(tip_during_joint_commit->id, parent_tip.id);
+  EXPECT_EQ(tip_during_joint_commit->value, parent_tip.value);
+
+  // After the commit finalized, the tip is the committed block.
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, res_nominate.proposed_block().block_id);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            parent_tip.value.proposal_header.block_height + 1);
+}
+
+// A joint DB/event commit that fails after the commit plan was accepted may
+// already have succeeded in one subsystem, and the scheduler has consumed the
+// pending nomination. That state cannot be retried in-process (a retry would
+// trip [Scheduler::commit_pending_nomination()]), so the commit must fail-stop
+// rather than rethrow, matching the genesis ceremony path.
+TEST(Mempool, JointCommitFaultFailsStop)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, parent_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  server.mempool_coord_rpc().set_commit_block_result_test_hook(
+      [](MempoolCoordinatorRpc::JointCommitResult &) {
+        throw std::runtime_error("injected joint commit fault");
+      });
+
+  // The threadsafe style re-executes the test binary for the child, so the
+  // coroutine threadpool is created inside the child rather than inherited
+  // (threadless) across a fork.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_DEATH(std::ignore = commit_block(server, parent_tip,
+                                          res_nominate.proposed_block()),
+               "in-process retry is unsafe: injected joint commit fault");
+}
+
 TEST(Mempool, ProposalUsesTransactionRoot)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

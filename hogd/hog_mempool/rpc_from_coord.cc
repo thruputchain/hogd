@@ -1293,6 +1293,9 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
+  if (commit_block_result_test_hook_) {
+    commit_block_result_test_hook_(result);
+  }
   co_return result;
 }
 
@@ -2564,9 +2567,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
     }
   });
 
+  // Once [accepted] is set, later nodes mutate the scheduler and launch the
+  // joint DB/event commit. From that point the commit cannot be retried
+  // in-process (see the fail-stop below [commit_dag.run()]).
   struct CommitPlan {
     const PendingBlock *committed_cache{nullptr};
     bool committed_nominated{false};
+    bool accepted{false};
     x23::Vec<BlockID> abandon_block_ids;
   };
 
@@ -2674,7 +2681,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
               SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
           co_return;
         }
-        last_committed_block_ = commit_plan.committed_cache->db_tip;
+        // The new tip is published by "finalize commit" only after the joint
+        // DB/event commit has been checked. Publishing it here would let
+        // [schedcoord_get_tip()] report a tip HogDB never committed if the
+        // commit fails.
+        commit_plan.accepted = true;
         co_return;
       });
 
@@ -2865,6 +2876,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         const JointCommitResult &joint_commit = commit_block_node.get();
         CHECK_EQ(joint_commit.db.result(), DbSchedResult::DbSchedResultOK);
         CHECK_EQ(joint_commit.event_commit, RPCError::kRPCNone);
+        // Publish the new tip only now that both subsystems have durably
+        // committed it. Copy before clearing the caches below:
+        // [committed_cache] may point into [validated_block_cache_].
+        CHECK_PTR(commit_plan.committed_cache);
+        last_committed_block_ = commit_plan.committed_cache->db_tip;
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
         // those vectors, we will experience segfaults because we will later
@@ -2894,6 +2910,26 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 
   co_await commit_dag.run();
   if (!commit_dag.ok() && commit_dag.failure().exception) {
+    if (commit_plan.accepted) {
+      // The joint DB/event commit may already have succeeded in one subsystem
+      // (or both), the scheduler has consumed the pending nomination, and the
+      // block caches were not finalized. None of that can be rolled back or
+      // retried in-process: a retry would trip
+      // [Scheduler::commit_pending_nomination()] on the already-cleared
+      // nomination. Fail-stop so restart recovery re-reads the durable tip,
+      // matching [schedulercoord_commit_genesis_ceremony()].
+      try {
+        std::rethrow_exception(commit_dag.failure().exception);
+      } catch (const std::exception &e) {
+        panic("block {} commit failed after the commit plan was accepted; "
+              "in-process retry is unsafe: {}",
+              block_id, e.what());
+      } catch (...) {
+        panic("block {} commit failed after the commit plan was accepted; "
+              "in-process retry is unsafe: unknown exception",
+              block_id);
+      }
+    }
     std::rethrow_exception(commit_dag.failure().exception);
   }
   if (const char *dot_dir = std::getenv("MEMPOOL_DAG_DOT_DIR");
