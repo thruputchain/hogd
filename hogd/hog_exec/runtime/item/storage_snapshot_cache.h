@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -96,12 +95,6 @@ public:
 
   x23::MaybeAsync<SystemStatus<const DbTip *>> try_get_db_tip();
 
-  // The frame hash-buffer limit, threaded to start_frame() by the callers that
-  // admit a frame so admission itself has no tip read left to fail on. Served
-  // off the same lock-free tip cache as everything else: the block's first
-  // read fetches the tip, every later one is an atomic load.
-  x23::MaybeAsync<SystemStatus<uint32_t>> try_get_max_sha256_buffers();
-
   // The executing block's own facts. Unlike everything above these do not
   // come from the db tip, which for an open block is the *parent*: the height
   // is the tip's plus one, and the timepoint is not derivable from it at all.
@@ -153,7 +146,6 @@ private:
   x23::Async<SystemStatus<const SnapshotStorageItem *>>
   load_snapshot_item(FrameItemKey key);
   x23::Async<SystemStatus<const DbTip *>> load_db_tip();
-  x23::Async<SystemStatus<uint32_t>> load_max_sha256_buffers();
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
