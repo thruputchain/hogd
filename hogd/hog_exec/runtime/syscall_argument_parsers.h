@@ -101,10 +101,23 @@ check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
   return (base_end <= memory_len);
 }
 
+// Reconstruct a by-reference syscall input by copying its bytes out of
+// (possibly unaligned) guest memory. This is the sole primitive the const
+// check_user_argument paths below use to decode an input aggregate, and it
+// copies exactly sizeof(T) bytes -- so the decode is host-layout-independent
+// only when T has no padding. Padding bytes make sizeof(T), and therefore the
+// number of bytes the ABI range-checks and reads, depend on the host's chosen
+// aggregate layout, so the same artifact and guest memory could be accepted or
+// rejected differently across conforming hosts (issue #3854). Name any gap as a
+// `reserved` field (see CopyableInvokeInputs in invoke_args.x); WritableOutput
+// enforces the symmetric no-padding property on syscall outputs.
 template<typename T>
 T
 read_unaligned(const void *ptr)
 {
+  static_assert(std::has_unique_object_representations_v<T>,
+                "syscall input types must not have padding bytes: name the "
+                "gaps as reserved fields (see invoke_args.x / ffi_types.h)");
   T value{};
   std::memcpy(&value, ptr, sizeof(T));
   return value;
