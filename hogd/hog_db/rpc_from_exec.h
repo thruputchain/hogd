@@ -10,6 +10,7 @@
 // generated x23 headers
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hog_db/invoke_tx.h"
 #include "rpc_types.hh"
@@ -75,7 +76,12 @@ static_assert(
 
 class HogDbExecutorServer : public RpcServer<HogDbExecutorRpc> {
 public:
-  explicit HogDbExecutorServer(RPCContext &ctx) : RpcServer(ctx) {}
+  explicit HogDbExecutorServer(RPCContext &ctx) : RpcServer(ctx)
+  {
+    // New contract bodies commit in one message, so this link is sized by the
+    // aggregate a transaction is admitted with, not a per-message budget.
+    max_message_size_ = kBulkRpcMaxMessageSize;
+  }
 };
 
 } // namespace hogd

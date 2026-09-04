@@ -25,6 +25,7 @@
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -253,13 +254,16 @@ private:
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
+  // [db_max_message_size] caps this framework's executor->db client; see
+  // DatabaseProxy.
   NativeContractTestFramework(
       bool log = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
       TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true,
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
           std::nullopt,
-      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt)
+      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
+      size_t db_max_message_size = kBulkRpcMaxMessageSize)
     : db_wrapper_(make_db_wrapper(test_db))
   {
     bool logging_enabled = log || do_logging_env();
@@ -267,7 +271,8 @@ public:
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
-    initialize(mode, empty_genesis, genesis_cost_model, genesis_network_config);
+    initialize(mode, empty_genesis, genesis_cost_model, genesis_network_config,
+               db_max_message_size);
     if (logging_enabled) {
       HogexecMetrics::launch_log_worker();
     }
@@ -722,11 +727,10 @@ private:
   void open_event_block(BlockID block_id);
   void close_event_block(BlockID block_id);
 
-  void initialize(
-      BlockExecutionMode mode, bool empty_genesis,
-      std::optional<StorageCostModelXdr> const &genesis_cost_model =
-          std::nullopt,
-      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt)
+  void initialize(BlockExecutionMode mode, bool empty_genesis,
+                  std::optional<StorageCostModelXdr> const &genesis_cost_model,
+                  std::optional<NetworkConfig> const &genesis_network_config,
+                  size_t db_max_message_size)
   {
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
@@ -735,8 +739,8 @@ private:
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
 
-    db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = exec_port});
+    const LocalMockDB mock_db{.read_port_number_ = exec_port};
+    db_proxy_ = std::make_unique<DatabaseProxy>(mock_db, db_max_message_size);
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
     event_sched_wrapper_ =
         std::make_unique<EventSchedWrapper>(event_server_wrapper_.sched_port());

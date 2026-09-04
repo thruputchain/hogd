@@ -17,6 +17,7 @@
 #include "built_contracts/syscall_misc_tests.h"
 #include "contract.hh"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -112,7 +113,7 @@ private:
   static NetworkConfig depth_one_config()
   {
     NetworkConfig config = stock_network_config();
-    config.max_cross_invoke_depth = 1;
+    set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 1);
     return config;
   }
 };

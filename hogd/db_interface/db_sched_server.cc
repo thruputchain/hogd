@@ -65,6 +65,11 @@ x23::Async<DbSchedResult>
 DbSchedRpc::dbsched_load_genesis_configuration(
     GenesisConfiguration genesis_configuration, ConsensusValue value)
 {
+  // Before compute_config_hash, which CHECKs this: the genesis is untrusted,
+  // so a non-canonical list has to be a rejection rather than an abort.
+  if (!config_hashable(genesis_configuration.network_config)) {
+    co_return DbSchedResult::DbSchedResultError;
+  }
   if (value.proposal_header.block_height != 0 ||
       value.proposal_header.network_hash !=
           genesis_configuration.network_hash ||

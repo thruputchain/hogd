@@ -24,6 +24,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
@@ -184,14 +185,15 @@ to_system_error_code(auto err, auto &&f)
 
 } // namespace
 
-DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
+DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier,
+                             size_t max_message_size)
   : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
         return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
             x23::HostPort{"localhost",
                           x23::uformat("{}", mock_db.read_port_number_)},
-            false, *x23::single_bucket_map);
+            false, *x23::single_bucket_map, max_message_size);
         // Uses just one client for local mock testing.
         // This avoids fd ulimit issues in sdk tests
       }
@@ -212,9 +214,8 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
              "{})",
              conn_map.nbuckets(), x23::llc_map->nbuckets(),
              x23::core_map->nbuckets());
-        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
-                                                                   false,
-                                                                   conn_map);
+        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
+            hostport, false, conn_map, max_message_size);
       }
       panic("unimplemented");
     }())
@@ -458,14 +459,6 @@ footprint_bound(FlaggedStorageDelta const &fd)
 {
   return kPerDeltaFraming + footprint_bound(fd.delta);
 }
-
-// The executor->HogDb RPC message cap a push must fit. x23 bounds
-// (record.size() - 4) -- the rpc_msg header plus the call args -- against
-// max_message_size (see send_call in x23/rpc.h). exec_server runs at x23's
-// default_max_message_size, which is a runtime-mutable extern (tests lower it)
-// with no constexpr to bind to; this mirrors its compile-time default.
-// TODO(rstutsman): bind to an x23 constexpr default once x23 exposes one.
-constexpr size_t kExecToDbMessageCap = 0x100'0000;
 
 // Bytes of the try_push_new_subtransaction request that count against the cap
 // but are NOT per-delta: the rpc_msg header, the BlockID and TransactionID

@@ -21,6 +21,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -484,6 +485,10 @@ private:
                            SipHash24Hasher>
       newly_created_contracts_;
 
+  // Noted at construction: the map above is keyed by hash, so a repeat leaves
+  // no trace there.
+  const bool has_duplicate_attachment_ = false;
+
   // Images for this transaction's attachments, keyed by contract hash.
   // perform_initial_validation keeps what it built to verify each one rather
   // than building it again at first invocation (#3536); an already-committed
@@ -521,6 +526,9 @@ private:
   // that run before any frame is pushed are what pin it.
   mutable DbTip const *db_tip_ = nullptr;
 
+  // Flattened when the tip is pinned: the invoke path reads these per frame.
+  mutable NetworkConfigParams config_params_{};
+
   inline static bool debug_force_commit_abort_{false};
 
   // The block's first tip fetch, split out so init_db_tip() can answer an
@@ -535,6 +543,13 @@ private:
   {
     CHECK_PTR(db_tip_);
     return db_tip_;
+  }
+
+  // The parameters this transaction's chain puts in force. Pinned with the tip.
+  NetworkConfigParams const &config_params() const
+  {
+    CHECK_PTR(db_tip_);
+    return config_params_;
   }
 
   // True if the given replay uniquifier has already expired at the executing

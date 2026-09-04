@@ -22,6 +22,7 @@
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -120,17 +121,23 @@ load_stock_genesis_root_contract()
   return contract;
 }
 
+// max_new_contracts_per_tx for this repository's dev and test chains.
+constexpr uint32_t kStockMaxNewContractsPerTx = 4;
+
 NetworkConfig
 stock_network_config()
 {
   // Values this repository's dev and test chains run under. They are a choice,
   // not a protocol default: nothing inherits them, and a real chain passes its
-  // own to build().
-  return NetworkConfig{
-      .ext = ExtensionPoint(0),
-      .max_sha256_buffers = 8,
-      .max_cross_invoke_depth = 256,
-  };
+  // own to build(). Every parameter is stated outright rather than left to a
+  // node's default, so changing either is visible in the config hash.
+  NetworkConfig config;
+  config.v(0);
+  set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 8);
+  set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256);
+  set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx,
+                   kStockMaxNewContractsPerTx);
+  return config;
 }
 
 GenesisConfiguration
@@ -234,6 +241,12 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
       if (attached_contract_hashes.insert(entry.contract_hash).second) {
         contracts_to_deploy.push_back(*entry.deployed_contract);
       }
+    }
+
+    // Fail where the artifact is built, not at a height-1 block the chain's
+    // own rules refuse to execute.
+    if (contracts_to_deploy.size() > kStockMaxNewContractsPerTx) {
+      return std::unexpected(GenesisCeremonyError::kTooManyDistinctContracts);
     }
 
     transactions.push_back(SignedTransaction{

@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -222,7 +223,7 @@ StorageSnapshotCache::try_get_max_sha256_buffers()
 {
   auto *tip = db_tip_.load();
   if (tip != nullptr) {
-    return SystemStatus<uint32_t>{tip->network_config.max_sha256_buffers};
+    return SystemStatus<uint32_t>{max_sha256_buffers(tip->network_config)};
   }
   return load_max_sha256_buffers();
 }
@@ -234,7 +235,7 @@ StorageSnapshotCache::load_max_sha256_buffers()
   if (!tip.has_value()) {
     co_return tip.error();
   }
-  co_return tip.value()->network_config.max_sha256_buffers;
+  co_return max_sha256_buffers(tip.value()->network_config);
 }
 
 void
