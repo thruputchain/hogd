@@ -69,7 +69,8 @@ SRpcFd::stop() noexcept
     write_ready();
     auto wq = write_queue_.exchange({});
     for (auto &wi : wq)
-      wi.replycb_(nullptr, {});
+      if (wi.replycb_)
+        wi.replycb_(nullptr, {});
   }
 }
 
@@ -212,10 +213,10 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
   if (cpus)
     cpus->set_affinity();
   Defer _cleanup([this] {
+    read_thread_.join();
     auto pcs = std::exchange(calls_->cbmap_, {});
     for (auto &pc : pcs)
       pc.second(nullptr, {});
-    read_thread_.join();
   });
   BufVec wrbuf;
   for (;;) {
