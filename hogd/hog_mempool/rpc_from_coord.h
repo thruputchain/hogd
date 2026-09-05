@@ -306,34 +306,27 @@ public:
     co_return ret;
   }
 
-  x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
-    x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
+    x23::XdrVec<XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
       ret.resize(tx_hashes.size());
       co_return ret;
     }
     ret.reserve(tx_hashes.size());
     for (const TransactionHash &tx_hash : tx_hashes) {
-      std::shared_ptr<const SignedTransaction> tx =
-          scheduler_->find_tx(tx_hash);
-      if (tx) {
-        // This is a bit awkward, but I need to copy [tx] into an [x23::Ptr]
-        // using [x23::Ptr]'s value constructor rather than just use the
-        // existing [tx] pointer. This avoids the issue where [tx] is freed from
-        // the scheduler by another thread before we can serialize and return
-        // the tx from this RPC.
-        //
-        // Even if we hold [scheduler_->global_lock_] to protect the txs rather
-        // than copy them into [tx_store], the lock is released at the end of
-        // this function, which is *before* the txs are accessed and serialized
-        // by x23. So that is still not safe.
-        ret.push_back(x23::Ptr<SignedTransaction>(*tx));
-      }
-      else {
-        ret.push_back(nullptr);
-      }
+      // [find_tx] hands back a reference into the scheduler's tx store, and
+      // the reply holds that reference until x23 has serialized the response,
+      // so the tx cannot be freed by another thread in between.  That is what
+      // the copy through [x23::Ptr]'s value constructor used to buy, and it
+      // was paying for it with a deep copy of the whole transaction --
+      // including its unbounded [Calldata] -- for every hash resolved.
+      //
+      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
+      // is an ownership change, not a wire change.
+      ret.push_back(
+          XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
 
     co_return ret;
