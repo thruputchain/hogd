@@ -42,8 +42,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
-    // The ceiling, not the limit in force: an item written when a higher
-    // limit was configured must still be readable after it is lowered.
+    // The ceiling, not the limit in force: items outlive a lowered limit.
     CHECK(bs->size() <= static_cast<size_t>(kBytestringCeilingLen));
     trace_data->outputs.emplace(SyscallBytestringGetOutputs{.bytestring = *bs});
   }
@@ -87,12 +86,6 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             std::span<const std::byte> input_bytestring,
                             StorageDeltaFlagSet input_flags)
 {
-  if (input_bytestring.size() >
-      syscall_handler.config_params().max_bytestring_len) {
-    co_return SyscallInnerResult{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-        WrappedGasAmount{0}};
-  }
   auto status =
       co_await syscall_handler.set_bytestring(input_key, input_bytestring,
                                               input_flags);

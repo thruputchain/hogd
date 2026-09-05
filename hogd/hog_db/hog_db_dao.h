@@ -323,15 +323,11 @@ make_contract_data_key(std::span<const std::byte> key)
 
 constexpr size_t kContractDataItemKeySize = 1 + kAddressSize + kItemKeySize;
 
-// The protocol bounds a bytestring by kBytestringCeilingLen; ramdb allocates
-// an item indirectly once its header, key and value exceed kBigItemThreshold.
-// Bytestrings are stored raw under a contract-data key, so the two constants
-// meet here and nowhere else. Raising the ceiling past this point is legal
-// protocol-side and would silently push every large bytestring onto the
-// indirect path, so make it a compile error instead.
-static_assert(sizeof(ItemHeader) + kContractDataItemKeySize +
-                  static_cast<size_t>(kBytestringCeilingLen) <=
-              kBigItemThreshold);
+// Bytestrings are stored raw under a contract-data key, so the protocol's
+// ceiling has to fit a ramdb item. Raising it past this point would make every
+// large bytestring a kTooBig write rather than a rejected one.
+static_assert(Database::item_fits(kContractDataItemKeySize,
+                                  kBytestringCeilingLen));
 
 constexpr auto
 make_contract_data_key(const ItemKey &key)

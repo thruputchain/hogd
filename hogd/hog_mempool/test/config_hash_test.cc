@@ -18,10 +18,8 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
 {
   const StorageCostModel model = StorageCostModel::default_cost_model();
   const NetworkConfig network_config = stock_network_config();
-  // Moves whenever the stock configuration changes, which is the point: this
-  // pins the preimage so a change to it is deliberate. Last moved when
-  // stock_network_config began stating max_bytestring_len, extending the
-  // parameter list to four.
+  // Moves whenever the stock configuration changes, which is the point: it
+  // pins the preimage so a change to it is deliberate.
   const ConfigHash expected{
       0x53, 0xa8, 0x94, 0x0a, 0x37, 0x53, 0xa4, 0x41, 0xef, 0x9d, 0x17,
       0xf7, 0xb8, 0xc1, 0x0a, 0xcc, 0xaa, 0x1d, 0xac, 0x02, 0xdb, 0x73,
@@ -112,7 +110,6 @@ TEST(ConfigHashTest, ShortListYieldsBytestringDefault)
   EXPECT_TRUE(config_params_canonical(config.v0()));
   EXPECT_EQ(config.v0().params.size(), 4U);
   EXPECT_EQ(max_bytestring_len(config), 4096U);
-  EXPECT_EQ(resolve_config_params(config).max_bytestring_len, 4096U);
 }
 
 // A repeated or misordered list is refused, because it would give one

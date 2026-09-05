@@ -1,14 +1,17 @@
 #include <gtest/gtest.h>
 
-#include <cstddef>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -17,8 +20,8 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "network_config.hh"
 #include "rpc_types.hh"
@@ -43,16 +46,9 @@ constexpr uint32_t kMaxBytestringLen = 256;
 // distinguishes the write bound from the decode bound.
 constexpr size_t kLegacyItemLen = 4 * kMaxBytestringLen;
 
-constexpr static StorageKeyContractData kKey{};
-
-Bytestring
-filled_bytestring(size_t len, uint8_t byte)
-{
-  Bytestring out;
-  out.resize_uninitialized(len);
-  std::fill(out.begin(), out.end(), byte);
-  return out;
-}
+constexpr std::string_view kKeyName = "bytestring";
+constexpr StorageKeyContractData kKey =
+    NativeContractTestFramework::make_storage_key(kKeyName);
 
 } // namespace
 
@@ -75,14 +71,17 @@ protected:
     setup_grant_storage_token(make_contract_address(0), 1'000'000'000);
   }
 
-  // The contract-data addrkey for kKey, built from the raw key rather than a
-  // string: these tests address the same slot the probes pass to the syscall.
-  static AddressAndKey seeded_addrkey()
+  // Puts an item larger than the configured limit at kKey and commits it.
+  // write_item goes straight to the database, bypassing the syscall check the
+  // same way an item admitted under a higher limit already would.
+  Bytestring seed_over_limit_item(char byte)
   {
-    StorageKey full_key(StorageKeyType::ContractData);
-    full_key.contract_data_key() = kKey;
-    return AddressAndKey{.address = make_contract_address(0),
-                         .key = std::move(full_key)};
+    auto value = make_bytestring(std::string(kLegacyItemLen, byte));
+    write_item(make_contract_data_addrkey(make_contract_address(0), kKeyName),
+               std::make_shared<StorageItemWrapper>(value,
+                                                    get_default_cost_model()));
+    advance_block();
+    return value;
   }
 
   // Runs `probe` as contract 0's entrypoint 0. The probe reports through
@@ -126,9 +125,9 @@ private:
 TEST_F(BytestringLimitTest, WriteAtConfiguredLimitIsAccepted)
 {
   run_probe([](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-    auto value = filled_bytestring(kMaxBytestringLen, 'a');
-    auto [res, _gas] = co_await syscall_BytestringSet_inner(
-        ctx.handler(), kKey, std::as_bytes(std::span(value)),
+    auto value = make_bytestring(std::string(kMaxBytestringLen, 'a'));
+    auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+        kKey, std::as_bytes(std::span(value)),
         std::to_underlying(StorageDeltaFlags::None));
     if (!res.has_value() ||
         res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -144,9 +143,9 @@ TEST_F(BytestringLimitTest, WriteAtConfiguredLimitIsAccepted)
 TEST_F(BytestringLimitTest, WriteOverConfiguredLimitIsRejected)
 {
   run_probe([](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-    auto value = filled_bytestring(kMaxBytestringLen + 1, 'b');
-    auto [res, _gas] = co_await syscall_BytestringSet_inner(
-        ctx.handler(), kKey, std::as_bytes(std::span(value)),
+    auto value = make_bytestring(std::string(kMaxBytestringLen + 1, 'b'));
+    auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+        kKey, std::as_bytes(std::span(value)),
         std::to_underlying(StorageDeltaFlags::None));
     if (!res.has_value()) {
       ADD_FAILURE() << "an over-limit write must be a syscall error, not a "
@@ -158,13 +157,13 @@ TEST_F(BytestringLimitTest, WriteOverConfiguredLimitIsRejected)
       co_return InvokeError{InvokeErrorCode::Deterministic};
     }
 
-    // The rejection is a no-op: no partial item is left at the key.
-    auto after = co_await ctx.handler().get_bytestring(kKey);
-    if (!after.has_value()) {
-      ADD_FAILURE() << "reading back after a rejected write failed outright";
-      co_return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    if (after.value().has_value()) {
+    // The rejection is a no-op: no item is left at the key to read.
+    std::vector<uint8_t> buffer(kMaxBytestringLen);
+    RuntimeMemoryLength written_len = 0;
+    auto after = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+        kKey, std::as_writable_bytes(std::span(buffer)), written_len);
+    if (!after.has_value() ||
+        after.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
       ADD_FAILURE() << "a rejected write must leave no item behind";
       co_return InvokeError{InvokeErrorCode::Deterministic};
     }
@@ -177,49 +176,18 @@ TEST_F(BytestringLimitTest, WriteOverConfiguredLimitIsRejected)
 // bound is the configured limit, the decode bound is kBytestringCeilingLen.
 TEST_F(BytestringLimitTest, ItemOverConfiguredLimitStaysReadable)
 {
-  auto addrkey = seeded_addrkey();
-  auto seeded = filled_bytestring(kLegacyItemLen, 'c');
-  write_item(addrkey,
-             std::make_shared<StorageItemWrapper>(seeded,
-                                                  get_default_cost_model()));
-  advance_block();
+  auto seeded = seed_over_limit_item('c');
 
-  run_probe([seeded](
+  run_probe([&seeded](
                 NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-    auto got = co_await ctx.handler().get_bytestring(kKey);
-    if (!got.has_value() || !got.value().has_value()) {
-      ADD_FAILURE() << "an item larger than the configured limit must still "
-                       "be readable";
-      co_return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    if (!std::ranges::equal(*got.value().value(), seeded)) {
-      ADD_FAILURE() << "the over-limit item must read back in full, not "
-                       "truncated to the configured limit";
-      co_return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    co_return InvokeStatus<void>{};
-  });
-}
-
-// The same tolerance through the guest-facing syscall, which copies into a
-// contract-supplied buffer rather than handing back the item.
-TEST_F(BytestringLimitTest, BytestringGetSyscallReadsOverLimitItem)
-{
-  auto addrkey = seeded_addrkey();
-  auto seeded = filled_bytestring(kLegacyItemLen, 'd');
-  write_item(addrkey,
-             std::make_shared<StorageItemWrapper>(seeded,
-                                                  get_default_cost_model()));
-  advance_block();
-
-  run_probe([](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
     std::vector<uint8_t> buffer(kLegacyItemLen);
     RuntimeMemoryLength written_len = 0;
     auto res = co_await ctx.syscall<SyscallNo::kBytestringGet>(
         kKey, std::as_writable_bytes(std::span(buffer)), written_len);
     if (!res.has_value() ||
         res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      ADD_FAILURE() << "BytestringGet must succeed on an over-limit item";
+      ADD_FAILURE() << "an item larger than the configured limit must still "
+                       "be readable";
       co_return InvokeError{InvokeErrorCode::Deterministic};
     }
     if (written_len != kLegacyItemLen) {
@@ -227,12 +195,10 @@ TEST_F(BytestringLimitTest, BytestringGetSyscallReadsOverLimitItem)
                     << written_len;
       co_return InvokeError{InvokeErrorCode::Deterministic};
     }
-    for (size_t i = 0; i < kLegacyItemLen; i++) {
-      if (buffer[i] != 'd') {
-        ADD_FAILURE() << "over-limit item read back with wrong contents at "
-                      << i;
-        co_return InvokeError{InvokeErrorCode::Deterministic};
-      }
+    if (!std::ranges::equal(buffer, seeded)) {
+      ADD_FAILURE() << "the over-limit item must read back in full, not "
+                       "truncated to the configured limit";
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
     co_return InvokeStatus<void>{};
   });

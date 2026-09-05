@@ -1924,8 +1924,7 @@ TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
   // exceed the 16 MiB cap. Each delta is ~1104 bytes (key+framing+1028), so
   // 16000 deltas ~= 16.8 MiB > cap. Rejected before any push is attempted.
   {
-    // The stock chain's configured max_bytestring_len.
-    const std::string max_value(1024, 'x');
+    const std::string max_value(kDefaultMaxBytestringLen, 'x');
     auto tx = make_new_per_tx_db_proxy();
     for (int i = 0; i < 16000; ++i) {
       tx.add_delta(make_addrkey(contract_addr, "spray" + std::to_string(i)),
@@ -1967,7 +1966,7 @@ TEST_P(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
   constexpr auto kBoundOf = [](size_t len) {
     return kMinDelta + ((len + 3) & ~size_t{3});
   };
-  constexpr size_t kMaxLen = 1024; // stock max_bytestring_len
+  constexpr size_t kMaxLen = kDefaultMaxBytestringLen;
   constexpr size_t kPerMax = kBoundOf(kMaxLen);
 
   // Bytestring lengths whose per-delta bounds sum to exactly `target`
