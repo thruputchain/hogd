@@ -116,7 +116,9 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
 BlockExecutionContext
 DBContext::block_execution_context() const
 {
-  auto tip = db_proxy_->get_db_tip(current_block_id_);
+  // Completed rather than awaited: the FFI entrypoints run on the caller's
+  // thread, never an x23 ThreadPool worker, which is what operator() asserts.
+  auto tip = db_proxy_->get_db_tip(current_block_id_)();
   if (!tip.has_value()) {
     throw std::runtime_error("block_execution_context: get_db_tip failed");
   }
@@ -184,7 +186,7 @@ DBContext::advance_new_block(BlockExecutionMode mode,
 std::optional<WireStorageItem>
 DBContext::get_snapshot_item(AddressAndKey const &addrkey)
 {
-  auto res = db_proxy_->get_snapshot_item(current_block_id_, addrkey);
+  auto res = db_proxy_->get_snapshot_item(current_block_id_, addrkey)();
   if (!res) {
     throw std::runtime_error("get_snapshot_item failed");
   }

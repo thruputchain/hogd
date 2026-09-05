@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
@@ -27,6 +28,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -44,8 +46,8 @@ NativeContract::function_t
 invoke_expecting(ContractAddress const &next,
                  InvocationFrameStatusCode expected)
 {
-  return [next,
-          expected](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+  return [next, expected](
+             NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
     CopyableInvokeOutputs outputs{};
     CopyableInvokeInputs inputs{
         .entrypoint_id = 0,
@@ -53,18 +55,20 @@ invoke_expecting(ContractAddress const &next,
         .flags = std::to_underlying(InvokeFlag::None),
     };
     auto r =
-        ctx.syscall<SyscallNo::kInvoke>(next, std::span<const std::byte>{},
-                                        std::span<uint32_t>{}, inputs, outputs);
+        co_await ctx.syscall<SyscallNo::kInvoke>(next,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{}, inputs,
+                                                 outputs);
     if (!r.has_value() ||
         r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
       ADD_FAILURE() << "Invoke syscall failed outright";
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
     if (outputs.frame_status != expected) {
       ADD_FAILURE() << "unexpected child frame status";
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
-    return {};
+    co_return InvokeStatus<void>{};
   };
 }
 
@@ -81,8 +85,8 @@ invoke_expecting_rejection(ContractAddress const &next, InvokeFlagSet flags,
                            std::vector<uint32_t> tokens,
                            SyscallErrorCode expected)
 {
-  return [next, flags, tokens = std::move(tokens),
-          expected](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+  return [next, flags, tokens = std::move(tokens), expected](
+             NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
     CopyableInvokeOutputs outputs{
         .return_buffer_len = UINT32_MAX,
         .returned_auth_token_len = UINT32_MAX,
@@ -95,20 +99,22 @@ invoke_expecting_rejection(ContractAddress const &next, InvokeFlagSet flags,
     };
     // The syscall takes a mutable span, so hand it one over a local copy.
     std::vector<uint32_t> forwarded = tokens;
-    auto r = ctx.syscall<SyscallNo::kInvoke>(next, std::span<const std::byte>{},
-                                             std::span<uint32_t>{forwarded},
-                                             inputs, outputs);
+    auto r =
+        co_await ctx.syscall<SyscallNo::kInvoke>(next,
+                                                 std::span<const std::byte>{},
+                                                 std::span<uint32_t>{forwarded},
+                                                 inputs, outputs);
     if (!r.has_value() || r.value() != expected) {
       ADD_FAILURE() << "invoke reported the wrong syscall error code";
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
     if (outputs.return_buffer_len != UINT32_MAX ||
         outputs.returned_auth_token_len != UINT32_MAX ||
         outputs.frame_status != InvocationFrameStatusCode::Abort) {
       ADD_FAILURE() << "a rejected invoke wrote to the caller's outputs";
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
-    return {};
+    co_return InvokeStatus<void>{};
   };
 }
 
@@ -134,9 +140,9 @@ invoke_expecting_depth_refusal(ContractAddress const &next)
 NativeContract::function_t
 unreachable_entrypoint()
 {
-  return [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+  return [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
     ADD_FAILURE() << "a contract past the cross-invoke bound was entered";
-    return {};
+    co_return InvokeStatus<void>{};
   };
 }
 
@@ -196,14 +202,15 @@ protected:
     auto runtime_context =
         std::make_unique<NativeContext>(std::move(contract_map));
     auto handler = deploy_and_make_handler(deployed, *runtime_context);
-    ASSERT_TRUE(handler.root_invoke().result_);
+    ASSERT_TRUE(handler.root_invoke()().result_);
   }
 
 private:
   static NetworkConfig genesis_network_config(uint32_t max_cross_invoke_depth)
   {
     NetworkConfig config = stock_network_config();
-    config.max_cross_invoke_depth = max_cross_invoke_depth;
+    set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                     max_cross_invoke_depth);
     return config;
   }
 };
@@ -258,7 +265,7 @@ TEST_F(CrossInvokeDepthTest, GenesisValueBoundsOpenFrames)
       std::make_unique<NativeContext>(std::move(contract_map));
   auto handler = deploy_and_make_handler(kChainLength, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
 }
 
@@ -275,7 +282,7 @@ TEST_F(CrossInvokeDepthZeroTest, RootInvocationIsRefused)
       std::make_unique<NativeContext>(std::move(contract_map));
   auto handler = deploy_and_make_handler(1, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
 
   // No frame is admitted, and there is no caller frame to receive the syscall
   // error, so the refusal surfaces as a deterministic failure of the whole
@@ -306,7 +313,7 @@ TEST_F(CrossInvokeDepthOneTest, RootInvocationRunsWithNoCrossInvokes)
       std::make_unique<NativeContext>(std::move(contract_map));
   auto handler = deploy_and_make_handler(2, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
 
   // The root frame fits under the bound, and the refusal it sees is a syscall
   // error rather than a failed frame, so it runs to completion and the

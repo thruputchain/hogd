@@ -137,7 +137,9 @@ public:
   // Nothing cross-checks the timepoint.
   BlockExecutionContext get_block_execution_context() const
   {
-    auto tip = db_proxy_->get_db_tip(block_number_);
+    // Completed here rather than awaited: bench setup runs on its own thread,
+    // never an x23 ThreadPool worker, which is what operator() asserts.
+    auto tip = db_proxy_->get_db_tip(block_number_)();
     if (!tip.has_value()) {
       panic("Failed to read db tip for block {}", block_number_);
     }
@@ -397,13 +399,16 @@ CommonBenchState::run_genesis_configuration(
 
   auto runtime_context = make_hog_exec_context();
 
+  // The bench harness drives execution from its own thread, never an x23
+  // ThreadPool worker, so it blocks on these coroutines rather than awaiting
+  // them (Async::operator() asserts it is off the pool).
   for (auto const &block : initialization_txs) {
     for (auto const &tx : block) {
       auto handler = make_handler(tx, allocate_txid(), *runtime_context);
-      if (!handler.root_invoke().is_root_success()) {
+      if (!handler.root_invoke()().is_root_success()) {
         panic("Failed to invoke transaction");
       }
-      if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+      if (handler.try_commit_transaction()() != ExecResult::ExecResultOK) {
         panic("failed to perform commit operation");
       }
     }
@@ -446,10 +451,10 @@ CommonBenchState::run_genesis_configuration(
   auto run_block = [&](InitializationBlock const &block) {
     for (auto const &tx : block) {
       auto handler = make_handler(tx, allocate_txid(), *runtime_context);
-      if (!handler.root_invoke().is_root_success()) {
+      if (!handler.root_invoke()().is_root_success()) {
         panic("Failed to invoke transaction");
       }
-      if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+      if (handler.try_commit_transaction()() != ExecResult::ExecResultOK) {
         panic("failed to perform commit operation");
       }
     }

@@ -1,7 +1,7 @@
 // Regression test for issues #2713, #2714, and #2718.
 //
 // These three diagnostics all run on the child-Invoke path, which is reached
-// from the noexcept syscall_Invoke_inner() body:
+// from the noexcept syscall_Invoke_inner()() body:
 //   #2713 - Runtime::invoke() emits an unguarded entry trace
 //           ("Invoking method {} with gas limit {}").
 //   #2718 - Runtime::invoke() emits an unguarded result trace

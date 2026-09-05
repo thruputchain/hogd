@@ -1,0 +1,85 @@
+# RV32 syscall cost reference.
+#
+# Regenerate with:
+#   scripts/rv32_syscall_bench.sh BUILD_DIR --out /tmp/sys.json
+#   scripts/rv32_syscall_report.py /tmp/sys.json --emit-reference \
+#     > hogd/hog_exec/runtime/rv32/gas_calibration/syscall_reference.txt
+#
+# Or run the RV32 Gas Calibration workflow with mode=reference,
+# which prints this block from the bench host.
+#
+# Checked by scripts/rv32_syscall_report.py --check. Costs are
+# multiples of this run's own crossing cost, not nanoseconds, so
+# the file survives the bench host changing speed. It does not
+# survive changing microarchitecture: a syscall that waits on
+# memory and one that only crosses the boundary do not scale
+# together, which is the same reason the opcode reference carries.
+#
+# What this catches that the gas schedule cannot: the schedule's
+# digest stops a CONSTANT being changed silently, and says nothing
+# about the engine drifting away from the constants. A syscall that
+# doubles in cost without any constant moving is exactly the
+# failure that leaves contracts underpaying, and it is invisible
+# to every other check in this repository.
+#
+# Regenerating this file to make a failure go away hides exactly
+# what it is for.
+
+engine_fingerprint d4697729c27d6dbd
+engine_source_digest 1912005f0d27f8bc
+# generated from a Release build on hog10 (AMD EPYC 9554 64-Core Processor)
+# crossing baseline 62.5 ns
+tolerance 1.0
+
+# guard <key> <cost relative to the crossing baseline>
+guard storage/NNIntGetFirstTouch/1/1 4.161
+guard storage/NNIntGetFirstTouch/1/16 3.714
+guard storage/NNIntGetFirstTouch/1/16384 5.823
+guard storage/NNIntGetFirstTouch/1/256 4.040
+guard storage/NNIntGetFirstTouch/1/262144 16.259
+guard storage/NNIntGetFirstTouch/1/4096 4.950
+guard storage/NNIntGetFirstTouch/1/65536 8.612
+guard storage/NNIntGetFirstTouch/16/1 4.422
+guard storage/NNIntGetFirstTouch/16/16 4.110
+guard storage/NNIntGetFirstTouch/16/256 4.480
+guard storage/NNIntGetFirstTouch/16/4096 5.052
+guard storage/NNIntGetFirstTouch/254/16 8.389
+guard storage/NNIntGetFirstTouch/254/256 8.281
+guard storage/NNIntGetFirstTouch/254/4096 8.587
+guard storage/NNIntGetFirstTouch/8/1 4.373
+guard storage/NNIntGetFirstTouch/8/16 3.972
+guard storage/NNIntGetFirstTouch/8/256 4.374
+guard storage/NNIntGetFirstTouch/8/4096 4.994
+guard storage/NNIntGetFirstTouchNoLoad/1/1 3.673
+guard storage/NNIntGetFirstTouchNoLoad/1/16 3.043
+guard storage/NNIntGetFirstTouchNoLoad/1/16384 3.978
+guard storage/NNIntGetFirstTouchNoLoad/1/256 3.315
+guard storage/NNIntGetFirstTouchNoLoad/1/262144 6.026
+guard storage/NNIntGetFirstTouchNoLoad/1/4096 3.582
+guard storage/NNIntGetFirstTouchNoLoad/1/65536 4.467
+guard storage/NNIntSetAddFirstTouch/1/1 3.393
+guard storage/NNIntSetAddFirstTouch/1/16 3.100
+guard storage/NNIntSetAddFirstTouch/1/16384 4.065
+guard storage/NNIntSetAddFirstTouch/1/256 3.326
+guard storage/NNIntSetAddFirstTouch/1/262144 6.096
+guard storage/NNIntSetAddFirstTouch/1/4096 3.630
+guard storage/NNIntSetAddFirstTouch/1/65536 4.531
+guard syscall/GetBlockHeight 0.881
+guard syscall/GetCalldataLen 0.984
+guard syscall/GetCurrentAddress 0.895
+guard syscall/GetMsgSender 1.016
+guard syscall/GetSourceTransactionHash 0.901
+guard syscall/NNIntGet 2.526
+guard syscall/NNIntGetNoLoad 2.432
+guard syscall/NNIntSetAdd 2.736
+guard syscall/SHA256Copy 1.039
+guard syscall/SHA256CopyNewSlot+Finalize 3.105
+guard syscall/SHA256Update/0 1.254
+guard syscall/SHA256Update/1024 10.118
+guard syscall/SHA256Update/256 3.460
+guard syscall/SHA256Update/32 1.306
+guard syscall/SHA256Update/4096 36.751
+guard syscall/SHA256Update0+Finalize 3.130
+guard syscall/VerifySignature/0 458.748
+guard syscall/VerifySignature/1024 490.655
+guard syscall/VerifySignature/64 466.834

@@ -1,9 +1,18 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <format>
+#include <fstream>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <system_error>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -149,17 +158,115 @@ listen_loopback(std::uint16_t port)
   return listener;
 }
 
-std::vector<x23::UniqueFd>
-hold_loopback_ports(std::uint16_t exec_port, std::uint16_t indexer_port,
-                    std::uint16_t mempool_port, std::uint16_t metrics_port)
+// exec, indexer, mempool, metrics -- in the order event_args() takes them.
+constexpr std::size_t kEventPortCount = 4;
+using EventPorts = std::array<std::uint16_t, kEventPortCount>;
+
+struct PortWindow {
+  std::uint16_t first;
+  std::uint16_t last;
+};
+
+// The unprivileged ports the kernel never hands out on its own: everything
+// below the ephemeral range, or above it when the range starts too low to
+// leave room. connect() and bind(0) draw only from the ephemeral range, so a
+// port outside it can be lost only to something that asked for it by number.
+PortWindow
+non_ephemeral_window()
+{
+  unsigned low = 0;
+  unsigned high = 0;
+  std::ifstream range("/proc/sys/net/ipv4/ip_local_port_range");
+  if (!(range >> low >> high) || low < 1024 || high < low || high > 65535) {
+    // Linux defaults, used when the sysctl is unreadable.
+    low = 32768;
+    high = 60999;
+  }
+  // A window of exactly kEventPortCount ports is enough, so both bounds are
+  // inclusive: [kLowestUsable, low - 1] holds low - kLowestUsable ports, and
+  // [high + 1, 65535] holds 65535 - high.
+  constexpr unsigned kLowestUsable = 10000;
+  if (low >= kLowestUsable + kEventPortCount) {
+    return PortWindow{.first = static_cast<std::uint16_t>(kLowestUsable),
+                      .last = static_cast<std::uint16_t>(low - 1)};
+  }
+  if (high + kEventPortCount <= 65535) {
+    return PortWindow{.first = static_cast<std::uint16_t>(high + 1),
+                      .last = 65535};
+  }
+  // The whole unprivileged space is ephemeral. Probe it anyway; there is
+  // nowhere better to put the ports.
+  return PortWindow{.first = 1024, .last = 65535};
+}
+
+std::optional<std::vector<x23::UniqueFd>>
+try_hold_loopback_ports(const EventPorts &ports)
 {
   std::vector<x23::UniqueFd> holders;
-  holders.reserve(4);
-  holders.push_back(listen_loopback(exec_port));
-  holders.push_back(listen_loopback(indexer_port));
-  holders.push_back(listen_loopback(mempool_port));
-  holders.push_back(listen_loopback(metrics_port));
+  holders.reserve(ports.size());
+  for (const std::uint16_t port : ports) {
+    try {
+      holders.push_back(listen_loopback(port));
+    } catch (const std::system_error &error) {
+      // Only a collision means "try the next block". Anything else -- fd
+      // exhaustion, a permission problem -- is an infrastructure failure, and
+      // reporting it as a port hunt that ran out would bury it.
+      if (error.code() != std::errc::address_in_use) {
+        throw;
+      }
+      return std::nullopt;
+    }
+  }
   return holders;
+}
+
+std::vector<x23::UniqueFd>
+hold_loopback_ports(const EventPorts &ports)
+{
+  std::optional<std::vector<x23::UniqueFd>> holders =
+      try_hold_loopback_ports(ports);
+  if (!holders) {
+    throw std::runtime_error(
+        std::format("lost reserved hog-event ports {}..{} while no hog-event "
+                    "owned them",
+                    ports.front(), ports.back()));
+  }
+  return std::move(*holders);
+}
+
+struct ReservedEventPorts {
+  EventPorts ports;
+  std::vector<x23::UniqueFd> holders;
+};
+
+// Reserves a block of consecutive loopback ports outside the ephemeral range,
+// returning them along with the listeners that hold them.
+ReservedEventPorts
+reserve_event_ports()
+{
+  const PortWindow window = non_ephemeral_window();
+  const unsigned span = static_cast<unsigned>(window.last - window.first) + 1;
+  const unsigned slots = span / kEventPortCount;
+  CHECK(slots > 0);
+  // Two processes reserving at the same time must not converge on the same
+  // block; the pid spreads them out and the probe settles the rest.
+  unsigned slot = static_cast<unsigned>(getpid()) % slots;
+  for (unsigned attempt = 0; attempt < std::min(slots, 512U); ++attempt) {
+    const unsigned base = window.first + (slot * kEventPortCount);
+    EventPorts ports{};
+    for (std::size_t i = 0; i < kEventPortCount; ++i) {
+      ports[i] = static_cast<std::uint16_t>(base + i);
+    }
+    if (std::optional<std::vector<x23::UniqueFd>> holders =
+            try_hold_loopback_ports(ports);
+        holders) {
+      return ReservedEventPorts{.ports = ports, .holders = std::move(*holders)};
+    }
+    slot = (slot + 1) % slots;
+  }
+  throw std::runtime_error(
+      std::format("no free block of {} loopback ports in {}..{}",
+                  kEventPortCount, window.first, window.last));
 }
 
 TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
@@ -180,26 +287,32 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
       std::string(x23::HostPort{"127.0.0.1", mempool_listen_port}.show());
 
   TmpDir work_dir;
-  // First start binds port 0 (hog-event owns the listeners; no probe race).
-  // EventCard advertises those addresses, so restart must reuse them. Passing
-  // the logged non-zero ports uses the existing SO_REUSEADDR path; a second
-  // port-0 start would skip it and fail to rebind.
+  // The EventCard advertises the addresses hog-event binds and prepare_event
+  // rejects a card that changed, so the restart has to come back on the same
+  // four ports. Reserve them up front, outside the ephemeral range, and hold
+  // them with SO_REUSEADDR whenever no hog-event owns them: ctest runs this
+  // test alongside one other per core, nearly all of them opening loopback
+  // sockets, and a kernel-assigned ephemeral port is up for grabs the instant
+  // the killed process releases it -- any connect() or bind(0) on the machine
+  // can be handed it, and then the restart cannot rebind.
+  ReservedEventPorts reserved = reserve_event_ports();
+  const std::uint16_t event_exec_port = reserved.ports[0];
+  const std::uint16_t event_indexer_port = reserved.ports[1];
+  const std::uint16_t event_mempool_port = reserved.ports[2];
+  const std::uint16_t event_metrics_port = reserved.ports[3];
+
   ConsensusValue block_one;
-  std::uint16_t event_exec_port = 0;
-  std::uint16_t event_indexer_port = 0;
-  std::uint16_t event_mempool_port = 0;
-  std::uint16_t event_metrics_port = 0;
-  std::vector<x23::UniqueFd> restart_ports;
   {
-    DaemonProcess event =
-        DaemonProcess::start(HOG_EVENT_BINARY,
-                             event_args(mempool_addr, work_dir.directory(), 0,
-                                        0, 0, 0));
+    reserved.holders.clear();
+    DaemonProcess event = DaemonProcess::start(
+        HOG_EVENT_BINARY,
+        event_args(mempool_addr, work_dir.directory(), event_exec_port,
+                   event_indexer_port, event_mempool_port, event_metrics_port));
     event.wait_until_log_contains("event initialization complete.");
-    event_exec_port = event.require_port("event.exec");
-    event_indexer_port = event.require_port("event.indexer");
-    event_mempool_port = event.require_port("event.mempool");
-    event_metrics_port = event.require_port("event.metrics");
+    ASSERT_EQ(event.require_port("event.exec"), event_exec_port);
+    ASSERT_EQ(event.require_port("event.indexer"), event_indexer_port);
+    ASSERT_EQ(event.require_port("event.mempool"), event_mempool_port);
+    ASSERT_EQ(event.require_port("event.metrics"), event_metrics_port);
 
     {
       event_sched_client sched = connect_event_sched(event_mempool_port);
@@ -216,10 +329,8 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
         EventCanonicalTip{.block_id = 11, .consensus_value = block_one});
 
     EXPECT_EQ(event.kill_unclean(), SIGKILL);
-    // EventCard requires the same listen ports. Hold them with SO_REUSEADDR
-    // until the restart exec so a parallel test cannot steal them.
-    restart_ports = hold_loopback_ports(event_exec_port, event_indexer_port,
-                                        event_mempool_port, event_metrics_port);
+    // Take the ports back until the restart execs.
+    reserved.holders = hold_loopback_ports(reserved.ports);
   }
 
   {
@@ -231,7 +342,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
     EXPECT_EQ(committed->consensus_value, block_one);
   }
 
-  restart_ports.clear();
+  reserved.holders.clear();
   DaemonProcess restarted =
       DaemonProcess::start(HOG_EVENT_BINARY,
                            event_args(mempool_addr, work_dir.directory(),

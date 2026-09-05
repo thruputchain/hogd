@@ -71,6 +71,55 @@ constexpr static uint64_t kSHA256StreamCost = 26;
 constexpr static uint64_t kVerifySignatureBaseCost = 17750;
 constexpr static uint64_t kVerifySignatureBlockCost = 131;
 
+// What an NNInt storage syscall costs on top of the crossing. Charged by
+// NonnegativeIntGet and NonnegativeIntSetAdd alike, on every call.
+//
+// This covers three measured costs at once, and deliberately charges all of
+// them every time:
+//
+//   the access itself   reaching the frame's item map, hashing the key,
+//                       reading or staging the value.  ~47-55 gas.
+//   the first touch     a key this transaction has not seen before misses the
+//                       active frame, walks its parents and creates a view,
+//                       loading from the snapshot cache on a read.  ~93 gas
+//                       for a read and ~34 for a write, at four thousand keys
+//                       in the frame.
+//   the commit          a successful child frame merges each staged item into
+//                       its parent, in frame completion rather than in any
+//                       syscall.  ~32 gas per item.
+//
+// Charging the first touch on every access, not only the first, is the same
+// trade kSHA256StreamCost makes above and for the same reason: the alternative
+// makes the price depend on whether the frame happened to hold the key
+// already, which is a thing about the frame's state rather than about the
+// call. The flat charge keeps every cost in this table a function of its
+// arguments, and it keeps a contract's bill independent of its own execution
+// history, which is what makes gas estimable before running it.
+//
+// It overbills a repeat touch by 1.6-2x at the key counts anything realistic
+// reaches -- measured 1.64x at one key in the frame, 1.60x at 256, 1.96x at
+// 4096 -- which is the direction this schedule already rounds and well inside
+// the spread it replaced.
+//
+// Prepaying the commit on every write is what lets it be charged at all: the
+// merge happens in InvocationFrameStack::finish_frame, which has no gas meter
+// and no syscall running. Charging it at the write overbills a frame that
+// later fails and never merges, which is the safe direction -- the staging
+// work happened either way.
+//
+// 150 covers the dearest sum of the three (a read: 47 + 93) with room, and
+// lands the total at a round 200 with the base. Writes come to 121 by the same
+// arithmetic, close enough that one constant serves both; two would be false
+// precision in a digest, and would give a contract a reason to prefer one call
+// over another for pricing rather than for what it needs.
+//
+// What this still does not cover is a frame holding far more than a few
+// thousand keys: the first touch rises to ~234 gas at 65536 and ~529 at
+// 262144 as the frame's map outgrows cache. What bounds that is the gas a
+// transaction must burn to reach those key counts. See
+// docs/rv32/rv32-gas-calibration.md.
+constexpr static uint64_t kStorageAccessCost = 150;
+
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
@@ -157,12 +206,13 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 7> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 8> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
     {.name = u8"VerifySignatureBase", .cost = kVerifySignatureBaseCost},
     {.name = u8"VerifySignatureBlock", .cost = kVerifySignatureBlockCost},
+    {.name = u8"StorageAccess", .cost = kStorageAccessCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
 }};

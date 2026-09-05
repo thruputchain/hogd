@@ -45,6 +45,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
@@ -84,10 +85,6 @@ namespace hogd {
 
 namespace {
 constexpr char kIndexerDbSubdir[] = "indexer-db";
-constexpr char kRuntimeSubdir[] = "runtime";
-constexpr char kRamDbSubdir[] = "ramdb";
-constexpr char kEventSubdir[] = "events";
-constexpr char kIndexerSubdir[] = "indexer";
 constexpr char kDataDirMetadataFile[] = "hog-devnode-data.json";
 constexpr std::size_t kMaxDataDirMetadataBytes = 64 * 1024;
 constexpr int kMetadataTempOpenFlags =
@@ -498,20 +495,20 @@ run_ramdb_open(std::size_t ramdb_bytes, Fn &&fn)
 
 HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
+    HogDevnodeDirectories directories,
     LocalBootstrapConfig const &bootstrap_config,
     std::optional<std::filesystem::path> const &data_dir,
     NetworkHash network_hash, std::size_t ramdb_bytes)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
-    ramdb_bytes_(ramdb_bytes), runtime_dir_(data_dir, kRuntimeSubdir),
-    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
-    indexer_dir_(data_dir, kIndexerSubdir), opened_db_([this] {
+    ramdb_bytes_(ramdb_bytes), dirs_(std::move(directories)),
+    opened_db_([this] {
       // Reject incompatible bootstrap intent before opening or migrating any
       // persisted chain state.
       preflight_data_dir_metadata(data_dir_, bootstrap_config_);
       return open_db_backend();
     }()),
-    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
+    event_ctx_(dirs_.event.directory()), event_sched_server_(event_ctx_),
     event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   try {
@@ -744,7 +741,7 @@ void
 HogDevnodeNode::init_indexer_backend()
 {
   std::filesystem::path db_path =
-      std::filesystem::path(indexer_dir_.directory()) / kIndexerDbSubdir;
+      std::filesystem::path(dirs_.indexer.directory()) / kIndexerDbSubdir;
   IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(db_path);
   if (!db_status) {
     panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
@@ -1049,20 +1046,20 @@ HogDbDAO
 HogDevnodeNode::open_db_backend() const
 {
   DBStatus<std::uint64_t> lsn = run_ramdb_open(ramdb_bytes_, [&] {
-    return Database::check(db_dir_.directory(), ramdb_bytes_);
+    return Database::check(dirs_.db.directory(), ramdb_bytes_);
   });
   if (!lsn.has_value()) {
     lsn.error().raise("ramdb integrity check failed for '{}'",
-                      db_dir_.directory());
+                      dirs_.db.directory());
   }
   info("database '{}' passed integrity check; current LSN is {}",
-       db_dir_.directory(), *lsn);
+       dirs_.db.directory(), *lsn);
 
   DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(ramdb_bytes_, [&] {
-    return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
+    return Database::open_lsn(dirs_.db.directory(), *lsn, ramdb_bytes_);
   });
   if (!ramdb.has_value()) {
-    ramdb.error().raise("ramdb open failed for '{}'", db_dir_.directory());
+    ramdb.error().raise("ramdb open failed for '{}'", dirs_.db.directory());
   }
 
   HogDbDAO db(RAMDB(std::move(*ramdb)));

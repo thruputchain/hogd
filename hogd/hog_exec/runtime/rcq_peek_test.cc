@@ -24,6 +24,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -57,29 +58,31 @@ TEST_F(SyscallRcqPeekTest, PeekLenMatchesInsertedEntry)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx,
-         uint32_t expected_len) -> InvokeStatus<void> {
+         uint32_t expected_len) -> x23::Async<InvokeStatus<void>> {
         uint32_t payload = 0xC0FFEEU;
-        auto insert_status = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
-            SyscallRcqPeekTest::kStorageKey,
-            std::as_bytes(std::span(&payload, 1)));
+        auto insert_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                SyscallRcqPeekTest::kStorageKey,
+                std::as_bytes(std::span(&payload, 1)));
         if (!insert_status.has_value() ||
             insert_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         RuntimeMemoryLength len = 0;
-        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
-            SyscallRcqPeekTest::kStorageKey, len);
+        auto peek_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                SyscallRcqPeekTest::kStorageKey, len);
         if (!peek_status.has_value() ||
             peek_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         if (len != expected_len) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -108,10 +111,10 @@ TEST_F(SyscallRcqPeekTest, PeekLenMatchesInsertedEntry)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -125,19 +128,20 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntry)
   NativeContractBuilder builder;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         RuntimeMemoryLength len = 0;
-        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
-            SyscallRcqPeekTest::kStorageKey, len);
+        auto peek_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                SyscallRcqPeekTest::kStorageKey, len);
         if (!peek_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto code = peek_status.value();
         if (code !=
             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -165,10 +169,10 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntry)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -180,18 +184,19 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntryEmitsNoStorageDelta)
   NativeContractBuilder builder;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      3, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         RuntimeMemoryLength len = 0;
-        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
-            SyscallRcqPeekTest::kStorageKey, len);
+        auto peek_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                SyscallRcqPeekTest::kStorageKey, len);
         if (!peek_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (peek_status.value() !=
             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -220,14 +225,14 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntryEmitsNoStorageDelta)
       *context);
   handler.enable_tracing();
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);
   EXPECT_TRUE(trace->storage_writes.empty());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -239,23 +244,24 @@ TEST_F(SyscallRcqPeekTest, PeekConsumeNoQueueEntryEmitsNoStorageDelta)
   NativeContractBuilder builder;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      6, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      6, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         uint32_t out = 0;
         RuntimeMemoryLength written_len = 0;
-        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-            SyscallRcqPeekTest::kStorageKey, true,
-            std::as_writable_bytes(std::span(&out, 1)), written_len);
+        auto peek_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                SyscallRcqPeekTest::kStorageKey, true,
+                std::as_writable_bytes(std::span(&out, 1)), written_len);
         if (!peek_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (peek_status.value() !=
             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (written_len != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -284,14 +290,14 @@ TEST_F(SyscallRcqPeekTest, PeekConsumeNoQueueEntryEmitsNoStorageDelta)
       *context);
   handler.enable_tracing();
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);
   EXPECT_TRUE(trace->storage_writes.empty());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -303,29 +309,30 @@ TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
   NativeContractBuilder builder;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      7, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-        auto delete_status = ctx.syscall<SyscallNo::kDeleteObject>(
+      7, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto delete_status = co_await ctx.syscall<SyscallNo::kDeleteObject>(
             SyscallRcqPeekTest::kStorageKey,
             std::to_underlying(StorageDeltaFlags::None));
         if (!delete_status.has_value() ||
             delete_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         RuntimeMemoryLength len = 0;
-        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
-            SyscallRcqPeekTest::kStorageKey, len);
+        auto peek_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                SyscallRcqPeekTest::kStorageKey, len);
         if (!peek_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (peek_status.value() !=
             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (len != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -354,7 +361,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
       *context);
   handler.enable_tracing();
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   auto const *trace = handler.get_trace();
@@ -363,7 +370,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
   EXPECT_EQ(trace->storage_writes[0].delta.type(),
             StorageDeltaType::kDeltaTypeDelete);
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -375,33 +382,35 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
   NativeContractBuilder builder;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      4, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      4, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         uint32_t payload = 0xC0FFEEU;
-        auto insert_status = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
-            SyscallRcqPeekTest::kStorageKey,
-            std::as_bytes(std::span(&payload, 1)));
+        auto insert_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                SyscallRcqPeekTest::kStorageKey,
+                std::as_bytes(std::span(&payload, 1)));
         if (!insert_status.has_value() ||
             insert_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       5,
       [](NativeSyscallContext &ctx,
-         uint32_t expected_len) -> InvokeStatus<void> {
+         uint32_t expected_len) -> x23::Async<InvokeStatus<void>> {
         RuntimeMemoryLength len = 0;
-        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
-            SyscallRcqPeekTest::kStorageKey, len);
+        auto peek_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                SyscallRcqPeekTest::kStorageKey, len);
         if (!peek_status.has_value() ||
             peek_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (len != expected_len) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -428,8 +437,9 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
                                            .calldata = insert_calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
-  ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-  ASSERT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+  ASSERT_EQ(insert_handler.try_commit_transaction()(),
+            ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -450,14 +460,14 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
       *context);
   peek_handler.enable_tracing();
 
-  auto root_res = peek_handler.root_invoke();
+  auto root_res = peek_handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   auto const *trace = peek_handler.get_trace();
   ASSERT_NE(trace, nullptr);
   EXPECT_TRUE(trace->storage_writes.empty());
 
-  ASSERT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(peek_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // A bytestring at the key is not a retrocausal queue; PeekLen must not
@@ -470,26 +480,29 @@ TEST_F(SyscallRcqPeekTest, PeekLenFailsWhenBytestringOccupiesKey)
   NativeContractBuilder builder;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      2, [](NativeSyscallContext &ctx, Bytestring data) -> InvokeStatus<void> {
-        auto set_status = ctx.syscall<SyscallNo::kBytestringSet>(
+      2,
+      [](NativeSyscallContext &ctx,
+         Bytestring data) -> x23::Async<InvokeStatus<void>> {
+        auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             SyscallRcqPeekTest::kStorageKey, std::as_bytes(std::span(data)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!set_status.has_value() ||
             set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         RuntimeMemoryLength len = 0;
-        auto peek_status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
-            SyscallRcqPeekTest::kStorageKey, len);
+        auto peek_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                SyscallRcqPeekTest::kStorageKey, len);
         if (!peek_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (peek_status.value() !=
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -525,10 +538,10 @@ TEST_F(SyscallRcqPeekTest, PeekLenFailsWhenBytestringOccupiesKey)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -566,42 +579,48 @@ TEST_F(SyscallRcqPeekTest,
   NativeContractBuilder builder;
   // method 8: insert one entry into each of `count` distinct queue keys.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      8, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
+      8,
+      [](NativeSyscallContext &ctx,
+         uint32_t count) -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < count; ++i) {
           auto payload = static_cast<uint8_t>(i);
-          auto status = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
-              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
+          auto status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                  make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
           if (!status.has_value() ||
               status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   // method 9: peek `count` keys. The first kMaxConcurrentRcqReadsPerTx succeed;
   // the cap-plus-one peek returns InvalidSyscallInput (not a crash).
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      9, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
+      9,
+      [](NativeSyscallContext &ctx,
+         uint32_t count) -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < count; ++i) {
           RuntimeMemoryLength len = 0;
-          auto status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
-              make_obs_cap_key(i), len);
+          auto status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                  make_obs_cap_key(i), len);
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (i < kMaxConcurrentRcqReadsPerTx) {
             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
                 len != 1) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
           else if (status.value() !=
                    SyscallErrorCode::
                        kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -631,8 +650,9 @@ TEST_F(SyscallRcqPeekTest,
   auto insert_handler =
       make_new_system_call_handler(make_tx(8, insert_calldata.value()),
                                    *context);
-  ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-  ASSERT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+  ASSERT_EQ(insert_handler.try_commit_transaction()(),
+            ExecResult::ExecResultOK);
 
   // The cap-plus-one observation returns InvalidSyscallInput; the process stays
   // alive and the contract (which handles the error) commits.
@@ -642,8 +662,8 @@ TEST_F(SyscallRcqPeekTest,
   ASSERT_TRUE(peek_calldata.has_value());
   auto peek_handler =
       make_new_system_call_handler(make_tx(9, peek_calldata.value()), *context);
-  ASSERT_TRUE(peek_handler.root_invoke().is_root_success());
-  EXPECT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(peek_handler.root_invoke()().is_root_success());
+  EXPECT_EQ(peek_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // #3043: A destructive concurrent RCQ consume that crosses the per-tx
@@ -668,30 +688,30 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
   // tx first makes those entries current-block concurrent entries for the
   // consume tx below.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      10, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      10, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto target = NativeContractTestFramework::make_storage_key("target_q");
         for (uint8_t payload : {uint8_t{0xA0}, uint8_t{0xA1}}) {
-          auto res = ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
               target, std::as_bytes(std::span(&payload, 1)));
           if (!res.has_value()) {
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
           }
           if (!res.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx - 1; ++i) {
           auto payload = static_cast<uint8_t>(i);
-          auto res = ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
               make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
           if (!res.has_value()) {
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
           }
           if (!res.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   // method 11: destructively consume T[0] (concurrent observation #1), peek
   // every filler to fill the observation sequence exactly to the cap, then
@@ -699,45 +719,48 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
   // return the read-limit error, which the contract handles as a stop condition
   // and returns success.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      11, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      11, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto target = NativeContractTestFramework::make_storage_key("target_q");
 
         auto first =
-            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+            co_await ctx.handler().retrocausal_queue_consume(target,
+                                                             /*peek=*/false);
         if (!first.has_value()) {
-          return first.error().to_invoke_error();
+          co_return first.error().to_invoke_error();
         }
         if (!first.value().has_value() || first.value().value().size() != 1) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx - 1; ++i) {
           auto peek =
-              ctx.handler().retrocausal_queue_consume(make_obs_cap_key(i),
-                                                      /*peek=*/true);
+              co_await ctx.handler().retrocausal_queue_consume(make_obs_cap_key(
+                                                                   i),
+                                                               /*peek=*/true);
           if (!peek.has_value()) {
-            return peek.error().to_invoke_error();
+            co_return peek.error().to_invoke_error();
           }
           if (!peek.value().has_value() || peek.value().value().size() != 1) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
         auto capped =
-            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+            co_await ctx.handler().retrocausal_queue_consume(target,
+                                                             /*peek=*/false);
         if (!capped.has_value()) {
-          return capped.error().to_invoke_error();
+          co_return capped.error().to_invoke_error();
         }
         // Expect the handleable read-limit error, not an entry.
         if (capped.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (capped.value().error().code() !=
             SyscallErrorCode::
                 kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -769,13 +792,13 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
   // state.
   {
     auto insert_handler = make_new_system_call_handler(insert_tx, *context);
-    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+    ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
     insert_proposal_data = insert_handler.get_proposal_data();
-    ASSERT_EQ(insert_handler.try_commit_transaction(),
+    ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
 
     auto consume_handler = make_new_system_call_handler(consume_tx, *context);
-    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
+    ASSERT_TRUE(consume_handler.root_invoke()().is_root_success());
     consume_proposal_data = consume_handler.get_proposal_data();
     // The cap-crossing consume logs a nondeterministic bit but records no
     // observation: the sequence stops at the cap while the bit count is one
@@ -784,7 +807,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
               kMaxConcurrentRcqReadsPerTx);
     ASSERT_EQ(consume_proposal_data.nondeterministic_bit_count,
               kMaxConcurrentRcqReadsPerTx + 1);
-    ASSERT_EQ(consume_handler.try_commit_transaction(),
+    ASSERT_EQ(consume_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 
@@ -797,15 +820,15 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
     auto insert_handler =
         make_new_system_call_handler_validation(insert_tx, *context,
                                                 insert_proposal_data);
-    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-    ASSERT_EQ(insert_handler.try_commit_transaction(),
+    ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+    ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
 
     auto consume_handler =
         make_new_system_call_handler_validation(consume_tx, *context,
                                                 consume_proposal_data);
-    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
-    ASSERT_EQ(consume_handler.try_commit_transaction(),
+    ASSERT_TRUE(consume_handler.root_invoke()().is_root_success());
+    ASSERT_EQ(consume_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 
@@ -836,38 +859,39 @@ TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
   // distinct filler queues. Committing this tx first makes them current-block
   // concurrent entries the attack tx below can observe to fill the cap.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      12, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      12, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx + 1; ++i) {
           auto payload = static_cast<uint8_t>(i);
-          auto res = ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
               make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
           if (!res.has_value()) {
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
           }
           if (!res.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   // method 13: peek the fillers to fill the observation sequence to the cap and
   // then cross it (setting the sticky cap flag), insert a self entry, then
   // destructively consume that self entry. The self consume records no
   // observation, so it must succeed and return the byte despite the cap.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      13, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      13, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto self_key =
             NativeContractTestFramework::make_storage_key("self_rcq");
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx + 1; ++i) {
           auto peek =
-              ctx.handler().retrocausal_queue_consume(make_obs_cap_key(i),
-                                                      /*peek=*/true);
+              co_await ctx.handler().retrocausal_queue_consume(make_obs_cap_key(
+                                                                   i),
+                                                               /*peek=*/true);
           if (!peek.has_value()) {
-            return peek.error().to_invoke_error();
+            co_return peek.error().to_invoke_error();
           }
           if (i < kMaxConcurrentRcqReadsPerTx) {
             if (!peek.value().has_value() || peek.value().value().size() != 1) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
           // The cap-crossing peek returns the read-limit error; the sticky flag
@@ -876,53 +900,55 @@ TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
                    peek.value().error().code() !=
                        SyscallErrorCode::
                            kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
         uint8_t secret = 0xA5;
-        auto insert = ctx.handler().retrocausal_queue_insert(
+        auto insert = co_await ctx.handler().retrocausal_queue_insert(
             self_key, std::as_bytes(std::span(&secret, 1)));
         if (!insert.has_value()) {
-          return insert.error().to_invoke_error();
+          co_return insert.error().to_invoke_error();
         }
         if (!insert.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto consume =
-            ctx.handler().retrocausal_queue_consume(self_key, /*peek=*/false);
+            co_await ctx.handler().retrocausal_queue_consume(self_key,
+                                                             /*peek=*/false);
         if (!consume.has_value()) {
-          return consume.error().to_invoke_error();
+          co_return consume.error().to_invoke_error();
         }
         // The self entry is returned, not dropped behind a read-limit error.
         if (!consume.value().has_value() ||
             consume.value().value().size() != 1) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   // method 14: a fresh tx confirms the self entry was actually consumed (the
   // successful consume committed), so the queue is now empty.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      14, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      14, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto self_key =
             NativeContractTestFramework::make_storage_key("self_rcq");
         auto peek =
-            ctx.handler().retrocausal_queue_consume(self_key, /*peek=*/true);
+            co_await ctx.handler().retrocausal_queue_consume(self_key,
+                                                             /*peek=*/true);
         if (!peek.has_value()) {
-          return peek.error().to_invoke_error();
+          co_return peek.error().to_invoke_error();
         }
         if (peek.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (peek.value().error().code() !=
                 SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry &&
             peek.value().error().code() !=
                 SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -942,8 +968,8 @@ TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *context);
-    return handler.root_invoke().is_root_success() &&
-           handler.try_commit_transaction() == ExecResult::ExecResultOK;
+    return handler.root_invoke()().is_root_success() &&
+           handler.try_commit_transaction()() == ExecResult::ExecResultOK;
   };
 
   ASSERT_TRUE(run(12));
@@ -970,106 +996,108 @@ TEST_F(SyscallRcqPeekTest, PastBlockConsumeSucceedsAtObservationCap)
   NativeContractBuilder builder;
   // method 20: insert a two-byte past-block entry into the target queue.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      20, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      20, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto target =
             NativeContractTestFramework::make_storage_key("pastblk_q");
         std::array<uint8_t, 2> past = {0xE0, 0xE1};
-        auto res = ctx.handler().retrocausal_queue_insert(target,
-                                                          std::as_bytes(
-                                                              std::span(past)));
+        auto res = co_await ctx.handler().retrocausal_queue_insert(
+            target, std::as_bytes(std::span(past)));
         if (!res.has_value()) {
-          return res.error().to_invoke_error();
+          co_return res.error().to_invoke_error();
         }
         if (!res.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   // method 21: insert one entry into each of kMaxConcurrentRcqReadsPerTx + 1
   // filler queues (current-block concurrent entries for the attack tx).
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      21, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      21, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx + 1; ++i) {
           auto payload = static_cast<uint8_t>(i);
-          auto res = ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
               make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
           if (!res.has_value()) {
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
           }
           if (!res.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   // method 22: cross the cap, self-insert a one-byte entry into the target
   // (materializing it), then destructively consume it. The past-block entry is
   // next in consume order; the consume must succeed and return that two-byte
   // entry despite the cap.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      22, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      22, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto target =
             NativeContractTestFramework::make_storage_key("pastblk_q");
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx + 1; ++i) {
           auto peek =
-              ctx.handler().retrocausal_queue_consume(make_obs_cap_key(i),
-                                                      /*peek=*/true);
+              co_await ctx.handler().retrocausal_queue_consume(make_obs_cap_key(
+                                                                   i),
+                                                               /*peek=*/true);
           if (!peek.has_value()) {
-            return peek.error().to_invoke_error();
+            co_return peek.error().to_invoke_error();
           }
           if (i < kMaxConcurrentRcqReadsPerTx) {
             if (!peek.value().has_value() || peek.value().value().size() != 1) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
           else if (peek.value().has_value() ||
                    peek.value().error().code() !=
                        SyscallErrorCode::
                            kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
         uint8_t self_byte = 0xA5;
-        auto insert = ctx.handler().retrocausal_queue_insert(
+        auto insert = co_await ctx.handler().retrocausal_queue_insert(
             target, std::as_bytes(std::span(&self_byte, 1)));
         if (!insert.has_value()) {
-          return insert.error().to_invoke_error();
+          co_return insert.error().to_invoke_error();
         }
         if (!insert.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto consume =
-            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+            co_await ctx.handler().retrocausal_queue_consume(target,
+                                                             /*peek=*/false);
         if (!consume.has_value()) {
-          return consume.error().to_invoke_error();
+          co_return consume.error().to_invoke_error();
         }
         // The two-byte past-block entry is returned, not dropped.
         if (!consume.value().has_value() ||
             consume.value().value().size() != 2) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   // method 23: a fresh tx consumes the target again. The past-block entry was
   // legitimately consumed above, so the only entry left is the one-byte self
   // entry -- its length confirms the past-block consume committed and the self
   // insert persisted.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      23, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      23, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto target =
             NativeContractTestFramework::make_storage_key("pastblk_q");
         auto consume =
-            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+            co_await ctx.handler().retrocausal_queue_consume(target,
+                                                             /*peek=*/false);
         if (!consume.has_value()) {
-          return consume.error().to_invoke_error();
+          co_return consume.error().to_invoke_error();
         }
         if (!consume.value().has_value() ||
             consume.value().value().size() != 1) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1089,8 +1117,8 @@ TEST_F(SyscallRcqPeekTest, PastBlockConsumeSucceedsAtObservationCap)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *context);
-    return handler.root_invoke().is_root_success() &&
-           handler.try_commit_transaction() == ExecResult::ExecResultOK;
+    return handler.root_invoke()().is_root_success() &&
+           handler.try_commit_transaction()() == ExecResult::ExecResultOK;
   };
 
   ASSERT_TRUE(run(20));
@@ -1120,47 +1148,50 @@ TEST_F(SyscallRcqPeekTest, MaterializedSelfConsumeCommitsWhenBelowCap)
   // method 30: insert a self entry into the queue (materializing it), then
   // destructively consume it -- the entry must be returned.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      30, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      30, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("belowcap_q");
         uint8_t payload = 0xC3;
-        auto insert = ctx.handler().retrocausal_queue_insert(
+        auto insert = co_await ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&payload, 1)));
         if (!insert.has_value()) {
-          return insert.error().to_invoke_error();
+          co_return insert.error().to_invoke_error();
         }
         if (!insert.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto consume =
-            ctx.handler().retrocausal_queue_consume(key, /*peek=*/false);
+            co_await ctx.handler().retrocausal_queue_consume(key,
+                                                             /*peek=*/false);
         if (!consume.has_value()) {
-          return consume.error().to_invoke_error();
+          co_return consume.error().to_invoke_error();
         }
         if (!consume.value().has_value() ||
             consume.value().value().size() != 1) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   // method 31: a fresh tx confirms the entry was actually consumed (the
   // successful consume committed), so the queue is now empty.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      31, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      31, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("belowcap_q");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, /*peek=*/true);
+        auto peek =
+            co_await ctx.handler().retrocausal_queue_consume(key,
+                                                             /*peek=*/true);
         if (!peek.has_value()) {
-          return peek.error().to_invoke_error();
+          co_return peek.error().to_invoke_error();
         }
         if (peek.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (peek.value().error().code() !=
                 SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry &&
             peek.value().error().code() !=
                 SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1180,8 +1211,8 @@ TEST_F(SyscallRcqPeekTest, MaterializedSelfConsumeCommitsWhenBelowCap)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *context);
-    return handler.root_invoke().is_root_success() &&
-           handler.try_commit_transaction() == ExecResult::ExecResultOK;
+    return handler.root_invoke()().is_root_success() &&
+           handler.try_commit_transaction()() == ExecResult::ExecResultOK;
   };
 
   ASSERT_TRUE(run(30));

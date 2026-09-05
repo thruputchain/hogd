@@ -8,6 +8,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -43,8 +44,17 @@ public:
 private:
   Rv32Contract const *contract_;
 
-  std::pair<InvokeStatus<void>, GasAmount>
+  // Stays noexcept and is deliberately not itself a coroutine: creating one
+  // allocates its frame in the ramp function, which can throw before the body
+  // runs, and x23's promises define no
+  // get_return_object_on_allocation_failure -- a noexcept coroutine would
+  // std::terminate() where this returns a structured Unrecoverable. The ecall
+  // loop lives in run_ecall_loop() and its frame allocation is caught here.
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
+
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit);
 };
 
 // RuntimeContext for RV32 contracts. Snapshot deployments arrive with their
@@ -58,7 +68,7 @@ public:
                                   PreparedContract &out) const override;
   using RuntimeContext::verify_contract;
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 };

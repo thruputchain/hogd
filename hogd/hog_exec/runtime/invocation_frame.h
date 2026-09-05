@@ -33,6 +33,7 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -77,7 +78,7 @@ public:
 
   // Mark the current frame as failed.
   // Used to clean up failed try_invoke frames.
-  SystemStatus<void>
+  x23::Async<SystemStatus<void>>
   mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
@@ -142,7 +143,7 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
-  SystemStatus<bool> try_acquire_frame_locks(
+  x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
       std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
 
@@ -330,7 +331,7 @@ public:
   // is still popped and an Unrecoverable SystemError is returned, so the
   // noexcept caller (SystemCallHandler::finish_frame) is never terminated
   // (#3378).
-  SystemStatus<std::pair<InvokeResult, bool>>
+  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data,
                DbConflictResult *try_invoke_conflict_out = nullptr);
@@ -424,6 +425,16 @@ public:
   ItemView *get_item_view(StorageKeyContractData const &data_key);
   ItemView *get_item_view(AddressAndKey const &addrkey);
   ItemView *get_item_view(FrameItemKey const &key);
+
+  // The frame key for `data_key` under the active frame's address, laid out
+  // and hashed once. A syscall that may reach the snapshot cache builds this,
+  // probes the frames with it, and hands the same key to UnmodifiedItem::load,
+  // so the key is hashed once per syscall rather than once per structure.
+  FrameItemKey frame_item_key(StorageKeyContractData const &data_key) const
+  {
+    assert(!frame_stack_.empty());
+    return FrameItemKey::contract_data(frame_stack_.back().address(), data_key);
+  }
 
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {

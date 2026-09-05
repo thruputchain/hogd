@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 28
+#define TEST_FFI_VERSION_MINOR 30
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -74,7 +74,8 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeDeserializeError = 4,
   // Unrecoverable error of unknown type
   kTestFFIErrorCodeUnrecoverableError = 5,
-  // Contract failed wasm verification (e.g., memory exceeds limits)
+  // Contract failed runtime verification (e.g., an RV32 artifact that cannot
+  // be translated)
   kTestFFIErrorCodeContractVerificationFailed = 6,
   // An argument violated a documented precondition (e.g. a negative
   // storage-token grant, or a mock invocation frame production would not admit)
@@ -378,7 +379,7 @@ struct VerifyAuthResultFromDBResult {
 struct VerifyAuthResultFromDBResult verify_signed_transaction_auth_from_db(
     void *db, struct FFISerializedSignedTransaction signed_tx);
 
-// Result of contract wasm verification.
+// Result of contract verification.
 struct VerifyContractResult {
   // 1 if contract is valid, 0 if invalid
   uint8_t success;

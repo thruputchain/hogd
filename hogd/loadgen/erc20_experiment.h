@@ -30,8 +30,9 @@ private:
 
   // Outer gas limit for a wallet do_action tx. rv32 meters one gas per
   // instruction, so the same do_action + cross-called erc20 transfer/mint costs
-  // ~2.4x the wasm gas (measured ~29k for a transfer vs ~12k on wasm); the rv32
-  // envelope is sized to cover that plus first-touch storage on the mint path.
+  // ~2.4x what the former wasm build did (measured ~29k for a transfer vs
+  // ~12k on wasm); the rv32 envelope is sized to cover that plus first-touch
+  // storage on the mint path.
   static GasAmount work_gas_limit() { return GasAmount{100'000}; }
 
   void initialize_wallets(SHA256Hash const &wallet_contract_hash);

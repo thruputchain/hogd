@@ -106,10 +106,10 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
                  make_nonce_delta(Uniquifier{.block_expiry_height = kept_height,
                                              .nonce = 1}),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
 
   // TX2: reserve a different fresh height, then abort.
@@ -120,10 +120,10 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
                      Uniquifier{.block_expiry_height = dropped_height,
                                 .nonce = 2}),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx.abort_transaction().has_value());
+    ASSERT_TRUE(tx.abort_transaction()().has_value());
   }
 
   // TX3: try a third distinct fresh height. Should fit (cap - 2 persisted +
@@ -136,13 +136,13 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
                      Uniquifier{.block_expiry_height = final_height,
                                 .nonce = 3}),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r.value())
         << "known anomaly: aborted fresh-height reservation leaks the "
            "pending_new_heights_ budget, causing a false rejection "
            "(issue #2356)";
-    ASSERT_TRUE(tx.abort_transaction().has_value());
+    ASSERT_TRUE(tx.abort_transaction()().has_value());
   }
 
   // Advance to a new block: the leak is per-block, so the same operation
@@ -156,12 +156,12 @@ TEST_F(ReplayCacheHeightBudgetLeakTest,
                      Uniquifier{.block_expiry_height = final_height,
                                 .nonce = 3}),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     EXPECT_TRUE(r.value())
         << "the leak is per-block; a fresh lock in the next block must admit "
            "the same reservation";
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
 
   advance_block();

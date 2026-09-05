@@ -10,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/version.h"
@@ -68,7 +69,7 @@ public:
     co_return ExpectedDBTip(RPCError::kRPCNotFound);
   }
 
-  x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
   schedgateway_lookup_tx(TransactionHashBatch tx_hashes)
   {
     co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);

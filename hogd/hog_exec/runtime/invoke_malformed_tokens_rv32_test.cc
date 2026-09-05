@@ -166,7 +166,7 @@ TEST_F(InvokeMalformedTokensRv32Test, MalformedTokensBeatReentrance)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   ASSERT_NE(handler.get_trace(), nullptr);
   auto const *record = single_invoke_record(*handler.get_trace());
@@ -186,7 +186,7 @@ TEST_F(InvokeMalformedTokensRv32Test, MalformedTokensRejectBeforeChildFrame)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   ASSERT_NE(handler.get_trace(), nullptr);
   auto const *record = single_invoke_record(*handler.get_trace());
@@ -209,7 +209,7 @@ TEST_F(InvokeMalformedTokensRv32Test, WellFormedTokensRunChild)
           .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   ASSERT_NE(handler.get_trace(), nullptr);
   auto const *record = single_invoke_record(*handler.get_trace());

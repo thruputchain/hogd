@@ -8,6 +8,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -70,7 +71,7 @@ public:
   // derived type needs `using RuntimeContext::verify_contract;`.
   InvokeErrorCode verify_contract(Contract const &contract) const;
 
-  virtual SystemStatus<std::unique_ptr<Runtime>>
+  virtual x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const = 0;
 };
@@ -92,13 +93,17 @@ public:
   Runtime(Runtime &&other) = delete;
   Runtime &operator=(Runtime &&other) = delete;
 
-  InvokeResult invoke(MethodID method_id, uint64_t gas_limit);
+  x23::Async<InvokeResult> invoke(MethodID method_id, uint64_t gas_limit);
 
   virtual ~Runtime() = default;
 
 protected:
-  // Invariant:  The returned GasAmount must be <= the input gas_limit
-  virtual std::pair<InvokeStatus<void>, GasAmount>
+  // Invariant:  The returned GasAmount must be <= the input gas_limit.
+  //
+  // MaybeAsync so an implementation that answers without touching the database
+  // -- and one that must stay noexcept, which a coroutine cannot (its frame
+  // allocation throws before the body runs) -- can return a value directly.
+  virtual x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) = 0;
 
   SystemCallHandler *syscall_handler_ = nullptr;

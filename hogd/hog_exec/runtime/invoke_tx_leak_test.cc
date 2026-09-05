@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 #include <span>
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -30,8 +30,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
-#include "x23/rpc_common.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -65,11 +64,11 @@ public:
     return InvokeErrorCode::None;
   }
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const & /*unused*/,
                    SystemCallHandler * /*unused*/) const override
   {
-    return nullptr;
+    co_return nullptr;
   }
 };
 
@@ -77,14 +76,13 @@ public:
 
 TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
 {
-  const std::size_t saved_max = x23::default_max_message_size;
-  x23::default_max_message_size = 4096;
-  x23::Defer restore_max{
-      [saved_max] { x23::default_max_message_size = saved_max; }};
-
+  // Scoped to this framework's exec-side client rather than set on
+  // x23::default_max_message_size, which racing server threads also read.
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false);
+      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*genesis_cost_model=*/std::nullopt,
+      /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/4096);
   fw.run_genesis_initialization(
       NativeContractTestFramework::make_compact_test_genesis_configuration());
 
@@ -108,14 +106,14 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
               [contract_hash](
-                  NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                auto r =
-                    ctx.handler().deploy_contract(kDeployNonce, contract_hash);
+                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto r = co_await ctx.handler().deploy_contract(kDeployNonce,
+                                                                contract_hash);
                 if (!r.has_value())
-                  return r.error().to_invoke_error();
+                  co_return r.error().to_invoke_error();
                 if (!r.value().has_value())
-                  return InvokeError{InvokeErrorCode::Deterministic};
-                return {};
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                co_return InvokeStatus<void>{};
               });
 
   auto native = std::make_unique<NativeContract>(std::move(fns));
@@ -148,10 +146,10 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
         },
         context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     EXPECT_EQ(commit_res, ExecResult::ExecResultUnrecoverable);
   }
 
@@ -163,7 +161,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   // Probe the old block ID with a read. If the BlockTX was garbage
   // collected (InvokeTX properly closed), this returns Abandon. If the
   // leaked InvokeTX kept the BlockTX alive, this succeeds.
-  auto tip_res = fw.get_db_proxy().get_db_tip(old_block);
+  auto tip_res = fw.get_db_proxy().get_db_tip(old_block)();
   EXPECT_FALSE(tip_res.has_value())
       << "BlockTX should be gone after discard — leaked InvokeTX kept it alive";
 }

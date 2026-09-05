@@ -121,6 +121,14 @@ struct ItemHeader {
 // be trivially copyable.
 static_assert(std::is_trivially_destructible_v<ItemHeader>);
 static_assert(std::is_trivially_copyable_v<ItemHeader>);
+// The durable WAL checksums the full object representation of a commit-marker
+// ItemHeader (see DiskWriter::write_worker / DiskReader::crc_valid). The writer
+// and recovery paths construct separate ItemHeader objects and canonicalize
+// only the `next` slot (clear_next), so the format is only stable if the header
+// has no padding: every byte must belong to a named field. Pin that invariant
+// here so a future field reorder/addition can't silently introduce padding and
+// make a logically-identical commit record fail CRC validation on recovery.
+static_assert(std::has_unique_object_representations_v<ItemHeader>);
 // Loglet::free() constructs std::atomic_ref<ItemStorage> over item->storage
 // to write the tombstone marker; the standard requires the referenced object
 // to satisfy atomic_ref::required_alignment.
