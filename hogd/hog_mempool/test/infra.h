@@ -90,7 +90,7 @@ public:
   // Brings up the whole stack and registers every subsystem with the mempool.
   // Throws when startup fails, e.g. [x23::XdrCallFailed] when the mempool
   // rejects the coordinator intro; the partially started stack is torn down.
-  explicit MempoolTestInfra(Options options);
+  explicit MempoolTestInfra(const Options &options);
 
   MempoolTestInfra(bool skip_genesis_block = false,
                    size_t mempool_tx_size_limit =

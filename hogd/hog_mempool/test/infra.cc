@@ -1,5 +1,6 @@
 #include "hogd/hog_mempool/test/infra.h"
 
+#include <exception>
 #include <limits>
 #include <memory>
 #include <string>
@@ -11,6 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/test.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -22,6 +24,7 @@
 #include "hogd/hog_exec/shared.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -32,7 +35,7 @@
 
 namespace hogd {
 
-MempoolTestInfra::MempoolTestInfra(Options options)
+MempoolTestInfra::MempoolTestInfra(const Options &options)
   : owned_db_dir_(options.db_directory.empty() ? std::make_unique<TmpDir>()
                                                : nullptr),
     db_directory_(owned_db_dir_ ? owned_db_dir_->directory()
