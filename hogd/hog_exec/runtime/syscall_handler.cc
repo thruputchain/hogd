@@ -1781,9 +1781,13 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
+  if (input_bytestring.size() > config_params().max_bytestring_len) {
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  assert(input_bytestring.size() <= kBytestringMaxLen);
 
   Bytestring new_string;
   new_string.resize_uninitialized(input_bytestring.size());

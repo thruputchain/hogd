@@ -30,6 +30,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "precompiles.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -137,6 +138,8 @@ stock_network_config()
   set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256);
   set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx,
                    kStockMaxNewContractsPerTx);
+  set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen,
+                   static_cast<uint32_t>(kDefaultMaxBytestringLen));
   return config;
 }
 
