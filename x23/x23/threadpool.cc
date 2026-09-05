@@ -108,6 +108,19 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
   }
 }
 
+// Both overloads of go() signal `nonempty` while still holding that
+// queue's lock, and only then release it.  Signalling after the unlock
+// would be marginally cheaper, but it lets the enqueued job outlive the
+// signaller's last use of the pool: once the lock is dropped a worker can
+// pop the job, run the coroutine to completion, and the awaiting thread
+// can destroy the ThreadPool -- and its condition variables -- before
+// notify_all() has finished touching one.  ThreadPool::async() makes that
+// reachable from a detached thread the pool does not join, so `co_await
+// pool.async(...)` as the last act of a program is enough to race the
+// pool's destructor (found by the TSAN schedule as a pthread_cond_destroy
+// against pthread_cond_broadcast in x23/tests/sync.cc).  Signalling under
+// the lock orders the broadcast before any worker can dequeue, and hence
+// before anything that could tear the pool down.
 void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
@@ -123,16 +136,16 @@ ThreadPool::go(std::vector<Job> &&jobs)
   for (auto &j : jobs) {
     int affinity_queue = llc_map->bucket(j.cpuhint);
     if (nonempty && qno(lq) != affinity_queue) {
-      lq.reset();
       nonempty->notify_all();
       nonempty = nullptr;
+      lq.reset();
     }
     if (enqueue_selected(lq, j, now))
       nonempty = &lq->nonempty;
   }
-  lq.reset();
   if (nonempty)
     nonempty->notify_all();
+  lq.reset();
 }
 
 void
@@ -142,11 +155,9 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  bool wasempty = enqueue_selected(lq, job, now);
-  auto *nonempty = &lq->nonempty;
+  if (enqueue_selected(lq, job, now))
+    lq->nonempty.notify_all();
   lq.reset();
-  if (wasempty)
-    nonempty->notify_all();
 }
 
 void

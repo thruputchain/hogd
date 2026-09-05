@@ -122,3 +122,30 @@ TEST(ThreadPoolOnQuiesce, RepeatedWakeups)
        count != kCoroutines; count = done.load(std::memory_order_acquire))
     done.wait(count, std::memory_order_relaxed);
 }
+
+// Regression test for #3865.  ThreadPool::async() runs its callable on a
+// detached thread that calls back into go() to resume the awaiting
+// coroutine, and go() is only allowed to signal the run queue while it
+// still holds that queue's lock.  Signalling after the unlock lets the
+// resumed coroutine -- and hence everything the resumption unblocks,
+// including destroying the pool -- overtake go()'s last touch of the
+// queue's condition variable, which TSAN reports as pthread_cond_destroy
+// racing pthread_cond_broadcast.  The pool is destroyed as soon as the
+// await returns so the window is as narrow as it can be.
+TEST(ThreadPoolAsync, ResumptionDoesNotOutraceEnqueue)
+{
+  for (unsigned i = 0; i < 200; ++i) {
+    auto pool = std::make_unique<ThreadPool>(2);
+    std::atomic_bool resumed{false};
+
+    [](ThreadPool &pool, std::atomic_bool &resumed) -> Detached {
+      co_await pool.async([] {});
+      resumed.store(true, std::memory_order_release);
+      resumed.notify_all();
+    }(*pool, resumed);
+
+    while (!resumed.load(std::memory_order_acquire))
+      resumed.wait(false);
+    pool.reset();
+  }
+}
