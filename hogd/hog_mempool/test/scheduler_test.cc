@@ -6,13 +6,13 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -24,6 +24,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -1048,21 +1049,21 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
             .contracts_to_deploy = {},
         }};
   };
-  // Finds a tx from [client] whose cache bucket lock is none of [taken].
+  // Makes a tx from [client] whose cache bucket lock is none of [taken].
   auto make_tx_outside_buckets =
       [&](fib_client_t &client, BlockHeight expiry,
-          std::initializer_list<const std::mutex *> taken)
-      -> std::optional<std::pair<SignedTransaction, TransactionHash>> {
-    for (uint64_t nonce = 1; nonce <= 64; nonce++) {
-      SignedTransaction candidate = make_tx(client, expiry, nonce);
-      const TransactionHash hash = sha256(candidate.tx);
-      const std::mutex *bucket = &scheduler->tx_cache_bucket_mutex(hash);
-      if (std::ranges::find(taken, bucket) == taken.end()) {
-        return std::pair{std::move(candidate), hash};
-      }
-    }
-    return std::nullopt;
-  };
+          std::initializer_list<const std::mutex *> taken) {
+        constexpr uint64_t kMaxNonce = 64;
+        for (uint64_t nonce = 1;; nonce++) {
+          CHECK_LE(nonce, kMaxNonce);
+          SignedTransaction candidate = make_tx(client, expiry, nonce);
+          const TransactionHash hash = sha256(candidate.tx);
+          const std::mutex *bucket = &scheduler->tx_cache_bucket_mutex(hash);
+          if (std::ranges::find(taken, bucket) == taken.end()) {
+            return std::pair{std::move(candidate), hash};
+          }
+        }
+      };
 
   // [blocker] has the lower expiry height, so the sweep removes it before
   // [victim]. The two need distinct cache buckets so that each can be pinned
@@ -1071,10 +1072,8 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
                                             /*nonce=*/0);
   const TransactionHash blocker_hash = sha256(blocker.tx);
   std::mutex &blocker_bucket = scheduler->tx_cache_bucket_mutex(blocker_hash);
-  const auto victim =
+  const auto [victim, victim_hash] =
       make_tx_outside_buckets(fib_client, start_block + 2, {&blocker_bucket});
-  ASSERT_TRUE(victim.has_value());
-  const TransactionHash &victim_hash = victim->second;
   std::mutex &victim_bucket = scheduler->tx_cache_bucket_mutex(victim_hash);
   // [probe] rides along in the resubmit batch ahead of [victim]. It targets an
   // account the scheduler has not cached yet, so [add_txs()] must finish its
@@ -1082,12 +1081,11 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
   // inserts [probe] into the cache; seeing [probe] via [find_tx()] therefore
   // tells the test the resubmit has reached the pinned lookup of [victim].
   // [probe] must not share a bucket with either pin or it would park too.
-  const auto probe = make_tx_outside_buckets(other_fib_client, start_block + 2,
-                                             {&blocker_bucket, &victim_bucket});
-  ASSERT_TRUE(probe.has_value());
-  const TransactionHash &probe_hash = probe->second;
+  const auto [probe, probe_hash] =
+      make_tx_outside_buckets(other_fib_client, start_block + 2,
+                              {&blocker_bucket, &victim_bucket});
 
-  scheduler->add_txs({blocker, victim->first})();
+  scheduler->add_txs({blocker, victim})();
   ASSERT_EQ(scheduler->size(), 2);
   ASSERT_EQ(scheduler->tx_cache_size(), 2UL);
   ASSERT_NE(scheduler->find_tx(victim_hash), nullptr);
@@ -1100,8 +1098,7 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
   // Resubmit the identical bytes of the expired [victim], as the gateway path
   // does. The resubmit caches [probe], then parks on [victim_bucket] inside
   // [add_txs_helper()].
-  std::thread resubmit(
-      [&] { scheduler->add_txs({probe->first, victim->first})(); });
+  std::thread resubmit([&] { scheduler->add_txs({probe, victim})(); });
   const bool resubmit_parked =
       wait_until([&] { return scheduler->find_tx(probe_hash) != nullptr; });
 
