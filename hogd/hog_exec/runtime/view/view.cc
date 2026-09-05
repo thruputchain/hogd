@@ -8,6 +8,7 @@
 #include "auth_token.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
@@ -62,13 +63,9 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
         !pinned.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }
-    auto parent_max_buffers =
-        co_await snapshot_cache.try_get_max_sha256_buffers();
-    if (!parent_max_buffers.has_value()) {
-      co_return ExpectedViewResult{TransactionViewStatus::InternalError};
-    }
-    auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {},
-                                         *parent_max_buffers);
+    auto r = syscall_handler.start_frame(
+        parent_frame_invocation, 0, {},
+        syscall_handler.config_params().max_sha256_buffers);
     if (!r.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }

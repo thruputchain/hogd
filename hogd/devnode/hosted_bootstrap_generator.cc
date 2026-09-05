@@ -30,6 +30,7 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -184,9 +185,13 @@ write_storage_cost_model_xdr(json::Writer &w, StorageCostModelXdr const &model)
 void
 write_network_config(json::Writer &w, NetworkConfig const &config)
 {
-  w.field("max_sha256_buffers", uint64_string(config.max_sha256_buffers));
+  // Reports the values in force rather than the list as written, so a reader
+  // sees what the chain runs under whether or not it states each parameter.
+  w.field("max_sha256_buffers", uint64_string(max_sha256_buffers(config)));
   w.field("max_cross_invoke_depth",
-          uint64_string(config.max_cross_invoke_depth));
+          uint64_string(max_cross_invoke_depth(config)));
+  w.field("max_new_contracts_per_tx",
+          uint64_string(max_new_contracts_per_tx(config)));
 }
 
 std::string

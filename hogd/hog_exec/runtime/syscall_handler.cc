@@ -26,6 +26,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -169,6 +170,7 @@ SystemCallHandler::pin_db_tip() const
   // Owned by the snapshot cache and stable until the cache is recycled for a
   // new block, which cannot happen while this transaction is executing.
   db_tip_ = *tip;
+  config_params_ = resolve_config_params(db_tip_->network_config);
   co_return SystemStatus<void>{};
 }
 
@@ -201,6 +203,8 @@ SystemCallHandler::SystemCallHandler(
       }
       return contracts;
     }()),
+    has_duplicate_attachment_(newly_created_contracts_.size() !=
+                              tx.contracts_to_deploy.size()),
     execution_mode_data_(
         [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
           if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
@@ -298,6 +302,28 @@ SystemCallHandler::perform_initial_validation()
   //
   // If we make the assumption that all contracts are validated by the time they
   // get to the executor, this check could be removed.
+
+  // Rejected rather than deduplicated: two different transaction encodings
+  // would otherwise have identical effect.
+  if (has_duplicate_attachment_) {
+    error("Transaction attaches the same contract more than once; {} are "
+          "distinct",
+          newly_created_contracts_.size());
+    cumulative_invoke_result_.result_ =
+        InvokeError{InvokeErrorCode::Deterministic};
+    co_return SystemStatus<void>{};
+  }
+
+  // Without this gate an oversized attachment set fails only at commit, where
+  // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
+  if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
+      newly_created_contracts_.size() > permitted) {
+    error("Transaction attaches {} contracts; chain permits {}",
+          newly_created_contracts_.size(), permitted);
+    cumulative_invoke_result_.result_ =
+        InvokeError{InvokeErrorCode::Deterministic};
+    co_return SystemStatus<void>{};
+  }
 
   for (auto const &[hash, contract] : newly_created_contracts_) {
     // Enforce the contract size limit before verification: the limit is
@@ -851,7 +877,7 @@ SystemCallHandler::validate_new_invocation(
   // syscall_Invoke_inner(), and the test FFI wrapper, which are the only ways
   // in from below root_invoke(). db_tip() fails loudly on a missed pin.
   if (invocation_frame_stack_.size() >=
-      db_tip()->network_config.max_cross_invoke_depth) {
+      config_params().max_cross_invoke_depth) {
     return SyscallStatus<void>{std::unexpected(
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
   }
@@ -968,12 +994,11 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // protected body runs, so a copy could throw std::bad_alloc across that
   // noexcept boundary and terminate the executor. The move is allocation-free
   // and invocation is unused afterward (#3058).
-  auto max_buffers = co_await snapshot_cache_.try_get_max_sha256_buffers();
-  if (!max_buffers.has_value()) {
-    co_return invoke_result_t{max_buffers.error(), 0};
-  }
-  auto start_status = start_frame(std::move(invocation), flags,
-                                  owned_auth_token_ids, *max_buffers);
+  // The tip was pinned above, so this is a field load rather than another trip
+  // through the snapshot cache -- invoke() runs per frame.
+  auto start_status =
+      start_frame(std::move(invocation), flags, owned_auth_token_ids,
+                  config_params().max_sha256_buffers);
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and

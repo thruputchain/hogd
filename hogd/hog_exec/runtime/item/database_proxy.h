@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -11,6 +12,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
@@ -46,7 +48,10 @@ using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 // that the executor can handle (or abort on).
 class DatabaseProxy {
 public:
-  DatabaseProxy(DatabaseIdentifier identifier);
+  // Caps the client streams only; tests lower it rather than the process-wide
+  // x23::default_max_message_size, which server threads also read.
+  DatabaseProxy(DatabaseIdentifier identifier,
+                size_t max_message_size = kBulkRpcMaxMessageSize);
 
   DatabaseProxy(DatabaseProxy const &) = delete;
   DatabaseProxy &operator=(DatabaseProxy const &) = delete;

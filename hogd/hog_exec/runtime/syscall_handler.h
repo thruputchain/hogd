@@ -21,6 +21,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -451,6 +452,14 @@ public:
   x23::Async<SystemStatus<const PreparedContract *>>
   resolve_prepared_contract(SHA256Hash hash);
 
+  // The parameters this transaction's chain puts in force, flattened when the
+  // tip was pinned. Callers must have run init_db_tip() first.
+  NetworkConfigParams const &config_params() const
+  {
+    CHECK_PTR(db_tip_);
+    return config_params_;
+  }
+
   // == Error conversion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
   static ExecResult to_exec_result(SystemErrorCode error_code);
@@ -483,6 +492,10 @@ private:
   const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
                            SipHash24Hasher>
       newly_created_contracts_;
+
+  // Noted at construction: the map above is keyed by hash, so a repeat leaves
+  // no trace there.
+  const bool has_duplicate_attachment_ = false;
 
   // Images for this transaction's attachments, keyed by contract hash.
   // perform_initial_validation keeps what it built to verify each one rather
@@ -520,6 +533,9 @@ private:
   // Mutable because it memoizes an immutable value: the const admission checks
   // that run before any frame is pushed are what pin it.
   mutable DbTip const *db_tip_ = nullptr;
+
+  // Flattened when the tip is pinned: the invoke path reads these per frame.
+  mutable NetworkConfigParams config_params_{};
 
   inline static bool debug_force_commit_abort_{false};
 

@@ -2200,6 +2200,58 @@ TEST(Rv32ThreadedTrapGas, ecallProgramBudgetSweepMatchesCanonical)
   }
 }
 
+TEST(Rv32ThreadedTrapGas, postHostDeficitResumeMatchesCanonicalConsensusState)
+{
+  // #3832: a recoverable invalid-syscall host debit leaves a partial budget, so
+  // the resumed post-ecall run [addi; ori] (two standalone I-type slots, cost
+  // 2) is unaffordable with one gas remaining and executes speculatively in
+  // deficit. The speculative run writes x12 and advances pc past the canonical
+  // failing boundary -- but that state is frame-local: a trap discards it, and
+  // the RV32 runtime propagates only the trap classification and gas consumed
+  // (rv32_contract.cc invoke_internal reads neither pc nor registers on a
+  // trap). The consensus-visible pair (trap, gas_remaining) must therefore
+  // match canonical even though pc/regs diverge -- the same guarantee
+  // outOfGasMidRunSettlesAtNextSeam documents for the non-resume case, here on
+  // the post-host resume path.
+  const std::vector<uint32_t> words = {
+      addi(10, 0, -1),                          // x10 = -1 (bad syscall number)
+      kEcallWord,                               // routes to a 10-gas NoSyscall
+      addi(11, 0, 5),                           // resumed run head
+      test_program::i_type(0x13U, 12, 6, 0, 7), // ori x12, x0, 7 (speculative)
+  };
+
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  Machine cmachine(canonical, /*memory_bytes=*/256, /*gas=*/13);
+  GasHost chost(/*gas_per_call=*/10);
+  const StepResult cresult = cmachine.run(chost);
+
+  auto threaded = threaded_from_words(words);
+  ASSERT_NE(threaded, nullptr);
+  ThreadedMachine tmachine(*threaded, /*gas=*/13);
+  GasHost thost(/*gas_per_call=*/10);
+  const StepResult tresult = tmachine.run(thost);
+
+  // Consensus-visible outputs agree between the two engines.
+  EXPECT_EQ(tresult, cresult);
+  EXPECT_EQ(cresult, StepResult::kTrap);
+  EXPECT_EQ(tmachine.trap(), cmachine.trap());
+  EXPECT_EQ(cmachine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(tmachine.gas_remaining(), cmachine.gas_remaining());
+  EXPECT_EQ(cmachine.gas_remaining(), 0U);
+  EXPECT_EQ(thost.call_count(), chost.call_count());
+  EXPECT_EQ(chost.call_count(), 1U);
+
+  // Frame-local, trap-discarded state legitimately diverges: canonical stops at
+  // the ori boundary (pc 12, x12 untouched); the threaded deficit run also ran
+  // the unpayable ori (pc 16, x12 = 7). Neither pc nor x12 is consensus-visible
+  // after a trap, so this divergence is by design, not a consensus fault.
+  EXPECT_EQ(cmachine.pc(), 12U);
+  EXPECT_EQ(cmachine.reg(12), 0U);
+  EXPECT_EQ(tmachine.pc(), 16U);
+  EXPECT_EQ(tmachine.reg(12), 7U);
+}
+
 TEST(Rv32ThreadedTrapGas, deficitRunEndingInEbreakReportsOutOfGas)
 {
   // The speculative run reaches its ebreak barrier, but canonical never got

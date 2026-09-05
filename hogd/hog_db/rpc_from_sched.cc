@@ -17,8 +17,10 @@
 #include "genesis.hh"
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -334,12 +336,32 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbSchedResult::DbSchedResultError;
   }
+  // Before compute_config_hash, which CHECKs this: the genesis is untrusted,
+  // so a non-canonical list has to be a rejection rather than an abort.
+  if (!config_hashable(genesis_configuration.network_config)) {
+    error("genesis network config parameters are not the gapless prefix 0, 1, "
+          "2, ... of the parameter ids");
+    co_return DbSchedResult::DbSchedResultError;
+  }
   if (value.proposal_header.block_height != kGenesisBlockHeight ||
       value.proposal_header.network_hash !=
           genesis_configuration.network_hash ||
       value.proposal_header.config_hash !=
           compute_config_hash(genesis_configuration)) {
     error("invalid genesis height, network hash, or config hash");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // A genesis can name a count whose commit batch this build could not send in
+  // one message; reject it here rather than at commit (#2190).
+  constexpr size_t kBatchOverhead = 1_KiB;
+  const size_t admissible =
+      (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
+  if (const uint32_t stated =
+          max_new_contracts_per_tx(genesis_configuration.network_config);
+      stated > admissible) {
+    error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
+          "commit in one message",
+          stated, admissible);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);

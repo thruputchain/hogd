@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
@@ -208,7 +209,8 @@ private:
   static NetworkConfig genesis_network_config(uint32_t max_cross_invoke_depth)
   {
     NetworkConfig config = stock_network_config();
-    config.max_cross_invoke_depth = max_cross_invoke_depth;
+    set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                     max_cross_invoke_depth);
     return config;
   }
 };
