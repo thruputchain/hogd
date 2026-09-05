@@ -67,34 +67,9 @@ SRpcFd::stop() noexcept
   if (ss_.request_stop()) {
     shutdown(fd_.get(), SHUT_RDWR);
     write_ready();
-
-    // Fail every outstanding client callback exactly once.  A callback
-    // is in exactly one of three places: still queued in write_queue_,
-    // held in the batch write_worker has swapped out of write_queue_
-    // but not yet registered, or registered in calls_->cbmap_.  We can
-    // reach the first and third; the second lives on write_worker's
-    // stack, which is why it completes that batch itself rather than
-    // registering it behind this drain.  Dropping any of them leaves
-    // the synchronous send_call() that queued it blocked forever on
-    // its stack semaphore, which strands the calling thread (an
-    // executor worker, for contract-originated database RPCs).
-    //
-    // Empty both containers before invoking anything.  The callbacks
-    // run arbitrary caller code and wake threads blocked in
-    // send_call(), one of which can drop the last reference to this
-    // SRpcFd, so no member may be touched once they start running --
-    // and none is held under a lock while they do.
-    Vec<WriteItem> q;
-    q.swap(*write_queue_.take());
-
-    decltype(PendingCalls::cbmap_) pcs;
-    pcs.swap(calls_->cbmap_);
-
-    for (auto &pc : pcs)
-      pc.second(nullptr, {});
-    for (auto &it : q)
-      if (it.replycb_)
-        it.replycb_(nullptr, {});
+    auto wq = write_queue_.exchange({});
+    for (auto &wi : wq)
+      wi.replycb_(nullptr, {});
   }
 }
 
@@ -236,42 +211,36 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
 {
   if (cpus)
     cpus->set_affinity();
-  Defer _join([this] { read_thread_.join(); });
+  Defer _cleanup([this] {
+    auto pcs = std::exchange(calls_->cbmap_, {});
+    for (auto &pc : pcs)
+      pc.second(nullptr, {});
+    read_thread_.join();
+  });
   BufVec wrbuf;
   for (;;) {
     Vec<WriteItem> q;
     for (;;) {
       write_ready_ = false;
-      if (ss_.stop_requested())
-        return;
-      q.swap(*write_queue_.take());
+      {
+        auto qptr = write_queue_.take();
+        if (ss_.stop_requested())
+          return;
+        q = std::exchange(*qptr, {});
+      }
       if (!q.empty())
         break;
       write_ready_.wait(false);
     }
 
-    auto calls = calls_.take();
-    // Check stop_requested while holding calls_, as stop() drains
-    // calls_->cbmap_ under this same lock.  The two critical sections
-    // cannot interleave, and request_stop() precedes stop()'s, so an
-    // unset flag here means stop()'s drain is still ahead of us and
-    // will complete whatever we register.  A set flag means that drain
-    // may already have happened, and these callbacks -- taken out of
-    // write_queue_ before stop() flushed it, so unseen there too --
-    // would never be completed: fail them here, once the lock is
-    // dropped.  (Symmetric with the check in write_call().)
-    if (ss_.stop_requested()) {
-      calls.reset();
-      for (auto &it : q)
-        if (it.replycb_)
-          it.replycb_(nullptr, {});
-      return;
-    }
+    decltype(calls_)::Ptr calls;
     for (auto &it : q) {
       if (it.replycb_) {
         x23assert(it.data_.size() >= 36 &&
                   getbe<uint32_t>(it.data_.data() + 8) == uint32_t(CALL) &&
                   getbe<uint32_t>(it.data_.data() + 12) == 2);
+        if (!calls)
+          calls = calls_.take();
         Xid xid = getbe<uint32_t>(it.data_.data() + 4);
         if (!xid)
           putbe(it.data_.data() + 4, xid = ++calls->lastxid_);
@@ -288,7 +257,8 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
     for (;;) {
       auto res = wrbuf.write(fd_.get());
       if (!res) {
-        if (res.error() == ECONNRESET || res.error() == EPIPE)
+        if (res.error() == ECONNRESET || res.error() == EPIPE ||
+            res.error() == EBADF)
           stop();
         else
           fail("write_worker: {}", res.error());
