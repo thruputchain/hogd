@@ -11,7 +11,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -31,6 +30,7 @@
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "transaction.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
