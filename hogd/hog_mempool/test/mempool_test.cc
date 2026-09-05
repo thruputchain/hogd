@@ -31,6 +31,7 @@
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -3101,45 +3102,52 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
-// A recovered database tip carries the network hash of the chain that
-// produced it. Adopting one from another network would publish a foreign tip
-// to the event aggregator and seed the scheduler with it, after which every
-// propose and validate fails on the parent-id gate. The mempool must instead
-// reject the coordinator intro that runs recovery.
-TEST(Mempool, CoordinatorIntroRejectsRecoveredTipFromAnotherNetwork)
+// A stack restarted over a database that another network produced must fail
+// at startup, the way a shard given the wrong --network-hash would, instead of
+// publishing that network's tip to every downstream and then failing every
+// propose and validate on the parent-id gate.
+TEST(Mempool, RestartRejectsDatabaseFromAnotherNetwork)
 {
-  MempoolTestInfra server(
-      MempoolTestInfra::Options{.skip_coordinator_intro = true});
-
+  TmpDir db_dir;
   NetworkHash other_network = MempoolTestInfra::kNetworkHash;
   other_network[0] ^= 0x01;
-  DbTip foreign_tip{};
-  foreign_tip.id = 0;
-  foreign_tip.value.proposal_header.block_height = 0;
-  foreign_tip.value.proposal_header.network_hash = other_network;
-  server.set_dbtip(foreign_tip);
 
-  EXPECT_THROW(server.intro_coordinator()(), x23::XdrCallFailed);
+  // Bring the stack up as one network and let it commit genesis, so the
+  // database carries a tip stamped with that network's hash.
+  {
+    MempoolTestInfra server(
+        MempoolTestInfra::Options{.network_hash =
+                                      MempoolTestInfra::kNetworkHash,
+                                  .db_directory = db_dir.directory()});
+    const SchedulerGetTipResult tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.network_hash,
+              MempoolTestInfra::kNetworkHash);
+  }
 
-  // Nothing downstream saw the foreign tip: the scheduler was never seeded and
-  // the event aggregator still sees no canonical tip to snapshot.
-  EXPECT_FALSE(server.mempool_coord_rpc().scheduler());
-  EXPECT_EQ(server.mempool_coord_rpc().auth_data_height(), -1);
-  EventCard event_card{.protocol = version::kHogdProtocol(),
-                       .address_for_exec = "127.0.0.1:1",
-                       .address_for_sched = "127.0.0.1:2"};
-  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(event_card).outcome(),
-            EventPrepareOutcome::EventPrepareNotReady);
+  // Restart over the same database as another network. The mempool rejects
+  // the coordinator intro that recovers the tip, which fails startup.
+  const MempoolTestInfra::Options other_network_options{
+      .skip_genesis_block = true,
+      .network_hash = other_network,
+      .db_directory = db_dir.directory()};
+  EXPECT_THROW(
+      { MempoolTestInfra rejected(other_network_options); },
+      x23::XdrCallFailed);
 
-  // The same tip stamped with this network's hash recovers normally, so the
-  // rejection above was the hash and not the staged tip itself.
-  DbTip own_tip = foreign_tip;
-  own_tip.value.proposal_header.network_hash = MempoolTestInfra::kNetworkHash;
-  server.set_dbtip(own_tip);
-  EXPECT_EQ(server.intro_coordinator()(),
-            CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
-  EXPECT_TRUE(server.mempool_coord_rpc().scheduler());
-  EXPECT_EQ(server.mempool_coord_rpc().auth_data_height(), 0);
+  // Restarting as the network that produced the database recovers its tip.
+  MempoolTestInfra restarted(
+      MempoolTestInfra::Options{.skip_genesis_block = true,
+                                .network_hash = MempoolTestInfra::kNetworkHash,
+                                .db_directory = db_dir.directory()});
+  const SchedulerGetTipResult tip =
+      restarted.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.network_hash,
+            MempoolTestInfra::kNetworkHash);
 }
 
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)

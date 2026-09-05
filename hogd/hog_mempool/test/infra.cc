@@ -24,25 +24,38 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "transaction.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
 MempoolTestInfra::MempoolTestInfra(Options options)
-  : mempool_coord_server_(RpcServer<MempoolCoordinatorRpc>(
-        sched_db_server_->impl(), mempool_auth_server_->impl(), kNetworkHash,
-        options.mempool_tx_size_limit))
+  : owned_db_dir_(options.db_directory.empty() ? std::make_unique<TmpDir>()
+                                               : nullptr),
+    db_directory_(owned_db_dir_ ? owned_db_dir_->directory()
+                                : options.db_directory),
+    mempool_coord_server_(RpcServer<MempoolCoordinatorRpc>(
+        sched_db_server_->impl(), mempool_auth_server_->impl(),
+        options.network_hash, options.mempool_tx_size_limit))
+{
+  try {
+    start(options);
+  } catch (...) {
+    prepare_for_failed_construction();
+    throw;
+  }
+}
+
+void
+MempoolTestInfra::start(const Options &options)
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration and metrics at the beginning of each test.
   Registration::registration().clear();
-  Registration::registration().set_network_hash(kNetworkHash);
+  Registration::registration().set_network_hash(options.network_hash);
   Metrics::instance().clear();
   init_hog_exec_metrics();
 
@@ -68,7 +81,10 @@ MempoolTestInfra::MempoolTestInfra(Options options)
   Registration::registration().publish_event_canonical_tip(
       EventCanonicalTip{.block_id = std::numeric_limits<BlockID>::max(),
                         .consensus_value = std::move(initial_value)});
-  init_contracts();
+  // A recovered database already holds whatever its chain deployed.
+  if (!ctx_->has_committed_tip()) {
+    init_contracts();
+  }
 
   // Start the database RPC servers.
   // [db_executor_server_] handles RPCs from the executor.
@@ -84,8 +100,8 @@ MempoolTestInfra::MempoolTestInfra(Options options)
   // Start the auth servers.
   std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
   dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)().value();
-  auth_server_ =
-      std::make_unique<AuthServer>(std::move(dbauth_client), kNetworkHash);
+  auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client),
+                                              options.network_hash);
 
   auth_db_server_->max_message_size_ = kBulkRpcMaxMessageSize;
   auth_mempool_server_->max_message_size_ = kBulkRpcMaxMessageSize;
@@ -110,11 +126,7 @@ MempoolTestInfra::MempoolTestInfra(Options options)
   // Now have all of the subsystems register themselves with the mempool.
   register_db_with_mempool();
   register_auth_with_mempool();
-  if (options.skip_coordinator_intro) {
-    return;
-  }
-  CHECK_EQ(intro_coordinator()(),
-           CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
+  register_coordinator_with_mempool()();
 
   if (!options.skip_genesis_block) {
     const StorageCostModel cost_model = StorageCostModel::default_cost_model();
@@ -122,7 +134,7 @@ MempoolTestInfra::MempoolTestInfra(Options options)
     auto root_contract = load_stock_genesis_root_contract();
     CHECK_EQ(
         mempool_coord_server_->impl()->schedcoord_load_genesis_configuration(
-            builder.build(kNetworkHash, cost_model, *root_contract,
+            builder.build(options.network_hash, cost_model, *root_contract,
                           stock_network_config()))(),
         DbSchedResult::DbSchedResultOK);
     register_event_with_mempool();
@@ -148,17 +160,25 @@ MempoolTestInfra::MempoolTestInfra(Options options)
   }
 }
 
-x23::Async<CoordinatorRegistrationOutcome>
-MempoolTestInfra::intro_coordinator()
+void
+MempoolTestInfra::prepare_for_failed_construction() noexcept
 {
-  auto client = create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
-                                               mempool_coord_server_.port())()
-                    .value();
-  std::string coord_address =
-      make_address(kAddress, coordinator_sched_server_.port());
-  CoordCard card{.protocol = version::kHogdProtocol(),
-                 .address_for_sched = coord_address.c_str()};
-  co_return co_await client.schedulercoord_intro_coord(card);
+  try {
+    // The scheduler only exists once the coordinator intro completed the
+    // mempool's finish_init(); a rejected intro never registers one.
+    std::shared_ptr<Scheduler> scheduler =
+        mempool_coord_server_.impl()->scheduler();
+    if (scheduler != nullptr) {
+      sched_db_server_.impl()->reset_scheduler()();
+      scheduler->shut_down()();
+    }
+    executor_.shut_down();
+  } catch (const std::exception &e) {
+    error("MempoolTestInfra failed-start cleanup received exception: {}",
+          e.what());
+  } catch (...) {
+    error("MempoolTestInfra failed-start cleanup received exception");
+  }
 }
 
 } // namespace hogd
