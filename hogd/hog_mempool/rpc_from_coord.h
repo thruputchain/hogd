@@ -79,18 +79,24 @@ public:
 
   // Bound on a [schedcoord_lookup_transactions] request.
   //
-  // Both that handler's listeners run with [kBulkRpcMaxMessageSize], and
-  // [TransactionHashBatch] is unbounded on the wire, so without this a request
-  // names as many hashes as it has bytes for -- 524,288 in 16 MiB, 67 million
-  // in a maximal record.  Each one costs a reply slot reserved up front, a
+  // [TransactionHashBatch] is unbounded on the wire and this listener runs
+  // with [kBulkRpcMaxMessageSize], so without a limit a request names as many
+  // hashes as it has bytes for -- 524,288 in 16 MiB, 67 million in a maximal
+  // record.  Each one costs a reply slot reserved up front, a
   // [Scheduler::find_tx] shard-lock acquisition, and, when it resolves,
   // another serialized copy of that transaction in the reply, in a loop that
-  // never suspends.  [schedgateway_lookup_tx] exposes all of that without
-  // authentication.
+  // never suspends.
   //
-  // The limit is well clear of observed use: the only known caller looks
-  // transactions up one at a time.
-  static constexpr size_t kMaxLookupTransactionsBatchSize = 1'024;
+  // A block's worth is the honest ceiling.  Chuckd's repair service answers a
+  // peer that is missing transactions for a proposal by looking those hashes
+  // up here, and it forwards the peer's list without a count check of its own
+  // -- so this is the backstop for that path.  A proposal cannot carry more
+  // than [kMaxBlockSize] transactions, so a request naming more than that is
+  // malformed by construction.
+  //
+  // The public gateway is far more restrictive; see
+  // [MempoolGatewayRpc::kMaxGatewayLookupTxBatchSize].
+  static constexpr size_t kMaxLookupTransactionsBatchSize = kMaxBlockSize;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,

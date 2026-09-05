@@ -175,7 +175,7 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
   EXPECT_FALSE(result[1]);
 }
 
-TEST(Mempool, LookupAtBatchLimitIsServed)
+TEST(Mempool, CoordLookupAtBatchLimitIsServed)
 {
   MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
@@ -187,7 +187,7 @@ TEST(Mempool, LookupAtBatchLimitIsServed)
   EXPECT_EQ(result.size(), hashes.size());
 }
 
-TEST(Mempool, LookupRejectsBatchOverLimit)
+TEST(Mempool, CoordLookupRejectsBatchOverLimit)
 {
   MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
@@ -199,6 +199,34 @@ TEST(Mempool, LookupRejectsBatchOverLimit)
   // ahead of the not-ready path, so this holds before the mempool is ready.
   EXPECT_THROW(coordinator.schedcoord_lookup_transactions(hashes)(),
                std::runtime_error);
+}
+
+TEST(Mempool, GatewayLookupAtBatchLimitIsServed)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  MempoolGatewayRpc gateway(&coordinator);
+  TransactionHashBatch hashes;
+  hashes.resize(MempoolGatewayRpc::kMaxGatewayLookupTxBatchSize);
+
+  auto result = gateway.schedgateway_lookup_tx(hashes)();
+
+  EXPECT_EQ(result.size(), hashes.size());
+}
+
+TEST(Mempool, GatewayLookupRejectsBatchOverLimit)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  MempoolGatewayRpc gateway(&coordinator);
+  TransactionHashBatch hashes;
+  hashes.resize(MempoolGatewayRpc::kMaxGatewayLookupTxBatchSize + 1);
+
+  // The public surface is bounded far below the coordinator's limit: a batch
+  // this size is still well within what chuckd may ask for on its own port.
+  EXPECT_LT(hashes.size(),
+            MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize);
+  EXPECT_THROW(gateway.schedgateway_lookup_tx(hashes)(), std::runtime_error);
 }
 
 TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
