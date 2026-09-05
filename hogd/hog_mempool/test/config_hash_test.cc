@@ -3,11 +3,13 @@
 #include <array>
 
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "storage_cost.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -16,10 +18,14 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
 {
   const StorageCostModel model = StorageCostModel::default_cost_model();
   const NetworkConfig network_config = stock_network_config();
+  // Moves whenever the stock configuration changes, which is the point: this
+  // pins the preimage so a change to it is deliberate. Last moved when
+  // stock_network_config began stating max_bytestring_len, extending the
+  // parameter list to four.
   const ConfigHash expected{
-      0x1b, 0xbb, 0xf1, 0xc1, 0xaa, 0xfb, 0x02, 0x7f, 0x9d, 0xfe, 0x53,
-      0x80, 0xc8, 0xe8, 0x51, 0xc1, 0xb0, 0xd8, 0x9b, 0x3b, 0x28, 0xe5,
-      0x47, 0x67, 0x67, 0xa5, 0x00, 0xed, 0x36, 0x13, 0x33, 0x01,
+      0x53, 0xa8, 0x94, 0x0a, 0x37, 0x53, 0xa4, 0x41, 0xef, 0x9d, 0x17,
+      0xf7, 0xb8, 0xc1, 0x0a, 0xcc, 0xaa, 0x1d, 0xac, 0x02, 0xdb, 0x73,
+      0x9a, 0x7b, 0x79, 0xea, 0x07, 0xf8, 0x9f, 0xe6, 0xb7, 0x7d,
   };
   EXPECT_EQ(compute_config_hash(
                 make_config_hash_preimage(model, network_config)),
@@ -54,7 +60,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   const ConfigHash original = compute_config_hash(
       make_config_hash_preimage(model, stock_network_config()));
 
-  std::array<NetworkConfig, 3> variants;
+  std::array<NetworkConfig, 4> variants;
   variants.fill(stock_network_config());
   set_config_param(variants[0], ConfigParamID::kConfigParamMaxSHA256Buffers,
                    max_sha256_buffers(variants[0]) + 1);
@@ -62,6 +68,8 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
                    max_cross_invoke_depth(variants[1]) + 1);
   set_config_param(variants[2], ConfigParamID::kConfigParamMaxNewContractsPerTx,
                    max_new_contracts_per_tx(variants[2]) + 1);
+  set_config_param(variants[3], ConfigParamID::kConfigParamMaxBytestringLen,
+                   max_bytestring_len(variants[3]) + 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(make_config_hash_preimage(model, variant)),
               original);
@@ -82,9 +90,29 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
   set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx, 8);
   set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 4);
   EXPECT_TRUE(config_params_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 3U);
+  EXPECT_EQ(config.v0().params.size(), 4U);
   EXPECT_EQ(max_new_contracts_per_tx(config), 8U);
   EXPECT_EQ(max_sha256_buffers(config), 4U);
+}
+
+// A configuration predating the bytestring parameter reads as the limit every
+// chain ran under before it existed, so adding the parameter changed no
+// chain's behaviour.
+TEST(ConfigHashTest, ShortListYieldsBytestringDefault)
+{
+  NetworkConfig config;
+  config.v(0);
+  set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx, 4);
+  ASSERT_EQ(config.v0().params.size(), 3U);
+  EXPECT_EQ(max_bytestring_len(config),
+            static_cast<uint32_t>(kDefaultMaxBytestringLen));
+
+  // Stating it extends the prefix by one and takes effect.
+  set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen, 4096);
+  EXPECT_TRUE(config_params_canonical(config.v0()));
+  EXPECT_EQ(config.v0().params.size(), 4U);
+  EXPECT_EQ(max_bytestring_len(config), 4096U);
+  EXPECT_EQ(resolve_config_params(config).max_bytestring_len, 4096U);
 }
 
 // A repeated or misordered list is refused, because it would give one

@@ -1783,7 +1783,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  assert(input_bytestring.size() <= kBytestringMaxLen);
+  assert(input_bytestring.size() <= config_params().max_bytestring_len);
 
   Bytestring new_string;
   new_string.resize_uninitialized(input_bytestring.size());

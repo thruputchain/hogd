@@ -6,6 +6,7 @@
 #include <span>
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -41,7 +42,9 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
-    CHECK(bs->size() <= kBytestringMaxLen);
+    // The ceiling, not the limit in force: an item written when a higher
+    // limit was configured must still be readable after it is lowered.
+    CHECK(bs->size() <= static_cast<size_t>(kBytestringCeilingLen));
     trace_data->outputs.emplace(SyscallBytestringGetOutputs{.bytestring = *bs});
   }
 
@@ -84,7 +87,8 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             std::span<const std::byte> input_bytestring,
                             StorageDeltaFlagSet input_flags)
 {
-  if (input_bytestring.size() > kBytestringMaxLen) {
+  if (input_bytestring.size() >
+      syscall_handler.config_params().max_bytestring_len) {
     co_return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};
