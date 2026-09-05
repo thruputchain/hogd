@@ -95,7 +95,7 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0x86dd48334941726cULL);
+static_assert(kGasScheduleDigest == 0x35d721c30a42777bULL);
 
 // The gas schedules an artifact is allowed to declare. The first entry is what
 // this build meters with and what a current lowerer stamps; any further entry
@@ -122,8 +122,13 @@ struct AcceptedGasSchedule {
   uint64_t digest;
 };
 
-inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
+inline constexpr std::array<AcceptedGasSchedule, 3> kAcceptedGasSchedules = {{
     {.version = kGasTableVersion, .digest = kGasScheduleDigest},
+    // v4 as it stood before NNInt storage access was priced. Every artifact
+    // stamped since v4 shipped declares this, so dropping it would reject
+    // contracts that are already deployed. Remove once the lowerer stamps the
+    // priced schedule.
+    {.version = 4, .digest = 0x86dd48334941726cULL},
     // groundhog-cli <= 0.11.0. Remove once the lowerer stamps v4.
     {.version = 3, .digest = 0x918317c21c46bb60ULL},
 }};
@@ -287,7 +292,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x40d726f77ea60affULL);
+static_assert(kArtifactFormatFingerprint == 0x667ee734990e9a59ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 

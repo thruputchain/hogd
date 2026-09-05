@@ -444,9 +444,11 @@ snapshot cache. Keeping them apart preserves that property and yields two
 independent estimates of the seam, which is how the decomposition below gets
 checked rather than assumed.
 
-The pricing has not changed: `gas_cost_table.h` still prices one syscall family
-(SHA256) and returns zero direct host gas for the rest. What follows is the
-input to changing that.
+This section was written when `gas_cost_table.h` priced one syscall family
+(SHA256) and returned zero direct host gas for the rest, and it describes the
+measurement that changed that. Since then the schedule has gained
+`kVerifySignature*` and `kStorageAccessCost`; the syscalls still returning
+nothing of their own are the ones no measurement has reached yet.
 
 ### The seam
 
@@ -519,6 +521,53 @@ has none yet -- it was taken on the bench host before this existed, and a
 reference with no seam guards checks no seam guards rather than failing. They
 appear the next time the bench pool regenerates it, which is the same
 `mode=reference` run that would be needed to make the ratios portable anyway.
+
+### Gating the syscall costs themselves
+
+The section above gates the *seam* the calibration harness measures. The
+production syscall path is gated separately, by
+`scripts/rv32_syscall_report.py --check` against
+`hogd/hog_exec/runtime/rv32/gas_calibration/syscall_reference.txt`, and the
+nightly fails on it.
+
+**What it catches that nothing else did.** The gas schedule's digest stops a
+constant being *edited* without the change being deliberate. It says nothing
+about the engine drifting away from the constants. A syscall that doubles in
+cost while every constant sits still leaves contracts underpaying by half, and
+before this gate existed no check in the repository looked at it -- the nightly
+measured the syscalls, filed the numbers, and stayed green whatever they said.
+
+**How it is built**, deliberately mirroring the opcode reference so there is one
+idea to understand rather than two:
+
+- Costs are **ratios to a crossing baseline measured in the same run**, so the
+  file survives the bench host changing speed. The baseline is the median of the
+  syscalls that only cross the boundary -- membership decided by measurement,
+  everything within 1.5x of the cheapest few -- rather than one chosen syscall,
+  because one row carrying every ratio is one row whose noise becomes the gate.
+  The anchor is a median of the three cheapest rather than the single cheapest,
+  so one anomalously fast row cannot drag the anchor below the cluster it is
+  supposed to be.
+- The tolerance is the **same 2x**. An alarm, not a budget: a gate that fires on
+  ordinary drift gets muted and then catches nothing.
+- **A guard that was not measured is a failure**, not a pass. A benchmark that
+  died halfway cannot report green by producing no rows to check.
+- The **engine fingerprint** is checked first, by equality. If it moved, every
+  ratio below describes a different interpreter.
+
+**What is deliberately not guarded.** `cold/` rows, because they are bounded by
+the benchmark's in-process mock rather than by hogd -- gating them would gate
+the harness. Rows whose own repetitions disagree by more than 5%, which cannot
+tell a regression from their own noise. And sweep cells where the frames-only
+baseline dominates the subtraction: the depth-254 K=1 cell isolates one ~260 ns
+touch by subtracting a 30 microsecond baseline, so the keys are 4% of what was
+timed and its ratio is mostly the error in that subtraction. A cell must carry
+at least 10% of its own measurement to be guarded, which excludes exactly that
+one.
+
+Regenerate on the bench host with the calibration workflow's `mode=reference`,
+which prints the block. Regenerating it to make a failure go away hides exactly
+what it is for.
 
 ### The other half, measured
 
@@ -1144,7 +1193,56 @@ The cold row is what it says: 42.2 µs against the in-process mock, 266x a warm
 lookup. It is on the record so the size of what the schedule declines to price
 is known, not as a candidate for the table.
 
-**What the run proposes, and what to take.** The report prints
+**What was adopted.** `kStorageAccessCost = 150`, charged by
+`NonnegativeIntGet` and `NonnegativeIntSetAdd` alike on every call, which with
+the shared base puts an NNInt syscall at **200 gas**. It replaces a schedule
+that charged these calls nothing of their own beyond the crossing -- 50 gas
+against a measured 178 ns.
+
+The constant folds together three separately measured costs and charges all of
+them every time:
+
+| | measured, at 4096 keys in the frame |
+|---|---:|
+| the access itself | 47 gas read, 55 write |
+| the first touch | 93 gas read, 34 write |
+| the commit, per staged item | 32 gas |
+| **read total** | **140** |
+| **write total** | **121** |
+
+**Why charge the first touch on every access rather than only the first.** It
+is the trade `kSHA256StreamCost` already makes, for the reason its comment
+gives: the alternative makes the price depend on whether the frame happened to
+hold the key already, which is a thing about the frame's state rather than
+about the call. The flat charge keeps every cost in the table a function of its
+arguments, and keeps a contract's bill independent of its own execution
+history -- which is what makes gas estimable before running it.
+
+What it costs is overbilling a repeat touch. Measured against a repeat of the
+same key, a first touch is 1.64x at one key in the frame, 1.60x at 256 and
+1.96x at 4096. Under 2x across everything realistic, which is the direction
+this schedule already rounds and far inside the spread it replaced.
+
+What it buys is that neither of the two mechanisms the alternative needs has to
+exist. The syscall cannot see whether a key was a first touch -- only
+`get_item_view` knows, and it returns a view without saying whether it created
+one -- so pricing it honestly means threading that signal out through every
+storage syscall, in consensus-critical code, forever.
+
+**Why prepaying the commit is what lets it be charged at all.** The merge runs
+in `InvocationFrameStack::finish_frame`, where there is no gas meter and no
+syscall executing; `invocation_frame.h` has no gas concept whatsoever. A
+per-item constant in the table would have changed no contract's bill. Charging
+it at the write instead overbills a frame that later fails and never merges,
+which is the safe direction -- the staging work happened either way.
+
+**What it still does not cover** is a frame holding far more than a few
+thousand keys: the first touch rises to ~234 gas at 65536 and ~529 at 262144 as
+the frame's map outgrows cache. That is the same policy question the scaling
+section below sets out, and folding does not change it. What bounds it is the
+gas a transaction must burn to reach those key counts.
+
+**What the run proposes for the rest, and what to take.** The report prints
 
 ```
 kStorageFirstTouchCost = 532;  // surcharge over a warm NNIntGet (158.4 ns)
@@ -1179,12 +1277,25 @@ in `modified_items_` on a **read** miss as well as a write, so a limit on keys
 *modified* would not bound the map -- a read-only transaction can still walk it
 into the tail. The bound has to be on keys *touched*.
 
-Adopting 100 is a gas-schedule change and not a benchmark change: the constant
-is folded into `rv32::kGasScheduleDigest` and pinned in committed artifacts, so
-it lands as a coordinated update rather than with this measurement.
+A separate first-touch constant is not what was adopted -- `kStorageAccessCost`
+folds this cost in and charges it on every access, for the reasons above. The
+figures here are what that fold was sized against, and what a later schedule
+would read if the first touch were ever priced on its own.
+
+Any such change is a gas-schedule change rather than a benchmark change: the
+constants are folded into `rv32::kGasScheduleDigest` and pinned in committed
+artifacts. `kAcceptedGasSchedules` in `artifact.h` is what keeps
+already-deployed contracts working across one: the old digest stays in that
+list as a transitional entry until the lowerer stamping the new one has rolled
+out. `kStorageAccessCost` did exactly that -- it added an entry for v4 as it
+stood before storage access was priced.
 
 These are charges *on top of* the syscall table, which prices `NNIntGet` at
-100 gas (the 50-gas shared crossing base plus 50 of its own). Nothing is
+200 gas since `kStorageAccessCost` landed -- the 50-gas shared crossing base
+plus 150 of its own, that 150 already folding in the first touch and the
+commit. (An earlier draft of this section said 100 gas, "the base
+plus 50 of its own". That was wrong twice over: the call charged only the base
+at the time, nothing of its own, and it charges 125 now.) Nothing is
 adopted here: the schedule is unchanged, and these are the input to that
 decision.
 
@@ -1222,10 +1333,10 @@ So pricing at the top of the sweep is not attractive: it would charge an
 ordinary transaction touching a handful of keys 3-4x what it costs. Pricing at
 the knee instead leaves a transaction touching hundreds of thousands of keys
 underpaying, and what bounds that is the gas budget it has to burn getting
-there -- at the 200 gas a first touch costs under the settled constant (the
-syscall's 100 plus a 100 surcharge), 262144 of them is about 52M gas before the
-contract does anything else. Which point to price at is a policy call about
-that budget rather than something the measurement settles.
+there -- at the 200 gas every access costs under the settled constant, 262144
+of them is about 52M gas before the contract does anything else. Which point to
+price at is a policy call about that budget rather than something the
+measurement settles.
 
 **Two caveats on the table above.** The knee's location is a property of the
 host's cache, which is why both hosts are shown rather than the pool alone:

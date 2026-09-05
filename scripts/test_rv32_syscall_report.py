@@ -8,6 +8,8 @@ what went in -- and that the rows the schedule must not price stay out of it.
 """
 
 import io
+import tempfile
+import os
 import json
 import unittest
 from contextlib import redirect_stdout
@@ -310,6 +312,156 @@ class StorageScheduleTest(unittest.TestCase):
         with redirect_stdout(out):
             report.print_table(run)
         self.assertIn("<- NOT FLAT", out.getvalue())
+
+
+def guardable_run(**kwargs):
+    """A run the gate can actually guard: several cheap syscalls, and a
+    stddev for every row.
+
+    The gate needs both. Ratios are relative to the median of the syscalls
+    that only cross the boundary, which needs at least three of them, and a
+    row with no stddev cannot be shown to reproduce well enough to guard.
+    """
+    run = synthetic_run(**kwargs)
+    # Three more crossing-only syscalls, close to GetBlockHeight's 70 ns, so a
+    # median over them means something.
+    for name, cost in (("GetCalldataLen", 72.0), ("GetCurrentAddress", 68.0),
+                       ("GetMsgSender", 71.0)):
+        run["benchmarks"].append(row(f"entry/{name}", cost, gas=51))
+    for entry in list(run["benchmarks"]):
+        if entry.get("aggregate_name") != "median":
+            continue
+        run["benchmarks"].append(
+            row(entry["name"], entry["real_time"] * 0.002,
+                aggregate="stddev"))
+    run["context"] = {"engine_fingerprint": "abc123", "hogd_host": "test"}
+    return run
+
+
+def reference_text(run):
+    out = io.StringIO()
+    with redirect_stdout(out):
+        report.emit_reference(run)
+    return out.getvalue()
+
+
+def write_reference(case, text):
+    path = os.path.join(case.tmp, "syscall_reference.txt")
+    with open(path, "w") as handle:
+        handle.write(text)
+    return path
+
+
+class GateTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.tmp = self.dir.name
+        self.addCleanup(self.dir.cleanup)
+
+    def check(self, run, path):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            status = report.check_against_reference(run, path)
+        return status, out.getvalue()
+
+    def test_a_run_passes_its_own_reference(self):
+        run = guardable_run()
+        path = write_reference(self, reference_text(run))
+        status, text = self.check(run, path)
+        self.assertEqual(status, 0)
+        self.assertIn("guard(s) hold", text)
+
+    def test_reference_guards_both_syscalls_and_storage(self):
+        text = reference_text(guardable_run())
+        self.assertIn("guard syscall/NNIntGet ", text)
+        self.assertIn("guard storage/NNIntGetFirstTouch/1/4096 ", text)
+        # The cold row is bounded by the benchmark's own mock, so gating it
+        # would gate the harness rather than hogd.
+        self.assertNotIn("cold", text)
+
+    def test_a_doubled_syscall_fails(self):
+        path = write_reference(self, reference_text(guardable_run()))
+        run = guardable_run()
+        for entry in run["benchmarks"]:
+            if entry["name"] == "entry/NNIntGet":
+                entry["real_time"] *= 2.5
+        status, text = self.check(run, path)
+        self.assertEqual(status, 1)
+        self.assertIn("syscall/NNIntGet", text)
+
+    def test_a_small_rise_does_not_fire(self):
+        """The tolerance is an alarm, not a budget: 20% must not fail."""
+        path = write_reference(self, reference_text(guardable_run()))
+        run = guardable_run()
+        for entry in run["benchmarks"]:
+            if entry["name"] == "entry/NNIntGet":
+                entry["real_time"] *= 1.2
+        status, _ = self.check(run, path)
+        self.assertEqual(status, 0)
+
+    def test_a_missing_row_fails_rather_than_passing(self):
+        """A guard that was not measured was not checked."""
+        path = write_reference(self, reference_text(guardable_run()))
+        run = guardable_run()
+        run["benchmarks"] = [e for e in run["benchmarks"]
+                             if e["name"] != "entry/NNIntGet"]
+        status, text = self.check(run, path)
+        self.assertEqual(status, 1)
+        self.assertIn("not measured in this run", text)
+
+    def test_a_noisy_row_is_not_guarded(self):
+        run = guardable_run()
+        for entry in run["benchmarks"]:
+            if (entry["name"] == "entry/NNIntGet"
+                    and entry.get("aggregate_name") == "stddev"):
+                entry["real_time"] *= 100
+        self.assertNotIn("guard syscall/NNIntGet ", reference_text(run))
+
+    def test_an_ill_conditioned_cell_is_not_guarded(self):
+        """A cell whose frames dominate its own measurement.
+
+        At depth 254 with one key the per-key cost is the gap between two
+        numbers that are almost equal, so its error is whatever theirs is,
+        magnified. Guarding it gates on that subtraction rather than on the
+        touch.
+        """
+        text = reference_text(guardable_run())
+        self.assertNotIn("guard storage/NNIntGetFirstTouch/254/1 ", text)
+        self.assertIn("guard storage/NNIntGetFirstTouch/254/4096 ", text)
+
+    def test_a_moved_engine_fingerprint_fails(self):
+        path = write_reference(self, reference_text(guardable_run()))
+        run = guardable_run()
+        run["context"]["engine_fingerprint"] = "moved99"
+        status, text = self.check(run, path)
+        self.assertEqual(status, 1)
+        self.assertIn("engine fingerprint", text)
+
+    def test_too_few_syscalls_gives_no_baseline(self):
+        """One row carrying every ratio is one row whose noise is the gate."""
+        run = guardable_run()
+        keep = ("entry/GetBlockHeight", "entry/NNIntGet")
+        run["benchmarks"] = [e for e in run["benchmarks"]
+                             if not e["name"].startswith("entry/")
+                             or e["name"] in keep]
+        baseline, guards = report.guardable(report.rows(run),
+                                            report.stddevs(run))
+        self.assertIsNone(baseline)
+        self.assertEqual(guards, {})
+
+    def test_an_anomalously_cheap_row_does_not_move_the_baseline(self):
+        """The anchor is a median of the cheapest few, not the single
+        cheapest, so one fast outlier cannot exclude the crossing cluster."""
+        run = guardable_run()
+        with_outlier = guardable_run()
+        for entry in with_outlier["benchmarks"]:
+            if entry["name"] == "entry/NNIntGetNoLoad":
+                entry["real_time"] = 1.0
+        plain, _ = report.guardable(report.rows(run), report.stddevs(run))
+        skewed, guards = report.guardable(report.rows(with_outlier),
+                                          report.stddevs(with_outlier))
+        self.assertEqual(plain, skewed)
+        self.assertIn("syscall/NNIntGet", guards)
 
 
 if __name__ == "__main__":
