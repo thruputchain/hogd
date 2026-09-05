@@ -1,12 +1,15 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "db_sched.hh"
@@ -1025,7 +1028,9 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
 TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  const ContractAddress &other_account = MempoolTestInfra::kAccountAddresses[1];
   fib_client_t fib_client(account);
+  fib_client_t other_fib_client(other_account);
 
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
@@ -1034,65 +1039,71 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
   constexpr uint32_t kFibonacciN = 10;
   const BlockHeight start_block = scheduler->current_block();
 
-  auto make_tx = [&](BlockHeight expiry, uint64_t nonce) {
+  auto make_tx = [&](fib_client_t &client, BlockHeight expiry, uint64_t nonce) {
     return SignedTransaction{
         .tx = Transaction{
-            .invocation = fib_client.make_invocation<kProgramName>(
+            .invocation = client.make_invocation<kProgramName>(
                 /*gas_amount=*/200, kFibonacciN),
             .uniquifier = {.block_expiry_height = expiry, .nonce = nonce},
             .contracts_to_deploy = {},
         }};
   };
+  // Finds a tx from [client] whose cache bucket lock is none of [taken].
+  auto make_tx_outside_buckets =
+      [&](fib_client_t &client, BlockHeight expiry,
+          std::initializer_list<const std::mutex *> taken)
+      -> std::optional<std::pair<SignedTransaction, TransactionHash>> {
+    for (uint64_t nonce = 1; nonce <= 64; nonce++) {
+      SignedTransaction candidate = make_tx(client, expiry, nonce);
+      const TransactionHash hash = sha256(candidate.tx);
+      const std::mutex *bucket = &scheduler->tx_cache_bucket_mutex(hash);
+      if (std::ranges::find(taken, bucket) == taken.end()) {
+        return std::pair{std::move(candidate), hash};
+      }
+    }
+    return std::nullopt;
+  };
 
   // [blocker] has the lower expiry height, so the sweep removes it before
   // [victim]. The two need distinct cache buckets so that each can be pinned
   // on its own.
-  const SignedTransaction blocker = make_tx(start_block + 1, /*nonce=*/0);
+  const SignedTransaction blocker = make_tx(fib_client, start_block + 1,
+                                            /*nonce=*/0);
   const TransactionHash blocker_hash = sha256(blocker.tx);
   std::mutex &blocker_bucket = scheduler->tx_cache_bucket_mutex(blocker_hash);
-
-  std::optional<SignedTransaction> victim;
-  TransactionHash victim_hash{};
-  for (uint64_t nonce = 1; nonce <= 64 && !victim; nonce++) {
-    SignedTransaction candidate = make_tx(start_block + 2, nonce);
-    const TransactionHash candidate_hash = sha256(candidate.tx);
-    if (&scheduler->tx_cache_bucket_mutex(candidate_hash) != &blocker_bucket) {
-      victim = std::move(candidate);
-      victim_hash = candidate_hash;
-    }
-  }
-  ASSERT_TRUE(victim.has_value())
-      << "could not find a tx in a different cache bucket than [blocker]";
+  const auto victim =
+      make_tx_outside_buckets(fib_client, start_block + 2, {&blocker_bucket});
+  ASSERT_TRUE(victim.has_value());
+  const TransactionHash &victim_hash = victim->second;
   std::mutex &victim_bucket = scheduler->tx_cache_bucket_mutex(victim_hash);
+  // [probe] rides along in the resubmit batch ahead of [victim]. It targets an
+  // account the scheduler has not cached yet, so [add_txs()] must finish its
+  // hog age refresh (and release [global_lock_]) before [add_txs_helper()]
+  // inserts [probe] into the cache; seeing [probe] via [find_tx()] therefore
+  // tells the test the resubmit has reached the pinned lookup of [victim].
+  // [probe] must not share a bucket with either pin or it would park too.
+  const auto probe = make_tx_outside_buckets(other_fib_client, start_block + 2,
+                                             {&blocker_bucket, &victim_bucket});
+  ASSERT_TRUE(probe.has_value());
+  const TransactionHash &probe_hash = probe->second;
 
-  scheduler->add_txs({blocker, *victim})();
+  scheduler->add_txs({blocker, victim->first})();
   ASSERT_EQ(scheduler->size(), 2);
   ASSERT_EQ(scheduler->tx_cache_size(), 2UL);
   ASSERT_NE(scheduler->find_tx(victim_hash), nullptr);
-  // Move the chain past both expiry heights so the next sweep drops them.
+  // Move the chain past every expiry height so the next sweep drops them all.
   scheduler->set_current_block(start_block + 3);
-
-  // [add_txs()] refreshes the cached hog age from the db before it runs
-  // [add_txs_helper()]; that refresh is its last touch of the account lock
-  // before the runqueue insert. Stamp a sentinel on the cached age so the test
-  // can tell when the resubmit is past that point.
-  constexpr BlockHeight kSentinelAge = 0x5eed;
-  {
-    auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
-    hog_age->average_ages[kHogAgeGroupReceived] = kSentinelAge;
-  }
 
   std::unique_lock<std::mutex> pin_resubmit(victim_bucket);
   std::unique_lock<std::mutex> pin_sweep(blocker_bucket);
 
   // Resubmit the identical bytes of the expired [victim], as the gateway path
-  // does. The resubmit refreshes the hog age, then parks on [victim_bucket]
-  // inside [add_txs_helper()].
-  std::thread resubmit([&] { scheduler->add_txs({*victim})(); });
-  const bool resubmit_parked = wait_until([&] {
-    auto [hog_age, lock] = scheduler->get_cached_hog_age(account);
-    return hog_age->average_ages[kHogAgeGroupReceived] != kSentinelAge;
-  });
+  // does. The resubmit caches [probe], then parks on [victim_bucket] inside
+  // [add_txs_helper()].
+  std::thread resubmit(
+      [&] { scheduler->add_txs({probe->first, victim->first})(); });
+  const bool resubmit_parked =
+      wait_until([&] { return scheduler->find_tx(probe_hash) != nullptr; });
 
   // Start the nomination sweep. It takes the account lock, finds both txs
   // expired, and parks on [blocker_bucket] while still holding the account
@@ -1128,7 +1139,7 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
   sweep.join();
   resubmit.join();
 
-  ASSERT_TRUE(resubmit_parked) << "resubmit never refreshed the hog age";
+  ASSERT_TRUE(resubmit_parked) << "resubmit never cached [probe]";
   ASSERT_TRUE(sweep_parked) << "schedule() never took the account lock";
   EXPECT_TRUE(scheduled_hashes.empty());
 
@@ -1136,6 +1147,7 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
   TransactionHashBatch runqueue_hashes;
   SignedTransactionBatch runqueue_txs;
   scheduler->get_txs_for_account(account, runqueue_hashes, runqueue_txs);
+  scheduler->get_txs_for_account(other_account, runqueue_hashes, runqueue_txs);
   for (const TransactionHash &tx_hash : runqueue_hashes) {
     EXPECT_NE(scheduler->find_tx(tx_hash), nullptr)
         << "tx is on the account runqueue but missing from the tx cache; the "
