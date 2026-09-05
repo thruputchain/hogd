@@ -77,6 +77,21 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
+  // Bound on a [schedcoord_lookup_transactions] request.
+  //
+  // Both that handler's listeners run with [kBulkRpcMaxMessageSize], and
+  // [TransactionHashBatch] is unbounded on the wire, so without this a request
+  // names as many hashes as it has bytes for -- 524,288 in 16 MiB, 67 million
+  // in a maximal record.  Each one costs a reply slot reserved up front, a
+  // [Scheduler::find_tx] shard-lock acquisition, and, when it resolves,
+  // another serialized copy of that transaction in the reply, in a loop that
+  // never suspends.  [schedgateway_lookup_tx] exposes all of that without
+  // authentication.
+  //
+  // The limit is well clear of observed use: the only known caller looks
+  // transactions up one at a time.
+  static constexpr size_t kMaxLookupTransactionsBatchSize = 1'024;
+
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
                         size_t num_exec_shards = 1)
@@ -310,6 +325,18 @@ public:
   x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
+    // Checked before [ready()], whose reply is also sized to the request.
+    //
+    // An over-limit request is refused with an RPC error rather than a short
+    // or empty reply: the reply is positional -- one (possibly null) slot per
+    // requested hash -- so any well-formed vector returned here would be
+    // indistinguishable from "none of these transactions are in the mempool".
+    if (tx_hashes.size() > kMaxLookupTransactionsBatchSize) {
+      throw std::runtime_error(std::format(
+          "schedcoord_lookup_transactions: {} hashes requested, limit is {}",
+          tx_hashes.size(), kMaxLookupTransactionsBatchSize));
+    }
+
     x23::XdrVec<XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
       ret.resize(tx_hashes.size());

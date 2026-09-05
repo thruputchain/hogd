@@ -175,6 +175,32 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
   EXPECT_FALSE(result[1]);
 }
 
+TEST(Mempool, LookupAtBatchLimitIsServed)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  TransactionHashBatch hashes;
+  hashes.resize(MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize);
+
+  auto result = coordinator.schedcoord_lookup_transactions(hashes)();
+
+  EXPECT_EQ(result.size(), hashes.size());
+}
+
+TEST(Mempool, LookupRejectsBatchOverLimit)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  TransactionHashBatch hashes;
+  hashes.resize(MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize + 1);
+
+  // Refused outright rather than answered short: a caller cannot mistake this
+  // for "none of these transactions are in the mempool".  The limit is checked
+  // ahead of the not-ready path, so this holds before the mempool is ready.
+  EXPECT_THROW(coordinator.schedcoord_lookup_transactions(hashes)(),
+               std::runtime_error);
+}
+
 TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
 {
   Registration &registration = Registration::registration();
