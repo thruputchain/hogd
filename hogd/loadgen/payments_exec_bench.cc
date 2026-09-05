@@ -1,35 +1,30 @@
 #include <benchmark/benchmark.h>
 
-#include <cstdint>
 #include <memory>
 #include <stdexcept>
 
 #include "exec_result.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
 #include "transaction.hh"
-#include "types.hh"
 
 // In-process benchmark of the contract runtimes on the erc20 + simple_wallet
 // payments workload. Unlike payments_bench (which drives a distributed
 // bench_server / coordinator over RPC), this runs entirely in one process
-// against an in-memory hogdb via NativeContractTestFramework -- nothing to
+// against an in-memory hog_db via NativeContractTestFramework -- nothing to
 // stand up, just run the binary locally.
 //
 // Timing/averaging/stats are handled by google benchmark. The timed body
 // executes one work transaction via root_invoke + abort: abort rolls back the
 // staged writes and discards the transfer's events, so each iteration runs
 // against the same post-init state with no DB write-back and the replay cache
-// untouched -- the measured time reflects interpreter + syscall cost. Both the
-// wasm and rv32 builds are registered (state.range(0)) so the runtimes can be
-// compared, and gas/tx is reported as a counter (the rv32 interpreter meters
-// one gas per instruction, so its figure is higher than wasm's coarser fuel
-// metering -- an accounting-scale difference).
+// untouched -- the measured time reflects interpreter + syscall cost. gas/tx
+// is reported as a counter.
 
 namespace hogd {
 namespace {
@@ -38,22 +33,19 @@ class PaymentsExecBench : public benchmark::Fixture {
 public:
   void SetUp(benchmark::State &state) override
   {
-    const bool use_rv32 = state.range(0) != 0;
-    const auto num_accounts = static_cast<uint32_t>(state.range(1));
+    const auto num_accounts = static_cast<uint32_t>(state.range(0));
     // A pool of distinct work txs to cycle through; abort keeps them reusable.
     constexpr uint64_t kPoolTxs = 1000;
 
     try {
       framework_ = std::make_unique<NativeContractTestFramework>(
           /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB, /*empty_genesis=*/false);
-      context_ = make_hogexec_context();
+          TestDB::kHogDb, /*empty_genesis=*/false);
+      context_ = make_hog_exec_context();
 
-      ERC20ExperimentState exp(
-          ERC20PaymentsConfig{
-              .num_addresses = num_accounts,
-          },
-          use_rv32);
+      ERC20ExperimentState exp(ERC20PaymentsConfig{
+          .num_addresses = num_accounts,
+      });
 
       auto init_result = exp.generate_experiment()();
       if (!init_result.has_value()) {
@@ -61,14 +53,14 @@ public:
       }
       framework_->run_genesis_initialization(
           init_result.value().genesis_configuration);
-      for (auto const &init_block : init_result.value().initialization_txs) {
+      auto run_initialization_block = [&](auto const &init_block) {
         for (auto const &tx : init_block) {
           auto handler =
               framework_->make_new_system_call_handler(tx.tx, *context_);
-          if (!handler.root_invoke().is_root_success()) {
+          if (!handler.root_invoke()().is_root_success()) {
             throw std::runtime_error("initialization transaction failed");
           }
-          if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+          if (handler.try_commit_transaction()() != ExecResult::ExecResultOK) {
             throw std::runtime_error("failed to commit init transaction");
           }
           // mint/initialize emit events; drain them so the committed handler
@@ -81,13 +73,18 @@ public:
           }
         }
         framework_->advance_block();
+      };
+      run_initialization_block(init_result.value().genesis_ceremony_txs);
+      for (auto const &init_block : init_result.value().initialization_txs) {
+        run_initialization_block(init_block);
       }
 
       auto extend_result = exp.extend_experiment(kPoolTxs, 1'000'000)();
       if (!extend_result.has_value()) {
         throw std::runtime_error("failed to extend erc20 experiment");
       }
-      parallel_batch_to_t(extend_result.value().work_txs, work_txs_)();
+      parallel_batch_to_t(extend_result.value().work_txs, work_txs_,
+                          kNoBatchSizeLimit)();
       if (work_txs_.empty()) {
         throw std::runtime_error("no work transactions generated");
       }
@@ -120,13 +117,13 @@ BENCHMARK_DEFINE_F(PaymentsExecBench, transfer)(benchmark::State &state)
   for (auto _ : state) {
     auto const &tx = work_txs_[i++ % work_txs_.size()];
     auto handler = framework_->make_new_system_call_handler(tx.tx, *context_);
-    auto invoke_result = handler.root_invoke();
+    auto invoke_result = handler.root_invoke()();
     if (!invoke_result.is_root_success()) {
       state.SkipWithError("work transaction failed");
       break;
     }
     gas_per_tx = invoke_result.gas_consumed_;
-    [[maybe_unused]] auto aborted = handler.abort_transaction();
+    [[maybe_unused]] auto aborted = handler.abort_transaction()();
   }
 
   state.SetItemsProcessed(state.iterations());
@@ -136,14 +133,11 @@ BENCHMARK_DEFINE_F(PaymentsExecBench, transfer)(benchmark::State &state)
                          benchmark::Counter::kIsRate);
 }
 
-// {use_rv32, num_accounts}. Both runtimes at a couple of account counts so the
-// rv32-vs-wasm gap (and how it moves with contention) is visible.
+// num_accounts: a couple of account counts so contention effects are visible.
 BENCHMARK_REGISTER_F(PaymentsExecBench, transfer)
-    ->Args({0, 10})
-    ->Args({1, 10})
-    ->Args({0, 2})
-    ->Args({1, 2})
-    ->ArgNames({"rv32", "accounts"})
+    ->Args({10})
+    ->Args({2})
+    ->ArgNames({"accounts"})
     ->Unit(benchmark::kMicrosecond)
     ->UseRealTime();
 

@@ -1,7 +1,4 @@
 add_subdirectory(crypto)
-add_subdirectory(wasmi)
-add_subdirectory(wasmtime)
-add_subdirectory(wasm_meter)
 
 # The version check enforces that the toolchain we configured matches
 # the pin in rust-toolchain.toml. RUST_TSAN intentionally bypasses that
@@ -38,16 +35,6 @@ message(STATUS "Rust target CPU: ${RUST_BUILD_CPU}")
 
 # Build list of features to enable
 set(FEATURES_TO_ENABLE "")
-
-# Enable debug_logging if build type is Debug
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  list(APPEND FEATURES_TO_ENABLE debug_logging)
-endif()
-
-# Enable wasm_debug if WASM_DEBUG_BACKTRACES is set
-if(WASM_DEBUG_BACKTRACES)
-  list(APPEND FEATURES_TO_ENABLE wasm_debug)
-endif()
 
 # Apply features if any are enabled
 if(FEATURES_TO_ENABLE)
@@ -86,16 +73,14 @@ if(RUST_TSAN)
     # TSAN false-flags any Rust-internal synchronization.
     #
     # --cfg=rustix_use_libc forces the `rustix` crate onto its libc backend
-    # instead of the Linux `linux_raw` backend it picks by default. wasmtime
-    # mmaps/munmaps compiled-code objects through rustix; with the raw backend
-    # those are inline `syscall` instructions that bypass TSAN's libc munmap
-    # interceptor, so freeing a code mmap never clears its shadow. When the
-    # kernel later hands the same virtual address to another worker thread's
-    # fresh compilation, TSAN reports a stale write/write race in
-    # finish_object (no happens-before across the unseen munmap/mmap reuse) —
-    # a false positive with no real shared memory. Routing through libc lets
-    # the interceptor clear shadow on free, eliminating the false positive
-    # while preserving detection of genuine races on that path.
+    # instead of the Linux `linux_raw` backend it picks by default. This was
+    # added for wasmtime, which mmap'd/munmap'd compiled-code objects through
+    # rustix: with the raw backend those are inline `syscall` instructions that
+    # bypass TSAN's libc munmap interceptor, so freeing a code mmap never
+    # cleared its shadow and TSAN reported a stale write/write race when the
+    # kernel reused the address. Neither wasmtime nor rustix is in the
+    # workspace dependency graph any more, so the cfg is currently inert; it is
+    # kept as a no-op guard in case a future dependency pulls rustix back in.
     message(STATUS "RUST_TSAN=ON: enabling Rust ThreadSanitizer instrumentation")
     corrosion_add_target_rustflags(unified_lib
         "-Zsanitizer=thread"

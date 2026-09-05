@@ -715,7 +715,7 @@ public:
   Awaiter wait() { return Awaiter{waiters_.take()}; }
 
   // Suspend the coroutine until someone calls notify_all(), except
-  // that if the internal value not old, then don't suspend.
+  // that if the internal value is not old, then don't suspend.
   Awaiter wait(const T &old)
   {
     auto ptr = waiters_.take();

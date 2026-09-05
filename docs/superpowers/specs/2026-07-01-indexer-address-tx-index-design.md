@@ -170,7 +170,7 @@ by its root invoked address, independent of whether it emitted events.
 ## Testing
 
 - **Regression for #2842**: ingest an eventless root invocation targeting `A`
-  via `indexer_event_process_events`; assert `get_transactions_by_address(A)`
+  via `ingest_legacy_events`; assert `get_transactions_by_address(A)`
   returns a ref with that `tx_hash`, and that `get_transaction_info(tx_hash)`
   then hydrates the full body (the exact case the old filter dropped). Reuse the
   PoC from the issue, retargeted to the new RPC + hydration step.

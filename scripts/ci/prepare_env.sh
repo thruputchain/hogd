@@ -16,8 +16,11 @@ else
   cargo install --locked --force --version "${CBINDGEN_VERSION}" cbindgen
 fi
 
-echo 'gcc version check'
-gcc --version
+echo 'gcc-15 version check'
+gcc-15 --version
+
+echo 'g++-15 version check'
+g++-15 --version
 
 echo 'clang version check'
 clang --version
@@ -34,5 +37,5 @@ cargo --version
 echo 'cargo fetch'
 CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
 
-echo 'set gcc in check'
-echo "GCC_CC=gcc GCC_CXX=g++" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+echo 'set gcc-15 in check'
+echo "GCC_CC=gcc-15 GCC_CXX=g++-15" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh

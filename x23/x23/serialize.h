@@ -544,10 +544,11 @@ public:
   BufViewEnd(BufView b) noexcept : BufView(b), bufend_{data() + size()} {}
   BufViewEnd(BufView b, const uint8_t *be) noexcept : BufView(b), bufend_(be) {}
   BufViewEnd(BufView b, const Buf &container) noexcept
-    : BufView(b), bufend_(container.data() + container.capacity())
+    : BufView(b),
+      bufend_(b.data() ? container.data() + container.capacity() : nullptr)
   {
 #ifndef NDEBUG
-    if (!empty()) {
+    if (data()) {
       x23assert(data() >= container.data());
       x23assert(data() + size() <= container.data() + container.size());
     }

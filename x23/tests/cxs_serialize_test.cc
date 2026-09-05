@@ -162,6 +162,27 @@ TEST(CxsSerialize, UnionRoundTrip)
   check_roundtrip(value);
 }
 
+TEST(CxsSerialize, ConstexprUnion)
+{
+  constexpr auto value = [] {
+    sunion_no_void out(senum::SE_POSITIVE);
+    out.pos() = 123;
+    return out;
+  }();
+  constexpr auto copy = value;
+  constexpr auto assigned = [copy] {
+    sunion_no_void out(senum::SE_NEGATIVE);
+    out = copy;
+    return out;
+  }();
+  static_assert(copy == value);
+  static_assert((copy <=> value) == 0);
+  static_assert(assigned.pos() == 123);
+
+  constexpr auto serialized = serialize_cxs_array<cxs_size(assigned)>(assigned);
+  static_assert(serialized == std::array<uint8_t, 3>{1, 0x3f, 123});
+}
+
 TEST(CxsSerialize, VecRoundTrip)
 {
   using test_vec = Bytestring;

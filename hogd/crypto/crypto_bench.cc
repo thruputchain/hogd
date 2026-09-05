@@ -34,21 +34,24 @@ bm_sha256(benchmark::State &state)
 {
   bench_func(state, [](std::span<std::byte> buf) { return sha256(buf); });
 }
-BENCHMARK(bm_sha256)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_sha256)->RangeMultiplier(2)->Range(kMin, kMax);
 
 void
 bm_blake3(benchmark::State &state)
 {
   bench_func(state, [](std::span<std::byte> buf) { return blake3(buf); });
 }
-BENCHMARK(bm_blake3)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_blake3)->RangeMultiplier(2)->Range(kMin, kMax);
 
 void
 bm_crc32c(benchmark::State &state)
 {
   bench_func(state, [](std::span<std::byte> buf) { return crc32c(buf); });
 }
-BENCHMARK(bm_crc32c)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_crc32c)->RangeMultiplier(2)->Range(kMin, kMax);
 
 void
 bm_siphash24(benchmark::State &state)
@@ -57,7 +60,8 @@ bm_siphash24(benchmark::State &state)
     return SipHash24::get_default()(buf);
   });
 }
-BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(kMin, kMax);
 
 void
 bm_ed25519_sign(benchmark::State &state)
@@ -69,7 +73,8 @@ bm_ed25519_sign(benchmark::State &state)
     // NOLINTEND(bugprone-unchecked-optional-access)
   });
 }
-BENCHMARK(bm_ed25519_sign)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_ed25519_sign)->RangeMultiplier(2)->Range(kMin, kMax);
 
 void
 bm_ed25519_sign_and_verify(benchmark::State &state)
@@ -82,9 +87,8 @@ bm_ed25519_sign_and_verify(benchmark::State &state)
     return ed25519_verify(pk, sig, buf);
   });
 }
-BENCHMARK(bm_ed25519_sign_and_verify)
-    ->RangeMultiplier(2)
-    ->Range(kMin, kMax); // NOLINT
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_ed25519_sign_and_verify)->RangeMultiplier(2)->Range(kMin, kMax);
 
 void
 bm_lthash16_add(benchmark::State &state)
@@ -95,7 +99,8 @@ bm_lthash16_add(benchmark::State &state)
     return h;
   });
 }
-BENCHMARK(bm_lthash16_add)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_lthash16_add)->RangeMultiplier(2)->Range(kMin, kMax);
 
 } // namespace
 

@@ -76,7 +76,7 @@ bm_erc20_extend_experiment(benchmark::State &state)
     state.PauseTiming();
     // Verify we got the expected number of transactions
     SignedTransactionBatch work_txs;
-    parallel_batch_to_t(result.value().work_txs, work_txs)();
+    parallel_batch_to_t(result.value().work_txs, work_txs, kNoBatchSizeLimit)();
     CHECK_EQ(work_txs.size(), num_txs);
     state.ResumeTiming();
 

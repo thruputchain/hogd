@@ -4,10 +4,11 @@ cmake_path(RELATIVE_PATH CMAKE_CURRENT_SOURCE_DIR BASE_DIRECTORY ${CMAKE_SOURCE_
 # Add contract loader library
 add_library(contract_loader
   contract_loader.cc
-  ${CMAKE_SOURCE_DIR}/hogd/hogexec/runtime/wasm/instrumented_bytes.cc
 )
 
 target_link_libraries(contract_loader
+  base
+  built_headers_interface
   x23
   protocol
   unified_lib
@@ -23,26 +24,8 @@ target_include_directories(contract_loader PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 
-add_dependencies(contract_loader generate_wasm_meter_ffi_h)
-
-target_compile_definitions(contract_loader PRIVATE
-  CMAKE_ROOT_BINARY_DIR="${CMAKE_BINARY_DIR}"
-)
-
-add_custom_target(all_wasm_contracts)
-add_custom_target(all_wasm_headers)
-add_dependencies(all_wasm_contracts all_wasm_headers)
-
+add_custom_target(all_contract_headers)
 add_custom_target(all_riscv_contracts)
-
-# Configure WASM build flags
-if(WASM_DEBUG_BACKTRACES)
-  set(WASM_FLAGS "-F logging,entrypoints")
-  message(STATUS "WASM contracts: debug build with backtraces enabled")
-else()
-  set(WASM_FLAGS "-F entrypoints")
-  message(STATUS "WASM contracts: release build (minimal size, no backtraces)")
-endif()
 
 # Tell CMake to clean the cargo/groundhog intermediate build directory.
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
@@ -66,7 +49,7 @@ list(APPEND generated_rs_files ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_cont
 add_xdr(roundtrip_hh
   ./integration_test_contracts/xdr/roundtrip.x
 )
-add_dependencies(all_wasm_headers build_roundtrip_hh)
+add_dependencies(all_contract_headers build_roundtrip_hh)
 
 set(roundtrip_rs_stamp ${CMAKE_CURRENT_BINARY_DIR}/roundtrip_rs.stamp)
 add_custom_command(
@@ -77,111 +60,64 @@ add_custom_command(
 )
 add_custom_target(build_roundtrip_rs DEPENDS ${roundtrip_rs_stamp})
 
-# Build all WASM contracts via groundhog-cli
-# Usage: add_wasm_builds(SPEC_CONTRACTS c1 c2 ... RAW_CONTRACTS c3 c4 ...)
-# SPEC_CONTRACTS produce both .wasm and _spec.json
-# RAW_CONTRACTS produce only .wasm (no #[contract] macro, no embedded spec)
-function(add_wasm_builds)
+# Build all RV32 contracts via build_risc.sh (groundhog-cli)
+# Usage: add_riscv_builds(SPEC_CONTRACTS d1/c1 d2/c2 ... RAW_CONTRACTS d3/c3 ...)
+# Contracts are named by their crate directory relative to this directory
+# (e.g. integration_test_contracts/fibonacci, local_test_contracts/foo); the
+# cargo package name is the last path component. Outputs land flat in
+# ${CMAKE_CURRENT_BINARY_DIR}, so package names must be unique across all
+# contract directories.
+# SPEC_CONTRACTS produce <name>.rv32a + <name>.rv32.json + <name>_spec.json
+# RAW_CONTRACTS produce only <name>.rv32a + <name>.rv32.json (no #[contract]
+# macro, no spec)
+function(add_riscv_builds)
   cmake_parse_arguments(ARG "" "" "SPEC_CONTRACTS;RAW_CONTRACTS" ${ARGN})
 
-  # Common dependencies (use stamp file to ensure roundtrip.rs files exist)
   set(common_depends
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
     ${roundtrip_rs_stamp})
 
-  # If you update the contracts (i.e. add new contracts, or change dependencies)
-  # then Cargo.lock will change, and the build will fail.  If that happens,
-  # run cargo update to update the lockfile manually.
-  #
-  # This will not fetch crates during the build process; you need to run the fetch script
-  # `./scripts/fetch.sh`
-  # if your set of downloaded crates is incomplete.
-
   set(all_outputs "")
   set(all_depends ${common_depends})
   set(build_commands "")
 
-  foreach(target_name ${ARG_SPEC_CONTRACTS})
-    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
+  foreach(contract_path ${ARG_SPEC_CONTRACTS})
+    cmake_path(GET contract_path FILENAME target_name)
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32a)
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32.json)
     list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
 
     file(GLOB target_rs_files
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+      ${CMAKE_CURRENT_SOURCE_DIR}/${contract_path}/src/*.rs)
     list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
 
     list(APPEND all_depends
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-      ${target_rs_files})
-
-    list(APPEND build_commands
-      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
-        ${target_name}
-        ${CMAKE_CURRENT_BINARY_DIR}
-        "${WASM_FLAGS}")
-  endforeach()
-
-  foreach(target_name ${ARG_RAW_CONTRACTS})
-    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
-
-    file(GLOB target_rs_files
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
-    list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
-
-    list(APPEND all_depends
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-      ${target_rs_files})
-
-    list(APPEND build_commands
-      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
-        --no-spec
-        ${target_name}
-        ${CMAKE_CURRENT_BINARY_DIR}
-        "${WASM_FLAGS}")
-  endforeach()
-
-  add_custom_command(
-    OUTPUT ${all_outputs}
-    ${build_commands}
-    DEPENDS ${all_depends}
-    COMMENT "Building all WASM contracts via groundhog-cli"
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  )
-
-  add_custom_target(all_wasms_built DEPENDS ${all_outputs})
-  add_dependencies(all_wasm_contracts all_wasms_built)
-endfunction()
-
-# Build all RV32 contracts via build_risc.sh
-# Usage: add_riscv_builds(CONTRACTS c1 c2 ...)
-# Each contract's [[bin]] target is compiled to an RV32 ELF and lowered to
-# <name>.rv32a (+ <name>.rv32.json), alongside the WASM artifacts.
-function(add_riscv_builds)
-  cmake_parse_arguments(ARG "" "" "CONTRACTS" ${ARGN})
-
-  set(common_depends
-    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-    ${roundtrip_rs_stamp})
-
-  set(all_outputs "")
-  set(all_depends ${common_depends})
-  set(build_commands "")
-
-  foreach(target_name ${ARG_CONTRACTS})
-    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32a)
-    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32.json)
-
-    file(GLOB target_rs_files
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
-    list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
-
-    list(APPEND all_depends
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/${contract_path}/Cargo.toml
       ${target_rs_files})
 
     list(APPEND build_commands
       COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_risc.sh
+        ${target_name}
+        ${CMAKE_CURRENT_BINARY_DIR})
+  endforeach()
+
+  foreach(contract_path ${ARG_RAW_CONTRACTS})
+    cmake_path(GET contract_path FILENAME target_name)
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32a)
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32.json)
+
+    file(GLOB target_rs_files
+      ${CMAKE_CURRENT_SOURCE_DIR}/${contract_path}/src/*.rs)
+    list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
+
+    list(APPEND all_depends
+      ${CMAKE_CURRENT_SOURCE_DIR}/${contract_path}/Cargo.toml
+      ${target_rs_files})
+
+    list(APPEND build_commands
+      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_risc.sh
+        --no-spec
         ${target_name}
         ${CMAKE_CURRENT_BINARY_DIR})
   endforeach()
@@ -228,7 +164,7 @@ function(add_contract_header target_name)
         ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
         -o ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.h
         -n ${target_name}
-        -w ${target_name}.wasm
+        -r ${target_name}.rv32a
         ${extra_includes}
     DEPENDS
       ${CMAKE_CURRENT_SOURCE_DIR}/generate_header.py
@@ -238,103 +174,79 @@ function(add_contract_header target_name)
 
   add_custom_target(${target_name}_header
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.h)
-  # Ensure wasm build (which produces the spec) completes first
-  add_dependencies(${target_name}_header all_wasms_built)
+  # Ensure rv32 build (which produces the spec) completes first
+  add_dependencies(${target_name}_header all_riscvs_built)
 
   # make sure that other targets can depend on the generated headers,
-  # not just the wasms
-  add_dependencies(all_wasm_headers ${target_name}_header)
+  # not just the contracts
+  add_dependencies(all_contract_headers ${target_name}_header)
 endfunction()
-
-# Build all WASMs (and specs) via groundhog-cli
-add_wasm_builds(
-  SPEC_CONTRACTS
-    fibonacci
-    fibonacci_call
-    cxs_roundtrip
-    txs_roundtrip
-    dev_wallet
-    deploy_and_transfer
-    read_only_test
-    manual_revert_test
-    manual_revert_caller
-    simple_wallet
-    simple_wallet_authclaim
-    sha256_wrapper
-    initial_token_claim
-    itc_erc20
-    authclaim_test
-    htlc
-    payment_channel
-    return_fault_test
-    tuple_return
-    no_syscall_test
-    syscall_misc_tests
-    syscall_parse_hardening_test
-    nnint_output_fault_test
-    output_alias_test
-    calldata_wrapper
-    delegate_call_test
-    ed25519_verify_wrapper
-    view_gateway_test
-  RAW_CONTRACTS
-    hash_bug
-    calldata_raw
-    sha256_raw
-    fibonacci_raw
-    nocontract_wallet
-)
 
 add_executable(contract_loader_test contract_loader_test.cc)
 target_link_libraries(contract_loader_test
   contract_loader
   GTest::gtest_main
 )
-add_dependencies(contract_loader_test all_riscv_contracts all_wasms_built)
+add_dependencies(contract_loader_test all_riscv_contracts all_riscvs_built)
 gtest_discover_tests(contract_loader_test)
 
-# Build the spec contracts for RV32 (each gets a [[bin]] wrapper + .rv32a).
+# Build the contracts for RV32 (each gets a [[bin]] wrapper + .rv32a). The
+# SPEC_CONTRACTS also produce <name>_spec.json, consumed by the header/XDR
+# generators below.
 #
-# A few contracts are intentionally excluded because they cannot be lowered to
-# an RV32 artifact:
-#   - RAW_CONTRACTS (hash_bug, calldata_raw, sha256_raw, fibonacci_raw,
-#     nocontract_wallet): no #[contract] macro -> no gh_* entry symbols, so
-#     rv32-lower rejects the ELF ("no #[contract] entry-point symbols found").
-#     hash_bug additionally has no sdk dep, so the rv32 runtime never links.
-#   - cxs_roundtrip, txs_roundtrip: their image overflows the rv32 RAM region
-#     (rust-lld: "section will not fit in region 'RAM'").
-message(STATUS "RV32 contracts: building 26 spec contracts (excluding raw contracts, cxs_roundtrip, txs_roundtrip)")
+# Contracts live in two sibling directories: integration_test_contracts (a
+# submodule) and local_test_contracts (checked into this repo directly).
+#
+# A few contracts are intentionally excluded:
+#   - calldata_raw, sha256_raw, fibonacci_raw: no #[contract] macro, so they
+#     produce no spec and nothing here loads their artifacts.
+#   - nocontract_wallet: client-stub-only crate with no [[bin]] wrapper, so
+#     there is no RV32 entry point to lower.
 add_riscv_builds(
-  CONTRACTS
-    fibonacci
-    fibonacci_call
-    dev_wallet
-    deploy_and_transfer
-    read_only_test
-    manual_revert_test
-    manual_revert_caller
-    simple_wallet
-    simple_wallet_authclaim
-    sha256_wrapper
-    initial_token_claim
-    itc_erc20
-    authclaim_test
-    htlc
-    payment_channel
-    return_fault_test
-    tuple_return
-    no_syscall_test
-    syscall_misc_tests
-    syscall_parse_hardening_test
-    nnint_output_fault_test
-    output_alias_test
-    calldata_wrapper
-    delegate_call_test
-    ed25519_verify_wrapper
-    view_gateway_test
+  SPEC_CONTRACTS
+    integration_test_contracts/fibonacci
+    integration_test_contracts/fibonacci_call
+    integration_test_contracts/default_wallet
+    integration_test_contracts/dev_wallet
+    integration_test_contracts/deploy_and_transfer
+    integration_test_contracts/genesis_root
+    integration_test_contracts/read_only_test
+    integration_test_contracts/manual_revert_test
+    integration_test_contracts/manual_revert_caller
+    integration_test_contracts/simple_wallet
+    integration_test_contracts/simple_wallet_authclaim
+    integration_test_contracts/sha256_wrapper
+    integration_test_contracts/itc_erc20
+    integration_test_contracts/authclaim_test
+    integration_test_contracts/htlc
+    integration_test_contracts/payment_channel
+    integration_test_contracts/return_fault_test
+    integration_test_contracts/tuple_return
+    integration_test_contracts/no_syscall_test
+    integration_test_contracts/syscall_misc_tests
+    integration_test_contracts/syscall_parse_hardening_test
+    integration_test_contracts/nnint_output_fault_test
+    integration_test_contracts/output_alias_test
+    integration_test_contracts/calldata_wrapper
+    integration_test_contracts/delegate_call_test
+    integration_test_contracts/ed25519_verify_wrapper
+    integration_test_contracts/view_gateway_test
+    integration_test_contracts/cxs_roundtrip
+    integration_test_contracts/txs_roundtrip
+    local_test_contracts/airdrop_faucet
+    local_test_contracts/auth_weight_test
+    local_test_contracts/drip_faucet
+    local_test_contracts/faucet_caller
+    local_test_contracts/invoke_malformed_tokens_test
+    local_test_contracts/tx_context_test
+  RAW_CONTRACTS
+    integration_test_contracts/hash_bug
 )
 
 # Generate .x files from spec JSON type_defs for contracts that define custom types
+add_types_xdr(default_wallet)
+add_types_xdr(drip_faucet)
+add_types_xdr(genesis_root)
 add_types_xdr(itc_erc20)
 add_types_xdr(manual_revert_test)
 add_types_xdr(simple_wallet)
@@ -343,6 +255,9 @@ add_types_xdr(cxs_roundtrip)
 add_types_xdr(payment_channel)
 
 # XDR .x -> .hh via x23c
+add_xdr(default_wallet_hh ./default_wallet.x)
+add_xdr(drip_faucet_hh ./drip_faucet.x)
+add_xdr(genesis_root_hh ./genesis_root.x)
 add_xdr(itc_erc20_hh ./itc_erc20.x)
 add_xdr(manual_revert_test_hh ./manual_revert_test.x)
 add_xdr(simple_wallet_hh ./simple_wallet.x)
@@ -350,31 +265,35 @@ add_xdr(txs_roundtrip_hh ./txs_roundtrip.x)
 add_xdr(cxs_roundtrip_hh ./cxs_roundtrip.x)
 add_xdr(payment_channel_hh ./payment_channel.x)
 
-# Ensure XDR generation waits for spec JSONs (produced by wasm build)
-add_dependencies(build_itc_erc20_hh all_wasms_built)
-add_dependencies(build_manual_revert_test_hh all_wasms_built)
-add_dependencies(build_simple_wallet_hh all_wasms_built)
-add_dependencies(build_txs_roundtrip_hh all_wasms_built)
-add_dependencies(build_cxs_roundtrip_hh all_wasms_built)
-add_dependencies(build_payment_channel_hh all_wasms_built)
+# Ensure XDR generation waits for spec JSONs (produced by rv32 build)
+add_dependencies(build_default_wallet_hh all_riscvs_built)
+add_dependencies(build_drip_faucet_hh all_riscvs_built)
+add_dependencies(build_genesis_root_hh all_riscvs_built)
+add_dependencies(build_itc_erc20_hh all_riscvs_built)
+add_dependencies(build_manual_revert_test_hh all_riscvs_built)
+add_dependencies(build_simple_wallet_hh all_riscvs_built)
+add_dependencies(build_txs_roundtrip_hh all_riscvs_built)
+add_dependencies(build_cxs_roundtrip_hh all_riscvs_built)
+add_dependencies(build_payment_channel_hh all_riscvs_built)
 
 # Make all headers wait for all type XDR .hh files
-add_dependencies(all_wasm_headers all_wasms_built)
+add_dependencies(all_contract_headers all_riscvs_built)
 
 # Generate contract headers
 add_contract_header(fibonacci)
 add_contract_header(fibonacci_call)
 add_contract_header(cxs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/cxs_roundtrip.hh")
 add_contract_header(txs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/txs_roundtrip.hh")
+add_contract_header(default_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/default_wallet.hh")
 add_contract_header(dev_wallet)
 add_contract_header(deploy_and_transfer)
+add_contract_header(genesis_root "${CURRENT_RELATIVE_SOURCE_DIR}/genesis_root.hh")
 add_contract_header(read_only_test)
 add_contract_header(manual_revert_test "${CURRENT_RELATIVE_SOURCE_DIR}/manual_revert_test.hh")
 add_contract_header(manual_revert_caller)
 add_contract_header(sha256_wrapper)
 add_contract_header(simple_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/simple_wallet.hh")
 add_contract_header(simple_wallet_authclaim)
-add_contract_header(initial_token_claim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
 add_contract_header(authclaim_test)
 add_contract_header(htlc)
@@ -382,12 +301,23 @@ add_contract_header(payment_channel "${CURRENT_RELATIVE_SOURCE_DIR}/payment_chan
 add_contract_header(return_fault_test)
 add_contract_header(tuple_return)
 add_contract_header(no_syscall_test)
+add_contract_header(ed25519_verify_wrapper)
 add_contract_header(syscall_misc_tests)
 add_contract_header(syscall_parse_hardening_test)
 add_contract_header(nnint_output_fault_test)
 add_contract_header(output_alias_test)
+add_contract_header(calldata_wrapper)
 add_contract_header(view_gateway_test)
+add_contract_header(airdrop_faucet)
+add_contract_header(auth_weight_test)
+add_contract_header(drip_faucet "${CURRENT_RELATIVE_SOURCE_DIR}/drip_faucet.hh")
+add_contract_header(faucet_caller)
+add_contract_header(invoke_malformed_tokens_test)
+add_contract_header(tx_context_test)
 
+add_dependencies(default_wallet_header default_wallet_hh)
+add_dependencies(drip_faucet_header drip_faucet_hh)
+add_dependencies(genesis_root_header genesis_root_hh)
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)
 add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)
@@ -397,4 +327,4 @@ add_dependencies(simple_wallet_header simple_wallet_hh)
 
 # Create ONE top-level ALL target that triggers everything
 add_custom_target(build_all_contracts ALL)
-add_dependencies(build_all_contracts all_wasm_contracts all_riscv_contracts)
+add_dependencies(build_all_contracts all_contract_headers all_riscv_contracts)

@@ -1,0 +1,59 @@
+# RV32 fuzz targets
+
+Two coverage-guided libFuzzer targets, built only with `-DBUILD_FUZZERS=ON`
+(default OFF, excluded from `all`). Require a clang/libc++ toolchain. A
+nightly CI sweep runs both from the committed seed corpus
+(`.github/workflows/fuzz_rv32_engine_diff.yml`).
+
+- `rv32_fuzz_artifact` -- the artifact deploy path. Raw bytes exercise every
+  header/digest rejection; a fixup phase assembles a well-formed artifact around
+  fuzzer input to reach decode, run-gas lowering, fusion, and image staging.
+- `rv32_fuzz_engine_diff` -- canonical `Machine` vs production
+  `ThreadedMachine`. Asserts exact-`ProgramError` decoder parity, accept/reject
+  parity of the production `ThreadedMachinePreInstantiation::create` gate
+  (verdict only: its backward lowering may report a different error word than
+  the canonical forward scan on multi-error programs), then execution parity
+  (OOG class + `gas_remaining==0` first; full trace parity only when neither
+  engine OOGs). A fuzzer-chosen run-gas chunk cap (biased small; see
+  `run_gas_cap_from_knob`) makes break carriers and their refund/deficit seams
+  reachable within the fuzz gas budget. Each input also carves a method id
+  seeded into a0/a1 (the v4 guest-dispatch entry seam), an initial-memory
+  image placed at a carved `memory_start`, and a `ScriptedHost` seed. The
+  scripted host derives each ecall's result deterministically from
+  (seed, call index) -- nonzero continue values, host gas debits (including
+  over-budget ones), halts, host out-of-gas, and `MachineView` memory writes
+  -- so every engine must observe identical host behavior; `HostStatus::kTrap`
+  is never produced (forbidden on the threaded ecall seam). Alongside the
+  traced comparison, the same input also runs an *untraced* `ThreadedMachine`
+  (the production handler set) and compares its final observable state and
+  host call log against canonical.
+
+## Build
+
+    source ./scripts/macos-env.sh
+    ./scripts/build.sh -d build/clang -t Debug -c clang -n
+    cmake -S . -B build/clang -DBUILD_FUZZERS=ON
+    make -C build/clang rv32_fuzz_artifact rv32_fuzz_engine_diff
+
+## Run
+
+    ./build/clang/hogd/hog_exec/runtime/rv32/rv32_fuzz_engine_diff \
+      -max_total_time=60 hogd/hog_exec/runtime/rv32/fuzz/corpus/engine_diff
+    ./build/clang/hogd/hog_exec/runtime/rv32/rv32_fuzz_artifact \
+      -max_total_time=60 hogd/hog_exec/runtime/rv32/fuzz/corpus/artifact
+
+Divergences abort with a stderr diagnostic and reproducing words; libFuzzer
+writes the input to `crash-*`. Reproduce with:
+
+    ./build/clang/hogd/hog_exec/runtime/rv32/rv32_fuzz_engine_diff crash-<hash>
+
+## Regenerating seeds
+
+    make -C build/clang rv32_emit_seeds
+    ./build/clang/hogd/hog_exec/runtime/rv32/rv32_emit_seeds \
+      hogd/hog_exec/runtime/rv32/fuzz/corpus
+
+## Helper unit tests
+
+    make -C build/clang rv32_fuzz_common_test
+    ./build/clang/hogd/hog_exec/runtime/rv32/rv32_fuzz_common_test

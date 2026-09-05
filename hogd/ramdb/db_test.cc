@@ -8,8 +8,10 @@
 #include <chrono>
 #include <cstddef>
 #include <format>
+#include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -96,6 +98,7 @@ make_value(uint64_t seed, size_t len)
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class DatabaseTest : public testing::Test {
 protected:
   DatabaseTest() = default;
@@ -384,7 +387,7 @@ TEST_F(DatabaseTest, Snapshot)
   remove_every_n(3);
 
   auto sync_ret = db_->sync_and_snapshot(0);
-  EXPECT_TRUE(sync_ret);
+  ASSERT_TRUE(sync_ret);
   auto &[lsn, snapshot_future] = *sync_ret;
   EXPECT_EQ(lsn, 1);
   DBStatus<void> ret = snapshot_future.get();
@@ -458,7 +461,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
 
   {
     auto sync_ret = db_->sync_and_snapshot(0);
-    EXPECT_TRUE(sync_ret);
+    ASSERT_TRUE(sync_ret);
     auto &[lsn, snapshot_future] = *sync_ret;
     EXPECT_EQ(lsn, 1);
     DBStatus<void> ret = snapshot_future.get();
@@ -477,7 +480,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   insert_n(kInsertions / 2);
   {
     auto sync_ret = db_->sync_and_snapshot(1);
-    EXPECT_TRUE(sync_ret);
+    ASSERT_TRUE(sync_ret);
     auto &[lsn, snapshot_future] = *sync_ret;
     EXPECT_EQ(lsn, 2);
     DBStatus<void> ret = snapshot_future.get();
@@ -497,6 +500,156 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   check_integrity();
 }
 
+// Destroying the database with a snapshot in flight must await it: the
+// snapshot thread reads the map and allocates loglets, so tearing those down
+// under it is a use-after-free. The join also makes the snapshot durable.
+TEST_F(DatabaseTest, SnapshotDestructorAwaitsCompletion)
+{
+  insert_n(kInsertions);
+
+  auto sync_ret = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(sync_ret);
+
+  // drop the database without waiting on the snapshot future.
+  db_.reset();
+
+  check_file_exists("0-1.snap");
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  check_integrity();
+}
+
+// Only one snapshot may run at a time (the map's mutation callback is a
+// single slot); a second request while one is in flight returns kBusy, and a
+// request after completion is admitted again.
+TEST_F(DatabaseTest, SnapshotRejectsOverlapping)
+{
+  insert_n(kInsertions);
+
+  auto first = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(first);
+  auto &[lsn, snapshot_future] = *first;
+
+  auto second = db_->sync_and_snapshot(0);
+  if (second) {
+    // Only admissible if the first snapshot had already finished.
+    EXPECT_EQ(snapshot_future.wait_for(std::chrono::seconds::zero()),
+              std::future_status::ready);
+    EXPECT_TRUE(second->second.get());
+  }
+  else {
+    EXPECT_EQ(second.error(), DBCode::kBusy);
+  }
+
+  EXPECT_TRUE(snapshot_future.get());
+
+  // after completion the next snapshot is admitted.
+  auto third = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(third);
+  EXPECT_TRUE(third->second.get());
+  check_integrity();
+}
+
+// Racing sync_and_snapshot() calls admit at most one snapshot at a time:
+// losers return kBusy without syncing, and every admitted snapshot
+// completes.
+TEST_F(DatabaseTest, SnapshotConcurrentAdmission)
+{
+  insert_n(kInsertions);
+
+  constexpr int kThreads = 8;
+  std::atomic<int> busy{0};
+  std::vector<std::future<DBStatus<void>>> futures;
+  std::mutex futures_mutex;
+
+  {
+    std::vector<std::jthread> threads;
+    threads.reserve(kThreads);
+    for (int i = 0; i < kThreads; ++i) {
+      threads.emplace_back([this, &busy, &futures, &futures_mutex] {
+        auto ret = db_->sync_and_snapshot(0);
+        if (!ret) {
+          EXPECT_EQ(ret.error(), DBCode::kBusy);
+          busy.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+        std::scoped_lock lk(futures_mutex);
+        futures.push_back(std::move(ret->second));
+      });
+    }
+  }
+
+  EXPECT_EQ(busy.load() + futures.size(), kThreads);
+  EXPECT_GE(futures.size(), 1U);
+  for (auto &f : futures)
+    EXPECT_TRUE(f.get());
+  check_integrity();
+}
+
+// snapshot_recommended turns on once the WAL beyond snapshot coverage passes
+// the floor, off when a snapshot covers it, and on again after another
+// live-set's-worth of WAL accumulates.
+TEST_F(DatabaseTest, SnapshotRecommendedTracksCoverage)
+{
+  // small WAL files so the floor (kDiskLogCleanupRatio files) is small.
+  constexpr size_t kSmallFileThreshold = 64 * 1024;
+  db_.reset();
+  ASSERT_TRUE(dir_.unlink_all());
+  ASSERT_TRUE(static_cast<bool>(
+      open_db(std::numeric_limits<uint64_t>::max(), kSmallFileThreshold)));
+
+  EXPECT_FALSE(db_->snapshot_recommended());
+
+  // ~10 MiB of inserts, far past the 256 KiB floor.
+  insert_n(kInsertions);
+  ASSERT_TRUE(db_->sync());
+  EXPECT_TRUE(db_->snapshot_recommended());
+
+  // false whether the snapshot is still in flight or already covering.
+  auto snap = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snap);
+  EXPECT_FALSE(db_->snapshot_recommended());
+  ASSERT_TRUE(snap->second.get());
+  EXPECT_FALSE(db_->snapshot_recommended());
+
+  // a fresh live-set's-worth of WAL is not enough by itself: the threshold
+  // is now the last snapshot's size, so overwrite the live set twice for a
+  // deterministic margin.
+  for (int round = 0; round < 2; ++round) {
+    for (const auto &[key, value] : oracle_) {
+      ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                           std::as_bytes(std::span(value))));
+    }
+  }
+  ASSERT_TRUE(db_->sync());
+  EXPECT_TRUE(db_->snapshot_recommended());
+}
+
+// snapshot_recommended counts WAL that predates this process: after a
+// restart with no snapshot on disk, the recovered WAL alone recommends one.
+TEST_F(DatabaseTest, SnapshotRecommendedCountsRecoveredWal)
+{
+  constexpr size_t kSmallFileThreshold = 64 * 1024;
+  db_.reset();
+  ASSERT_TRUE(dir_.unlink_all());
+  ASSERT_TRUE(static_cast<bool>(
+      open_db(std::numeric_limits<uint64_t>::max(), kSmallFileThreshold)));
+
+  insert_n(kInsertions);
+  ASSERT_TRUE(db_->sync());
+
+  // reopen: nothing has been written this incarnation, but the WAL on disk
+  // is far past the floor and no snapshot covers it.
+  ASSERT_TRUE(static_cast<bool>(
+      open_db(std::numeric_limits<uint64_t>::max(), kSmallFileThreshold)));
+  EXPECT_TRUE(db_->snapshot_recommended());
+
+  auto snap = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snap);
+  ASSERT_TRUE(snap->second.get());
+  EXPECT_FALSE(db_->snapshot_recommended());
+  check_integrity();
+}
+
 TEST_F(DatabaseTest, SnapshotOngoingPuts)
 {
   auto rand = rand_; // snapshot rng state.
@@ -506,7 +659,7 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
   // Take a snapshot of the oracle.
   std::unordered_map<std::string, std::string> backup(oracle_);
   auto sync_ret = db_->sync_and_snapshot(0);
-  EXPECT_TRUE(sync_ret);
+  ASSERT_TRUE(sync_ret);
   auto &[_, snapshot_future] = *sync_ret;
 
   rand_ = rand; // restore rng state to try to get overwrites.
@@ -536,7 +689,7 @@ TEST_F(DatabaseTest, SnapshotOngoingRemoves)
   // Take a snapshot of the oracle.
   std::unordered_map<std::string, std::string> backup{oracle_};
   auto sync_ret = db_->sync_and_snapshot(0);
-  EXPECT_TRUE(sync_ret);
+  ASSERT_TRUE(sync_ret);
   auto &[_, snapshot_future] = *sync_ret;
 
   std::jthread bg{[this] { remove_every_n(1); }};
@@ -722,15 +875,18 @@ TEST_F(DatabaseTest, DiskCleanup)
     }
   };
 
-  // create enough log files that we exceed the cleaning threshold.
-  fill_file_and_sync(2);
+  // create enough log files that we exceed the cleaning threshold. The ASSERTs
+  // inside fill_file_and_sync only return from the lambda, so the fatal failure
+  // has to be re-checked here; otherwise a failing sync() lets the test run on
+  // and dereference an errored sync_and_snapshot() result below (#3206).
+  ASSERT_NO_FATAL_FAILURE(fill_file_and_sync(2));
 
-  check_file_exists("0.log");
-  check_file_exists("1.log");
+  ASSERT_NO_FATAL_FAILURE(check_file_exists("0.log"));
+  ASSERT_NO_FATAL_FAILURE(check_file_exists("1.log"));
 
   // manually trigger a snapshot so some of the wal files become redundant.
   auto sync_ret = db_->sync_and_snapshot(0);
-  EXPECT_TRUE(sync_ret);
+  ASSERT_TRUE(sync_ret);
   auto &[new_lsn, snapshot_future] = *sync_ret;
   EXPECT_EQ(new_lsn, 3);
   DBStatus<void> snap_ret = snapshot_future.get();

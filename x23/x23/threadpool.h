@@ -123,6 +123,7 @@
 #include <x23/cpumap.h>
 #include <x23/debug.h>
 #include <x23/err.h>
+#include <x23/move_only_function.h>
 #include <x23/mvar.h>
 #include <x23/signal.h>
 #include <x23/utility.h>
@@ -279,6 +280,15 @@ public:
   // ThreadPool, as that would cause deadlock.
   void quiesce() noexcept;
 
+  // Run a callback asynchronously after every worker has passed through a
+  // quiescent state.  Unlike quiesce(), this can be called from a worker.
+  void on_quiesce(move_only_function<void() noexcept> cb)
+  {
+    std::lock_guard _g(qcbq_lock_);
+    qcbq_.emplace_back(std::move(cb));
+    qcbq_nonempty_.notify_one();
+  }
+
   // Drain pauses the current thread and doesn't return until all
   // coroutine handles that were either in the queue or executing at
   // the time drain was invoked have completed.  Do not call this from
@@ -314,8 +324,8 @@ public:
     // wasn't part of a thread pool:
     x23assert(tp);
     return SuspendCount{std::this_thread::get_id(),
-                        tp->tstate_[my_thread_no].count_.load(
-                            std::memory_order_relaxed)};
+                        quiesce_count(tp->tstate_[my_thread_no].count_.load(
+                            std::memory_order_relaxed))};
   }
 
   // A CrashIfSuspended will crash your program if the coroutine in
@@ -352,6 +362,14 @@ public:
 private:
   // Timestamp for empty queues
   static constexpr uint64_t kEmpty = std::numeric_limits<uint64_t>::max();
+  // Reserve one counter bit so quiesce() and a worker can atomically order a
+  // request for notification against the worker becoming idle.
+  static constexpr size_t kQuiesceWake =
+      size_t{1} << (std::numeric_limits<size_t>::digits - 1);
+  static constexpr size_t quiesce_count(size_t value)
+  {
+    return value & ~kQuiesceWake;
+  }
 
   // Number of threads currently associated with each runqueue.  We
   // assume threads don't migrade that often, so we can pack these
@@ -375,7 +393,7 @@ private:
   using QPtr = MVar<QueueState>::Ptr;
   struct alignas(hardware_destructive_interference_size) RunQueue
     : public MVar<QueueState> {
-    // qtime of oldest Job at back of queue, or kEmpty if empty.  Kept
+    // qtime of oldest Job at front of queue, or kEmpty if empty.  Kept
     // outside the queue state in its own cache line so it can be
     // checked approximately without acquiring the mutex.
     std::atomic_uint64_t qtime_{kEmpty};
@@ -411,15 +429,15 @@ private:
     }
   }
 
-  void enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
+  // Returns true if the queue was previously empty
+  bool enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
   {
     qselect(&lq, job.cpuhint);
     bool wasempty = lq->q.empty();
     lq->q.emplace_back(job, now);
-    if (wasempty) {
+    if (wasempty)
       RunQueue::set_qtime(lq, now);
-      lq->nonempty.notify_all();
-    }
+    return wasempty;
   }
 
   class Worker {
@@ -445,7 +463,6 @@ private:
     // 2*count of iterations of the loop.  Even numbers mean the
     // thread is idle, odd numbers means it is executing a coroutine.
     std::atomic_size_t count_{0};
-    std::atomic_bool please_wake_{false};
   };
   std::unique_ptr<ThreadState[]> tstate_;
 
@@ -453,6 +470,15 @@ private:
   inline static thread_local size_t my_thread_no{};
 
   std::stop_source ss_;
+
+  std::mutex qcbq_lock_;
+  std::condition_variable qcbq_nonempty_;
+  std::vector<move_only_function<void() noexcept>> qcbq_;
+  std::jthread qcbq_service_thread_;
+
+  void qcbq_service();
+  void qcbq_do_service(std::unique_lock<std::mutex> &lk);
+
   std::vector<std::unique_ptr<Worker>> workers_;
   std::vector<std::jthread> threads_;
 

@@ -1,0 +1,83 @@
+name: RV32 Gas Calibration
+
+# Nightly, because a calibration stops describing the engine over weeks, not
+# per PR. Every run files its JSON to metrics_history whether the check passes
+# or fails, so the costs are a time series and not just a pass/fail.
+on:
+    schedule:
+        - cron: "0 17 * * *" # Daily at 10am PDT/9am PST
+    workflow_dispatch:
+        inputs:
+            mode:
+                description: >-
+                    check: gate against the committed reference.
+                    reference: measure and print a reference for this host,
+                    without gating (use once to bootstrap a new bench host).
+                type: choice
+                required: true
+                default: check
+                options:
+                    - check
+                    - reference
+env:
+    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+
+jobs:
+    calibrate:
+        runs-on: self-hosted
+        permissions:
+            contents: read
+            actions: read
+
+        steps:
+            - name: Clean up .gitconfig
+              run: |
+                  echo "Cleaning up .gitconfig"
+                  rm -f /home/hogci/.gitconfig
+            - uses: webfactory/ssh-agent@v0.10.0
+              with:
+                  ssh-private-key: |
+                      ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+                      ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+                      ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+                      ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+                      ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+                      ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+                      ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+                      ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+                      ${{ secrets.HOGD_TO_SCP_KEY }}
+                      ${{ secrets.HOGD_TO_XDR_RPC }}
+                      ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+                      ${{ secrets.HOGD_TO_HOGX_KEY }}
+            - uses: actions/checkout@v6
+            - name: Run hog schedule
+              run: |
+                  BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+                  # `inputs` is empty on a scheduled run.
+                  MODE="${{ inputs.mode || 'check' }}"
+                  echo "Branch name: $BRANCH_NAME, mode: $MODE"
+                  # 60 minutes rather than 40: the syscall half of the
+                  # measurement links the runtime, and through genesis that
+                  # puts the guest contract build on this job's critical path.
+                  # The opcode calibration alone never needed it.
+                  hog_sched \
+                    --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
+                    --key=github_repo --value=${{ github.repository }} \
+                    --key=git_commit --value=${{ github.sha }} \
+                    --key=git_branch --value=$BRANCH_NAME \
+                    --key=mode --value=$MODE \
+                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
+                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
+                    --timeout-sec=3600 \
+                    ./scripts/schedules/rv32_gas_calibration.toml
+            - name: Print Log Download Instructions
+              if: always()
+              uses: ./.github/actions/print-log-instructions

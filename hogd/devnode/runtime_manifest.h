@@ -1,10 +1,8 @@
 #pragma once
 
+#include "types.hh"
 #include <filesystem>
 #include <string>
-#include <string_view>
-
-#include "types.hh"
 
 namespace hogd {
 
@@ -20,6 +18,6 @@ std::string format_hex_hash(SHA256Hash const &hash);
 
 RuntimeManifestPointer
 write_hog_devnode_runtime_manifest(HogDevnodeNode const &node,
-                                   std::string_view network_id);
+                                   NetworkHash const &network_hash);
 
 } // namespace hogd

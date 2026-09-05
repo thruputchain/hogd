@@ -20,6 +20,7 @@ extern "C" {
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 static_assert(std::endian::native == std::endian::little,
               "LtHash16 assumes little-endian byte order");
@@ -108,6 +109,15 @@ private:
 
   void finalize(blake3_hasher &hasher, bool negate)
   {
+    // BLAKE3 writes bytes into the uint16_t component storage through a
+    // uint8_t *, and we read them back as uint16_t. Accessing an object's
+    // representation this way is only well-defined through a character type;
+    // uint8_t is an optional typedef that the standard does not require to be
+    // unsigned char. Guarantee the alias-permitted choice at compile time so
+    // this consensus-hash code never depends on an implementation decision.
+    static_assert(std::is_same_v<uint8_t, unsigned char>,
+                  "LtHash16 finalize aliases uint16_t storage through "
+                  "uint8_t *; uint8_t must be unsigned char");
     alignas(64) uint16_t components[kNumComponents];
     blake3_hasher_finalize(&hasher, reinterpret_cast<uint8_t *>(components),
                            kStateBytes);

@@ -23,3 +23,12 @@ SH_FORMAT=shfmt
 if [ -f ${SCRIPT_DIR}/conf.sh ]; then
   source ${SCRIPT_DIR}/conf.sh
 fi
+
+# HOGD_BUILD_JOBS: default parallelism for cmake --build, derived from
+# performance-core count and RAM rather than raw core count. Sourced after
+# conf.sh so that a pinned NPROC (CI writes one there to bound build memory)
+# still wins. NPROC itself is left alone because tidy.sh and dev.sh use it for
+# clang-tidy fan-out and container CPU limits.
+if [ -f "${SCRIPT_DIR}/build-jobs.sh" ]; then
+  source "${SCRIPT_DIR}/build-jobs.sh"
+fi

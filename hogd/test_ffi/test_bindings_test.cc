@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -5,7 +6,6 @@
 #include <gtest/gtest.h>
 #include <span>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -19,37 +19,56 @@
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
+#include "hogd/crypto/domain_separators.h"
+#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "hogd/test_ffi/test_genesis_root_contract.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "storage_cost.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
+// clang-tidy's dataflow does not treat ASSERT_TRUE(x.has_value()) as a guard,
+// so it flags the subsequent unchecked *x. These tests only dereference
+// optionals after asserting presence; suppress the check file-wide.
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 namespace hogd {
 
 namespace {
 
+// Non-zero, so a signature preimage that dropped the network hash would still
+// fail to verify against a database built here.
+constexpr NetworkHash kTestNetworkHash{0x5a};
+
 void *
 make_db()
 {
-  auto db = create_db(nullptr, 0);
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db = create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
+                      genesis_root.size(), nullptr, 0);
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -94,7 +113,10 @@ TEST(TestBindingsTest, MissingContractOnDeploymentTest)
 
   ContractAddress deployment_addr{};
 
-  Contract contract{};
+  // Any well-formed contract works here: the point is that its hash was
+  // never stored. The union needs an explicit type now that discriminant 0
+  // is reserved.
+  Contract contract(ContractType::kRv32);
   auto hash = sha256(contract);
 
   // the contract size is for deployment costs, which we ignore in this test.
@@ -522,7 +544,7 @@ TEST(TestBindingsTest, GrantStorageTokensTest)
                                                 1000),
             kTestFFIErrorCodeNone);
 
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 }
 
 namespace {
@@ -543,7 +565,10 @@ DecoratedSignature
 make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
-  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+  sig.ed25519() =
+      ed25519_sign(sk.ed25519(),
+                   transaction_signature_preimage(kTestNetworkHash, tx))
+          .value();
   return {.public_key_id = public_key_id, .signature = sig};
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
@@ -592,11 +617,10 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
 
   // Test good verification
   {
-    VerifyAuthResult result =
-        verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                        .len = static_cast<uint32_t>(
-                                            serialized_stx.size())},
-                                       make_source_auth_data(serialized_auth));
+    VerifyAuthResult result = verify_signed_transaction_auth(
+        {.data = serialized_stx.data(),
+         .len = static_cast<uint32_t>(serialized_stx.size())},
+        make_source_auth_data(serialized_auth), kTestNetworkHash.data());
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code, 0);
@@ -615,7 +639,7 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
     VerifyAuthResult result = verify_signed_transaction_auth(
         {.data = serialized_stx.data(),
          .len = static_cast<uint32_t>(serialized_stx.size())},
-        make_source_auth_data(serialized_wrong_auth));
+        make_source_auth_data(serialized_wrong_auth), kTestNetworkHash.data());
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code,
@@ -632,8 +656,11 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
 
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+
   Transaction tx{};
-  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.invoked_address = *derived_address;
   tx.invocation.gas_limit = 100'000;
   tx.auth_claim = claim;
 
@@ -648,22 +675,20 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   auto serialized_stx = x23::serialize(stx);
 
   // No registered auth data: the pubkey claim succeeds.
-  VerifyAuthResult success =
-      verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                      .len = static_cast<uint32_t>(
-                                          serialized_stx.size())},
-                                     {.data = nullptr, .len = 0});
+  VerifyAuthResult success = verify_signed_transaction_auth(
+      {.data = serialized_stx.data(),
+       .len = static_cast<uint32_t>(serialized_stx.size())},
+      {.data = nullptr, .len = 0}, kTestNetworkHash.data());
   EXPECT_EQ(success.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(success.auth_error_code, 0);
 
   // Supplying auth data means the address is already registered, so a pubkey
   // claim is no longer valid.
   auto serialized_auth = x23::serialize(auth_data);
-  VerifyAuthResult result =
-      verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                      .len = static_cast<uint32_t>(
-                                          serialized_stx.size())},
-                                     make_source_auth_data(serialized_auth));
+  VerifyAuthResult result = verify_signed_transaction_auth(
+      {.data = serialized_stx.data(),
+       .len = static_cast<uint32_t>(serialized_stx.size())},
+      make_source_auth_data(serialized_auth), kTestNetworkHash.data());
 
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.auth_error_code,
@@ -713,7 +738,7 @@ TEST(TestBindingsTest, VerifyAuthFromDB)
   ASSERT_TRUE(write_result.has_value()) << "Failed to write address auth data";
 
   // Advance block so auth data is available
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   // Serialize transaction
   auto serialized_stx = x23::serialize(stx);
@@ -758,8 +783,11 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
 
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+
   Transaction tx{};
-  tx.invocation.invoked_address = sha256(preimage);
+  tx.invocation.invoked_address = *derived_address;
   tx.invocation.gas_limit = 100'000;
   tx.auth_claim = claim;
 
@@ -772,7 +800,7 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
   x23::Defer d([db] { free_db(db); });
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   auto serialized_stx = x23::serialize(stx);
   VerifyAuthResultFromDBResult result =
@@ -817,8 +845,11 @@ TEST(TestBindingsTest, CostModelRoundtrip)
   auto serialized_model = x23::serialize(custom_model);
 
   // Create a DB seeded with the custom cost model.
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
   auto db_result = create_db(serialized_model.data(),
-                             static_cast<uint32_t>(serialized_model.size()));
+                             static_cast<uint32_t>(serialized_model.size()),
+                             NetworkHash{}.data(), genesis_root.data(),
+                             genesis_root.size(), nullptr, 0);
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(db_result.db, nullptr);
   x23::Defer d([&] { free_db(db_result.db); });
@@ -836,6 +867,83 @@ TEST(TestBindingsTest, CostModelRoundtrip)
                    x23::BufView{cost_result.data.data, cost_result.data.len});
 
   EXPECT_EQ(custom_model, roundtripped);
+}
+
+// The network config is optional in the same way the cost model is: absent
+// means this build's stock values, supplied means genesis runs under exactly
+// what was handed in. Reading it back off the committed tip is what the
+// executor does, so a roundtrip here covers the whole path.
+TEST(TestBindingsTest, NetworkConfigRoundtrip)
+{
+  NetworkConfig custom_config = stock_network_config();
+  set_config_param(custom_config, ConfigParamID::kConfigParamMaxSHA256Buffers,
+                   max_sha256_buffers(custom_config) + 1);
+  set_config_param(custom_config,
+                   ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                   max_cross_invoke_depth(custom_config) + 1);
+  ASSERT_NE(custom_config, stock_network_config());
+
+  auto serialized_config = x23::serialize(custom_config);
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_result =
+      create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                genesis_root.size(), serialized_config.data(),
+                static_cast<uint32_t>(serialized_config.size()));
+  ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(db_result.db, nullptr);
+  x23::Defer d([&] { free_db(db_result.db); });
+
+  auto config_result = get_network_config(db_result.db);
+  ASSERT_EQ(config_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(config_result.data.data, nullptr);
+  x23::Defer d2([&] { free_ffi_data_buffer(config_result.data); });
+
+  NetworkConfig roundtripped;
+  x23::deserialize(&roundtripped, x23::BufView{config_result.data.data,
+                                               config_result.data.len});
+  EXPECT_EQ(custom_config, roundtripped);
+}
+
+// Omitting the config is what every existing caller does, so the stock values
+// have to survive that path unchanged.
+TEST(TestBindingsTest, NetworkConfigDefaultsToStockWhenAbsent)
+{
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_result =
+      create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                genesis_root.size(), nullptr, 0);
+  ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d([&] { free_db(db_result.db); });
+
+  auto config_result = get_network_config(db_result.db);
+  ASSERT_EQ(config_result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d2([&] { free_ffi_data_buffer(config_result.data); });
+
+  NetworkConfig roundtripped;
+  x23::deserialize(&roundtripped, x23::BufView{config_result.data.data,
+                                               config_result.data.len});
+  EXPECT_EQ(roundtripped, stock_network_config());
+}
+
+// A config that does not deserialize is rejected the way a bad cost model is,
+// rather than silently falling back to the stock values.
+TEST(TestBindingsTest, NetworkConfigGarbageIsRejected)
+{
+  constexpr uint8_t kGarbage[] = {0xFF, 0xFF, 0xFF};
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_result =
+      create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                genesis_root.size(), kGarbage, sizeof(kGarbage));
+  EXPECT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeDeserializeError);
+  EXPECT_EQ(db_result.db, nullptr);
+}
+
+// get_network_config guards its handle like every other db accessor.
+TEST(TestBindingsTest, NetworkConfigNullDbRejected)
+{
+  auto result = get_network_config(nullptr);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
+  EXPECT_EQ(result.data.data, nullptr);
 }
 
 namespace {
@@ -1253,7 +1361,7 @@ namespace {
 //   std::span<const std::byte> input_calldata,
 //   std::span<const std::byte> input_owned_auth_token_ids_list,
 //   const CopyableInvokeInputs &input_inputs,
-//   CopyableInvokeOutputs &output_outputs) noexcept
+//   CopyableInvokeOutputs &output_outputs)() noexcept
 
 HostFnStatus<SyscallErrorCode>
 test_ffi_invoke(const ContractAddress &input_address,
@@ -1292,7 +1400,7 @@ test_ffi_invoke(const ContractAddress &input_address,
 // syscall_MintAuthToken_inner(SystemCallHandler &syscall_handler,
 //   const BlockHeight &input_expiry_height,
 //   std::span<const std::byte> input_serialized_auth_token,
-//   uint32_t &output_token_id) noexcept
+//   uint32_t &output_token_id)() noexcept
 HostFnStatus<SyscallErrorCode>
 test_ffi_mint_auth_token(BlockHeight input_expiry_height,
                          std::span<const std::byte> input_serialized_auth_token,
@@ -1320,7 +1428,7 @@ test_ffi_mint_auth_token(BlockHeight input_expiry_height,
 //   ContractAddress &output_token_minter,
 //   RuntimeMemoryLength &output_auth_payload_written_len,
 //   uint32_t &output_unwrapped_token_id_start,
-//   uint32_t &output_unwrapped_token_id_count) noexcept
+//   uint32_t &output_unwrapped_token_id_count)() noexcept
 HostFnStatus<SyscallErrorCode>
 test_ffi_consume_auth_token(
     uint32_t input_token_id, std::span<std::byte> output_auth_payload,
@@ -1688,6 +1796,300 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
   EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+}
+
+// Two handlers open against one runtime context, each holding a mock frame at
+// the same time. sdk_rs works this way: a TestEnvironment holds exactly one
+// runtime context and opens every TransactionHandler against it, and hog_exec
+// proper has the same shape (one thread_local RuntimeContext per executor
+// thread). So the runtime context must resolve each mock invocation back to the
+// handler running it rather than to a single context-wide slot.
+namespace {
+
+// Forces the coroutine onto a pool worker before reading the slot. A database
+// read migrates the same way, but incidentally; these hop on purpose so the
+// migration is the thing under test rather than a side effect of the DB.
+x23::Async<SyscallHandlerContext *>
+context_after_pool_hop()
+{
+  co_await default_threadpool().bg();
+  co_return SyscallHandlerContext::get_context();
+}
+
+x23::Async<SyscallHandlerContext *>
+owner_after_pool_hop(SystemCallHandler *handler)
+{
+  co_await default_threadpool().bg();
+  co_return SyscallHandlerContext::from_handler(handler);
+}
+
+} // namespace
+
+// The whole design rests on the context slot NOT following a coroutine across
+// a resume -- if it did, from_handler() would be unnecessary. Assert the
+// premise directly, so this fails loudly if x23 ever gains thread-affine
+// resumption and the rest of the machinery becomes dead weight.
+// The shape sdk_rs actually runs: one TestEnvironment (one runtime context)
+// with a handler per thread, all invoking at once. Every invocation suspends
+// on the database reads under resolve_runtime and resumes on a worker, so each
+// one has to re-find its own handler while every other thread's is equally
+// live. A lookup that consulted the running thread, or a single shared slot,
+// fails here and passes every single-threaded test in this file.
+TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
+{
+  // A lookup that consulted the running thread or a single shared slot fails
+  // at two threads; eight with four rounds each leaves room for the push/pop
+  // cycle to interleave badly.  Almost all of the runtime is the shared DB
+  // setup, so the extra threads are close to free.
+  constexpr int kThreadCount = 8;
+  constexpr int kIterations = 4;
+
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // One mock id and one deployment address per thread, so each invocation
+  // carries its own check block.  Both have to differ: the id selects the
+  // callback's check block, and the address is what the frame targets --
+  // deploying to the default address would put every thread's contract at the
+  // same place, leaving them all invoking whichever one was deployed last.
+  // The 0x80 base keeps these clear of the caller addresses below, since a
+  // nested invoke of an address already on the stack is rejected.
+  std::vector<CallerCheckData> check_data(kThreadCount);
+  std::vector<ContractAddress> contract_addrs(kThreadCount);
+  for (int t = 0; t < kThreadCount; t++) {
+    ContractAddress deployment_addr{};
+    deployment_addr[0] = static_cast<uint8_t>(0x80 + t);
+    contract_addrs[t] =
+        deploy_mock_contract(db, rc, 1 + t, mock_contract_check_caller,
+                             &check_data[t], deployment_addr);
+  }
+
+  std::vector<std::thread> threads;
+  threads.reserve(kThreadCount);
+  std::atomic<int> failures{0};
+
+  for (int t = 0; t < kThreadCount; t++) {
+    threads.emplace_back([&, t] {
+      auto handler = make_mocked_handler(db, rc);
+      if (handler.ffi_error_code != kTestFFIErrorCodeNone) {
+        failures.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+      x23::Defer close([&] {
+        if (close_syscall_handler(handler.syscall_handler) !=
+            kTestFFIErrorCodeNone)
+          failures.fetch_add(1, std::memory_order_relaxed);
+      });
+
+      ContractAddress frame_addr{};
+      frame_addr[0] = static_cast<uint8_t>(t + 1);
+
+      check_data[t].expected_self = contract_addrs[t];
+      check_data[t].expected_sender = frame_addr;
+
+      Invocation invocation = {
+          .invoked_address = frame_addr,
+          .entrypoint = entrypoint_from_method_id(0x1234),
+          .gas_limit = 1'000'000,
+          .calldata = {},
+      };
+      if (open_frame(handler.syscall_handler, invocation) !=
+          kTestFFIErrorCodeNone) {
+        failures.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+      // An open frame is owed a finish, and close_syscall_handler() refuses to
+      // destroy a handler that still has one -- which in turn makes free_db()
+      // refuse the DBContext, stranding its RPC clients and hanging the
+      // process in ~CoroPoll at exit.  Pay the debt on every path out, so a
+      // check that fails here fails as a test rather than as a hang.  Declared
+      // after `close` so it runs before it.
+      x23::Defer finish([&] {
+        auto done = finish_mock_invocation_frame(handler.syscall_handler,
+                                                 std::to_underlying(
+                                                     InvokeErrorCode::None));
+        free_ffi_data_buffer(done.serialized_output);
+        free_ffi_data_buffer(done.serialized_trace);
+        free_ffi_data_buffer(done.serialized_events);
+      });
+
+      for (int i = 0; i < kIterations; i++) {
+        check_data[t].sender_check_passed = false;
+        check_data[t].self_check_passed = false;
+
+        if (push_context(handler.syscall_handler) != kTestFFIErrorCodeNone) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+        x23::Defer pop([&] {
+          if (pop_context() != kTestFFIErrorCodeNone)
+            failures.fetch_add(1, std::memory_order_relaxed);
+        });
+        Calldata calldata;
+        RuntimeMemoryLength output_return_buffer_len = 0,
+                            output_returned_auth_token_len = 0;
+        auto res =
+            test_ffi_invoke(contract_addrs[t], 0x1234, UINT64_MAX, calldata,
+                            InvokeFlagSet{}, {}, output_return_buffer_len,
+                            output_returned_auth_token_len);
+        if (!res.has_value() ||
+            *res != SyscallErrorCode::kSyscallErrorCodeNone ||
+            !check_data[t].sender_check_passed ||
+            !check_data[t].self_check_passed) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+      }
+    });
+  }
+
+  for (auto &th : threads) {
+    th.join();
+  }
+  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
+}
+
+TEST(TestBindingsTest, ContextSlotDoesNotFollowACoroutineHop)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+  ASSERT_NE(SyscallHandlerContext::get_context(), nullptr);
+
+  // The pool worker's own stack is empty; the push happened on this thread.
+  EXPECT_EQ(context_after_pool_hop()(), nullptr);
+
+  // ...and the hop did not disturb the pushing thread's stack.
+  EXPECT_EQ(SyscallHandlerContext::get_context(),
+            static_cast<SyscallHandlerContext *>(handler.syscall_handler));
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+}
+
+// What make_new_runtime() actually does once it resumes on a worker: recover
+// the owner from the handler hog_exec handed it, with no thread involved.
+// Two live handlers on one runtime context, so a lookup that ignored its
+// argument would have a 50% chance of passing.
+TEST(TestBindingsTest, FromHandlerResolvesOwnerOnAPoolThread)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler_a = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_a.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler_a.syscall_handler); });
+
+  auto handler_b = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_b.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { close_syscall_handler(handler_b.syscall_handler); });
+
+  auto *ctx_a = static_cast<SyscallHandlerContext *>(handler_a.syscall_handler);
+  auto *ctx_b = static_cast<SyscallHandlerContext *>(handler_b.syscall_handler);
+
+  EXPECT_EQ(owner_after_pool_hop(&ctx_a->to_handler())(), ctx_a);
+  EXPECT_EQ(owner_after_pool_hop(&ctx_b->to_handler())(), ctx_b);
+
+  // Same answer on the calling thread: the lookup is thread-independent, which
+  // is the entire point of it.
+  EXPECT_EQ(SyscallHandlerContext::from_handler(&ctx_a->to_handler()), ctx_a);
+  EXPECT_EQ(SyscallHandlerContext::from_handler(&ctx_b->to_handler()), ctx_b);
+}
+
+TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  CallerCheckData check_data;
+  auto contract_addr =
+      deploy_mock_contract(db, rc, 1, mock_contract_check_caller, &check_data);
+  check_data.expected_self = contract_addr;
+
+  auto handler_a = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_a.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler_a.syscall_handler); });
+
+  auto handler_b = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_b.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { close_syscall_handler(handler_b.syscall_handler); });
+
+  ContractAddress addr_a{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+  ContractAddress addr_b{2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+
+  auto open = [](void *handler, ContractAddress const &frame_addr) {
+    Invocation invocation = {
+        .invoked_address = frame_addr,
+        .entrypoint = entrypoint_from_method_id(0x1234),
+        .gas_limit = 1'000'000,
+        .calldata = {},
+    };
+    ASSERT_EQ(open_frame(handler, invocation), kTestFFIErrorCodeNone);
+  };
+
+  // Both frames stay open across both invocations, so each invocation has to
+  // find its own handler while the other is equally live.
+  open(handler_a.syscall_handler, addr_a);
+  open(handler_b.syscall_handler, addr_b);
+
+  // The contract reads get_msg_sender() off whichever handler is running, so a
+  // mismatch means the invocation attached to the wrong one.
+  auto invoke_from = [&](void *handler, ContractAddress const &frame_addr) {
+    check_data.expected_sender = frame_addr;
+    check_data.sender_check_passed = false;
+    check_data.self_check_passed = false;
+
+    ASSERT_EQ(push_context(handler), kTestFFIErrorCodeNone);
+    Calldata calldata;
+    RuntimeMemoryLength output_return_buffer_len = 0,
+                        output_returned_auth_token_len = 0;
+    auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
+                               InvokeFlagSet{}, {}, output_return_buffer_len,
+                               output_returned_auth_token_len);
+    EXPECT_TRUE(res.has_value());
+    EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
+    EXPECT_TRUE(check_data.sender_check_passed);
+    EXPECT_TRUE(check_data.self_check_passed);
+    ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+  };
+
+  invoke_from(handler_a.syscall_handler, addr_a);
+  invoke_from(handler_b.syscall_handler, addr_b);
+
+  auto finish = [](void *handler) {
+    auto finish_res =
+        finish_mock_invocation_frame(handler,
+                                     std::to_underlying(InvokeErrorCode::None));
+    EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+    free_ffi_data_buffer(finish_res.serialized_output);
+    free_ffi_data_buffer(finish_res.serialized_trace);
+    free_ffi_data_buffer(finish_res.serialized_events);
+  };
+  finish(handler_a.syscall_handler);
+  finish(handler_b.syscall_handler);
 }
 
 // Verify that a contract invoked from a mock frame sees get_current_address()
@@ -3134,7 +3536,7 @@ TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
                                                 1'000'000'000),
             kTestFFIErrorCodeNone);
 
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   // Build signed transaction targeting root contract
   SignedTransaction stx{
@@ -3208,6 +3610,23 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
 
 // Regression test: concurrent create_db calls from multiple threads used to
 // cause use-after-free in PerThread storage (fixed in #1327).
+// The genesis root contract is a required argument: a null pointer is
+// rejected up front, and bytes that do not deserialize to a Contract fail
+// with a structured error instead of failing genesis construction.
+TEST(TestBindingsTest, CreateDBRejectsMissingGenesisRoot)
+{
+  auto null_res =
+      create_db(nullptr, 0, NetworkHash{}.data(), nullptr, 0, nullptr, 0);
+  EXPECT_EQ(null_res.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
+  EXPECT_EQ(null_res.db, nullptr);
+
+  constexpr uint8_t kGarbage[] = {0xFF, 0xFF, 0xFF};
+  auto garbage_res = create_db(nullptr, 0, NetworkHash{}.data(), kGarbage,
+                               sizeof(kGarbage), nullptr, 0);
+  EXPECT_EQ(garbage_res.ffi_error_code, kTestFFIErrorCodeDeserializeError);
+  EXPECT_EQ(garbage_res.db, nullptr);
+}
+
 TEST(TestBindingsTest, ConcurrentCreateDB)
 {
   constexpr int kThreadCount = 8;
@@ -3231,34 +3650,8 @@ TEST(TestBindingsTest, ConcurrentCreateDB)
   }
 }
 
-// Test that setup_create_contract rejects wasm contracts with memory
-// exceeding the allowed limit. See wat/test_large_memory.wat (100 initial
-// pages, well above the 1-page limit).
-TEST(TestBindingsTest, SetupCreateContractRejectsLargeMemory)
-{
-  auto *db = make_db();
-  ASSERT_NE(db, nullptr);
-  x23::Defer d([db] { free_db(db); });
-
-  auto *rc = make_runtime_context();
-  ASSERT_NE(rc, nullptr);
-  x23::Defer d2([rc] { close_runtime_context(rc); });
-
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract() =
-      test::load_wasm_from_file("test_large_memory.wasm");
-
-  auto bytes = x23::serialize(contract);
-
-  // setup_create_contract should reject this contract because its memory
-  // exceeds the allowed limit. Before the fix, this would succeed and the
-  // contract would fail later with an Unrecoverable error during instantiation.
-  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
-  EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
-}
-
 // Regression test for #2683: setup_create_contract must run the runtime
-// verifier for RV32 contracts (not just Wasmi) before storing them. An invalid
+// verifier for RV32 contracts before storing them. An invalid
 // RV32 artifact that do_verify_contract rejects must be rejected here too with
 // a structured ContractVerificationFailed error, rather than being stored and
 // surfacing later as an Unrecoverable error during invocation.
@@ -3311,50 +3704,13 @@ TEST(TestBindingsTest, SetupCreateContractRejectsUnknownNative)
   EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
 }
 
-namespace {
-
-// Append an unsigned LEB128-encoded u32 to a wasm byte buffer.
-void
-append_wasm_u32_leb128(auto &out, uint32_t value)
-{
-  do {
-    uint8_t byte = value & 0x7fU;
-    value >>= 7U;
-    if (value != 0) {
-      byte |= 0x80U;
-    }
-    out.push_back(byte);
-  } while (value != 0);
-}
-
-// Append a well-formed, verifier-allowed "name" custom section padded with
-// `custom_bytes` of filler so the serialized contract can be pushed past
-// RAMDB's single-item size limit while staying a valid module.
-void
-append_name_custom_section(auto &wasm, uint32_t custom_bytes)
-{
-  constexpr std::string_view kSectionName = "name";
-
-  wasm.push_back(0); // custom section id
-  append_wasm_u32_leb128(wasm, static_cast<uint32_t>(1 + kSectionName.size() +
-                                                     custom_bytes));
-  append_wasm_u32_leb128(wasm, static_cast<uint32_t>(kSectionName.size()));
-  wasm.append_range(kSectionName);
-  wasm.append_range(std::string(custom_bytes, 'x'));
-}
-
-} // namespace
-
-// Since #2569 hogdb chunks large code rows across multiple RAMDB items, so an
-// honest verifier-accepted contract whose serialized bytes exceed RAMDB's
-// single-item limit now stores successfully through the setup path.  This
-// supersedes the #2462 regression concern (the write no longer fails; the
-// structured-error-or-crash question is moot at this size).  We also deploy
-// the stored contract and invoke it end-to-end to confirm the full path works;
-// the padded test_param_entrypoint module has a wrong-ABI export so the frame
-// returns a deterministic Fault, but the FFI layer still returns
-// kTestFFIErrorCodeNone.
-TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasmStoresChunked)
+// Regression test for #3592: a native precompile (here the default wallet)
+// verifies and stores through setup_create_contract(), but deploying it at an
+// ordinary address must be rejected -- production deploy_contract() bans
+// redeploying native precompiles. Without the setup-path ban, the deployment
+// row is written and a later nested invoke of the default wallet trips its
+// root-only CHECK and aborts the process instead of returning an error.
+TEST(TestBindingsTest, SetupDeployContractRejectsNativePrecompile)
 {
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
@@ -3364,34 +3720,69 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasmStoresChunked)
   ASSERT_NE(rc, nullptr);
   x23::Defer d2([rc] { close_runtime_context(rc); });
 
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract() =
-      test::load_wasm_from_file("test_param_entrypoint.wasm");
-  append_name_custom_section(contract.wasmi_contract().data, 96_KiB);
+  Contract wallet_contract(ContractType::kNative);
+  wallet_contract.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+  auto bytes = x23::serialize(wallet_contract);
+
+  // The native default wallet is registered with the runtime, so it verifies
+  // and stores successfully.
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  // Deploying it at an ordinary child address is rejected with a structured
+  // error rather than persisting the invariant-breaking deployment.
+  ContractAddress addr{0x44};
+  EXPECT_EQ(setup_deploy_contract(db, addr.data(),
+                                  sha256(wallet_contract).data(), bytes.size()),
+            kTestFFIErrorCodeInvalidArgument);
+}
+
+// Since #2569 hog_db chunks large code rows across multiple RAMDB items, so an
+// honest verifier-accepted contract whose serialized bytes exceed RAMDB's
+// single-item limit stores successfully through the setup path. The artifact
+// format has no slack section, so the row is pushed past kBigItemThreshold
+// with a full 64 KiB initial memory image (memory_bytes lands exactly at
+// kMaxMemoryBytes, the accept-side limit boundary). We also deploy the stored
+// contract and invoke it end-to-end to confirm the full path works; the
+// program Returns, so the invoke is asserted as a frame success.
+TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedRv32StoresChunked)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  std::vector<uint32_t> words;
+  uint8_t reg = 10;
+  for (const int32_t imm : {6, 0, 0, 0, 0, 0}) {
+    words.push_back(rv32::test_program::addi(reg++, 0, imm));
+  }
+  words.push_back(0x00000073U);
+
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.append_range(
+      rv32::test_artifact::build_artifact(words, std::vector<uint8_t>(64 * 1024,
+                                                                      0xA5)));
 
   auto bytes = x23::serialize(contract);
-  // Precondition: the contract is large enough to be rejected by the DB write
-  // but the module stays under the meter's 2 MiB cap, so verification passes.
   ASSERT_GT(bytes.size(), kBigItemThreshold);
-  ASSERT_LT(contract.wasmi_contract().data.size(), 2_MiB);
 
   auto verify_result = do_verify_contract(rc, bytes.data(), bytes.size());
   ASSERT_EQ(verify_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_EQ(verify_result.success, 1);
 
-  // Since #2569 the oversized row is stored chunked: the setup write succeeds.
   auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
   EXPECT_EQ(result, kTestFFIErrorCodeNone);
 
-  // Deploy and invoke end-to-end to confirm the chunked contract is readable
-  // and executable.
   ContractAddress deployment_addr{};
   ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
                                   sha256(contract).data(), bytes.size()),
             kTestFFIErrorCodeNone);
 
-  // A committed transaction consumes a replay nonce charged to the invoked
-  // address; grant enough storage tokens to cover that cost.
   ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
                                                 1'000'000),
             kTestFFIErrorCodeNone);
@@ -3400,7 +3791,7 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasmStoresChunked)
       .tx = {.invocation =
                  {
                      .invoked_address = deployment_addr,
-                     .entrypoint = entrypoint_from_method_id(0x1234),
+                     .entrypoint = entrypoint_from_method_id(0),
                      .gas_limit = 1'000'000,
                      .calldata = {},
                  },
@@ -3415,27 +3806,12 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasmStoresChunked)
   x23::Defer d4([&] { free_ffi_data_buffer(invoke_result.serialized_output); });
   x23::Defer d5([&] { free_ffi_data_buffer(invoke_result.serialized_trace); });
   x23::Defer d6([&] { free_ffi_data_buffer(invoke_result.serialized_events); });
-  // The FFI wrapper must not surface an unrecoverable error: the param-ABI
-  // mismatch is a deterministic fault, not a system error.
-  EXPECT_EQ(invoke_result.ffi_error_code, kTestFFIErrorCodeNone);
-}
-
-// Test that do_verify_contract returns failure for wasm with large memory.
-TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
-{
-  auto *rc = make_runtime_context();
-  ASSERT_NE(rc, nullptr);
-  x23::Defer d([rc] { close_runtime_context(rc); });
-
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract() =
-      test::load_wasm_from_file("test_large_memory.wasm");
-
-  auto bytes = x23::serialize(contract);
-
-  auto result = do_verify_contract(rc, bytes.data(), bytes.size());
-  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
-  EXPECT_EQ(result.success, 0);
+  ASSERT_EQ(invoke_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(invoke_result.serialized_output.data, nullptr);
+  InvocationFrameOutput output;
+  x23::deserialize(&output, x23::BufView{invoke_result.serialized_output.data,
+                                         invoke_result.serialized_output.len});
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
 }
 
 // Regression test for #1754: FFIDataBuffer::len must be uint64_t so that
@@ -3811,12 +4187,13 @@ TEST(TestBindingsTest, AdvanceBlockRejectedWhileHandlerOpen)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   // Advancing the block while the handler is open is rejected.
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(advance_new_block(db, nullptr),
+            kTestFFIErrorCodeUnrecoverableError);
 
   // After the handler is closed, advancing the block succeeds.
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
             kTestFFIErrorCodeNone);
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -3893,7 +4270,7 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
   DbConflictResult conflict;
   x23::deserialize(&conflict, x23::BufView{c2.serialized_conflict.data,
                                            c2.serialized_conflict.len});
-  // Proposal mode: hogdb selects All in debug builds, First in release
+  // Proposal mode: hog_db selects All in debug builds, First in release
   // builds.
   if constexpr (is_debug_build()) {
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
@@ -3906,7 +4283,7 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
     ASSERT_TRUE(found_replay);
   }
   else {
-    // First mode reports whichever conflicting delta hogdb hit first, which
+    // First mode reports whichever conflicting delta hog_db hit first, which
     // is not deterministic when the batch can conflict more than once, so
     // don't assert a specific code.
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
@@ -3914,3 +4291,5 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
 }
 
 } // namespace hogd
+
+// NOLINTEND(bugprone-unchecked-optional-access)

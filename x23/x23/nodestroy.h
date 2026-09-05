@@ -36,9 +36,19 @@ make_nodestroy(auto *p)
   return *p;
 }
 
+template<typename T> struct NodestroyAllocator : public std::allocator<T> {
+  using super = std::allocator<T>;
+
+  T *allocate(size_t n) { return make_nodestroy(super::allocate(n)); }
+  auto allocate_at_least(size_t n)
+  {
+    return make_nodestroy(super::allocate_at_least(n));
+  }
+};
+
 // An Unconstructed<T> must be manually constructed an destroyed.  If
-// it's never destroyed, it may will leak memory, which is okay for
-// global variables.  Disables leak sanitizer during construction.
+// it's never destroyed, it may leak memory, which is okay for global
+// variables.  Disables leak sanitizer during construction.
 template<typename T> requires (!std::is_reference_v<T>)
 class Unconstructed {
 public:

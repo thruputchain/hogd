@@ -11,17 +11,17 @@ add_library(
 )
 target_link_libraries(
   hog_devnode
-  auth
+  hog_auth
   base
   contract_loader
   crypto
-  event
+  hog_event
   exec_interface
   genesis
   hogd
-  hogdb
-  indexer
-  mempool
+  hog_db
+  hog_indexer
+  hog_mempool
   protocol
   ramdb
   runtime
@@ -30,8 +30,7 @@ target_link_libraries(
 add_dependencies(
   hog_devnode
   all_riscv_contracts
-  all_wasm_contracts
-  all_wasm_headers
+  all_contract_headers
 )
 target_include_directories(
   hog_devnode
@@ -83,7 +82,6 @@ target_link_libraries(
 add_dependencies(
   hog_devnode_test
   all_riscv_contracts
-  all_wasm_contracts
   hog-devnode
 )
 gtest_discover_tests(
@@ -111,10 +109,30 @@ target_link_libraries(
 add_dependencies(
   bootstrap_manifest_test
   all_riscv_contracts
-  all_wasm_contracts
-  all_wasm_headers
+  all_contract_headers
 )
 gtest_discover_tests(bootstrap_manifest_test)
+
+add_executable(
+  hog_devnode_tmp_dir_test
+  hog_devnode_tmp_dir_test.cc
+)
+target_include_directories(
+  hog_devnode_tmp_dir_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(
+  hog_devnode_tmp_dir_test
+  hog_devnode
+  GTest::gtest
+)
+add_dependencies(
+  hog_devnode_tmp_dir_test
+  all_riscv_contracts
+  all_contract_headers
+)
+gtest_discover_tests(hog_devnode_tmp_dir_test)
 
 add_executable(
   hosted_bootstrap_generator_test
@@ -140,8 +158,7 @@ target_link_libraries(
 add_dependencies(
   hosted_bootstrap_generator_test
   all_riscv_contracts
-  all_wasm_contracts
-  all_wasm_headers
+  all_contract_headers
   hog-hosted-bootstrap
 )
 gtest_discover_tests(hosted_bootstrap_generator_test)

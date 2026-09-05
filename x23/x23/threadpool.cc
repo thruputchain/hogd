@@ -30,7 +30,8 @@ ThreadPool::ThreadPool(size_t nthreads)
   : nthreads_(nthreads), nqueues_((init_cpumaps(), llc_map->nbuckets())),
     queue_nthreads_(new std::atomic_uint[nqueues_]{}),
     runqueues_(std::make_unique<RunQueue[]>(nqueues_)),
-    tstate_(std::make_unique<ThreadState[]>(nthreads))
+    tstate_(std::make_unique<ThreadState[]>(nthreads)),
+    qcbq_service_thread_(&ThreadPool::qcbq_service, this)
 {
   fastclock::get_ns(); // Calibrate the clock early
   workers_.reserve(nthreads_);
@@ -51,6 +52,12 @@ ThreadPool::~ThreadPool()
     ptr->nonempty.notify_all();
   }
   threads_.clear(); // Join all threads before destroying fields
+
+  std::unique_lock lk{qcbq_lock_};
+  qcbq_nonempty_.notify_all();
+  // qcbq_service might exit after ss_.request_stop(), so purge final
+  // quiescent callbacks after workers have exited.
+  qcbq_do_service(lk);
 }
 
 // Find and lock a runqueue for a job with cpuhint.  If the "affinity
@@ -112,9 +119,20 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
+  std::condition_variable *nonempty = nullptr;
   for (auto &j : jobs) {
-    enqueue_selected(lq, j, now);
+    int affinity_queue = llc_map->bucket(j.cpuhint);
+    if (nonempty && qno(lq) != affinity_queue) {
+      lq.reset();
+      nonempty->notify_all();
+      nonempty = nullptr;
+    }
+    if (enqueue_selected(lq, j, now))
+      nonempty = &lq->nonempty;
   }
+  lq.reset();
+  if (nonempty)
+    nonempty->notify_all();
 }
 
 void
@@ -124,7 +142,11 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  enqueue_selected(lq, job, now);
+  bool wasempty = enqueue_selected(lq, job, now);
+  auto *nonempty = &lq->nonempty;
+  lq.reset();
+  if (wasempty)
+    nonempty->notify_all();
 }
 
 void
@@ -134,13 +156,18 @@ ThreadPool::quiesce() noexcept
 
   std::vector<size_t> counts(nthreads_);
   for (size_t i = 0; i < nthreads_; ++i)
-    counts[i] = tstate_[i].count_;
+    counts[i] =
+        quiesce_count(tstate_[i].count_.load(std::memory_order_acquire));
 
-  for (size_t i = 0; i < nthreads_; ++i)
-    while (counts[i] % 2 && counts[i] == tstate_[i].count_) {
-      tstate_[i].please_wake_ = true;
-      tstate_[i].count_.wait(counts[i]);
+  for (size_t i = 0; i < nthreads_; ++i) {
+    while (counts[i] % 2) {
+      size_t current =
+          tstate_[i].count_.fetch_or(kQuiesceWake, std::memory_order_acq_rel);
+      if (quiesce_count(current) != counts[i])
+        break;
+      tstate_[i].count_.wait(current | kQuiesceWake, std::memory_order_relaxed);
     }
+  }
 }
 
 void
@@ -170,6 +197,34 @@ ThreadPool::drain() noexcept
   // Now also wait for all running threads to yield, since some of
   // those might still have been enqueued before drain was called.
   quiesce();
+}
+
+void
+ThreadPool::qcbq_service()
+{
+  std::unique_lock lk(qcbq_lock_);
+  for (;;) {
+    qcbq_do_service(lk);
+    if (ss_.stop_requested())
+      return;
+    qcbq_nonempty_.wait(lk);
+  }
+}
+
+void
+ThreadPool::qcbq_do_service(std::unique_lock<std::mutex> &lk)
+{
+  assert(lk);
+  for (;;) {
+    auto v = std::exchange(qcbq_, {});
+    if (v.empty())
+      return;
+    lk.unlock();
+    quiesce();
+    for (auto &f : v)
+      std::invoke(f);
+    lk.lock();
+  }
 }
 
 std::string
@@ -336,17 +391,15 @@ ThreadPool::Worker::work()
   auto &ts = pool_->tstate_[threadno_];
   size_t count = 0;
   for (;;) {
-    ts.count_.store(count++);
-    if (ts.please_wake_) {
-      ts.please_wake_ = false;
+    size_t oldcount = ts.count_.exchange(count++, std::memory_order_release);
+    if (oldcount & kQuiesceWake)
       ts.count_.notify_all();
-    }
 
     auto ptr = getq();
     if (!ptr)
       return;
     auto task = qpop(ptr);
-    ts.count_ = count++;
+    ts.count_.store(count++, std::memory_order_release);
     ptr.reset();
     task();
   }

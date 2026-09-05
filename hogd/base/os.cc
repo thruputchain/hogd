@@ -8,6 +8,7 @@ extern "C" {
 #ifdef __linux__
 #include <sched.h>
 #endif // defined(__linux__)
+#include <unistd.h>
 }
 
 #include <cerrno>
@@ -111,6 +112,17 @@ read_process_name()
 #else  // defined(__linux__)
   CHECK(false);
 #endif // defined(__linux__)
+}
+
+size_t
+total_physical_memory()
+{
+  const auto pages = static_cast<int64_t>(sysconf(_SC_PHYS_PAGES));
+  const auto page_size = static_cast<int64_t>(sysconf(_SC_PAGE_SIZE));
+  if (pages <= 0 || page_size <= 0) {
+    return 0;
+  }
+  return static_cast<size_t>(pages) * static_cast<size_t>(page_size);
 }
 
 } // namespace hogd

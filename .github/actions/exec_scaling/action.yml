@@ -24,13 +24,13 @@ runs:
       shell: bash
 
     - name: launch multiexec runner one exec
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -a 100 > multiexec_runner_log
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -a 100 > multiexec_runner_log
       shell: bash
     - name: launch multiexec runner two exec
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -a 100 >> multiexec_runner_log
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -a 100 >> multiexec_runner_log
       shell: bash
     - name: launch multiexec runner three exec
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -a 100 >> multiexec_runner_log
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -a 100 >> multiexec_runner_log
       shell: bash
     - name: log multiexec runner logs
       run: ./scripts/log_metric.sh multiexec_interface multiexec_runner_log
@@ -38,8 +38,8 @@ runs:
     - name: cleanup control servers
       if: always()
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} stop
       shell: bash

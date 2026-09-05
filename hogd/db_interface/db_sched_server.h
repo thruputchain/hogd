@@ -52,14 +52,13 @@ public:
     co_return DbSchedResult::DbSchedResultError; // TODO(geoff): unimplemented
   }
   x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id,
-                                                    BlockHash block_hash,
-                                                    SHA256Hash events_hash);
+                                                    ConsensusValue value);
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
   static x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
 
-  x23::Async<DbSchedResult> dbsched_load_genesis_configuration(
-      GenesisConfiguration const &genesis_configuration, uint64_t network_id,
-      SHA256Hash txset_hash, SHA256Hash events_hash);
+  x23::Async<DbSchedResult>
+  dbsched_load_genesis_configuration(GenesisConfiguration genesis_configuration,
+                                     ConsensusValue value);
 
   static x23::Async<DbTipResult> dbsched_get_tip()
   {

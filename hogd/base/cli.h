@@ -17,6 +17,27 @@
 
 namespace hogd {
 
+// help_requested returns true when either help flag appears anywhere on the
+// command line. Daemons check this before initialization so help takes
+// precedence over every other argument and remains side-effect-free.
+inline bool
+help_requested(int argc, char *argv[])
+{
+  if (argv == nullptr) {
+    return false;
+  }
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] == nullptr) {
+      continue;
+    }
+    const std::string_view arg = argv[i];
+    if (arg == "--help" || arg == "-h") {
+      return true;
+    }
+  }
+  return false;
+}
+
 // try_parse_integer parses a complete, in-range number in the given base. A
 // base of 0 auto-detects: a "0x" prefix means hex, anything else is decimal.
 //

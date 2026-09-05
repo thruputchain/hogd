@@ -22,18 +22,21 @@ check() {
 check_complete() {
   local scenario="$1" got
   got="$(HOG_STARTUP_LIST_ONLY=1 "$SCRIPT" "$scenario" | sort | tr '\n' ' ' | sed 's/ $//')"
-  local want="auth chuckd event hogdb hogexec indexer loadgen mempool"
+  local want="auth chuckd event hog-db hog-exec indexer loadgen mempool"
   if [[ "$got" != "$want" ]]; then
     echo "FAIL $scenario component set: got [$got] want [$want]"
     fail=1
   fi
 }
 
-check mempool-first "mempool loadgen hogexec event indexer hogdb auth chuckd"
-check mempool-last "loadgen hogexec event indexer hogdb auth mempool chuckd"
-check mempool-middle "loadgen hogexec event mempool indexer hogdb auth chuckd"
-check coordinator-first "mempool loadgen chuckd event indexer hogexec hogdb auth"
-check starve-auth "mempool loadgen hogexec hogdb event indexer chuckd"
+check mempool-first "mempool loadgen hog-exec event indexer hog-db auth chuckd"
+check mempool-last "loadgen hog-exec event indexer hog-db auth mempool chuckd"
+check mempool-middle "loadgen hog-exec event mempool indexer hog-db auth chuckd"
+check coordinator-first "mempool loadgen chuckd event indexer hog-exec hog-db auth"
+check starve-auth "mempool loadgen hog-exec hog-db event indexer chuckd"
+check starve-exec "mempool loadgen hog-db event indexer auth chuckd"
+check starve-db "mempool loadgen hog-exec event indexer auth chuckd"
+check starve-event "mempool loadgen hog-exec hog-db indexer auth chuckd"
 
 # Ordering relations for the indexer/event scenarios.
 idx_before_event() {
@@ -62,7 +65,7 @@ idx_before_event
 event_before_idx
 
 # coordinator-first must launch chuckd before each mempool-downstream service
-# (auth, hogexec, hogdb) so the coordinator can drive traffic before they
+# (auth, hog-exec, hog-db) so the coordinator can drive traffic before they
 # register with the mempool.
 coordinator_before_downstreams() {
   local order
@@ -70,7 +73,7 @@ coordinator_before_downstreams() {
   local c
   c=$(grep -n '^chuckd$' <<<"$order" | cut -d: -f1)
   local dep p
-  for dep in auth hogexec hogdb; do
+  for dep in auth hog-exec hog-db; do
     p=$(grep -n "^${dep}\$" <<<"$order" | cut -d: -f1)
     [[ "$c" -lt "$p" ]] || {
       echo "FAIL coordinator-first: chuckd($c) not before $dep($p)"
@@ -82,16 +85,19 @@ coordinator_before_downstreams
 
 # starve-auth intentionally omits auth (and only auth) to starve the mempool's
 # verify path: it must contain chuckd and every component except auth.
-starve_auth_omits_auth() {
+starve_omits() {
+  local scenario="$1" omitted="$2" want="$3"
   local order
-  order="$(HOG_STARTUP_LIST_ONLY=1 "$SCRIPT" starve-auth | sort | tr '\n' ' ' | sed 's/ $//')"
-  local want="chuckd event hogdb hogexec indexer loadgen mempool"
+  order="$(HOG_STARTUP_LIST_ONLY=1 "$SCRIPT" "$scenario" | sort | tr '\n' ' ' | sed 's/ $//')"
   if [[ "$order" != "$want" ]]; then
-    echo "FAIL starve-auth set: got [$order] want [$want] (auth omitted, all others present)"
+    echo "FAIL $scenario set: got [$order] want [$want] ($omitted omitted, all others present)"
     fail=1
   fi
 }
-starve_auth_omits_auth
+starve_omits starve-auth auth "chuckd event hog-db hog-exec indexer loadgen mempool"
+starve_omits starve-exec hog-exec "auth chuckd event hog-db indexer loadgen mempool"
+starve_omits starve-db hog-db "auth chuckd event hog-exec indexer loadgen mempool"
+starve_omits starve-event event "auth chuckd hog-db hog-exec indexer loadgen mempool"
 
 for s in mempool-first mempool-last mempool-middle indexer-before-event event-before-indexer coordinator-first; do
   check_complete "$s"

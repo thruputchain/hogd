@@ -1,10 +1,10 @@
 #include "hogd/db_interface/db_sched_server.h"
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
-#include "hogd/base/types.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "rpc_types.hh"
-#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -20,13 +20,13 @@ DbSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-DbSchedRpc::dbsched_commit_snapshot(BlockID id, BlockHash block_hash,
-                                    SHA256Hash events_hash)
+DbSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
 {
   if (block_manager_->commit_block(id)) {
-    //(geoff) TODO: Replace with actual BlockHash if available
     DbBlockResult result(DbSchedResult::DbSchedResultOK);
-    // result.block_hash = ...; // Set block_hash if available
+    result.block().config_hash_preimage =
+        make_config_hash_preimage(*block_manager_->get_cost_model(),
+                                  block_manager_->get_network_config());
     co_return result;
   }
   DbBlockResult result(DbSchedResult::DbSchedResultError);
@@ -43,6 +43,9 @@ DbSchedRpc::dbsched_close_snapshot(BlockID id)
   }
   blk->close_block();
   DbBlockResult result(DbSchedResult::DbSchedResultOK);
+  result.block().config_hash_preimage =
+      make_config_hash_preimage(*block_manager_->get_cost_model(),
+                                block_manager_->get_network_config());
   // TODO(geoff): Set block_hash if available
   // result.block_hash = ...; // Set block_hash if available
   co_return result;
@@ -60,9 +63,20 @@ DbSchedRpc::dbsched_abandon_snapshot(BlockID id)
 
 x23::Async<DbSchedResult>
 DbSchedRpc::dbsched_load_genesis_configuration(
-    GenesisConfiguration const &genesis_configuration, uint64_t network_id,
-    SHA256Hash txset_hash, SHA256Hash events_hash)
+    GenesisConfiguration genesis_configuration, ConsensusValue value)
 {
+  // Before compute_config_hash, which CHECKs this: the genesis is untrusted,
+  // so a non-canonical list has to be a rejection rather than an abort.
+  if (!config_hashable(genesis_configuration.network_config)) {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (value.proposal_header.block_height != 0 ||
+      value.proposal_header.network_hash !=
+          genesis_configuration.network_hash ||
+      value.proposal_header.config_hash !=
+          compute_config_hash(genesis_configuration)) {
+    co_return DbSchedResult::DbSchedResultError;
+  }
   if (block_manager_->initialize_genesis_configuration(genesis_configuration)) {
     co_return DbSchedResult::DbSchedResultOK;
   }

@@ -9,7 +9,7 @@ cross-check that keeps hogd's `artifact.h` and the Rust artifact crate's
 
 The RV32 **v4 artifact format** is defined twice:
 
-- **C++** — `hogd/hogexec/runtime/rv32/artifact.h`: the constants, field
+- **C++** — `hogd/hog_exec/runtime/rv32/artifact.h`: the constants, field
   offsets, and validation the runtime applies when it parses an artifact.
 - **Rust** — `groundhog-rpc:crates/rv32/artifact/src/format.rs`: the
   constants and writer the lowerer uses to emit the artifact.
@@ -158,7 +158,7 @@ execution smoke.
 
 ## Components by repo (Slice 1)
 
-- **hogd** (`hogd/hogexec/runtime/rv32/artifact.h`): `format_fingerprint()`
+- **hogd** (`hogd/hog_exec/runtime/rv32/artifact.h`): `format_fingerprint()`
   constexpr + `kArtifactFormatFingerprint` + `static_assert`; smoke test
   (`rv32_runtime_context_test.cc`) reads the stamped metadata fingerprint and
   asserts equality with the C++ value.

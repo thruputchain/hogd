@@ -3,9 +3,9 @@
 #include <format>
 #include <future>
 #include <print>
-#include <stdexcept>
 #include <string>
 
+#include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
@@ -23,7 +23,7 @@ usage(const char *progname, int exit_code = EXIT_FAILURE)
 {
   std::println(stderr,
                "Usage: {} --bind-ip <ip> [--port <port>] "
-               "[--metrics-port <port>] [--help]",
+               "[--metrics-port <port>] [-h|--help] [--version]",
                progname);
   std::println(stderr, "Options:");
   std::println(stderr, "  --bind-ip <ip>  IP address to bind metrics on");
@@ -32,7 +32,8 @@ usage(const char *progname, int exit_code = EXIT_FAILURE)
                kDefaultLoadgenPort);
   std::println(stderr, "  --metrics-port <port>  Health/metrics HTTP port "
                        "(default: 0)");
-  std::println(stderr, "  --help         Show this help message");
+  std::println(stderr, "  -h, --help     Show this help message");
+  std::println(stderr, "  --version      Show version information");
   exit(exit_code);
 }
 
@@ -42,7 +43,7 @@ parse_port(const std::string &value)
   size_t pos = 0;
   uint64_t port = std::stoul(value, &pos, 10);
   if (pos != value.size() || port > 65535) {
-    throw std::runtime_error(std::format("Invalid port: {}", value));
+    hogd::panic("Invalid port: {}", value);
   }
   return static_cast<uint16_t>(port);
 }
@@ -52,6 +53,13 @@ parse_port(const std::string &value)
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
+  if (hogd::help_requested(argc, argv)) {
+    usage(argv[0], EXIT_SUCCESS);
+  }
+  if (hogd::print_version_and_exit_if_requested(argc, argv)) {
+    return EXIT_SUCCESS;
+  }
+
   // Initialize hogd
   auto ret = hogd::hogd_init(argc, argv);
   if (ret) {
@@ -66,9 +74,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Parse command line arguments
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--help") {
-      usage(progname, EXIT_SUCCESS);
-    }
     if (arg == "--bind-ip" && i + 1 < argc) {
       bind_ip = argv[++i];
       continue;

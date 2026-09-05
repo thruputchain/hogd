@@ -13,12 +13,13 @@
 #include "auth_claim.hh"
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/simple_wallet_authclaim.h"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/loadgen/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
@@ -75,8 +76,8 @@ ERC20BasicAuthExperimentState::initialize_wallets(
     wallets_.push_back(WalletInfo{
         .public_key = keys.first,
         .secret_key = keys.second,
-        .address = GenesisConfigurationLoader::calculate_deployed_address(
-            wallet_contract_hash, make_nonce(i)),
+        .address = calculate_genesis_deployment_address(wallet_contract_hash,
+                                                        make_nonce(i)),
         .initial_nonce = make_nonce(i),
     });
   }
@@ -91,7 +92,8 @@ ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
   Signature sig(CryptographicScheme::Ed25519);
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   sig.ed25519() =
-      ed25519_sign(wallets_[wallet_index].secret_key, x23::serialize(tx.tx))
+      ed25519_sign(wallets_[wallet_index].secret_key,
+                   transaction_signature_preimage(config_.network_hash, tx.tx))
           .value();
   // NOLINTEND(bugprone-unchecked-optional-access)
   tx.signatures.push_back(DecoratedSignature{
@@ -114,8 +116,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
     return claim;
   }();
 
-  auto erc20_contract = erc20_meta::load_wasm();
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto erc20_contract = erc20_meta::load_rv32();
+  auto wallet_contract = wallet_meta::load_rv32();
   assert(erc20_contract);
   assert(wallet_contract);
 
@@ -131,18 +133,18 @@ ERC20BasicAuthExperimentState::generate_experiment()
   const auto num_initial_allocations =
       static_cast<int128_t>(wallets_.size()) + 1;
   const int128_t wallet_initial_hogs =
-      (GenesisConfigurationLoader::initial_hog_token_supply() /
+      ((int128_t{kTotalHogSupply} * int128_t{kHogDivisibility}) /
        num_initial_allocations) -
       kWalletInitialHogsEpsilon;
   GenesisConfigurationBuilder builder;
-  builder.add_initial_config(erc20_contract, make_nonce(0),
-                             erc20_meta::entrypoint<"initialize">(),
-                             erc20_meta::make_calldata<"initialize">(
-                                 owner_address),
-                             // The number of hogs each wallet starts with.
-                             wallet_initial_hogs);
-  erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
-      sha256(*erc20_contract), make_nonce(0));
+  builder.add_distribution(erc20_contract, make_nonce(0),
+                           erc20_meta::entrypoint<u8"initialize">(),
+                           erc20_meta::make_calldata<u8"initialize">(
+                               owner_address),
+                           // The number of hogs each wallet starts with.
+                           wallet_initial_hogs);
+  erc20_address_ = calculate_genesis_deployment_address(sha256(*erc20_contract),
+                                                        make_nonce(0));
 
   // initialize wallets
   for (auto const &wallet : wallets_) {
@@ -150,16 +152,12 @@ ERC20BasicAuthExperimentState::generate_experiment()
     // storage available to support their token balances. This will be changed
     // in the future, with whatever initialization procedures we use, but it
     // works for now.
-    builder.add_initial_config(wallet_contract, wallet.initial_nonce,
-                               wallet_meta::entrypoint<"initialize">(),
-                               wallet_meta::make_calldata<"initialize">(
-                                   wallet.public_key),
-                               wallet_initial_hogs);
+    builder.add_distribution(wallet_contract, wallet.initial_nonce,
+                             wallet_meta::entrypoint<u8"initialize">(),
+                             wallet_meta::make_calldata<u8"initialize">(
+                                 wallet.public_key),
+                             wallet_initial_hogs);
   }
-
-  // make unfurl txs
-  x23::Vec<SignedTransaction> unfurl_txs;
-  unfurl_txs.append_range(builder.make_unfurl_genesis_transactions());
 
   // make mint txs
   x23::Vec<SignedTransaction> mint_txs;
@@ -168,13 +166,14 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
     // has to match the deserialized objects in simple_wallet::do_action
     Calldata internal_calldata =
-        x23::serialize(erc20_address_, erc20_meta::entrypoint<"mint">(),
+        x23::serialize(erc20_address_, erc20_meta::entrypoint<u8"mint">(),
                        GasAmount{1'000'000},
-                       erc20_meta::make_calldata<"mint">(wallets_[i].address,
-                                                         make_amount(uint128_t{
-                                                             1'000'000'000})));
+                       erc20_meta::make_calldata<u8"mint">(
+                           wallets_[i].address,
+                           make_amount(uint128_t{1'000'000'000})));
 
-    auto calldata = wallet_meta::make_calldata<"do_action">(internal_calldata);
+    auto calldata =
+        wallet_meta::make_calldata<u8"do_action">(internal_calldata);
 
     auto tx = SignedTransaction{
         .tx =
@@ -182,14 +181,14 @@ ERC20BasicAuthExperimentState::generate_experiment()
                 .invocation =
                     Invocation{
                         .invoked_address = owner_address,
-                        .entrypoint = wallet_meta::entrypoint<"do_action">(),
-                        .gas_limit = GasAmount{20'000},
+                        .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
+                        .gas_limit = GasAmount{100'000},
                         .calldata = std::move(calldata),
                     },
                 .uniquifier =
                     Uniquifier{.block_expiry_height =
                                    make_init_mint_expiry_height(i - 1),
-                               .nonce = unfurl_txs.size() + i},
+                               .nonce = i},
                 .auth_claim = self_auth_claim,
             },
     };
@@ -198,13 +197,22 @@ ERC20BasicAuthExperimentState::generate_experiment()
   }
 
   x23::Vec<InitializationBlock> initialization_txs;
-  initialization_txs.reserve(2);
-  initialization_txs.emplace_back(std::move(unfurl_txs));
+  initialization_txs.reserve(1);
   initialization_txs.emplace_back(std::move(mint_txs));
+
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  auto root_contract = load_stock_genesis_root_contract();
+  assert(root_contract);
+
+  InitializationBlock genesis_ceremony_txs;
+  genesis_ceremony_txs.append_range(
+      builder.make_genesis_ceremony_transactions(cost_model));
 
   co_return LoadgenSuccessResult{
       .genesis_configuration =
-          builder.build_or_panic(StorageCostModel::default_cost_model()),
+          builder.build(config_.network_hash, cost_model, *root_contract,
+                        stock_network_config()),
+      .genesis_ceremony_txs = std::move(genesis_ceremony_txs),
       .initialization_txs = std::move(initialization_txs),
   };
 }
@@ -272,22 +280,22 @@ ERC20BasicAuthExperimentState::extend_experiment(
 
             // has to match the deserialized objects in simple_wallet::do_action
             static auto entrypoint_transfer =
-                erc20_meta::entrypoint<"transfer">();
+                erc20_meta::entrypoint<u8"transfer">();
             Calldata internal_calldata =
                 x23::serialize(erc20_address_, entrypoint_transfer,
                                GasAmount{1'000'000},
-                               erc20_meta::make_calldata<"transfer">(
+                               erc20_meta::make_calldata<u8"transfer">(
                                    wallets_[receiver].address,
                                    make_amount(amount)));
 
             static auto entrypoint_do_action =
-                wallet_meta::entrypoint<"do_action">();
+                wallet_meta::entrypoint<u8"do_action">();
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = entrypoint_do_action,
-                .gas_limit = GasAmount{20'000},
-                .calldata =
-                    wallet_meta::make_calldata<"do_action">(internal_calldata),
+                .gas_limit = GasAmount{100'000},
+                .calldata = wallet_meta::make_calldata<u8"do_action">(
+                    internal_calldata),
             };
 
             work_txs[j] = SignedTransaction{

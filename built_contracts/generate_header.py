@@ -88,11 +88,16 @@ def map_type(ty):
         return f"std::tuple<{', '.join(items)}>"
     elif kind == "named":
         return ty["name"]
+    elif kind == "signed_token":
+        # `Signed<T>` serializes to zero bytes; the handle arrives out-of-band.
+        # `preimage` (the signed payload type, or null when opaque) is metadata
+        # only and does not change the C++ mirror.
+        return "SignedToken"
     else:
-        return kind
+        raise ValueError(f"unmapped C++ type kind '{kind}'")
 
 
-def generate_interface_struct(interface, wasm_file=None):
+def generate_interface_struct(interface, rv32_file=None):
     """Generate a single C++ struct for one contract interface."""
     interface_name = interface["name"]
     version = interface["version"]
@@ -140,9 +145,9 @@ def generate_interface_struct(interface, wasm_file=None):
 
     signatures_str = ",\n             ".join(function_signatures)
 
-    wasm_str = (
-        f'constexpr static std::string_view kWasmFile = "{wasm_file}";'
-        if wasm_file
+    rv32_file_str = (
+        f'constexpr static std::string_view kRv32File = "{rv32_file}";'
+        if rv32_file
         else ""
     )
 
@@ -152,7 +157,7 @@ struct {interface_name} {{
     // derivation hashes UTF-8 bytes independent of -fexec-charset. See #2898.
     constexpr static std::u8string_view kTraitName = u8"{interface_name}";
     constexpr static std::u8string_view kVersion = u8"{version}";
-    {wasm_str}
+    {rv32_file_str}
 
     constexpr static std::string_view kSerializationFormat = "cxs";
 
@@ -171,7 +176,7 @@ struct {interface_name} {{
 
 
 def generate_header(
-    json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None
+    json_file, output_file=None, namespace=None, extra_includes=None, rv32_file=None
 ):
     with open(json_file, "r") as f:
         spec = json.load(f)
@@ -191,7 +196,7 @@ def generate_header(
     # Generate a struct for each interface
     structs = []
     for iface in interfaces:
-        structs.append(generate_interface_struct(iface, wasm_file))
+        structs.append(generate_interface_struct(iface, rv32_file))
 
     header_content = f"""#pragma once
 
@@ -204,7 +209,7 @@ def generate_header(
 #include "x23/vec.h"
 #include "x23/x23.h"
 #include "types.hh"
-#include "hogd/hogexec/components/contract_result.h"
+#include "hogd/hog_exec/components/contract_result.h"
 
 // Auto-generated from contract spec
 // DO NOT EDIT
@@ -234,7 +239,7 @@ def main():
     parser.add_argument("json_spec_file", help="Path to the JSON contract spec file")
     parser.add_argument("-o", "--output", dest="output_file")
     parser.add_argument("-n", "--namespace")
-    parser.add_argument("-w", "--wasm", dest="wasm_file")
+    parser.add_argument("-r", "--rv32", dest="rv32_file")
     parser.add_argument("-i", "--include", dest="extra_includes", action="append")
     args = parser.parse_args()
 
@@ -247,7 +252,7 @@ def main():
         args.output_file,
         args.namespace,
         args.extra_includes,
-        args.wasm_file,
+        args.rv32_file,
     )
 
 

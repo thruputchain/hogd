@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <optional>
@@ -31,10 +32,12 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
-#include "hogd/hogexec/shared.h"
+#include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -64,6 +67,7 @@ block_shutdown_signal()
   sigset_t blocked_mask;
   CHECK_EQ(sigemptyset(&blocked_mask), 0);
   CHECK_EQ(sigaddset(&blocked_mask, SIGTERM), 0);
+  CHECK_EQ(sigaddset(&blocked_mask, SIGINT), 0);
 
   sigset_t suspend_mask;
   // Use pthread_sigmask (not sigprocmask, whose behavior is unspecified in a
@@ -72,6 +76,7 @@ block_shutdown_signal()
   // blocked mask; see hog_devnode_init.
   CHECK_EQ(pthread_sigmask(SIG_BLOCK, &blocked_mask, &suspend_mask), 0);
   CHECK_EQ(sigdelset(&suspend_mask, SIGTERM), 0);
+  CHECK_EQ(sigdelset(&suspend_mask, SIGINT), 0);
 
   return {.suspend_mask = suspend_mask};
 }
@@ -83,14 +88,15 @@ install_signal_handler()
   action.sa_handler = request_shutdown;
   CHECK_EQ(sigemptyset(&action.sa_mask), 0);
   CHECK_EQ(sigaction(SIGTERM, &action, nullptr), 0);
+  CHECK_EQ(sigaction(SIGINT, &action, nullptr), 0);
 }
 
 void
 wait_for_shutdown(const ShutdownSignals &signals)
 {
   while (!shutdown_requested) {
-    // SIGTERM is blocked outside sigsuspend(), so checking the flag and
-    // sleeping are atomic with respect to the shutdown signal.
+    // Shutdown signals are blocked outside sigsuspend(), so checking the
+    // flag and sleeping are atomic with respect to them.
     sigsuspend(&signals.suspend_mask);
   }
   info("hog-devnode shutdown requested");
@@ -100,10 +106,10 @@ wait_for_shutdown(const ShutdownSignals &signals)
 
 void
 emit_readiness(const HogDevnodeNode &node, ReadinessSink sink,
-               std::string_view runtime_network_id)
+               NetworkHash const &runtime_network_hash)
 {
   RuntimeManifestPointer manifest =
-      write_hog_devnode_runtime_manifest(node, runtime_network_id);
+      write_hog_devnode_runtime_manifest(node, runtime_network_hash);
   switch (sink) {
   case ReadinessSink::kStdout:
     std::println("{}", manifest.readiness_payload);
@@ -115,26 +121,38 @@ int
 hog_devnode_init(std::string listen_host,
                  std::uint16_t requested_scheduler_port,
                  ReadinessSink readiness_sink,
-                 std::string_view runtime_network_id,
-                 BootstrapAccountConfig const &bootstrap_config,
-                 std::optional<std::filesystem::path> const &data_dir)
+                 NetworkHash const &runtime_network_hash,
+                 LocalBootstrapConfig const &bootstrap_config,
+                 std::optional<std::filesystem::path> const &data_dir,
+                 std::size_t ramdb_bytes)
 {
   install_signal_handler();
-  // Block SIGTERM before spawning any worker threads (init_hogexec_metrics and
-  // the HogDevnodeNode constructor start well over a hundred of them). Threads
-  // inherit the signal mask of their creator, so blocking here means SIGTERM is
-  // blocked in every worker. A process-directed SIGTERM is then delivered only
-  // to the main thread inside sigsuspend(). Otherwise the kernel could deliver
-  // it to a worker thread; request_shutdown() would set the flag there, but the
-  // main thread's sigsuspend() only wakes when the signal is delivered to
-  // itself, so shutdown would hang until the test escalates to SIGKILL.
+  // Block the shutdown signals before spawning any worker threads
+  // (init_hog_exec_metrics and the HogDevnodeNode constructor start well over
+  // a hundred of them). Threads inherit the signal mask of their creator, so
+  // blocking here means they are blocked in every worker. A process-directed
+  // shutdown signal is then delivered only to the main thread inside
+  // sigsuspend(). Otherwise the kernel could deliver it to a worker thread;
+  // request_shutdown() would set the flag there, but the main thread's
+  // sigsuspend() only wakes when the signal is delivered to itself, so
+  // shutdown would hang until the test escalates to SIGKILL.
   ShutdownSignals shutdown_signals = block_shutdown_signal();
 
-  init_hogexec_metrics();
+  init_hog_exec_metrics();
+
+  // An unusable $TMPDIR or data dir is an operator environment problem, so it
+  // is reported here rather than raised out of the node's construction.
+  std::expected<HogDevnodeDirectories, std::string> directories =
+      HogDevnodeDirectories::create(data_dir);
+  if (!directories) {
+    error("hog-devnode failed before readiness: {}", directories.error());
+    return EXIT_FAILURE;
+  }
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      bootstrap_config, data_dir);
-  emit_readiness(node, readiness_sink, runtime_network_id);
+                      std::move(*directories), bootstrap_config, data_dir,
+                      runtime_network_hash, ramdb_bytes);
+  emit_readiness(node, readiness_sink, runtime_network_hash);
   info("hog-devnode initialization complete.");
 
   wait_for_shutdown(shutdown_signals);
@@ -170,13 +188,14 @@ namespace {
 
 struct HogDevnodeOptions {
   std::string listen_host = "127.0.0.1";
-  std::string runtime_network_id = std::string(hogd::kDefaultRuntimeNetworkId);
+  hogd::NetworkHash runtime_network_hash = hogd::kDefaultRuntimeNetworkHash;
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
   std::optional<std::filesystem::path> data_dir;
-  hogd::BootstrapAccountConfig bootstrap_config;
+  hogd::LocalBootstrapConfig bootstrap_config;
   std::vector<std::filesystem::path> contract_artifact_directories;
   std::optional<hogd::LogLevel> log_level;
+  std::size_t ramdb_bytes = hogd::HogDevnodeNode::kDefaultRamDbBytes;
 };
 
 class DataDirLock {
@@ -248,6 +267,15 @@ print_usage(FILE *stream, char *argv[])
 
 Start a local Groundhog development node.
 
+Typical use:
+  hog-devnode serves only hogd's internal x23 RPC, bound to loopback, and prints
+  one readiness JSON line on stdout. It is not the public JSON-RPC endpoint.
+  Contract developers normally run it through the groundhog CLI, which
+  supervises this process and serves JSON-RPC (port 9545 by default):
+
+    export GROUNDHOG_DEVNODE_BINARY=/path/to/hog-devnode
+    groundhog node
+
 Options:
   --listen-host <ip>             Host/interface for internal x23 services
                                  [default: 127.0.0.1]
@@ -266,20 +294,29 @@ Options:
   --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
                                  dev-account and wallet shorthand flags
                                  conflict.
-  --dev-accounts <count>         Deterministic dev accounts to bootstrap
-                                 [default: 0]
+  --dev-accounts <count>         Deterministic user accounts, excluding dev-0
+                                 [default: 0]. groundhog node passes its own
+                                 count; pass at least 1 when running directly
+                                 so a non-faucet account exists.
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
                                  [default: groundhog-dev-accounts]
-  --dev-account-tokens <tokens>  Initial storage-token balance per dev account
+  --dev-account-tokens <tokens>  Initial storage-token balance per user account
                                  [default: 1000000000]
+                                 dev-0 is always the fixed 10000000000000-raw
+                                 local faucet.
   --log-level <level>            Log verbosity: critical, error, warn, info,
                                  debug, or trace [default: build-dependent]
+  --ramdb-bytes <bytes>          RAM database capacity to reserve at startup.
+                                 Lower it on low-memory systems (e.g. WSL)
+                                 [default: 16106127360 (15 GiB)]
   --version                      Print version
   -h, --help                     Print help
 
 Environment:
   HOGD_LOG_FORMAT=json           Emit newline-delimited JSON logs to stderr.
                                  The default is human-readable stderr logs.
+  TMPDIR                         Parent directory for ephemeral node state
+                                 when --data-dir is omitted [default: /tmp].
 
 Readiness:
   stdout is reserved for the readiness line when --readiness stdout is used.
@@ -493,11 +530,20 @@ parse_args(int argc, char *argv[])
       dev_account_tokens_value = argv[++i];
       continue;
     }
+    if (arg == "--ramdb-bytes" && i + 1 < argc) {
+      options.ramdb_bytes =
+          hogd::parse_integer_arg<std::size_t>("--ramdb-bytes", argv[++i], argv,
+                                               usage, /*base=*/0);
+      if (options.ramdb_bytes == 0) {
+        hogd::arg_error("--ramdb-bytes must be positive", argv, usage);
+      }
+      continue;
+    }
     usage(argv);
   }
   reject_manifest_shorthand_conflicts(sources, argv);
   if (dev_accounts_value.has_value()) {
-    options.bootstrap_config.count =
+    options.bootstrap_config.user_account_count =
         parse_bootstrap_account_count(*dev_accounts_value, argv);
   }
   if (dev_account_seed_value.has_value()) {
@@ -515,7 +561,7 @@ parse_args(int argc, char *argv[])
                                   *dev_account_tokens_value),
                       argv, usage);
     }
-    options.bootstrap_config.storage_tokens = *tokens;
+    options.bootstrap_config.user_storage_tokens = *tokens;
   }
   if (dev_wallet_profile_value.has_value()) {
     if (dev_wallet_profile_value->empty()) {
@@ -529,10 +575,13 @@ parse_args(int argc, char *argv[])
   hogd::set_contract_artifact_directories(
       options.contract_artifact_directories);
   if (bootstrap_manifest_path.has_value()) {
-    hogd::BootstrapManifestConfig manifest_config =
+    std::expected<hogd::BootstrapManifestConfig, std::string> manifest_config =
         hogd::load_bootstrap_manifest(*bootstrap_manifest_path);
-    options.runtime_network_id = std::move(manifest_config.network_id);
-    options.bootstrap_config = std::move(manifest_config.bootstrap_config);
+    if (!manifest_config) {
+      hogd::arg_error(manifest_config.error(), argv, usage);
+    }
+    options.runtime_network_hash = manifest_config->network_hash;
+    options.bootstrap_config = std::move(manifest_config->bootstrap_config);
   }
   return options;
 }
@@ -566,8 +615,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return hogd::hog_devnode_init(std::move(options.listen_host),
                                   options.scheduler_port,
                                   options.readiness_sink,
-                                  options.runtime_network_id,
-                                  options.bootstrap_config, options.data_dir);
+                                  options.runtime_network_hash,
+                                  options.bootstrap_config, options.data_dir,
+                                  options.ramdb_bytes);
   } catch (const std::exception &error) {
     hogd::error("hog-devnode failed before readiness: {}", error.what());
     return EXIT_FAILURE;

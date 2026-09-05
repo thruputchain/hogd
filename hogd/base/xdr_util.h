@@ -9,8 +9,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <span>
-#include <string_view>
+#include <type_traits>
 #include <vector>
 #include <version>
 
@@ -24,6 +25,7 @@
 #include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -78,6 +80,32 @@ static_assert((uint128_t{UINT64_MAX} << 64 | UINT64_MAX) ==
               "uint128 all-ones must match int128 -1");
 static_assert((int128_t{int64_t{-1}} << 64 | int128_t{UINT64_MAX}) == -1,
               "signed limb reconstruction must produce -1");
+
+// #3070: NNInt128 and balance rows are persisted and folded into the
+// consensus DbHash as `int128_to_xdr_bytes(...)`, whose width is
+// `sizeof(int128_xdr)`. `int128_xdr` is two 64-bit limbs with no over-
+// alignment, so on every conforming target it has no tail padding and this
+// width is exactly the 16-byte fixed XDR representation of the two limbs.
+// Pin that invariant at compile time so the persisted/hashed row width can
+// never drift from the wire encoding regardless of host object layout.
+static_assert(sizeof(int128_xdr) == 16,
+              "int128_xdr must be exactly two 64-bit limbs with no tail "
+              "padding; persisted/hashed row width feeds the consensus DbHash");
+static_assert(sizeof(int128_xdr) == sizeof(uint128_xdr),
+              "signed and unsigned 128-bit row widths must match");
+
+// #3131: the fixed-width helpers below store their `std::byte` row storage
+// and read it back through `uint8_t` (via `x23::putbe`/`getbe`, which
+// dereference `uint8_t` elements). Object-representation access through
+// `uint8_t` is only alias-permitted when `uint8_t` is a character type. Every
+// target we build on typedefs `std::uint8_t` to `unsigned char`, but pin that
+// precondition at compile time so the consensus-state persistence/DbHash path
+// can never silently rely on an implementation where `std::uint8_t` is an
+// extended (non-character) integer type.
+static_assert(std::is_same_v<std::uint8_t, unsigned char>,
+              "NNInt128 XDR byte helpers access std::byte storage through "
+              "uint8_t; uint8_t must be unsigned char for that access to be "
+              "alias-safe in the consensus DbHash path");
 
 inline std::array<std::byte, sizeof(int128_xdr)>
 int128_to_xdr_bytes(int128_t value)
@@ -166,12 +194,19 @@ xdr_cpu_to_be(T value)
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
 
+// [max_objects] for input this node produced itself.  Grep it to find every
+// decode that trusts its source.
+inline constexpr size_t kNoBatchSizeLimit = SIZE_MAX;
+
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs
 // xdr.size()) as well as per-object XDR deserialization failures.
+// [max_objects] caps what the batch may claim, rejected before anything is
+// allocated for it.  Use [kNoBatchSizeLimit] only for locally produced input.
 template<typename T>
 inline x23::Async<bool>
-parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
+parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs,
+                    size_t max_objects)
 {
   if (parallel.segment_tokens.size() != parallel.segment_bytes.size()) {
     info("failed to deserialize: segment_tokens size {} != segment_bytes size "
@@ -201,12 +236,15 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
   // divide rather than multiply so the bound cannot overflow [size_t]. The sum
   // itself cannot overflow either: [segment_tokens] holds at most 0xffffffff
   // entries each at most 0xffffffff, so the total is below SIZE_MAX.
+  // [max_objects] joins that bound rather than getting a scan of its own: the
+  // loop below already accumulates the claimed total.
   constexpr size_t kMinObjectSize = x23::detail::xdr_size_bounds<T>().min_;
   static_assert(kMinObjectSize > 0,
                 "ParallelBatch element type must have a nonzero minimum XDR "
                 "size, else token counts cannot bound the allocation");
   const size_t max_total_segment_tokens =
-      std::min<size_t>(0xffffffffUL, total_segment_bytes / kMinObjectSize);
+      std::min({max_objects, size_t{0xffffffffUL},
+                total_segment_bytes / kMinObjectSize});
 
   std::vector<size_t> obj_offsets;
   obj_offsets.reserve(parallel.segment_tokens.size());
@@ -217,8 +255,9 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
   }
   if (total_segment_tokens > max_total_segment_tokens) {
     info("failed to deserialize: claimed {} segment tokens exceeds the maximum "
-         "{} that {} payload bytes can encode",
-         total_segment_tokens, max_total_segment_tokens, total_segment_bytes);
+         "{} allowed by the caller's {} object limit and {} payload bytes",
+         total_segment_tokens, max_total_segment_tokens, max_objects,
+         total_segment_bytes);
     co_return false;
   }
   objs.resize(total_segment_tokens, {});
@@ -377,15 +416,6 @@ t_to_parallel_batch(const x23::XdrVec<T> &objs)
   co_return parallel;
 }
 
-struct ByteArrayHasher {
-  template<std::size_t N>
-  static std::size_t operator()(const std::array<uint8_t, N> &array) noexcept
-  {
-    return std::hash<std::string_view>{}(
-        std::string_view(reinterpret_cast<const char *>(array.data()), N));
-  }
-};
-
 template<std::size_t N>
 auto
 show_byte_array(const std::array<uint8_t, N> &array)
@@ -397,7 +427,67 @@ show_byte_array(const std::array<uint8_t, N> &array)
 #endif
 }
 
+// An owning pointer that serializes as an XDR optional -- a 4-byte presence
+// tag followed by the object -- exactly as [x23::Ptr] does, but from a
+// [std::shared_ptr].
+//
+// [x23::Ptr] is a [std::unique_ptr], so its value constructor takes the object
+// *by value*: building a reply out of [x23::Ptr] deep-copies whatever it is
+// pointing at.  Where the object is already owned by a [std::shared_ptr] --
+// which is how a lookup into a shared cache hands one back -- that copy buys
+// nothing.  Holding the [std::shared_ptr] in the reply keeps the object alive
+// on its own, and x23 serializes a handler's return value while it is still in
+// scope (the [make_record] calls in x23/rpc.h), so the reference outlives the
+// bytes being written.
+//
+// The pointee must not be mutated while a reply holding it is in flight.
+template<typename T> struct XdrSharedPtr : std::shared_ptr<const T> {
+  using super = std::shared_ptr<const T>;
+  using value_type = T;
+
+  using super::super;
+
+  XdrSharedPtr() = default;
+  explicit XdrSharedPtr(super p) : super(std::move(p)) {}
+};
+
+// [x23::xdr_size] is qualified: [T] is in namespace [hogd] too, so unqualified
+// lookup would find only this overload set and never x23's.
+template<typename T>
+inline size_t
+xdr_size(const XdrSharedPtr<T> &p)
+{
+  if (p) {
+    return 4UZ + x23::xdr_size(*p);
+  }
+  return 4UZ;
+}
+
+template<typename T>
+inline void
+xdr_serialize(auto &serializer, const XdrSharedPtr<T> &p)
+{
+  if (p) {
+    serializer.put32(1);
+    serializer(*p);
+  }
+  else {
+    serializer.put32(0);
+  }
+}
+
 } // namespace hogd
+
+namespace x23 {
+
+// Declares that an [XdrSharedPtr] may stand in wherever the wire type is a
+// [Ptr].  x23 composes this through vectors itself, so declaring it for the
+// element type is enough for a vector of them to answer an RPC whose declared
+// return is a vector of optionals.
+template<typename X>
+struct serialize_equiv<Ptr<X>, hogd::XdrSharedPtr<X>> : std::true_type {};
+
+} // namespace x23
 
 template<> struct std::hash<hogd::AddressAndKey> {
   std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept

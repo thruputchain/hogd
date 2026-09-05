@@ -11,6 +11,7 @@
 #include "genesis.hh"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "rpc_types.hh"
 
 // Data structures to manage a possibly-forking tree of blocks.
@@ -42,6 +43,9 @@ public:
   // child block.
   BlockID committed_tip_id();
 
+  // -1 before genesis, 0 once genesis is loaded, one more per commit.
+  BlockHeight committed_tip_height();
+
   // new_id should be a new, never-before-used ID.
   // returns true if new_id is successfully linked to the parent.
   // Otherwise the parent id is no longer a valid block to link to.
@@ -58,6 +62,26 @@ public:
   void set_cost_model(StorageCostModel model)
   {
     cost_model_.emplace(std::move(model));
+  }
+
+  DeployedContractHash const &get_default_wallet() const
+  {
+    assert(default_wallet_.has_value());
+    return *default_wallet_;
+  }
+
+  NetworkConfig const &get_network_config() const
+  {
+    assert(network_config_.has_value());
+    return *network_config_;
+  }
+
+  // The network this chain belongs to, from the genesis configuration. Fixed
+  // for the life of the network, so every tip carries it.
+  NetworkHash const &get_network_hash() const
+  {
+    assert(network_hash_.has_value());
+    return *network_hash_;
   }
 
 private:
@@ -103,12 +127,19 @@ private:
   };
 
   std::optional<const StorageCostModel> cost_model_;
+  std::optional<DeployedContractHash> default_wallet_;
+  // The chain's execution parameters: handed to the executor in the DbTip and
+  // committed to through the config hash preimage.
+  std::optional<NetworkConfig> network_config_;
+  std::optional<NetworkHash> network_hash_;
 
   // remove the block, and all of its children
   // returns the block_data_ for each block that was removed;
   // this lets us push the work of garbage collection outside the critical
   // section of the lock.
   std::vector<std::shared_ptr<BlockState>> remove_subtree(BlockID root);
+
+  BlockHeight last_committed_height_ = -1;
 
   std::shared_mutex mtx_;
   bool initialized_genesis_ = false;

@@ -114,7 +114,7 @@ metadata check verifies the stamped lowerer fingerprint against `artifact.h`.
 That gives the format extraction a regression guard and keeps cross-repo drift
 visible while the implementation remains duplicated across languages.
 
-Current v4 surface to mirror (from `hogd/hogexec/runtime/rv32/artifact.h`):
+Current v4 surface to mirror (from `hogd/hog_exec/runtime/rv32/artifact.h`):
 magic `GHRV32A1`, 132-byte header, format version 4, entry ABI 2, syscall ABI 1,
 gas table version 3 + gas-schedule digest `0x918317C21C46BB60`, VM-profile digest
 `0x55C53A685F0EB33D`, and SHA256 commitments for code / initial-memory sections.
@@ -141,7 +141,7 @@ directory:
 built_contracts/build_risc.sh rv32_smoke_counter /tmp/rv32-smoke
 RV32_SMOKE_ARTIFACT=/tmp/rv32-smoke/rv32_smoke_counter.rv32a \
 RV32_SMOKE_METHOD_ID=0x143934D51BD51575 \
-  build/gcc-rv32-ci/hogd/hogexec/runtime/rv32_runtime_context_test \
+  build/gcc-rv32-ci/hogd/hog_exec/runtime/rv32_runtime_context_test \
   --gtest_filter='*LoweredSdkArtifactSmoke'
 ```
 

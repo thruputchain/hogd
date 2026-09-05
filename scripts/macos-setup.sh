@@ -43,8 +43,6 @@ BREW_PACKAGES=(
   "lz4"       # Compression
   "zstd"      # Compression
   "snappy"    # Compression (for RocksDB)
-  "wabt"      # WebAssembly tools (wat2wasm)
-  "binaryen"  # WebAssembly optimizer (wasm-opt)
   "ccache"    # CCache (for faster builds)
 )
 
@@ -110,7 +108,7 @@ fi
 # rust-toolchain.toml files and .devcontainer/Dockerfile:
 #   - 1.93.0             hogd/rust + CMakeLists Rust_TOOLCHAIN
 #   - 1.96.0             pre-staged for the planned stable-Rust unification
-#   - nightly-2026-02-12 built_contracts (wasm32 + build-std)
+#   - nightly-2026-02-12 built_contracts (rv32 + build-std)
 RUST_TOOLCHAINS=("1.93.0" "1.96.0" "nightly-2026-02-12")
 for tc in "${RUST_TOOLCHAINS[@]}"; do
   if ! rustup toolchain list | grep -q "^$tc"; then
@@ -119,20 +117,14 @@ for tc in "${RUST_TOOLCHAINS[@]}"; do
   fi
 done
 
-# Install wasm32 target for nightly
-if ! rustup target list --installed --toolchain nightly-2026-02-12 | grep -q wasm32-unknown-unknown; then
-  echo "Installing wasm32-unknown-unknown target for nightly..."
-  rustup target add wasm32-unknown-unknown --toolchain nightly-2026-02-12
-fi
-
 # Install rust-src for build-std
 if ! rustup component list --installed --toolchain nightly-2026-02-12 | grep -q rust-src; then
   echo "Installing rust-src component for nightly..."
   rustup component add rust-src --toolchain nightly-2026-02-12
 fi
 
-# Install the wasm + rv32 contract backends for 1.96 (the planned stable unification)
-for target in wasm32-unknown-unknown riscv32im-unknown-none-elf; do
+# Install the rv32 contract backend for 1.96 (the planned stable unification)
+for target in riscv32im-unknown-none-elf; do
   if ! rustup target list --installed --toolchain 1.96.0 | grep -q "$target"; then
     echo "Installing $target target for 1.96.0..."
     rustup target add "$target" --toolchain 1.96.0
@@ -239,10 +231,18 @@ export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
 # For cmake to find packages
 export CMAKE_PREFIX_PATH="/opt/homebrew/opt/llvm:/opt/homebrew/opt/openssl@3:/opt/homebrew/opt/zlib:/opt/homebrew/opt/bzip2:/opt/homebrew/opt/lz4:/opt/homebrew/opt/zstd:/opt/homebrew/opt/snappy:/opt/homebrew/opt/jemalloc"
 
+# Default build parallelism, derived from performance cores and RAM. Raw core
+# count oversubscribes Apple silicon (efficiency cores) and RAM (~0.9 GB per
+# translation unit); see scripts/build-jobs.sh for the measurements.
+if [ -f "$SCRIPT_DIR/build-jobs.sh" ]; then
+  . "$SCRIPT_DIR/build-jobs.sh"
+fi
+
 echo "hogd development environment activated"
 echo "  Python: $HOGD_PYTHON"
 echo "  Clang:  $(clang --version | head -1)"
 echo "  Rust:   $(rustc --version) (default)"
+echo "  Jobs:   ${HOGD_BUILD_JOBS:-unset} (override with HOGD_BUILD_JOBS or build.sh -j)"
 # Show the project toolchain version to verify rustup is working
 TOOLCHAIN_VERSION=$(grep 'channel' "$PROJECT_ROOT/hogd/rust/rust-toolchain.toml" 2>/dev/null | cut -d'"' -f2)
 if [ -n "$TOOLCHAIN_VERSION" ]; then

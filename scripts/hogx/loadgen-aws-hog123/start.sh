@@ -18,7 +18,7 @@ for i in $(seq 0 15); do
   host="aws-hog$i"
   ssh "$host" '
     rm -rf /tmp/hogx/* &&
-    killall -9 indexer_exec auth_exec hogdb hogexec chuckd scpd mempool_exec event_exec loadgen_server || true
+    killall -9 hog-indexer hog-auth hog-db hog-exec chuckd scpd hog-mempool hog-event loadgen_server || true
   ' &
 done
 wait
@@ -33,6 +33,6 @@ rm -rf ~/.hogx
 # [$SCRIPT_DIR].
 cp -R $HOGX_HOME/ ~/.hogx
 
-"$HOGX" -m 2 start -a loadgen --network-id 1
+"$HOGX" -m 2 start -a loadgen --network-hash 0000000000000000000000000000000000000000000000000000000000000001
 
 echo "using: export HOGX_HOME=${HOGX_HOME}"

@@ -51,6 +51,37 @@ def validate_and_extract_error_codes(syscall: dict) -> list[str]:
     return error_codes
 
 
+# Syscalls whose inner body reads or writes hog_db, and so may suspend.
+#
+# Their generated declaration returns MaybeAsyncSyscallInnerResult instead of a
+# plain SyscallInnerResult, and their bodies are coroutines; every other body
+# returns its result directly and lands in MaybeAsync's value arm at no cost
+# (see wrap_after_parse_async in syscall_entry_outer.h).
+#
+# This lives here rather than in protocol/syscalls.yaml because whether a body
+# suspends is a hog_exec implementation detail -- the wire ABI is identical
+# either way, and the Rust/TS SDKs generated from the same spec do not care.
+# A stale entry cannot go unnoticed: the body definition would no longer match
+# this declaration and the build fails.
+ASYNC_SYSCALLS = frozenset({
+    "BytestringGetLen",
+    "BytestringGet",
+    "BytestringSet",
+    "NonnegativeIntGet",
+    "NonnegativeIntSetAdd",
+    "DeleteObject",
+    "RetrocausalQueueInsert",
+    "RetrocausalQueueConsume",
+    "RetrocausalQueuePeekLen",
+    "DeployContract",
+    "ChangePublicKeyRegistration",
+    "WriteAddressRequiredWeight",
+    # Invoke recurses into Runtime::invoke, so it suspends wherever the child
+    # invocation does.
+    "Invoke",
+})
+
+
 """
 Each syscall generates a
 syscall_{callname}_inner(...); declaration.
@@ -278,12 +309,22 @@ def gen_inner_outer(
 
     inner_arg_decls = ", ".join(inner_arg_decl_strs)
 
-    inner = f"""std::pair<{inner_return_type}, WrappedGasAmount>
-syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls}) noexcept;
+    if name in ASYNC_SYSCALLS:
+        if inner_return_type != "HostFnStatus<SyscallErrorCode>":
+            raise ValueError(
+                f"Syscall {name}: async syscalls must use the standard inner "
+                f"return type, got {inner_return_type}"
+            )
+        result_type = "MaybeAsyncSyscallInnerResult"
+    else:
+        result_type = f"std::pair<{inner_return_type}, WrappedGasAmount>"
+
+    inner = f"""{result_type}
+syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
 """
-    frame = f"""std::pair<{inner_return_type}, WrappedGasAmount>
-syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls}) noexcept
+    frame = f"""{result_type}
+syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls})
 {{
   throw std::runtime_error("unimplemented");
 }}
@@ -359,8 +400,8 @@ def gen_syscall_meta_h(spec_full: dict) -> str:
 #include <string_view>
 #include <array>
 
-#include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/hogexec/runtime/syscall_meta_concept.h"
+#include "hogd/hog_exec/runtime/syscall_inner.h"
+#include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 
@@ -396,9 +437,9 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 
 #include "event.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/syscall_types.h"
-#include "hogd/hogexec/components/ffi_types.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/syscall_types.h"
+#include "hogd/hog_exec/components/ffi_types.h"
 #include "invoke_flag.hh"
 #include "invoke_args.hh"
 #include "storage_item.hh"
@@ -461,14 +502,14 @@ def gen_syscall_frame(spec: list[dict], args: list[int]) -> str:
 
     joined = "".join(req_calls)
 
-    return f"""#include "hogd/hogexec/runtime/syscall_inner.h"
+    return f"""#include "hogd/hog_exec/runtime/syscall_inner.h"
 
 #include <cstddef>
 #include <span>
 #include <utility>
 
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "types.hh"
 

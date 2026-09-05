@@ -18,10 +18,7 @@ option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
 option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
 set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
 set(RUST_BUILD_CPU "native" CACHE STRING "Rust target CPU to build for (default 'native')")
-# Enable WASM debug backtraces (preserves function names in stack traces)
-# When OFF (default): builds release WASMs, minimal size, no backtraces
-# When ON: builds debug WASMs with name section for useful backtraces
-option(WASM_DEBUG_BACKTRACES "Enable WASM debug backtraces with function names" OFF)
+
 # Enable logging of build failures to a file
 # This is used to track build failures in CI,
 # so that we can see what failed more easily (without info buried under pages of logs).
@@ -99,8 +96,6 @@ message(STATUS "Using CMAKE_CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
 message(STATUS "Using CMAKE_CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 include(cmake/stacktrace.cmake)
-include(cmake/wat2wasm.cmake)
-include(cmake/wasmopt.cmake)
 
 # Where to place generated headers
 set(BUILT_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/built_headers")
@@ -304,12 +299,16 @@ configure_file(
   ${HOGD_BUILT_HEADERS_DIR}/config.h
   @ONLY
 )
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_config.h.in
+  ${HOGD_BUILT_HEADERS_DIR}/build_config.h
+  @ONLY
+)
 
 add_subdirectory(built_contracts)
 
 # Finally, enable hogd's own code
 include_directories(${CMAKE_SOURCE_DIR})
-add_definitions(-DCMAKE_ROOT_BINARY_DIR=\"${CMAKE_BINARY_DIR}\")
 
 # Set after externals so try_compile/try_run checks are unaffected.
 # CMAKE_CROSSCOMPILING_EMULATOR initializes CROSSCOMPILING_EMULATOR on new

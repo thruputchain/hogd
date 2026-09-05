@@ -136,7 +136,7 @@ private:
 // references to items remain valid until the NMVec is resized below
 // their index or destroyed.  Unlike a deque, it is safe to access
 // items in one thread while resizing an NMVec in another thread.
-template<typename T> class NMVec {
+template<typename T, typename Allocator = std::allocator<T>> class NMVec {
   struct Location;
 
 public:
@@ -389,7 +389,7 @@ private:
   // chunks_[i] is nullptr or an array of (kMinChunk << i) allocations
   std::array<std::atomic<T *>, kNumChunks> chunks_{};
 
-  static inline std::allocator<T> a{};
+  static inline Allocator a{};
 
   // The chunks start at kMinChunk and keep doubling.
   static constexpr size_t chunk_size(unsigned chunkno) noexcept

@@ -11,6 +11,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
@@ -76,7 +77,7 @@ protected:
 
   // simple impl, for now
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>,
-                               ByteArrayHasher>>
+                               SipHash24Hasher>>
       contract_creates_;
 
   // Does NOT own the parent StorageView.

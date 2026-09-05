@@ -126,8 +126,12 @@ inline std::string
 get_tmp_dir()
 {
   // use TMPDIR environment variable, of /tmp if not found.
-  if (char *tmp = getenv("TMPDIR"); tmp != nullptr)
-    return std::string(tmp);
+  if (char *tmp = getenv("TMPDIR"); tmp != nullptr && *tmp != '\0') {
+    std::string dir(tmp);
+    if (dir.back() != '/')
+      dir.push_back('/');
+    return dir;
+  }
   return "/tmp/";
 }
 

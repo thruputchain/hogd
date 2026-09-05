@@ -10,7 +10,7 @@ machine-local JSON as source.
 ## Regenerate
 
 ```sh
-build-release-ccache-tmp/hogd/hogexec/runtime/rv32/rv32_vm_bench \
+build-release-ccache-tmp/hogd/hog_exec/runtime/rv32/rv32_vm_bench \
   --benchmark_min_time=0.5s \
   --benchmark_out=/tmp/rv32-vm.json \
   --benchmark_out_format=json

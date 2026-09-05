@@ -6,7 +6,6 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <utility>
 
 #include <x23/debug.h>
 #include <x23/fileio.h>
@@ -19,6 +18,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 
 #ifdef __APPLE__
@@ -32,10 +32,15 @@ namespace hogd {
 
 namespace {
 
+struct InitEntry {
+  InitFunc init;
+  std::string_view name;
+};
+
 // add your init functions here
-const std::pair<InitFunc, std::string_view> init_tbl[] = {
-    {base_init, "base"},
-    {crypto_init, "crypto"},
+constexpr InitEntry kInitTbl[] = {
+    {.init = base_init, .name = "base"},
+    {.init = crypto_init, .name = "crypto"},
 };
 
 constexpr std::string_view kJsonLogFormat = "json";
@@ -90,7 +95,7 @@ print_version(const char *process, bool do_print_binary_hash)
   info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
        version::kHogdGitHash);
   info("hogd config: {}", version::kHogdCmake);
-  info("hogd protocol: {}", version::kHogdProtocol());
+  info("hogd protocol: {}", protocol_text(version::kHogdProtocol()));
   info("hogd command: {}", cmdline);
   if (do_print_binary_hash)
     info("hogd process: {}, binary hash: {}", process, get_self_binary_hash());
@@ -137,7 +142,7 @@ hogd_init(int argc, char *argv[], bool do_print_version, LogLevel log_level)
   }
 
   // initialize each subsystem
-  for (auto [func, name] : init_tbl) {
+  for (auto [func, name] : kInitTbl) {
     debug("Initializing '{}'.", name);
     GStatus<void> ret = func();
     if (!ret) {

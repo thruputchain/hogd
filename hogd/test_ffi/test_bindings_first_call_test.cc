@@ -18,6 +18,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/test_ffi/test_bindings.h"
@@ -41,12 +42,17 @@ make_key_pair()
   return {pk_wrapper, sk_wrapper};
 }
 
+constexpr NetworkHash kTestNetworkHash{0x5a};
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 DecoratedSignature
 make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
-  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+  sig.ed25519() =
+      ed25519_sign(sk.ed25519(),
+                   transaction_signature_preimage(kTestNetworkHash, tx))
+          .value();
   return {.public_key_id = public_key_id, .signature = sig};
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
@@ -95,7 +101,7 @@ TEST(TestBindingsFirstCallTest,
   VerifyAuthResult result = verify_signed_transaction_auth(
       {.data = serialized_stx.data(),
        .len = static_cast<uint32_t>(serialized_stx.size())},
-      make_source_auth_data(serialized_auth_data));
+      make_source_auth_data(serialized_auth_data), kTestNetworkHash.data());
 
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.auth_error_code,

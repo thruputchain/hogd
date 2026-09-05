@@ -7,6 +7,7 @@ members = [
     "integration_test_contracts/calldata_raw",
     "integration_test_contracts/calldata_wrapper",
     "integration_test_contracts/cxs_roundtrip",
+    "integration_test_contracts/default_wallet",
     "integration_test_contracts/dev_wallet",
     "integration_test_contracts/deploy_and_transfer",
     "integration_test_contracts/delegate_call_test",
@@ -14,9 +15,9 @@ members = [
     "integration_test_contracts/fibonacci",
     "integration_test_contracts/fibonacci_call",
     "integration_test_contracts/fibonacci_raw",
+    "integration_test_contracts/genesis_root",
     "integration_test_contracts/hash_bug",
     "integration_test_contracts/htlc",
-    "integration_test_contracts/initial_token_claim",
     "integration_test_contracts/itc_erc20",
     "integration_test_contracts/manual_revert_caller",
     "integration_test_contracts/manual_revert_test",
@@ -37,6 +38,12 @@ members = [
     "integration_test_contracts/tuple_return",
     "integration_test_contracts/txs_roundtrip",
     "integration_test_contracts/view_gateway_test",
+    "local_test_contracts/airdrop_faucet",
+    "local_test_contracts/auth_weight_test",
+    "local_test_contracts/drip_faucet",
+    "local_test_contracts/faucet_caller",
+    "local_test_contracts/invoke_malformed_tokens_test",
+    "local_test_contracts/tx_context_test",
 ]
 
 [workspace.package]
@@ -52,25 +59,28 @@ edition = "2024"
 
 [workspace.dependencies]
 # groundhog dependencies
-sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-groundhog-rv32-runtime = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-groundhog-xdr = { registry = "groundhog", version = "0.19", features = ["xdrs", "syscalls"] }
-groundhog-syscall = { registry = "groundhog", version = "0.19" }
-xdrs = { registry = "groundhog", version = "0.7.1", features = ["int128", "heapless"] }
-sha2 = { version = "0.10.8", default-features = false }
+sdk = { registry = "groundhog", version = "0.25.0" }
+groundhog-rv32-runtime = { registry = "groundhog", version = "0.25.0" }
+# default features include std, which cannot build for the on-chain targets
+groundhog-domain-separator = { registry = "groundhog", version = "0.25.0", default-features = false }
+groundhog-xdr = { registry = "groundhog", version = "0.29.0", features = ["xdrs", "syscalls"] }
+groundhog-syscall = { registry = "groundhog", version = "0.29.0" }
+xdrs = { registry = "groundhog", version = "0.8.2", features = ["int128", "heapless"] }
+sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
 hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
-# Standard interface crates
-groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-groundhog-erc1271-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+# Standard interface crates. Their own version line in sdk_rs.
+groundhog-erc20-if = { registry = "groundhog", version = "0.1.17" }
+groundhog-erc1271-if = { registry = "groundhog", version = "0.1.17" }
 
-# Standard test crates
-bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-erc20-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-erc20-bottle-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-erc20-native-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+# Standard test crates. Only reached through optional contract features that
+# nothing here enables, but cargo resolves optional deps regardless.
+bottle-test-if = { registry = "groundhog", version = "0.25.0" }
+erc20-test = { registry = "groundhog", version = "0.25.0" }
+erc20-bottle-test = { registry = "groundhog", version = "0.25.0" }
+erc20-native-test = { registry = "groundhog", version = "0.25.0" }
 
 [profile.release]
 trim-paths = "all" # unstable

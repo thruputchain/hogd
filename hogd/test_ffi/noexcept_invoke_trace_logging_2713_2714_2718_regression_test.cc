@@ -1,7 +1,7 @@
 // Regression test for issues #2713, #2714, and #2718.
 //
 // These three diagnostics all run on the child-Invoke path, which is reached
-// from the noexcept syscall_Invoke_inner() body:
+// from the noexcept syscall_Invoke_inner()() body:
 //   #2713 - Runtime::invoke() emits an unguarded entry trace
 //           ("Invoking method {} with gas limit {}").
 //   #2718 - Runtime::invoke() emits an unguarded result trace
@@ -35,8 +35,8 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
 #include "invoke_args.hh"
@@ -178,7 +178,7 @@ setup_root_invokes_child(ContractAddress *child_addr_storage, bool deploy_child)
               kTestFFIErrorCodeNone);
   }
 
-  EXPECT_EQ(advance_new_block(h.db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(h.db, nullptr), kTestFFIErrorCodeNone);
 
   SignedTransaction stx{
       .tx = {.invocation =

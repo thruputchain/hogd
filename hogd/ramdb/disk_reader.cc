@@ -504,7 +504,7 @@ DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn,
                  uint64_t *max_snapshot_end_lsn)
 {
   ElapsedTimer timer{};
-  std::shared_ptr<void> _{nullptr, [&timer](...) {
+  std::shared_ptr<void> _{nullptr, [&timer](void *) {
                             info("recovery took {:.2f}", timer.elapsed());
                           }};
 

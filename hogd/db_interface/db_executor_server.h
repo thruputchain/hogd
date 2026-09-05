@@ -9,6 +9,7 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
@@ -78,10 +79,12 @@ public:
   }
 
 private:
-  static bool try_reserve_delta(BlockState *block_state, TransactionID tx,
-                                AddressAndKey const &addrkey,
-                                StorageDelta const &delta,
-                                StorageDeltaFlagSet flags);
+  // Returns kRPCNone if the delta was reserved, kRPCStorageWriteFailed on a
+  // recoverable conflict, or kRPCUnrecoverable on executor misbehavior.
+  static RPCError try_reserve_delta(BlockState *block_state, TransactionID tx,
+                                    AddressAndKey const &addrkey,
+                                    StorageDelta const &delta,
+                                    StorageDeltaFlagSet flags);
   BlockManager *block_manager_;
 };
 
@@ -90,7 +93,12 @@ static_assert(
 
 class DbExecutorServer : public RpcServer<DbExecutorRpc> {
 public:
-  DbExecutorServer(BlockManager *block_manager) : RpcServer(block_manager) {}
+  DbExecutorServer(BlockManager *block_manager) : RpcServer(block_manager)
+  {
+    // Match HogDbExecutorServer: the mock serves the same interface, so a test
+    // running against it must see the same message bound as production.
+    max_message_size_ = kBulkRpcMaxMessageSize;
+  }
 };
 
 } // namespace hogd

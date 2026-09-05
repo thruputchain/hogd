@@ -1,0 +1,352 @@
+#include "hogd/hog_exec/interface/executor_context.h"
+
+#include <atomic>
+#include <cassert>
+#include <limits>
+#include <mutex>
+#include <new>
+#include <optional>
+#include <utility>
+
+#include "exec_result.hh"
+#include "exec_sched.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/runtime/view/view.h"
+#include "integration.hh"
+#include "rpc_types.hh"
+#include "transaction.hh"
+#include "view.hh"
+#include "x23/async.h"
+#include "x23/serialize.h"
+
+namespace hogd {
+
+PerTransactionDatabaseProxy
+ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
+{
+  return PerTransactionDatabaseProxy(db_proxy_, block_id_, tx_id);
+}
+
+PerTransactionEventServerProxy
+ExecutorContext::make_per_tx_event_server_proxy(TransactionID tx_id)
+{
+  return PerTransactionEventServerProxy(event_server_proxy_, block_id_, tx_id);
+}
+
+x23::Async<ExecProposeResult>
+ExecutorContext::propose_transaction(SignedTransaction signed_tx,
+                                     TransactionID tx_id)
+{
+  assert(mode_ == ExecutionMode::kProposing);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
+  co_return co_await run_propose_transaction(std::move(signed_tx), tx_id);
+}
+
+x23::Async<ExecProposeBatchResult>
+ExecutorContext::propose_transaction_batch(
+    SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
+{
+  assert(mode_ == ExecutionMode::kProposing);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
+  ExecProposeBatchResult batch_res;
+  batch_res.reserve(signed_txs.size());
+  for (size_t i = 0; i < signed_txs.size(); i++) {
+    batch_res.push_back(
+        co_await run_propose_transaction(signed_txs[i], first_tx_id + i));
+  }
+  assert(batch_res.size() == signed_txs.size());
+  co_return std::move(batch_res);
+}
+
+x23::Async<ExpectedViewResult>
+ExecutorContext::view_transaction(TransactionViewQuery const &query)
+{
+  assert(mode_ == ExecutionMode::kViewing);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
+  // query stays borrowed from the caller across the hop; the RPC service keeps
+  // the request alive until the returned Async completes.
+  co_return co_await run_view_transaction(query);
+}
+
+x23::Async<ExecValidateBatchResult>
+ExecutorContext::validate_transaction_batch(
+    ProposedTransactionBatch const &proposed_txs, TransactionID first_tx_id)
+{
+  assert(mode_ == ExecutionMode::kValidating);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
+  ExecValidateBatchResult batch_res;
+  batch_res.reserve(proposed_txs.size());
+  for (size_t i = 0; i < proposed_txs.size(); i++) {
+    batch_res.push_back(
+        co_await run_validate_transaction(proposed_txs[i], first_tx_id + i));
+  }
+  assert(batch_res.size() == proposed_txs.size());
+  co_return std::move(batch_res);
+}
+
+x23::Async<ExecResult>
+ExecutorContext::validate_transaction(ProposedTransaction proposed_tx,
+                                      TransactionID tx_id)
+{
+  assert(mode_ == ExecutionMode::kValidating);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
+  co_return co_await run_validate_transaction(std::move(proposed_tx), tx_id);
+}
+
+// Stale-block execution during propose/validate is benign.
+//
+// The StorageSnapshotCache can mask HogDb stale-block detection: if
+// deployment metadata, contract code, or storage items are already cached,
+// later reads return the cached value without hitting HogDb and the
+// Abandon error code is never surfaced.  This is fine here because:
+//
+//  - A proposal that executes against a stale block produces a candidate
+//    that will never be committed (the coordinator commits at most one
+//    sibling, and the stale block's sibling already won).
+//  - Validation replays the same proposal data on the same block, so
+//    staleness is symmetric.
+//  - Stale proposal blocks are cleaned up lazily when the block is closed
+//    or the next block opens.
+//
+// The view gateway, by contrast, does care about staleness — it serves
+// public RPCs and must not return arbitrarily old data.  See
+// ViewGatewayRpc::request_refresh() for the view-side mitigation.
+x23::Async<ExecProposeResult>
+ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
+                                         TransactionID tx_id)
+{
+  static thread_local auto context = make_hog_exec_context();
+  assert(mode_ == ExecutionMode::kProposing);
+
+  // Reject an over-cap body before execution so it can't overflow the event
+  // RPC (#2857); NonDeterministicError matches the sibling db-push reject.
+  if (x23::xdr_size(signed_tx) > kMaxBytesSignedTransaction) {
+    co_return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
+  }
+
+  auto proxy = make_per_tx_db_proxy(tx_id);
+  // SystemCallHandler's ctor deep-copies tx.contracts_to_deploy (#1538) and
+  // re-serializes the tx for sha256 (#1905); both are proportional to
+  // attacker-influenced input. This runs on a detached DispatchPool worker,
+  // so an escaping throw would hit std::terminate(). Contain bad_alloc only;
+  // anything else is a genuine bug and should still terminate.
+  std::optional<SystemCallHandler> syscall_handler;
+  try {
+    syscall_handler.emplace(signed_tx.tx, *snapshot_cache_, std::move(proxy),
+                            make_per_tx_event_server_proxy(tx_id),
+                            ProposalModeCtor{}, *context);
+  } catch (std::bad_alloc const &e) {
+    // The diagnostic itself allocates while formatting and can throw again
+    // under the same memory pressure, so guard it and fall back to the
+    // no-allocation reporter (cf. database_proxy.cc commit_transaction).
+    try {
+      error("Unrecoverable: SystemCallHandler construction failed: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("SystemCallHandler ctor failure diagnostic");
+    }
+    co_return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
+  }
+  co_await syscall_handler->root_invoke();
+  auto exec_res = co_await syscall_handler->try_commit_transaction();
+
+  auto out = ExecProposeResult(exec_res);
+
+  switch (exec_res) {
+  case ExecResult::ExecResultOK:
+  case ExecResult::ExecResultTxDeterministicError:
+  case ExecResult::ExecResultTxRootFrameReverted:
+    out.proposal_data() = syscall_handler->get_proposal_data();
+    break;
+  case ExecResult::ExecResultTxNonDeterministicError:
+  case ExecResult::ExecResultFailedGasSponsorship:
+  case ExecResult::ExecResultTxValidationFailure:
+  case ExecResult::ExecResultSystemError:
+  case ExecResult::ExecResultUnrecoverable:
+    // nothing to do: a rejected transaction (e.g. an expired uniquifier, #2568,
+    // which surfaces as a ValidationFailure) is not included in the proposal.
+    break;
+  }
+
+  if (exec_res == ExecResult::ExecResultOK ||
+      exec_res == ExecResult::ExecResultTxDeterministicError ||
+      exec_res == ExecResult::ExecResultTxRootFrameReverted) {
+    // Assemble the full transaction body forwarded to the event server: the
+    // SignedTransaction we executed plus the nondeterministic data this
+    // proposal produced (already captured into [out] above). Move signed_tx
+    // in — it is not used again — so the event coroutine, which owns the body
+    // by value, never has to deep-copy the attacker-influenced signed_tx; only
+    // proposal_data is copied, and it is bounded and also needed in [out].
+    // Building this before the pending-counter increment keeps any allocation
+    // failure here from leaving the counter unbalanced.
+    ProposedTransaction proposed_tx{
+        .signed_tx = std::move(signed_tx),
+        .nondeterministic_proposal_data = out.proposal_data(),
+    };
+    // Use release ordering to ensure the event RPC spawn is visible to
+    // other threads before they see the incremented counter.
+    pending_event_calls_.fetch_add(1, std::memory_order_release);
+    // The release of the PerThreaadARC for this happens after the above
+    // fetch_add; hence, when finish_block() is called, the above change is
+    // visible.
+    //
+    // Furthermore, it is not possible that the acquire_reference() for this
+    // transaction could succeed if the PerThreadARC is in shutdown mode. (If
+    // someone sends a bunch of propose_transaction() calls and then immediately
+    // calls finish_block() without waiting for those, and uses different tcp
+    // connections so the calls aren't ordered, then some of those propose calls
+    // might still fail by failing to acquire a reference).
+    //
+    // Hence, once shutdown has started, the final cleanup owner can drain
+    // pending_event_calls_ before this ExecutorContext is destroyed.
+    syscall_handler->emit_events(exec_res, std::move(proposed_tx))(
+        [this](SystemStatus<void> res) -> x23::Detached {
+          log_event_return(res);
+          co_return;
+        });
+  }
+
+  co_return out;
+}
+
+x23::Async<ExecResult>
+ExecutorContext::run_validate_transaction(ProposedTransaction tx,
+                                          TransactionID tx_id)
+{
+  static thread_local auto context = make_hog_exec_context();
+  assert(mode_ == ExecutionMode::kValidating);
+  // Same cap as proposal, so a peer-proposed oversized tx is a deterministic
+  // reject rather than fail-stopping the validator (#2857).
+  if (x23::xdr_size(tx.signed_tx) > kMaxBytesSignedTransaction) {
+    co_return ExecResult::ExecResultTxNonDeterministicError;
+  }
+  auto proxy = make_per_tx_db_proxy(tx_id);
+  // SystemCallHandler's ctor deep-copies tx.contracts_to_deploy (#1538) and
+  // re-serializes the tx for sha256 (#1905); both are proportional to
+  // attacker-influenced input. This runs on a detached DispatchPool worker,
+  // so an escaping throw would hit std::terminate(). Contain bad_alloc only;
+  // anything else is a genuine bug and should still terminate.
+  std::optional<SystemCallHandler> syscall_handler;
+  try {
+    syscall_handler.emplace(tx.signed_tx.tx, *snapshot_cache_, std::move(proxy),
+                            make_per_tx_event_server_proxy(tx_id),
+                            ValidationModeCtor{
+                                tx.nondeterministic_proposal_data},
+                            *context);
+  } catch (std::bad_alloc const &e) {
+    // The diagnostic itself allocates while formatting and can throw again
+    // under the same memory pressure, so guard it and fall back to the
+    // no-allocation reporter (cf. database_proxy.cc commit_transaction).
+    try {
+      error("Unrecoverable: SystemCallHandler construction failed: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("SystemCallHandler ctor failure diagnostic");
+    }
+    co_return ExecResult::ExecResultUnrecoverable;
+  }
+  co_await syscall_handler->root_invoke();
+  auto exec_res = co_await syscall_handler->try_commit_transaction();
+
+  if (exec_res == ExecResult::ExecResultOK ||
+      exec_res == ExecResult::ExecResultTxDeterministicError ||
+      exec_res == ExecResult::ExecResultTxRootFrameReverted) {
+    // Use release ordering to ensure the event RPC spawn is visible to
+    // other threads before they see the incremented counter.
+    pending_event_calls_.fetch_add(1, std::memory_order_release);
+    // In validation mode the full body was given to us; move it into the event
+    // coroutine (which owns it by value) rather than copying — [tx] is not
+    // used again, so the attacker-influenced proposal body is never deep-copied
+    // on this post-commit path.
+    syscall_handler->emit_events(exec_res, std::move(tx))(
+        [this](SystemStatus<void> res) -> x23::Detached {
+          log_event_return(res);
+          co_return void();
+        });
+  }
+  co_return exec_res;
+}
+
+x23::Async<ExpectedViewResult>
+ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
+{
+  assert(mode_ == ExecutionMode::kViewing);
+  static thread_local auto context = make_hog_exec_context();
+  co_return co_await View::run_view_transaction(
+      *snapshot_cache_,
+      make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max()),
+      make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
+      query, *context, {});
+}
+
+void
+ExecutorContext::log_event_return(SystemStatus<void> err)
+{
+  if (!err.has_value()) {
+    std::unique_lock lock(event_accumulate_mutex_);
+    event_error_ = err.error().code();
+    error("event error: {}", std::to_underlying(event_error_.value()));
+  }
+  // Use release ordering to ensure all event RPC operations (including
+  // server-side add_event/write_event) are visible before the decrement.
+  pending_event_calls_.fetch_sub(1, std::memory_order_release);
+}
+
+x23::Async<std::optional<SystemErrorCode>>
+ExecutorContext::await_event_return()
+{
+  uint32_t wait_count = 0;
+  // Use acquire ordering to ensure we see all operations that happened
+  // before the release-store in log_event_return, including all server-side
+  // event operations.
+  while (pending_event_calls_.load(std::memory_order_acquire) > 0) {
+    cpu_relax();
+    wait_count++;
+    if ((wait_count & 0xFF) == 0U) [[unlikely]] {
+      co_await default_threadpool().bg();
+    }
+  }
+  co_return event_error_;
+}
+
+} // namespace hogd

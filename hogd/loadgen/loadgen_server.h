@@ -19,9 +19,10 @@ class LoadgenRpc {
 public:
   using rpc_service = LoadgenInterfaceV1;
 
-  // We set the RPC max message size to a large value because the loadgen
-  // transfers a lot of data via individual RPC calls.
-  static constexpr size_t kRpcMaxMessageSize = 0x7fffffffff;
+  // We set the RPC max message size to the largest value x23 supports because
+  // the loadgen transfers a lot of data via individual RPC calls.  This is the
+  // ONC RPC single-fragment record limit; x23 cannot frame a larger message.
+  static constexpr size_t kRpcMaxMessageSize = 0x7fffffff;
 
   x23::Async<LoadgenResult> generate_experiment(ExperimentConfig config);
 

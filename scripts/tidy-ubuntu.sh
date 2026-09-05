@@ -83,10 +83,7 @@ fi
 run_other_checks() {
   # Run clippy separately from clang-tidy to avoid OOM.
   set -e
-  cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings
   cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings
-  cd ${ROOT_DIR}/hogd/rust/wasmtime && cargo clippy --no-deps -- -D warnings
-  cd ${ROOT_DIR}/hogd/rust/synchronized_map && cargo clippy --no-deps -- -D warnings
   cd ${ROOT_DIR}
   PYTHON_FILES=$(find hogd/ -name '*.py')
   if [ -n "$PYTHON_FILES" ]; then

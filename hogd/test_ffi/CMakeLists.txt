@@ -28,7 +28,7 @@ target_link_libraries(
   auth_claim
   precompiles
   runtime
-  auth
+  hog_auth
   runtime_test_util
 )
 
@@ -48,7 +48,7 @@ target_link_libraries(
   auth_claim
   precompiles
   runtime
-  auth
+  hog_auth
   runtime_test_util
 )
 
@@ -122,7 +122,7 @@ endif()
 # SyscallHandlerContext / mock_syscall_parser without going through an extern
 # "C" entry point), so it never reaches lazy_init() and needs logging and the
 # executor metrics initialized up front. It therefore keeps its own custom
-# main() (run_hogexec_tests, via GTest::gtest with no gtest_main) and lives in
+# main() (run_hog_exec_tests, via GTest::gtest with no gtest_main) and lives in
 # its own binary. Keeping it separate lets test_ffi_test below rely solely on
 # lazy_init() -- the real initialization path FFI consumers take -- so a
 # subsystem an entry point forgets to initialize surfaces as a test failure
@@ -144,7 +144,7 @@ target_link_libraries(
   auth_claim
   precompiles
   runtime
-  auth
+  hog_auth
   runtime_test_util
   GTest::gtest
 )
@@ -181,15 +181,10 @@ target_link_libraries(
   auth_claim
   precompiles
   runtime
-  auth
+  hog_auth
   runtime_test_util
   GTest::gtest
   GTest::gtest_main
-)
-add_dependencies(
-  test_ffi_test
-  test_large_memory_wasm
-  test_param_entrypoint_wasm
 )
 gtest_discover_tests(test_ffi_test)
 
@@ -214,7 +209,7 @@ target_link_libraries(
   auth_claim
   precompiles
   runtime
-  auth
+  hog_auth
   runtime_test_util
   GTest::gtest
   GTest::gtest_main

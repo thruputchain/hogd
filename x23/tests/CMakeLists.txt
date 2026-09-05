@@ -42,11 +42,34 @@ endforeach()
 add_x23_test(poll_zombie)
 set_tests_properties(poll_zombie PROPERTIES TIMEOUT 10)
 
+add_x23_test(poll_writer_zombie)
+set_tests_properties(poll_writer_zombie PROPERTIES TIMEOUT 10)
+
 add_x23_test(abort_zombie)
 set_tests_properties(abort_zombie PROPERTIES TIMEOUT 10)
 
 add_x23_test(abort_live)
 set_tests_properties(abort_live PROPERTIES TIMEOUT 10)
+
+add_x23_test(writebuf_fd_poison)
+set_tests_properties(writebuf_fd_poison PROPERTIES TIMEOUT 15)
+
+add_x23_test(writebuf_stale_worker)
+set_tests_properties(writebuf_stale_worker PROPERTIES TIMEOUT 15)
+
+add_x23_test(poll_writer_uaf)
+set_tests_properties(poll_writer_uaf PROPERTIES TIMEOUT 15)
+
+# Reproducers for a clang 22 coroutine codegen regression (see the header
+# comments): the .destroy clone of a MaybeAsync-returning coroutine destroys
+# an uninitialized copy of the ramp's return-object temporary.  Expected to
+# fail (SIGSEGV) on toolchains carrying the bug, e.g. Homebrew clang 22.1.5;
+# passes on clang 21.  The _standalone variant uses only standard headers so
+# it can be handed to LLVM verbatim.
+add_x23_test(coro_return_object_destroy)
+set_tests_properties(coro_return_object_destroy PROPERTIES TIMEOUT 15)
+# add_x23_test(coro_return_object_destroy_standalone)
+# set_tests_properties(coro_return_object_destroy_standalone PROPERTIES TIMEOUT 15)
 
 add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
 target_link_libraries(test_canary x23)
@@ -96,6 +119,7 @@ add_x23_gtest(max_message_size)
 add_x23_gtest(srpc_sockio_regression)
 add_x23_gtest(shutdown)
 add_x23_gtest(sync)
+add_x23_gtest(threadpool)
 add_x23_gtest(detached)
 add_x23_gtest(dag)
 add_x23_gtest(uiobuf)
@@ -104,6 +128,16 @@ add_x23_gtest(refcnt)
 
 if(GOOGLETEST_PATH)
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
+# threadpool gets the same budget as the stress tests above rather than
+# shutdown's 10s.  DestructionWakeupStress creates and destroys 10000
+# thread pools, and its cost tracks the host's CPU count (a pool
+# allocates one run queue per LLC bucket and always starts a qcbq
+# service thread), so on a big CI host under `ctest --parallel` it takes
+# a few seconds even without sanitizers -- 4.5s on the asyncio schedule
+# -- and runs past 10s under ASAN or TSAN.  It is checking for a lost
+# wakeup, which hangs rather than merely running slowly, so the larger
+# budget still catches what the test is for.
+set_tests_properties(threadpool PROPERTIES TIMEOUT 60)
 endif()
 
 if(BENCHMARK_PATH)

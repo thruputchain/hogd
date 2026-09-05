@@ -1,6 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <limits>
+#include <memory>
+#include <new>
 #include <span>
+#include <tuple>
 #include <utility>
 
 #include <vector>
@@ -551,6 +556,150 @@ TEST(Deserialize, BufViewSerializesLikeCalldata)
   static_assert(
       x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 0xffffffff>>);
   static_assert(x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 100>>);
+}
+
+// A vector of a zero-wire-size element (here an empty XDR struct) consumes no
+// input per element, so the per-element decode never runs short of input; the
+// only bound on the count is the vector's own maximum.  For a *bounded* such
+// vector the decoder's bounded reserve plus Vec::check_size still rejects a
+// count past the maximum (XdrLengthError) rather than materializing empty
+// elements until std::bad_alloc.  (An unbounded such vector has no wire-derived
+// limit; that case is contained at the SRPC boundary, which converts the
+// allocator failure into an error reply instead of crossing its noexcept input
+// boundary.)
+TEST(Deserialize, ZeroWireBoundedVectorRejectsOverflow)
+{
+  static_assert(detail::xdr_size_bounds<std::tuple<>>().max_ == 0,
+                "test relies on the empty struct being zero-wire-size");
+  x23::Vec<std::tuple<>, 8> vec;
+  uint8_t input[] = {0xff, 0xff, 0xff, 0xff}; // count 0xffffffff >> max_size 8
+  EXPECT_THROW(x23::deserialize(&vec, x23::BufView(input, sizeof(input))),
+               x23::XdrLengthError);
+}
+
+// Same for the CXS decode pathway (a Vec<tuple<>> serializes to just its
+// count, so the CXS-encoded count is the whole record).
+TEST(Deserialize, CxsZeroWireBoundedVectorRejectsOverflow)
+{
+  x23::Buf bytes = serialize_cxs_for_test(std::uint32_t(0xffffffff));
+  x23::Vec<std::tuple<>, 8> vec;
+  auto status =
+      x23::deserialize_cxs(&vec, std::span<const uint8_t>(bytes.data(),
+                                                          bytes.size()));
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kLengthExceeded);
+}
+
+// Issue #3106: a bounded typed XDR vector must reject a decoded element count
+// above its generated maximum regardless of the allocator's capacity policy.
+//
+// Deserializer::go leaves the direct `size > X::max_size()` rejection commented
+// out and relies instead on a later oversized Vec::realloc() to throw.  That
+// only holds if the vector's recorded capacity never exceeds what realloc()
+// checked: Vec::realloc() stores every element allocate_at_least() hands back
+// (`ar.count - ExtraAlloc`) as usable capacity, and Vec::ensure() returns
+// without calling check_size() whenever that recorded capacity already covers
+// the next growth.  C++23 explicitly permits allocate_at_least() to return more
+// than requested, so a conforming allocator that reports one surplus element
+// lets the decoder walk size() one element past max_size().
+//
+// The default std::allocator in the libstdc++/libc++ we build against happens
+// to return exactly the requested count, which is the only reason the existing
+// oversized-vector tests reach realloc() and throw.  SlackAllocator below is a
+// conforming allocator that exercises the permitted surplus instead.
+namespace slack_alloc_test {
+
+template<typename T> struct SlackAllocator {
+  using value_type = T;
+
+  constexpr SlackAllocator() noexcept = default;
+  template<typename U>
+  constexpr SlackAllocator(const SlackAllocator<U> &) noexcept
+  {}
+
+#if defined(__cpp_lib_allocate_at_least)
+  using AllocationResult = std::allocation_result<T *>;
+#else
+  // GCC 15 lacks P0401R6, but Vec only requires these two result members.
+  struct AllocationResult {
+    T *ptr;
+    std::size_t count;
+  };
+#endif
+
+  [[nodiscard]] T *allocate(std::size_t n)
+  {
+    if (n > std::numeric_limits<std::size_t>::max() / sizeof(T))
+      throw std::bad_array_new_length{};
+    return static_cast<T *>(
+        ::operator new(n * sizeof(T), std::align_val_t{alignof(T)}));
+  }
+  // [allocator.requirements]: deallocate may receive any count between the
+  // allocate_at_least request and the returned count, inclusive.
+  [[nodiscard]] AllocationResult allocate_at_least(std::size_t n)
+  {
+    return {.ptr = allocate(n + 1), .count = n + 1};
+  }
+  void deallocate(T *p, std::size_t) noexcept
+  {
+    ::operator delete(p, std::align_val_t{alignof(T)});
+  }
+
+  template<typename U>
+  constexpr bool operator==(const SlackAllocator<U> &) const noexcept
+  {
+    return true;
+  }
+};
+
+// The deserializer pre-reserves min(count, 0x1'0000 / sizeof(value_type))
+// elements, so a bound of exactly that many makes the bounded reserve allocate
+// the whole vector and land on the allocator's surplus.
+constexpr std::size_t kMaxElts = 0x1'0000 / sizeof(std::uint32_t);
+using SlackVec = Vec<std::uint32_t, kMaxElts, SlackAllocator<std::uint32_t>>;
+
+// XDR encoding of a uint32 vector of `count` elements, element i holding i.
+inline x23::Buf
+slack_vec_xdr(std::uint32_t count)
+{
+  x23::Buf buf;
+  buf.resize_uninitialized(4UZ + 4UZ * count);
+  putbe<std::uint32_t>(buf.data(), count);
+  for (std::uint32_t i = 0; i < count; ++i)
+    putbe<std::uint32_t>(buf.data() + 4UZ + 4UZ * i, i);
+  return buf;
+}
+
+} // namespace slack_alloc_test
+
+// Vec's generic xdr_meta specialization only covers the default allocator, so
+// name this instantiation explicitly.
+template<> struct xdr_meta<slack_alloc_test::SlackVec> {
+  static constexpr XdrCategory category = XdrCategory::kVec;
+};
+
+TEST(Deserialize, VectorAllocatorSlackBypassesMaxSize)
+{
+  using slack_alloc_test::kMaxElts;
+
+  const x23::Buf input =
+      slack_alloc_test::slack_vec_xdr(static_cast<std::uint32_t>(kMaxElts) + 1);
+  slack_alloc_test::SlackVec vec;
+
+  // The wire count is one past the vector's generated bound, so the decode has
+  // to be rejected.  It currently succeeds and yields size() == max_size() + 1.
+  EXPECT_THROW(deserialize(&vec, BufView(input)), x23::XdrLengthError);
+  EXPECT_LE(vec.size(), vec.max_size());
+}
+
+// Same root cause, without any oversized wire count (amendment 4845 on issue
+// #3106): a plain reserve() up to the bound leaves the bounded vector claiming
+// capacity beyond max_size(), which is the slack the decode above consumes.
+TEST(Deserialize, VectorAllocatorSlackExceedsCapacityBound)
+{
+  slack_alloc_test::SlackVec vec;
+  vec.reserve(slack_alloc_test::kMaxElts);
+  EXPECT_LE(vec.capacity(), vec.max_size());
 }
 
 // NOLINTEND(modernize-type-traits)

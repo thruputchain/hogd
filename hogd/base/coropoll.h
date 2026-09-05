@@ -55,7 +55,7 @@ make_chunks(size_t total_size, size_t chunk_count)
     const size_t chunk_size = base_size + (i < remainder ? 1 : 0);
     const size_t start = offset;
     const size_t end = start + chunk_size;
-    chunks.push_back({start, end});
+    chunks.push_back(ChunkRange{.start = start, .end = end});
     offset = end;
   }
   CHECK_EQ(offset, total_size);

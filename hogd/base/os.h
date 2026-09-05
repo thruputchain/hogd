@@ -63,4 +63,8 @@ ErrnoStatus<ProcessStats> read_process_stats();
 // returns the process's name.
 std::string read_process_name();
 
+// total_physical_memory returns the total bytes of physical RAM, or 0 if the
+// value cannot be determined.
+size_t total_physical_memory();
+
 } // namespace hogd

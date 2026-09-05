@@ -328,7 +328,7 @@ TEST_F(IndexerTest, GetTransactionsReturnsAllRegardlessOfAddress)
   BlockHeight block_height = 100;
   TxEventLogBatch events = create_event_logs();          // 2 txs, addrs 0xAA/0xBB
   ProposedTransactionBatch bodies = create_tx_bodies(events.size());
-  event_->indexer_event_process_events(block_height, events, bodies)();
+  ingest_legacy_events(block_height, events, bodies)();
 
   TransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
@@ -486,7 +486,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   event_log.proposed_tx_hash = tx_hash;
   ASSERT_TRUE(event_log.events.empty());
 
-  event_->indexer_event_process_events(block_height, TxEventLogBatch{event_log},
+  ingest_legacy_events(block_height, TxEventLogBatch{event_log},
                                        ProposedTransactionBatch{body})();
 
   AddressTransactionQuery query{};
@@ -773,7 +773,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   ev.serialized_event.resize(4);
   event_log.events.push_back(ev);
 
-  event_->indexer_event_process_events(block_height, TxEventLogBatch{event_log},
+  ingest_legacy_events(block_height, TxEventLogBatch{event_log},
                                        ProposedTransactionBatch{body})();
 
   auto query_for = [&](ContractAddress const &addr) {
@@ -825,7 +825,7 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
     hashes.push_back(h);
     TxEventLog log;
     log.proposed_tx_hash = h;
-    event_->indexer_event_process_events(
+    ingest_legacy_events(
         BlockHeight{static_cast<uint64_t>(300 + i)}, TxEventLogBatch{log},
         ProposedTransactionBatch{body})();
   }

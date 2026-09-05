@@ -94,13 +94,40 @@ cp ${BUILD_DIR}/scpd.dev ${PKG_DIR}/scpd
 cp ${BUILD_DIR}/hogx-agent ${PKG_DIR}/hogx-agent
 cp ${BUILD_DIR}/hogx ${PKG_DIR}/hogx
 
-cp ${BUILD_DIR}/hogd/hogdb/hogdb ${PKG_DIR}/hogdb
-cp ${BUILD_DIR}/hogd/hogexec/hogexec ${PKG_DIR}/hogexec
-cp ${BUILD_DIR}/hogd/event/event_exec ${PKG_DIR}/event_exec
-cp ${BUILD_DIR}/hogd/indexer/indexer_exec ${PKG_DIR}/indexer_exec
-cp ${BUILD_DIR}/hogd/mempool/mempool_exec ${PKG_DIR}/mempool_exec
-cp ${BUILD_DIR}/hogd/auth/auth_exec ${PKG_DIR}/auth_exec
+cp ${BUILD_DIR}/hogd/hog_db/hog-db ${PKG_DIR}/hog-db
+cp ${BUILD_DIR}/hogd/hog_exec/hog-exec ${PKG_DIR}/hog-exec
+cp ${BUILD_DIR}/hogd/hog_event/hog-event ${PKG_DIR}/hog-event
+cp ${BUILD_DIR}/hogd/hog_indexer/hog-indexer ${PKG_DIR}/hog-indexer
+cp ${BUILD_DIR}/hogd/hog_mempool/hog-mempool ${PKG_DIR}/hog-mempool
+cp ${BUILD_DIR}/hogd/hog_auth/hog-auth ${PKG_DIR}/hog-auth
 cp ${BUILD_DIR}/hogd/loadgen/loadgen_server ${PKG_DIR}/loadgen_server
+
+echo "validating packaged executable help"
+set +x
+for executable in "${PKG_DIR}"/*; do
+  if [[ ! -f "${executable}" || ! -x "${executable}" ]]; then
+    continue
+  fi
+  for help_flag in --help -h; do
+    if ! expected_help=$("${executable}" "${help_flag}" 2>&1); then
+      echo "${executable} ${help_flag} failed" >&2
+      exit 1
+    fi
+    if [[ -z "${expected_help}" ]]; then
+      echo "${executable} ${help_flag} produced no help output" >&2
+      exit 1
+    fi
+    if ! mixed_help=$("${executable}" --invalid "${help_flag}" 2>&1); then
+      echo "${executable} did not prioritize ${help_flag}" >&2
+      exit 1
+    fi
+    if [[ "${mixed_help}" != "${expected_help}" ]]; then
+      echo "${executable} displayed non-help output with ${help_flag}" >&2
+      exit 1
+    fi
+  done
+done
+set -x
 
 # compute package name
 

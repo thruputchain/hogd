@@ -4,15 +4,16 @@
 #include <print>
 #include <string>
 #include <unistd.h> // NOLINT(misc-include-cleaner)
+#include <utility>
 
 #include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/block_explorer/shared.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/init.h"
-#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "types.hh"
@@ -38,11 +39,13 @@ block_explorer_init(const std::string &indexer_server_addr,
   }
 
   // Register with the indexer server.
-  indexer_block_explorer_client_t client =
-      make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(
-                                                 indexer_server_addr),
-                                             /*retry=*/true,
-                                             LoadgenRpc::kRpcMaxMessageSize)();
+  auto client_res = make_rpc_client<IndexerBlockExplorer1>(
+      server_address_to_sockaddr(indexer_server_addr),
+      /*retry=*/true, kBulkRpcMaxMessageSize)();
+  if (!client_res)
+    panic("block_explorer connect to indexer failed: {}",
+          client_res.error().error_code().message());
+  indexer_block_explorer_client_t client = std::move(*client_res);
   const IndexerBlockExplorerIntroOutcome intro_result =
       client.indexer_block_explorer_intro(version::kHogdProtocol())();
   if (intro_result != IndexerBlockExplorerIntroOutcome::IntroSuccess) {

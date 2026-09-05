@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
-#include <future>
 #include <optional>
 #include <print>
 #include <span>
@@ -1421,7 +1420,7 @@ MerkleTrie::generate_all_hashes_above_frontier(
   };
 
   std::vector<HashInfo> stack;
-  stack.push_back({root, 0});
+  stack.push_back(HashInfo{.node = root, .next_child_to_visit = 0});
 
   while (!stack.empty()) {
     HashInfo &info = stack.back();
@@ -1436,7 +1435,7 @@ MerkleTrie::generate_all_hashes_above_frontier(
       while (info.next_child_to_visit < info.node->branch_children().size()) {
         Node *child = info.node->branch_children()[info.next_child_to_visit++];
         if (child) {
-          stack.push_back({child, 0});
+          stack.push_back(HashInfo{.node = child, .next_child_to_visit = 0});
           pushed_child = true;
           break;
         }
@@ -1445,7 +1444,8 @@ MerkleTrie::generate_all_hashes_above_frontier(
     case Node::Type::kExtension:
       if (info.next_child_to_visit == 0 && info.node->extension_child()) {
         info.next_child_to_visit = 1;
-        stack.push_back({info.node->extension_child(), 0});
+        stack.push_back(HashInfo{.node = info.node->extension_child(),
+                                 .next_child_to_visit = 0});
         pushed_child = true;
       }
       break;
@@ -1476,15 +1476,14 @@ MerkleTrie::generate_all_hashes(size_t num_threads)
     return;
   }
 
-  std::vector<std::future<void>> futures;
-  futures.reserve(frontier.size());
+  // JobScope joins every worker before this frame returns, so a submit()
+  // failure mid-loop cannot leave a worker hashing a subtree we no longer own.
+  WorkerPool::JobScope scope;
+  scope.reserve(frontier.size());
   for (Node *subtree_root : frontier) {
-    futures.push_back(WorkerPool::get_default_pool().submit(
-        [subtree_root] { generate_all_hashes_serial(subtree_root); }));
+    scope.submit([subtree_root] { generate_all_hashes_serial(subtree_root); });
   }
-  for (std::future<void> &future : futures) {
-    future.get();
-  }
+  scope.wait();
 
   std::unordered_set<Node *> frontier_set(frontier.begin(), frontier.end());
   generate_all_hashes_above_frontier(&root_, frontier_set);

@@ -23,14 +23,14 @@ runs:
       shell: bash
     - name: clear work dirs
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 11111 clear_work_dir
       shell: bash
     - name: launch event server
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 start hogd/event/event_exec --mempool-addr hog10:8095 --work-dir ${{ inputs.work-dir }}/
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 11111 start hogd/hog_event/hog-event --mempool-addr hog10:8095 --work-dir ${{ inputs.work-dir }}/
       shell: bash
     - name: make sure event server is running
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 expect_running
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 11111 expect_running
       shell: bash
     - name: wait for event server ports
       run: |
@@ -38,7 +38,7 @@ runs:
         ./scripts/wait-port.sh hog11 ${{ env.EVENT_MEMPOOL_PORT }}
       shell: bash
     - name: run event server benchmark
-      run: ./${{ inputs.build-dir }}/hogd/event/event_server_bench -e hog11:${{ env.EVENT_EXECUTOR_PORT }} -s hog11:${{ env.EVENT_MEMPOOL_PORT }} -n 1000000 -c 40 -o 100 > event_server_bench_log
+      run: ./${{ inputs.build-dir }}/hogd/hog_event/hog_event_server_bench -e hog11:${{ env.EVENT_EXECUTOR_PORT }} -s hog11:${{ env.EVENT_MEMPOOL_PORT }} -n 1000000 -c 40 -o 100 > event_server_bench_log
       shell: bash
     - name: clone metrics history # This is idempotent
       run: ./scripts/clone_metrics_history.sh
@@ -51,5 +51,5 @@ runs:
       if: always()
       shell: bash
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 11111 stop
 

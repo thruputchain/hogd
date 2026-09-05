@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -12,11 +13,20 @@
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
+
+enum class GenesisCeremonyError {
+  kNegativeDistribution,
+  kSupplyExceeded,
+  // Too many distinct wallet artifacts among the accounts funded together.
+  kTooManyDistinctContracts,
+};
 
 constexpr static ContractAddress
 make_precompile_address(GenesisContractAddresses addr_enum)
@@ -33,84 +43,75 @@ make_precompile_address(GenesisContractAddresses addr_enum)
 
 class GenesisConfigurationBuilder {
 public:
-  void add_initial_config(std::shared_ptr<const Contract> const &contract,
-                          SHA256Hash const &nonce,
-                          ContractEntrypointID entrypoint, Calldata calldata,
-                          int128_t amount);
+  void add_distribution(std::shared_ptr<const Contract> const &contract,
+                        SHA256Hash const &nonce,
+                        ContractEntrypointID entrypoint, Calldata calldata,
+                        int128_t amount);
 
-  // Returns std::nullopt if the configured allocations exceed the initial hog
-  // token supply. Callers build this from user-supplied data (devnode bootstrap
-  // manifests), so an over-allocation is reportable input, not an invariant:
-  // report it rather than taking the process down from inside a shared builder.
-  std::optional<GenesisConfiguration>
-  build(StorageCostModel const &cost_model) const;
+  // Build the policy-neutral height-0 configuration. It contains no
+  // allocations or native supply; those are created by root-contract
+  // invocations in the height-1 ceremony.
+  GenesisConfiguration build(NetworkHash const &network_hash,
+                             StorageCostModel const &cost_model,
+                             Contract const &root_contract,
+                             NetworkConfig const &network_config) const;
 
-  // build() for callers whose allocations are hardcoded and therefore cannot
-  // exceed the supply -- tests, benchmarks, loadgen. Panics if they somehow do.
-  // Anything assembling a config from user input must use build() and report
-  // the failure instead.
-  GenesisConfiguration build_or_panic(StorageCostModel const &cost_model) const;
+  // Build the stock distributor root's single height-1 invocation. The
+  // transaction creates and funds all economic state and deploys every entry.
+  std::expected<std::vector<SignedTransaction>, GenesisCeremonyError>
+  try_make_genesis_ceremony_transactions(
+      StorageCostModel const &cost_model) const;
 
-  // The set of transactions that claim the balances that are set up
-  // in the genesis block.
-  // These could be, but are not required to be, all run in the first block.
-  std::vector<SignedTransaction> make_unfurl_genesis_transactions() const;
+  // Panic-style wrapper for trusted callers whose hardcoded allocations are
+  // known to fit within the native-token supply.
+  std::vector<SignedTransaction>
+  make_genesis_ceremony_transactions(StorageCostModel const &cost_model) const;
+
+  // Override GenesisConfiguration::default_wallet (defaults to
+  // native_default_wallet_hash()).
+  void set_default_wallet(DeployedContractHash const &default_wallet)
+  {
+    default_wallet_override_ = default_wallet;
+  }
 
 private:
   struct Entry {
-    PresetDeploymentConfig config;
+    SHA256Hash initial_nonce;
+    SHA256Hash contract_hash;
+    ContractEntrypointID entrypoint;
+    Calldata calldata;
     int128_t amount;
     std::shared_ptr<const Contract> deployed_contract;
   };
 
   std::vector<Entry> entries_;
-  int128_t allocated_hogs_ = 0;
+  std::optional<DeployedContractHash> default_wallet_override_;
 };
 
-class GenesisConfigurationLoader {
-public:
-  // Constructor takes the genesis configuration
-  explicit GenesisConfigurationLoader(
-      GenesisConfiguration genesis_configuration);
+// Load the repository's reviewed stock distributor artifact. Chains may put a
+// different RV32 contract in GenesisConfiguration::root_contract.
+std::shared_ptr<const Contract> load_stock_genesis_root_contract();
 
-  // Load genesis configuration data into storage
-  // This calculates storage keys and stores allocation amounts as int128s
-  void load_genesis_configuration(
-      // Returned amount is the amount of storage used by the item
-      std::function<int128_t(StorageKey const &, int128_t const &)> const
-          &write_storage,
-      std::function<void(std::shared_ptr<const Contract>)> const
-          &write_contract,
-      std::function<void(ContractAddress const &contract_address,
-                         DeployedContractHash const &contract_hash)> const
-          &write_deployment,
-      std::function<int128_t(ContractAddress const &,
-                             AddressAuthData const &)> const &write_auth_data);
+ContractAddress
+calculate_genesis_deployment_address(SHA256Hash const &contract_hash,
+                                     SHA256Hash const &nonce);
 
-  // Calculate storage key for a genesis entry
-  // Format: sha256("Initial Deployment" || hash || nonce || entrypoint ||
-  // calldata)
-  static StorageKey
-  calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
-                        ContractEntrypointID entrypoint,
-                        std::span<const std::uint8_t> calldata);
-  static StorageKey calculate_storage_key(PresetDeploymentConfig const &config);
+DeployedContractHash native_default_wallet_hash();
 
-  constexpr static ContractAddress kDeployContractAddress =
-      make_precompile_address(
-          GenesisContractAddresses::kAddressInitialTokenClaim);
-  constexpr static ContractAddress kPresetNativeTokenAddress =
-      make_precompile_address(
-          GenesisContractAddresses::kAddressPrecompiledHogToken);
+// The execution parameters this repository's dev and test chains run under.
+// The protocol sets no value for any of them, so a real chain passes its own
+// to build() the same way it picks its own root contract.
+NetworkConfig stock_network_config();
 
-  static ContractAddress
-  calculate_deployed_address(SHA256Hash const &contract_hash,
-                             SHA256Hash const &nonce);
-
-  static int128_t initial_hog_token_supply();
-
-private:
-  GenesisConfiguration genesis_configuration_;
-};
+// Visit only the records required to execute the height-1 root ceremony.
+// Economic state (supply, balances, and replay metadata) is created lazily by
+// ordinary transaction execution.
+void visit_genesis_execution_prerequisites(
+    GenesisConfiguration const &config,
+    std::function<void(std::shared_ptr<const Contract>)> const &visit_contract,
+    std::function<void(ContractAddress const &,
+                       DeployedContractHash const &)> const &visit_deployment,
+    std::function<void(ContractAddress const &, AddressAuthData const &)> const
+        &visit_auth_data);
 
 } // namespace hogd

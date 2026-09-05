@@ -1,5 +1,7 @@
 #include "hogd/devnode/hosted_bootstrap_generator.h"
 
+#include "hogd/base/network_hash.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -23,10 +25,12 @@
 #include <vector>
 
 #include "built_contracts/dev_wallet.h"
+#include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -35,9 +39,11 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
+#include "network_config.hh"
 #include "storage_cost.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -177,10 +183,15 @@ write_storage_cost_model_xdr(json::Writer &w, StorageCostModelXdr const &model)
 }
 
 void
-write_int128_xdr(json::Writer &w, int128_xdr const &value)
+write_network_config(json::Writer &w, NetworkConfig const &config)
 {
-  w.field("highbits", static_cast<std::int64_t>(value.highbits));
-  w.field("lowbits", uint64_string(value.lowbits));
+  // Reports the values in force rather than the list as written, so a reader
+  // sees what the chain runs under whether or not it states each parameter.
+  w.field("max_sha256_buffers", uint64_string(max_sha256_buffers(config)));
+  w.field("max_cross_invoke_depth",
+          uint64_string(max_cross_invoke_depth(config)));
+  w.field("max_new_contracts_per_tx",
+          uint64_string(max_new_contracts_per_tx(config)));
 }
 
 std::string
@@ -188,24 +199,27 @@ build_genesis_json(GenesisConfiguration const &genesis)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.array_field("initial_config", [&](json::Writer &w) {
-      for (InitialConfigurationEntry const &entry : genesis.initial_config) {
-        w.object([&](json::Writer &w) {
-          w.object_field("config", [&](json::Writer &w) {
-            w.field("initial_nonce", xdr_hex(entry.config.initial_nonce));
-            w.field("contract_hash", xdr_hex(entry.config.contract_hash));
-            w.field("entrypoint", xdr_hex(entry.config.entrypoint));
-            w.field("calldata",
-                    xdr_hex(std::as_bytes(std::span(entry.config.calldata))));
-          });
-          w.object_field("amount", [&](json::Writer &w) {
-            write_int128_xdr(w, entry.amount);
-          });
-        });
-      }
-    });
+    w.field("network_hash", xdr_hex(genesis.network_hash));
     w.object_field("storage_cost_model", [&](json::Writer &w) {
       write_storage_cost_model_xdr(w, genesis.storage_cost_model);
+    });
+    w.object_field("network_config", [&](json::Writer &w) {
+      write_network_config(w, genesis.network_config);
+    });
+    w.object_field("root_contract", [&](json::Writer &w) {
+      w.field("contract_type",
+              std::format("{}", genesis.root_contract.contract_type()));
+      w.object_field("rv32_contract", [&](json::Writer &w) {
+        w.field("data", xdr_hex(std::as_bytes(std::span(
+                            genesis.root_contract.rv32_contract().data))));
+      });
+    });
+    w.object_field("default_wallet", [&](json::Writer &w) {
+      w.field("hash", xdr_hex(genesis.default_wallet.hash));
+      w.field("contract_size",
+              static_cast<std::int64_t>(genesis.default_wallet.contract_size));
+      w.field("contract_type",
+              std::format("{}", genesis.default_wallet.contract_type));
     });
   });
   return buffer;
@@ -228,9 +242,8 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{1});
     w.field("kind", "hog-hosted-bootstrap");
-    w.field("networkId", config.network_id);
-    w.field("protocol", version::kHogdProtocol());
-    w.field("genesisHash", hex_string(artifact.genesis_hash));
+    w.field("networkHash", format_network_hash(config.network_hash));
+    w.field("protocol", protocol_text(version::kHogdProtocol()));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.bootstrap_config.dev_wallet_profile);
       w.field("devAccounts",
@@ -282,11 +295,11 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
         w.field("deployedCodeHash", hex_string(dev_wallet_hash));
         w.field("artifactHint", wallet_profile.artifact_hint);
         w.field("deployEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
         w.field("doActionEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
         w.field("createWalletEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
       });
       w.object_field("storageCostModel", [&](json::Writer &w) {
         write_storage_cost_model(w, storage_cost_model);
@@ -408,9 +421,6 @@ write_file_if_absent_or_same(std::filesystem::path const &path,
 HostedBootstrapArtifact
 build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
 {
-  if (config.network_id.empty()) {
-    throw std::runtime_error("hosted bootstrap network id must not be empty");
-  }
   if (config.bootstrap_config.seed.empty()) {
     throw std::runtime_error(
         "hosted bootstrap dev account seed must not be empty");
@@ -449,8 +459,7 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     const SHA256Hash nonce =
         derive_hosted_faucet_nonce(config.faucet->public_key);
     const ContractAddress wallet_address =
-        GenesisConfigurationLoader::calculate_deployed_address(
-            wallet_contract_hash, nonce);
+        calculate_genesis_deployment_address(wallet_contract_hash, nonce);
 
     for (BootstrapAccountMetadata const &account : accounts) {
       if (account.address == wallet_address) {
@@ -460,9 +469,9 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     }
 
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-    builder.add_initial_config(
-        wallet_contract, nonce, wallet_meta::entrypoint<"initialize">(),
-        wallet_meta::make_calldata<"initialize">(config.faucet->public_key),
+    builder.add_distribution(
+        wallet_contract, nonce, wallet_meta::entrypoint<u8"initialize">(),
+        wallet_meta::make_calldata<u8"initialize">(config.faucet->public_key),
         static_cast<int128_t>(config.faucet->storage_tokens));
     faucet = HostedFaucetMetadata{
         .wallet_address = wallet_address,
@@ -471,23 +480,24 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     };
   }
 
-  // The allocations come from the hosted bootstrap config, so over-allocating
-  // is a reportable input error. devnode's main() turns this into a clean
-  // message; it still reports failures by exception (see hogd #3001).
-  std::optional<GenesisConfiguration> genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
-  if (!genesis_configuration) {
-    throw std::runtime_error("hosted bootstrap config allocates more hogs than "
-                             "the initial hog token supply");
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  auto initialization_txs =
+      builder.try_make_genesis_ceremony_transactions(cost_model);
+  if (!initialization_txs.has_value()) {
+    throw std::runtime_error(
+        "hosted bootstrap accounts, faucet, and ceremony funding exceed the "
+        "native token supply");
   }
 
   HostedBootstrapArtifact artifact{
-      .genesis_configuration = std::move(*genesis_configuration),
-      .initialization_txs = builder.make_unfurl_genesis_transactions(),
+      .genesis_configuration =
+          builder.build(config.network_hash, cost_model,
+                        *load_stock_genesis_root_contract(),
+                        stock_network_config()),
+      .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
       .faucet = std::move(faucet),
   };
-  artifact.genesis_hash = sha256(artifact.genesis_configuration);
   artifact.genesis_json = build_genesis_json(artifact.genesis_configuration);
   artifact.metadata_json = build_metadata_json(config, artifact);
   return artifact;

@@ -4,8 +4,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <random>
 #include <span>
+#include <type_traits>
 #include <utility>
 
 #include "auth_claim.hh"
@@ -13,8 +15,10 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "parallel.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -42,6 +46,38 @@ TEST(Int128XdrBytesTest, RoundTripsPositiveAndNegativeValues)
 
   EXPECT_EQ(int128_from_xdr_bytes(int128_to_xdr_bytes(kPositive)), kPositive);
   EXPECT_EQ(int128_from_xdr_bytes(int128_to_xdr_bytes(kNegative)), kNegative);
+}
+
+// #3131: int128_to_xdr_bytes / int128_from_xdr_bytes reach their std::byte row
+// storage through uint8_t (via x23::putbe/getbe). That object-representation
+// access is only alias-permitted when uint8_t is a character type; the helpers
+// now pin that precondition at compile time. Mirror the guard here and exercise
+// a decode from an independently-populated std::byte buffer read back through a
+// span -- the shape of the persisted contract-data read path.
+TEST(Int128XdrBytesTest, DecodesFromStandaloneByteBufferAliasSafely)
+{
+  static_assert(std::is_same_v<std::uint8_t, unsigned char>,
+                "NNInt128 XDR byte helpers depend on uint8_t being "
+                "unsigned char for alias-safe object-representation access");
+
+  constexpr int128_t kValue =
+      (int128_t{0x0102030405060708LL} << 64) | 0x1112131415161718ULL;
+
+  // Big-endian 16-byte encoding of kValue, staged into a fresh std::byte
+  // buffer without going through the helper's own array.
+  std::array<std::byte, sizeof(int128_xdr)> buffer{};
+  for (size_t i = 0; i < buffer.size(); i++) {
+    buffer[i] = std::byte{static_cast<unsigned char>(
+        static_cast<uint128_t>(kValue) >> (8 * (buffer.size() - i - 1)))};
+  }
+
+  EXPECT_EQ(int128_from_xdr_bytes(
+                std::span<const std::byte, sizeof(int128_xdr)>(buffer)),
+            kValue);
+
+  // And the helper's own encode must land in that same canonical layout.
+  auto encoded = int128_to_xdr_bytes(kValue);
+  EXPECT_TRUE(std::equal(encoded.begin(), encoded.end(), buffer.begin()));
 }
 
 namespace {
@@ -80,7 +116,7 @@ TEST(ParallelBatchToTTest, RoundTripsSingleSignedTransaction)
       t_to_parallel_batch(SignedTransactionBatch{tx})();
 
   SignedTransactionBatch parsed;
-  ASSERT_TRUE(parallel_batch_to_t(batch, parsed)());
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
   ASSERT_EQ(parsed.size(), 1UL);
   EXPECT_EQ(parsed[0], tx);
 }
@@ -113,10 +149,61 @@ TEST(ParallelBatchToTTest, AppendPreservesExistingDataAndOrder)
   EXPECT_GT(batch.xdr.size(), initial_num_bytes);
 
   SignedTransactionBatch parsed;
-  ASSERT_TRUE(parallel_batch_to_t(batch, parsed)());
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
   ASSERT_EQ(parsed.size(), 2UL);
   EXPECT_EQ(parsed[0], tx0);
   EXPECT_EQ(parsed[1], tx1);
+}
+
+TEST(ParallelBatchToTTest, AcceptsABatchAtTheObjectLimit)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction(),
+                             make_minimal_signed_transaction()})();
+
+  SignedTransactionBatch parsed;
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed, 2)());
+  EXPECT_EQ(parsed.size(), 2UL);
+}
+
+TEST(ParallelBatchToTTest, RejectsABatchOverTheObjectLimit)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction(),
+                             make_minimal_signed_transaction()})();
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, 1)());
+  // Nothing was allocated for the objects the batch claimed.
+  EXPECT_TRUE(parsed.empty());
+}
+
+// The limit applies to what the metadata claims, so the payload never has to
+// be large enough to back it.
+TEST(ParallelBatchToTTest, RejectsAnOverclaimAgainstTheObjectLimit)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
+  batch.segment_tokens[0] = 0xffffffff;
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, 1)());
+  EXPECT_TRUE(parsed.empty());
+}
+
+TEST(ParallelBatchToTTest, AZeroObjectLimitAcceptsOnlyAnEmptyBatch)
+{
+  ParallelSignedTransactionBatch empty =
+      t_to_parallel_batch(SignedTransactionBatch{})();
+  SignedTransactionBatch parsed;
+  EXPECT_TRUE(parallel_batch_to_t(empty, parsed, 0)());
+  EXPECT_TRUE(parsed.empty());
+
+  ParallelSignedTransactionBatch one = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+  EXPECT_FALSE(parallel_batch_to_t(one, parsed, 0)());
 }
 
 TEST(ParallelBatchToTTest, RejectsOverclaimedFinalSegment)
@@ -130,7 +217,7 @@ TEST(ParallelBatchToTTest, RejectsOverclaimedFinalSegment)
   batch.segment_tokens[0] = 2;
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RejectsLeftoverSegmentBytes)
@@ -144,7 +231,7 @@ TEST(ParallelBatchToTTest, RejectsLeftoverSegmentBytes)
   batch.segment_bytes[0] += 4;
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RejectsXdrLargerThanSegmentBytes)
@@ -156,7 +243,7 @@ TEST(ParallelBatchToTTest, RejectsXdrLargerThanSegmentBytes)
   batch.xdr.resize(batch.xdr.size() + 4, 0);
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RejectsSegmentBytesLargerThanXdr)
@@ -168,7 +255,7 @@ TEST(ParallelBatchToTTest, RejectsSegmentBytesLargerThanXdr)
   batch.segment_bytes[0] += 4;
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)
@@ -188,7 +275,7 @@ TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)
       corrupted.xdr[idx_dist(rng)] = byte_dist(rng);
     }
     SignedTransactionBatch parsed;
-    (void)parallel_batch_to_t(corrupted, parsed)();
+    (void)parallel_batch_to_t(corrupted, parsed, kNoBatchSizeLimit)();
   }
 }
 
@@ -208,7 +295,7 @@ TEST(ParallelBatchToTTest, RejectsTokenCountExceedingPayloadBytes)
   };
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)
@@ -222,7 +309,92 @@ TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)
   };
 
   x23::XdrVec<BoundedUint32Vec> parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
+}
+
+namespace {
+
+SignedTransaction
+make_shared_ptr_test_tx(std::uint64_t nonce, size_t calldata_bytes)
+{
+  SignedTransaction tx{};
+  tx.tx.uniquifier.nonce = nonce;
+  tx.tx.invocation.gas_limit = 1234;
+  tx.tx.invocation.calldata.resize(calldata_bytes);
+  for (size_t i = 0; i < calldata_bytes; i++) {
+    tx.tx.invocation.calldata[i] = static_cast<std::uint8_t>(i + nonce);
+  }
+  return tx;
+}
+
+} // namespace
+
+// [XdrSharedPtr] exists to change who owns the bytes, not what the bytes are,
+// so pin the encoding against [x23::Ptr] rather than trusting the type system
+// to have meant it.
+TEST(XdrSharedPtrTest, SerializesByteForByteLikeXdrPtr)
+{
+  const SignedTransaction tx =
+      make_shared_ptr_test_tx(/*nonce=*/7, /*calldata_bytes=*/37);
+
+  const x23::Ptr<SignedTransaction> owned(tx);
+  const XdrSharedPtr<SignedTransaction> shared(
+      std::make_shared<const SignedTransaction>(tx));
+
+  EXPECT_EQ(xdr_size(shared), x23::xdr_size(owned));
+  EXPECT_EQ(x23::serialize(shared), x23::serialize(owned));
+}
+
+TEST(XdrSharedPtrTest, NullSerializesLikeNullXdrPtr)
+{
+  const x23::Ptr<SignedTransaction> owned(nullptr);
+  const XdrSharedPtr<SignedTransaction> shared;
+
+  EXPECT_EQ(xdr_size(shared), 4UL);
+  EXPECT_EQ(xdr_size(shared), x23::xdr_size(owned));
+  EXPECT_EQ(x23::serialize(shared), x23::serialize(owned));
+}
+
+TEST(XdrSharedPtrTest, VectorMatchesVectorOfXdrPtrs)
+{
+  const SignedTransaction first =
+      make_shared_ptr_test_tx(/*nonce=*/1, /*calldata_bytes=*/0);
+  const SignedTransaction second =
+      make_shared_ptr_test_tx(/*nonce=*/2, /*calldata_bytes=*/64);
+
+  // Present/absent/present, the shape a lookup reply actually produces.
+  x23::XdrVec<x23::Ptr<SignedTransaction>> owned;
+  owned.push_back(x23::Ptr<SignedTransaction>(first));
+  owned.push_back(nullptr);
+  owned.push_back(x23::Ptr<SignedTransaction>(second));
+
+  x23::XdrVec<XdrSharedPtr<SignedTransaction>> shared;
+  shared.push_back(XdrSharedPtr<SignedTransaction>(
+      std::make_shared<const SignedTransaction>(first)));
+  shared.push_back({});
+  shared.push_back(XdrSharedPtr<SignedTransaction>(
+      std::make_shared<const SignedTransaction>(second)));
+
+  EXPECT_EQ(x23::xdr_size(shared), x23::xdr_size(owned));
+  EXPECT_EQ(x23::serialize(shared), x23::serialize(owned));
+}
+
+// A vector of these must be usable where the wire type is a vector of
+// optionals -- that is what lets an RPC handler return one.
+static_assert(
+    x23::serializes_like<x23::XdrVec<XdrSharedPtr<SignedTransaction>>,
+                         x23::Vec<x23::Ptr<SignedTransaction>, 0xffffffff>>);
+
+TEST(XdrSharedPtrTest, SharesTheOriginalObjectRatherThanCopyingIt)
+{
+  const std::shared_ptr<const SignedTransaction> tx =
+      std::make_shared<const SignedTransaction>(
+          make_shared_ptr_test_tx(/*nonce=*/3, /*calldata_bytes=*/16));
+
+  const XdrSharedPtr<SignedTransaction> shared(tx);
+
+  EXPECT_EQ(shared.get(), tx.get());
+  EXPECT_EQ(tx.use_count(), 2L);
 }
 
 } // namespace hogd

@@ -3,11 +3,15 @@ set -Eeuo pipefail
 
 . "$(dirname "$0")/bench_harness.sh"
 . "$(dirname "$0")/../hog-ip.sh"
+ci_enable_error_trace
 
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
-STALE_PROCESSES="loadgen_server hogexec auth_exec event_exec indexer_exec hogdb chuckd chuckd.dev scpd scpd.dev mempool_exec"
-CONTROL_CLI="./$BUILD_DIR/hogd/hogexec/bench/control_cli"
+STALE_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
+CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
+WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
+EVENT_WORK_DIR="$WORK_ROOT/event"
+INDEXER_DB_DIR="$WORK_ROOT/indexer"
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -39,7 +43,6 @@ export AUTH_DB_PORT=8050
 export AUTH_MEMPOOL_PORT=8051
 export AUTH_HTTP_PORT=8052
 
-export INDEXER_EVENT_PORT=8060
 export INDEXER_BLOCK_EXPLORER_PORT=8061
 export INDEXER_HTTP_PORT=8062
 
@@ -71,37 +74,40 @@ ci_control_clear_work_dirs "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
 echo 'kill stale processes'
 kill_stale_processes
 
+echo 'create event and indexer work dirs'
+ci_remote_run hog9 "mkdir -p $(printf '%q' "$EVENT_WORK_DIR") $(printf '%q' "$INDEXER_DB_DIR")"
+
 echo 'launch loadgen'
 $CONTROL_CLI hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server --bind-ip "$(hog_ip hog7)" --port $LOADGEN_PORT --metrics-port $LOADGEN_HTTP_PORT
 
 echo 'wait for loadgen'
 ci_wait_port hog7 $LOADGEN_PORT
 
-echo 'launch first hogexec'
+echo 'launch first hog-exec'
 # the mempool runs on hog10
-$CONTROL_CLI hog5 $CI_CONTROL_PORT start hogd/hogexec/hogexec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
-# can't wait for hogexec: that's waiting on the coordinator
+$CONTROL_CLI hog5 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+# can't wait for hog-exec: that's waiting on the coordinator
 
-echo 'launch second hogexec'
+echo 'launch second hog-exec'
 # the mempool runs on hog10
-$CONTROL_CLI hog6 $CI_CONTROL_PORT start hogd/hogexec/hogexec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
-# can't wait for hogexec: that's waiting on the coordinator
+$CONTROL_CLI hog6 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+# can't wait for hog-exec: that's waiting on the coordinator
 
-echo 'check hogexec is running'
+echo 'check hog-exec is running'
 $CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
 
 echo 'launch event'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/event/event_exec --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir $WORK_DIR/ --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
+$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_event/hog-event --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir "$EVENT_WORK_DIR" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
 
 echo 'launch indexer'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/indexer/indexer_exec --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path $WORK_DIR/ --bind-ip "$(hog_ip hog9)" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
+$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_indexer/hog-indexer --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path "$INDEXER_DB_DIR" --bind-ip "$(hog_ip hog9)" --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
-echo 'launch hogdb'
-$CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
+echo 'launch hog-db'
+$CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hog_db/hog-db --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
 
 echo 'launch auth'
-$CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/auth/auth_exec --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
+$CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator (chuckd-rs)'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
@@ -126,7 +132,7 @@ $CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
-bash -c 'timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec --bind-ip '"$(hog_ip hog10)"' --metrics-port $MEMPOOL_HTTP_PORT --network-id 1 --num-db-shards 1 --num-exec-shards 2 --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+bash -c 'timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool --bind-ip '"$(hog_ip hog10)"' --metrics-port $MEMPOOL_HTTP_PORT --network-hash 0000000000000000000000000000000000000000000000000000000000000001 --num-db-shards 1 --num-exec-shards 2 --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
 echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.

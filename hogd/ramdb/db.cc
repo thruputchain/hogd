@@ -214,7 +214,8 @@ Database::background_worker(const std::stop_token &stoken)
 
       // determine how much wal data there is, see if it's "too much".
       size_t log_bytes = DiskReader::log_bytes(dir_);
-      bool needed = log_bytes >= (4 * disk_writer_.get_file_size_threshold());
+      bool needed = log_bytes >= (kDiskLogCleanupRatio *
+                                  disk_writer_.get_file_size_threshold());
       info("disk logs occupy {}; cleanup {}needed",
            print_iec_bytes(log_bytes, true), needed ? "" : "not ");
 
@@ -260,9 +261,24 @@ Database::estimate_heap_size(size_t bytes)
 DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
 Database::sync_and_snapshot(uint64_t begin_lsn)
 {
+  // The map's mutation callback is a single slot, so at most one snapshot
+  // may run at a time. The exchange claims the slot atomically: when calls
+  // race, exactly one proceeds and the rest return kBusy without reaching
+  // sync(). The acquire pairs with the release in the snapshot thread,
+  // ordering its max_snapshot_end_lsn_ update before the begin_lsn check
+  // below; every bail-out until the thread is spawned must release the
+  // claim.
+  if (snapshot_running_.exchange(true, std::memory_order_acq_rel)) {
+    warn("rejecting snapshot from lsn {}: a snapshot is already in flight",
+         begin_lsn);
+    return DBError{DBCode::kBusy};
+  }
+
   DBStatus<uint64_t> ret = sync();
-  if (!ret) [[unlikely]]
+  if (!ret) [[unlikely]] {
+    snapshot_running_.store(false, std::memory_order_release);
     return ret.error();
+  }
 
   notify_wal_grew();
 
@@ -272,6 +288,7 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
 
   if (begin_lsn > end_lsn) {
     warn("bad snapshot begin and end lsns {} to {}", begin_lsn, end_lsn);
+    snapshot_running_.store(false, std::memory_order_release);
     return DBError{DBCode::kTooBig};
   }
 
@@ -283,159 +300,189 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     error("snapshot begin_lsn {} exceeds max snapshot coverage {}; "
           "this would create an unrecoverable gap",
           begin_lsn, max_snapshot_end_lsn_);
+    snapshot_running_.store(false, std::memory_order_release);
     return DBError{DBCode::kTooBig};
   }
 
+  // Everything written so far is durable after the sync() above, so a
+  // completed snapshot extends coverage over exactly this many WAL bytes.
+  size_t wal_bytes_at_sync = wal_bytes_at_open_ + disk_writer_.get_bytes_out();
+
   std::latch setup_latch{1};
-  auto promise = std::make_shared<std::promise<DBStatus<void>>>();
+  auto promise = std::promise<DBStatus<void>>();
+  std::future<DBStatus<void>> future = promise.get_future();
 
-  std::jthread([this, path = std::move(path), begin_lsn, end_lsn, &setup_latch,
-                promise] {
-    debug("snapshot starting in background");
-    ElapsedTimer timer{};
-
-    struct Stats {
-      size_t items;
-      size_t bytes;
-
-      Stats &operator+=(const Stats &stats)
-      {
-        items += stats.items;
-        bytes += stats.bytes;
-        return *this;
-      }
-    };
-
-    PerThread<Stats> perthread_stats{};
-
-    constexpr bool kChunkedSnapshot = false;
-    constexpr size_t kMaxFileSize = kChunkedSnapshot
-                                        ? kDiskLogFileThreshold
-                                        : std::numeric_limits<size_t>::max();
-
-    // only allocate one head for this writer since snapshotting is
-    // single-threaded anyway.
-    std::string tmp_path = std::format("__{}.tmp", path);
-    DiskWriter snap_writer{*loglet_allocator_, dir_, 0};
-    // start snap writer bg thread; this also configures writer so that
-    // sync() at end of snapshotting writes a commit record for end_lsn - 1.
-    snap_writer.init(end_lsn - 1, tmp_path, kMaxFileSize);
-
-    // Atomic: the mutation callback runs on concurrent put()/remove() threads.
-    std::atomic<bool> copy_failed{false};
-
-    auto add_item_to_snapshot = [&snap_writer, &begin_lsn, &end_lsn,
-                                 &copy_failed,
-                                 &stats = perthread_stats](ItemHeader *item) {
-      if (item->lsn < begin_lsn || item->lsn >= end_lsn)
-        return;
-
-      constexpr size_t kHash = 0; // irrelevant; there is only one head
-      ScopedDiskWrite record = snap_writer.write_record(kHash);
-      // add item to snapshot file using the lsn indicated by item->lsn.
-      DBStatus<uint64_t> ret = record.modify(item, true);
-      if (!ret) [[unlikely]] {
-        copy_failed.store(true, std::memory_order_release);
-        return;
-      }
-      // ret LSN ignored; it is meaningless outside of redo log.
-
-      record.reset();
-
-      stats->items++;
-      stats->bytes += item->total_bytes();
-    };
-
-    // tell map that a snapshot is ongoing.
-    // if put()/remove() runs into an item that is about to be
-    // overwritten that should be part of the snapshot, it triggers
-    // this callback to stuff a copy of the item in the snapshot's
-    // disk-bound loglets.
-    map_.register_mutation_cb(add_item_to_snapshot);
-
-    // disk writer and map are now set up, so unblock snapshot_and_sync()
-    // so it can return to the user and they can resume db operations,
-    // while the snapshot runs in the background.
-    // after line below setup_latch access is undefined behavior.
-    setup_latch.count_down();
-
-    map_.for_each(add_item_to_snapshot);
-
-    // snapshot is done, so we don't care about future put()/remove ops.
-    map_.register_mutation_cb(nullptr);
-
-    // A failed pre-mutation copy leaves the snapshot missing a committed row;
-    // abort before publishing rather than advertise an incomplete snapshot.
-    // Live data is safe -- still in the WAL (#2198).
-    if (copy_failed.load(std::memory_order_acquire)) [[unlikely]] {
-      warn("snapshot aborted: a pre-mutation item copy failed (out of memory)");
-      promise->set_value(DBError(DBCode::kNoMemory));
-      return;
-    }
-
-    Stats stats{};
-    {
-      std::unique_lock ul = perthread_stats.lock_threads();
-      perthread_stats.for_each(ul, [&stats](Stats &s) { stats += s; });
-    }
-
-    double seconds = timer.elapsed();
-    info("snapshot took {:.3f} s (not including disk sync)", seconds);
-    info("...total items snapshot {}", stats.items);
-    info("...total bytes snapshot {}", print_iec_bytes(stats.bytes, true));
-    info("...snapshot rate {}/s", print_iec_bytes(stats.bytes / seconds), true);
-
-    ElapsedTimer snap_sync_timer{};
-
-    DBStatus<uint64_t> ret = snap_writer.sync();
-    if (!ret) [[unlikely]] {
-      warn("snapshot sync failed");
-      promise->set_value(ret.transform([](auto &e) {}));
-      return;
-    }
-
-    // atomically rename snapshot files to prevent recovery from trying to
-    // recover partially written snapshots.
-    ErrnoStatus<void> r = dir_.rename(tmp_path, path);
-    if (!r) {
-      warn("snapshot atomic rename from {} to {} failed", tmp_path, path);
-      promise->set_value(ret.error());
-      return;
-    }
-    // sync the dir to avoid losing the updated dentry (thanks abelay!).
-    DBStatus<void> dirsync_ret = dir_.sync().transform_error(to_db_error);
-    if (!dirsync_ret) {
-      promise->set_value(dirsync_ret.error());
-      return;
-    }
-
-    size_t bytes_out = snap_writer.get_bytes_out();
-    seconds = timer.elapsed();
-    info("snapshot wrote {} to storage took {:.3f} s, {}/s",
-         print_iec_bytes(bytes_out, true), snap_sync_timer.elapsed(),
-         print_iec_bytes(bytes_out / seconds, true));
-    metrics_.snap_bytes_out_.fetch_add(bytes_out, std::memory_order_relaxed);
-
-    // completing a snapshot may make some files redundant, so trigger cleanup.
-    notify_wal_grew();
-
-    // Update snapshot coverage only after the snapshot is fully durable.
-    // The caller must check the future before using end_lsn as begin_lsn
-    // for a subsequent incremental snapshot.
-    max_snapshot_end_lsn_ = std::max(max_snapshot_end_lsn_, end_lsn);
-
-    promise->set_value({});
-  }).detach();
-  // TODO(stutsman): should we keep track of the ongoing snapshot thread so
-  // the DB destructor can await any ongoing snapshots to avoid crashes/UB on DB
-  // shutdown? A problem with doing that is that the stop token would have to be
-  // integrated into map_.for_each.
+  // Assignment joins the previous snapshot thread; it has already finished
+  // (it released the snapshot_running_ claim we now hold), so the join is
+  // immediate.
+  snapshot_thread_ = std::jthread([this, path = std::move(path), begin_lsn,
+                                   end_lsn, wal_bytes_at_sync, &setup_latch,
+                                   promise = std::move(promise)]() mutable {
+    DBStatus<void> result = write_snapshot(path, begin_lsn, end_lsn,
+                                           wal_bytes_at_sync, setup_latch);
+    // Clear the flag before publishing the result: a caller that waits
+    // on the future may start the next snapshot immediately.
+    snapshot_running_.store(false, std::memory_order_release);
+    promise.set_value(std::move(result));
+  });
 
   // wait for snapshotter thread to get writer initialized and map informed of
   // snapshot; after that the user can resume db operations.
   setup_latch.wait();
 
-  return std::make_pair(end_lsn, promise->get_future());
+  return std::make_pair(end_lsn, std::move(future));
+}
+
+bool
+Database::snapshot_recommended() const
+{
+  if (snapshot_running_.load(std::memory_order_acquire))
+    return false;
+
+  size_t total = wal_bytes_at_open_ + disk_writer_.get_bytes_out();
+  size_t uncovered = total - covered_wal_bytes_.load(std::memory_order_relaxed);
+  size_t threshold =
+      std::max(kDiskLogCleanupRatio * disk_writer_.get_file_size_threshold(),
+               last_snapshot_bytes_.load(std::memory_order_relaxed));
+  return uncovered >= threshold;
+}
+
+DBStatus<void>
+Database::write_snapshot(const std::string &path, uint64_t begin_lsn,
+                         uint64_t end_lsn, size_t wal_bytes_at_sync,
+                         std::latch &setup_latch)
+{
+  debug("snapshot starting in background");
+  ElapsedTimer timer{};
+
+  struct Stats {
+    size_t items;
+    size_t bytes;
+
+    Stats &operator+=(const Stats &stats)
+    {
+      items += stats.items;
+      bytes += stats.bytes;
+      return *this;
+    }
+  };
+
+  PerThread<Stats> perthread_stats{};
+
+  constexpr bool kChunkedSnapshot = false;
+  constexpr size_t kMaxFileSize = kChunkedSnapshot
+                                      ? kDiskLogFileThreshold
+                                      : std::numeric_limits<size_t>::max();
+
+  // only allocate one head for this writer since snapshotting is
+  // single-threaded anyway.
+  std::string tmp_path = std::format("__{}.tmp", path);
+  DiskWriter snap_writer{*loglet_allocator_, dir_, 0};
+  // start snap writer bg thread; this also configures writer so that
+  // sync() at end of snapshotting writes a commit record for end_lsn - 1.
+  snap_writer.init(end_lsn - 1, tmp_path, kMaxFileSize);
+
+  // Atomic: the mutation callback runs on concurrent put()/remove() threads.
+  std::atomic<bool> copy_failed{false};
+
+  auto add_item_to_snapshot = [&snap_writer, &begin_lsn, &end_lsn, &copy_failed,
+                               &stats = perthread_stats](ItemHeader *item) {
+    if (item->lsn < begin_lsn || item->lsn >= end_lsn)
+      return;
+
+    constexpr size_t kHash = 0; // irrelevant; there is only one head
+    ScopedDiskWrite record = snap_writer.write_record(kHash);
+    // add item to snapshot file using the lsn indicated by item->lsn.
+    DBStatus<uint64_t> ret = record.modify(item, true);
+    if (!ret) [[unlikely]] {
+      copy_failed.store(true, std::memory_order_release);
+      return;
+    }
+    // ret LSN ignored; it is meaningless outside of redo log.
+
+    record.reset();
+
+    stats->items++;
+    stats->bytes += item->total_bytes();
+  };
+
+  // tell map that a snapshot is ongoing.
+  // if put()/remove() runs into an item that is about to be
+  // overwritten that should be part of the snapshot, it triggers
+  // this callback to stuff a copy of the item in the snapshot's
+  // disk-bound loglets.
+  map_.register_mutation_cb(add_item_to_snapshot);
+
+  // disk writer and map are now set up, so unblock sync_and_snapshot()
+  // so it can return to the user and they can resume db operations,
+  // while the snapshot runs in the background.
+  // after line below setup_latch access is undefined behavior.
+  setup_latch.count_down();
+
+  map_.for_each(add_item_to_snapshot);
+
+  // snapshot is done, so we don't care about future put()/remove ops.
+  map_.register_mutation_cb(nullptr);
+
+  // A failed pre-mutation copy leaves the snapshot missing a committed row;
+  // abort before publishing rather than advertise an incomplete snapshot.
+  // Live data is safe -- still in the WAL (#2198).
+  if (copy_failed.load(std::memory_order_acquire)) [[unlikely]] {
+    warn("snapshot aborted: a pre-mutation item copy failed (out of memory)");
+    return DBError(DBCode::kNoMemory);
+  }
+
+  Stats stats{};
+  {
+    std::unique_lock ul = perthread_stats.lock_threads();
+    perthread_stats.for_each(ul, [&stats](Stats &s) { stats += s; });
+  }
+
+  double seconds = timer.elapsed();
+  info("snapshot took {:.3f} s (not including disk sync)", seconds);
+  info("...total items snapshot {}", stats.items);
+  info("...total bytes snapshot {}", print_iec_bytes(stats.bytes, true));
+  info("...snapshot rate {}/s", print_iec_rate(stats.bytes, seconds, true));
+
+  ElapsedTimer snap_sync_timer{};
+
+  DBStatus<uint64_t> ret = snap_writer.sync();
+  if (!ret) [[unlikely]] {
+    warn("snapshot sync failed");
+    return ret.error();
+  }
+
+  // atomically rename snapshot files to prevent recovery from trying to
+  // recover partially written snapshots.
+  ErrnoStatus<void> r = dir_.rename(tmp_path, path);
+  if (!r) {
+    warn("snapshot atomic rename from {} to {} failed", tmp_path, path);
+    return to_db_error(r.error());
+  }
+  // sync the dir to avoid losing the updated dentry (thanks abelay!).
+  DBStatus<void> dirsync_ret = dir_.sync().transform_error(to_db_error);
+  if (!dirsync_ret) {
+    return dirsync_ret.error();
+  }
+
+  size_t bytes_out = snap_writer.get_bytes_out();
+  seconds = timer.elapsed();
+  info("snapshot wrote {} to storage took {:.3f} s, {}/s",
+       print_iec_bytes(bytes_out, true), snap_sync_timer.elapsed(),
+       print_iec_rate(bytes_out, seconds, true));
+  metrics_.snap_bytes_out_.fetch_add(bytes_out, std::memory_order_relaxed);
+
+  // completing a snapshot may make some files redundant, so trigger cleanup.
+  notify_wal_grew();
+
+  // Update snapshot coverage only after the snapshot is fully durable.
+  // The caller must check the future before using end_lsn as begin_lsn
+  // for a subsequent incremental snapshot.
+  max_snapshot_end_lsn_ = std::max(max_snapshot_end_lsn_, end_lsn);
+  covered_wal_bytes_.store(wal_bytes_at_sync, std::memory_order_relaxed);
+  last_snapshot_bytes_.store(bytes_out, std::memory_order_relaxed);
+
+  return {};
 }
 
 DBStatus<std::unique_ptr<Database>>
@@ -470,6 +517,7 @@ Database::open_internal(std::string_view path, std::optional<uint64_t> lsn,
     info("loaded up to LSN {}, {} items", *load_ret, db->map_.size());
   db->disk_writer_.init(*load_ret, "{}.log", log_file_size_threshold);
   db->max_snapshot_end_lsn_ = snap_end;
+  db->wal_bytes_at_open_ = DiskReader::log_bytes(db->dir_);
   return db;
 }
 

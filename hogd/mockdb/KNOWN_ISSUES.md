@@ -1,7 +1,7 @@
 # MockDB Known Issues
 
 MockDB is a simplified in-memory database used as a comparison point against
-HogDB for correctness testing. It will eventually be removed. The following
+HogDb for correctness testing. It will eventually be removed. The following
 issues exist but will not be fixed.
 
 ## Partial batch failure leaks locks
@@ -12,7 +12,7 @@ subtransaction stack but does not release the `StorageItemDeltaManager` lock
 acquired by the first (successful) delta. This blocks concurrent transactions
 from using the same key for the rest of the block.
 
-HogDB handles this correctly via `rollback_to_savepoint`.
+HogDb handles this correctly via `rollback_to_savepoint`.
 
 - **File**: `hogd/db_interface/transaction_state.cc` (pop_subtransactions)
 - **Test**: `BugHuntPartialBatchFailureLocksNotReverted` (skipped on MockDB)
@@ -20,11 +20,55 @@ HogDB handles this correctly via `rollback_to_savepoint`.
 ## `get_db_tip` returns kRPCUnimplemented
 
 `DbExecutorRpc::get_db_tip` returns `RPCError::kRPCUnimplemented` with a TODO.
-HogDB returns actual `DbTip` data. The executor's `DatabaseProxy` maps
+HogDb returns actual `DbTip` data. The executor's `DatabaseProxy` maps
 `kRPCUnimplemented` to `kSystemUnrecoverable`, causing a fatal error if any
 contract calls `get_db_tip` on MockDB.
 
 - **File**: `hogd/db_interface/db_executor_server.cc:~226`
+
+## RCQ consume lock is rejected when re-pushed by the same transaction
+
+A successful TryInvoke pushes the child frame's deltas as a subtransaction
+(`InvocationFrame::try_acquire_frame_locks`), and the root commit later pushes
+the same item's cumulative delta again. RCQ deltas carry absolute consume
+state, so the re-push is idempotent on HogDb, which tracks the transaction's
+subtransactions in `InvokeTX`. On MockDB the second push is rejected as a
+competing consumer and the transaction fails with
+`ExecResultTxNonDeterministicError`.
+
+The transaction's identity does reach the rejection point: the re-push goes
+through the same-transaction upgrade path
+(`StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock`), whose
+RCQ branch calls `try_reserve_consume()` unconditionally instead of consulting
+`prev_typeclass_lock`, where `consume_lock() == 1` proves this transaction
+already holds the reservation (compare the `already_locked` check in the
+AuthData branch of the same switch). An early-out there would make the re-push
+idempotent.
+
+- **File**: `hogd/storage_item/storage_item_delta_manager.cc`
+  (`handle_try_reserve_from_set_typeclass_lock`, RCQ branch)
+- **Tests**: `TryInvokeConsumeCommits`, `TryInvokeConsumeConcurrentEntryCommits`
+  and `ProposalValidationTryInvokeConsumeCommitMatch` in `rcq_delete_test.cc`
+  (skipped on MockDB)
+
+## No per-block RCQ insert cap: >250 concurrent entries abort proposal-mode consumers
+
+MockDB does not enforce `kRetrocausalQueueBlockEntriesMaxLen` at commit
+(`RetrocausalQueueArgs::new_entries_` grows unbounded), so committing two
+transactions that together insert more than 250 entries at one key succeeds. A
+proposal-mode transaction that then consumes a 251st concurrent entry hits the
+`CHECK(!ProposalModeData)` in `RetrocausalQueueItem::get_next_item`
+(`hog_exec/runtime/item/item_view.cc`) and aborts the test process. On HogDb
+the reservation gate in `RetrocausalQueueLock::try_atomic_change_lock` caps
+committed inserts per (block, key) at 250, making the CHECK a valid invariant.
+Do not write proposal-mode MockDB tests that consume past the cap.
+
+- **File**: `hogd/storage_item/refcounted_delta_variant.cc`
+  (`RetrocausalQueueArgs::insert_entry`)
+- **Tests**: `ConcurrentOverflow` in `rcq_test.cc` (skipped on MockDB);
+  validation-mode cap pinned by
+  `ConcurrentConsumeCapExceededIsValidationFailure` in
+  `rcq_doctored_proposal_data_test.cc`
 
 ## Balance deltas from different subtransaction depths are not combined
 
@@ -35,7 +79,7 @@ a later subtransaction are independent deltas that need to be combined, but
 `extract_results` silently drops the earlier one. This means storage costs locked
 at one depth are lost if a balance transfer occurs at a deeper depth.
 
-HogDB handles this correctly via `InvokeTX::balance_deltas_`, which tracks
+HogDb handles this correctly via `InvokeTX::balance_deltas_`, which tracks
 `manual_transfer_amount` and `total_locked_storage_amount` separately and
 combines them at commit time.
 

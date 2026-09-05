@@ -12,6 +12,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
+#include <string>
 #include <utility>
 
 #include "address_auth.hh"
@@ -24,10 +26,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/shared.h"
+#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -39,6 +42,7 @@
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "network_config.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -138,11 +142,11 @@ lazy_init() noexcept
     static std::mutex init_mutex;
     std::lock_guard lock(init_mutex);
     static bool initialized = false;
-    // init_hogexec_metrics() registers several metrics and is not atomic: if it
-    // throws partway (e.g. bad_alloc mid-registration) it leaves the executor
-    // component partially populated with done_with_init still false. A naive
-    // retry would re-register a duplicate name and trip init_metric()'s CHECK
-    // (an abort, defeating this noexcept initializer's structured-error
+    // init_hog_exec_metrics() registers several metrics and is not atomic: if
+    // it throws partway (e.g. bad_alloc mid-registration) it leaves the
+    // executor component partially populated with done_with_init still false. A
+    // naive retry would re-register a duplicate name and trip init_metric()'s
+    // CHECK (an abort, defeating this noexcept initializer's structured-error
     // contract). Latch that as a permanent failure and keep reporting it
     // instead of retrying into the abort.
     static bool metrics_init_failed = false;
@@ -162,12 +166,12 @@ lazy_init() noexcept
       // (HogexecMetrics::mark_tx_*), so a committing entry point trips Metrics'
       // done_with_init CHECK unless those metrics are registered first. Guarded
       // because a host that already initialized them (e.g. a test main calling
-      // init_hogexec_metrics()) must not double-initialize: init_metric()
+      // init_hog_exec_metrics()) must not double-initialize: init_metric()
       // asserts the component is not yet marked done.
       if (!Metrics::instance().done_with_init(
               Metrics::ComponentName::kExecutor)) {
         metrics_init_failed = true; // pessimistic; cleared only on full success
-        init_hogexec_metrics();
+        init_hog_exec_metrics();
         metrics_init_failed = false;
       }
       initialized = true;
@@ -237,7 +241,12 @@ enable_syscall_logging(int32_t level) noexcept
 
 CreateDBResult
 make_new_db(const uint8_t *serialized_cost_model,
-            uint32_t serialized_cost_model_len) noexcept
+            uint32_t serialized_cost_model_len,
+            const uint8_t *serialized_network_hash,
+            const uint8_t *serialized_genesis_root_contract,
+            uint32_t serialized_genesis_root_contract_len,
+            const uint8_t *serialized_network_config,
+            uint32_t serialized_network_config_len) noexcept
 {
   // First-use init can fail (allocation failure); return a structured error
   // rather than letting it cross this noexcept boundary (issue #2575).
@@ -246,6 +255,28 @@ make_new_db(const uint8_t *serialized_cost_model,
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
   try {
+    static_assert(sizeof(NetworkHash) == 32);
+    NetworkHash network_hash{};
+    if (serialized_network_hash == nullptr) {
+      return {.db = nullptr, .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+    }
+    std::memcpy(network_hash.data(), serialized_network_hash,
+                network_hash.size());
+
+    if (serialized_genesis_root_contract == nullptr) {
+      return {.db = nullptr, .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+    }
+    Contract genesis_root_contract;
+    try {
+      x23::deserialize(&genesis_root_contract,
+                       x23::BufView{serialized_genesis_root_contract,
+                                    serialized_genesis_root_contract_len});
+    } catch (x23::XdrException const &e) {
+      log_error("error deserializing genesis root contract: {}", e);
+      return {.db = nullptr,
+              .ffi_error_code = kTestFFIErrorCodeDeserializeError};
+    }
+
     StorageCostModelXdr cost_model_xdr =
         StorageCostModel::default_cost_model().to_xdr();
     if (serialized_cost_model != nullptr) {
@@ -259,7 +290,21 @@ make_new_db(const uint8_t *serialized_cost_model,
                 .ffi_error_code = kTestFFIErrorCodeDeserializeError};
       }
     }
-    auto *db = new DBContext(cost_model_xdr);
+    NetworkConfig network_config = stock_network_config();
+    if (serialized_network_config != nullptr) {
+      try {
+        x23::deserialize(&network_config,
+                         x23::BufView{serialized_network_config,
+                                      serialized_network_config_len});
+      } catch (x23::XdrException const &e) {
+        log_error("error deserializing network config: {}", e);
+        return {.db = nullptr,
+                .ffi_error_code = kTestFFIErrorCodeDeserializeError};
+      }
+    }
+
+    auto *db = new DBContext(cost_model_xdr, network_hash,
+                             genesis_root_contract, network_config);
     return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error creating db context: {}", e);
@@ -298,6 +343,34 @@ get_cost_model(void *db) noexcept
   }
 }
 
+GetNetworkConfigResult
+get_network_config(void *db) noexcept
+{
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+  if (!db_context) {
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+  }
+
+  try {
+    // Reading the tip and serializing both allocate; keep them inside the
+    // catch boundary so a std::bad_alloc becomes a structured FFI error
+    // instead of crossing this noexcept helper (issue #2513).
+    auto serialized = x23::serialize(db_context->get_network_config());
+
+    auto buffer = make_new_data_buffer(serialized.size());
+    if (!buffer.has_value()) {
+      return {.data = kNullBuffer, .ffi_error_code = buffer.error()};
+    }
+    std::memcpy(buffer.value().data, serialized.data(), serialized.size());
+    return {.data = buffer.value(), .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (std::exception const &e) {
+    log_error("error serializing network config: {}", e);
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
+}
+
 GetSnapshotStorageItemResult
 get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
 {
@@ -316,6 +389,15 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
       log_error("error deserializing address and key: {}", e);
       return {.data = kNullBuffer,
               .ffi_error_code = kTestFFIErrorCodeDeserializeError};
+    }
+
+    // get_snapshot_item() reads current_block_id_ and queries the snapshot that
+    // id names; advance_new_block() changes both. Borrow across the read so the
+    // two cannot interleave (issue #2704).
+    DBContext::Borrow borrow(*db_context);
+    if (!borrow.held()) {
+      return {.data = kNullBuffer,
+              .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
     }
 
     auto item = db_context->get_snapshot_item(deserialized_addrkey);
@@ -340,16 +422,33 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
 TestFFIErrorCode
 free_db(DBContext *ptr) noexcept
 {
+  if (ptr == nullptr) {
+    return kTestFFIErrorCodeNone;
+  }
+
   // Syscall handlers borrow the DB (and its snapshot/proxies) by reference, so
   // freeing it while a handler is still open would dangle those references on a
   // later close/invoke. Reject the free instead of crashing (issue #2433).
-  if (ptr != nullptr && ptr->has_open_handlers()) {
+  // Taking the exclusive lifecycle transition also makes the free and an
+  // advance mutually exclusive, and refuses handler admission for the rest of
+  // the teardown (issue #3049). It cannot do more than that: this call destroys
+  // the DBContext, so a caller that has already entered another entry point on
+  // this handle has nothing left to be rejected against. Sequencing free_db()
+  // after every other call on the handle stays the caller's job -- see the
+  // threading contract in test_bindings.h.
+  DBContext::LifecycleTransition teardown(*ptr);
+  if (!teardown.held()) {
     best_effort_log([] {
       error("free_db called while syscall handlers derived from this DB are "
-            "still open; close them first");
+            "still open (or another DB lifecycle operation is in flight); "
+            "close them first");
     });
     return kTestFFIErrorCodeUnrecoverableError;
   }
+
+  // The DBContext is about to be destroyed, so there is nothing left to end
+  // the transition on; it dies with the state it was protecting.
+  teardown.release_without_ending();
   try {
     delete ptr;
   } catch (std::exception const &e) {
@@ -360,7 +459,7 @@ free_db(DBContext *ptr) noexcept
 }
 
 TestFFIErrorCode
-advance_new_block(void *db) noexcept
+advance_new_block(void *db, const uint64_t *block_timepoint) noexcept
 {
   auto *ptr = reinterpret_cast<DBContext *>(db);
   if (!ptr)
@@ -368,16 +467,24 @@ advance_new_block(void *db) noexcept
 
   // Advancing the block replaces the snapshot cache that open handlers still
   // reference; reject it while any handler derived from this DB is open so a
-  // later root_invoke() doesn't read freed snapshot state (issue #2436).
-  if (ptr->has_open_handlers()) {
+  // later root_invoke() doesn't read freed snapshot state (issue #2436). Hold
+  // the DB's exclusive lifecycle transition across the whole advance rather
+  // than sampling the open-handler count once: the transition is admitted only
+  // from a state with no open handlers, and it refuses handler admission until
+  // the snapshot replacement is complete, closing the window in which a
+  // concurrently opening handler bound to the cache this advance frees (issue
+  // #3049).
+  DBContext::LifecycleTransition transition(*ptr);
+  if (!transition.held()) {
     best_effort_log([] {
       error("advance_new_block called while syscall handlers derived from this "
-            "DB are still open; close them first");
+            "DB are still open (or another DB lifecycle operation is in "
+            "flight); close them first");
     });
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  // A prior close_syscall_handler() failed to confirm closure of its HogDB
+  // A prior close_syscall_handler() failed to confirm closure of its HogDb
   // transaction and poisoned this DB (issue #2596). The open-handler guard is
   // gone, but an orphaned InvokeTX may still hold a BlockTX open, so advancing
   // (which closes/commits the current snapshot and opens a new one) is unsafe.
@@ -391,8 +498,16 @@ advance_new_block(void *db) noexcept
   }
 
   try {
-    ptr->advance_new_block();
+    ptr->advance_new_block(BlockExecutionMode::kBlockExecutionModeProposal,
+                           block_timepoint
+                               ? std::optional<TimePoint>(*block_timepoint)
+                               : std::nullopt);
     return kTestFFIErrorCodeNone;
+  } catch (BackwardsTimepointError const &e) {
+    // The caller's argument, not an internal failure: nothing was advanced, so
+    // the DB is still usable and the caller can retry with a sane timepoint.
+    log_error("error advancing new block: {}", e);
+    return kTestFFIErrorCodeInvalidArgument;
   } catch (std::exception const &e) {
     log_error("error advancing new block: {}", e);
     return kTestFFIErrorCodeUnrecoverableError;
@@ -410,11 +525,11 @@ open_runtime_context() noexcept
   }
   try {
     // Own the wrapper slot via unique_ptr until construction fully succeeds, so
-    // a throw from make_shared() (or make_hogexec_context()) after the slot is
+    // a throw from make_shared() (or make_hog_exec_context()) after the slot is
     // allocated does not leak it. The honest C caller gets a null handle on
     // failure and has no way to free the slot itself (issue #2506).
     auto out = std::make_unique<std::shared_ptr<hogd::MockRuntimeContext>>();
-    *out = std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
+    *out = std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
     CHECK(*out != nullptr);
     return {.context = out.release(), .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
@@ -553,7 +668,7 @@ open_mocked_syscall_handler(void *db, void *rc,
           // Report a failed abort -- whether it returns an error status or
           // throws -- rather than silently dropping it.
           try {
-            auto abort_res = handler->to_handler().abort_transaction();
+            auto abort_res = handler->to_handler().abort_transaction()();
             if (!abort_res.has_value()) {
               best_effort_log([&] {
                 error("error aborting transaction during traced "
@@ -611,7 +726,7 @@ close_syscall_handler(void *syscall_handler) noexcept
 
   // Reference the borrowed DB before taking ownership: if the implicit abort
   // below fails (or throws), the handler -- and with it its open-handler guard
-  // -- is destroyed, but the HogDB InvokeTX may still be open. Poison the DB's
+  // -- is destroyed, but the HogDb InvokeTX may still be open. Poison the DB's
   // lifecycle through this reference so advance_new_block() cannot proceed past
   // the now-absent guard into the scheduler over orphaned transaction state
   // (issue #2596). The DBContext is owned by the caller and outlives the
@@ -633,7 +748,7 @@ close_syscall_handler(void *syscall_handler) noexcept
     // attempt a second abort.
     if (!owned->is_committed_or_aborted()) {
       owned->mark_committed_or_aborted();
-      auto res = owned->to_handler().abort_transaction();
+      auto res = owned->to_handler().abort_transaction()();
       if (!res.has_value()) {
         error("error aborting transaction during close: {}", res.error());
         db.poison_lifecycle();
@@ -679,12 +794,13 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
     return kUnrecoverableError;
   } catch (...) {
     // A mock contract callback (ForeignEntryPoint) is not declared noexcept and
-    // is not restricted to std::exception throws;
-    // MockRuntime::invoke_internal() lets callback exceptions unwind. A
-    // non-std::exception throw (e.g. int) would otherwise escape this noexcept
-    // boundary and terminate an honest caller (#2693), so translate it to a
-    // structured error -- as mock_syscall_entrypoint() already does. Report via
-    // fputs (no allocation), since there is no exception object to format.
+    // is not restricted to std::exception throws. MockContract::invoke() now
+    // catches callback exceptions at the call itself (#2789), so this arm is a
+    // backstop for anything else that throws a non-std::exception below here --
+    // it must not escape this noexcept boundary and terminate an honest caller
+    // (#2693). Translate it to a structured error, as mock_syscall_entrypoint()
+    // already does. Report via fputs (no allocation), since there is no
+    // exception object to format.
     std::fputs(
         "test_ffi: unrecoverable: unknown exception during root_invoke\n",
         stderr);
@@ -840,7 +956,7 @@ try_commit_transaction(void *syscall_handler) noexcept
       error("try_commit_transaction after a failed finish-result handoff");
       return kUnrecoverableError;
     }
-    auto res = context->to_handler().try_commit_transaction();
+    auto res = context->to_handler().try_commit_transaction()();
     context->mark_committed_or_aborted();
 
     // Always serialize the full DbConflictResult (including the None arm) so
@@ -928,7 +1044,7 @@ abort_transaction(void *syscall_handler) noexcept
   }
 
   try {
-    auto res = context->to_handler().abort_transaction();
+    auto res = context->to_handler().abort_transaction()();
     // SystemCallHandler::abort_transaction() marks its transaction aborted
     // before issuing the abort RPC, so the context must record the abort even
     // when the RPC reports or throws an error; otherwise the destructor in
@@ -1000,7 +1116,7 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     return kTestFFIErrorCodeDeserializeError;
   } catch (std::exception const &e) {
     // Deserializing a well-formed contract still allocates (e.g. resizing the
-    // ContractBlob::wasm vector), so std::bad_alloc can be thrown here on valid
+    // ContractBlob::data vector), so std::bad_alloc can be thrown here on valid
     // input. Catch it so it doesn't cross the noexcept FFI boundary (#2490).
     log_error("unrecoverable: error deserializing contract: {}", e);
     return kTestFFIErrorCodeUnrecoverableError;
@@ -1018,8 +1134,8 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     }
 
     // Verify runtime-backed contracts before storing — reject contracts that
-    // would fail during instantiation (e.g., wasm memory exceeding limits, an
-    // RV32 artifact that cannot be translated, or an unknown native id).
+    // would fail during instantiation (e.g., an RV32 artifact that cannot be
+    // translated, or an unknown native id).
     // kMockTest is excluded because it has no production runtime to verify
     // against (the base context only registers the real runtimes); its
     // registration is checked above via has_mock_contract().
@@ -1062,7 +1178,8 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   auto &dao = db_cast->get_base_db().get_db();
   Contract contract;
   try {
-    // read_wasm_code() copies the stored row out of RAMDB (make_byte_buffer()
+    // read_contract_code() copies the stored row out of RAMDB
+    // (make_byte_buffer()
     // allocates the returned byte buffer, #2765) and x23::deserialize() resizes
     // the opaque-vector destination (#2642/#2766); both can throw
     // std::bad_alloc on a valid stored contract. setup_deploy_contract() is
@@ -1070,7 +1187,7 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
     // boundary -- mirroring setup_create_contract() -- rather than letting an
     // allocation failure cross the noexcept boundary and terminate an honest
     // caller.
-    auto res = dao.read_wasm_code(h);
+    auto res = dao.read_contract_code(h);
     if (!res) {
       // best_effort_log keeps the not-found diagnostic non-throwing so it still
       // returns the structured missing-contract code (#2584, same pattern as
@@ -1090,6 +1207,22 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
     log_error("unrecoverable: error reading/deserializing stored contract: {}",
               e);
     return kTestFFIErrorCodeUnrecoverableError;
+  }
+
+  // Native precompiles (the default wallet, the hog token) are installed at
+  // genesis and are never (re)deployed at an ordinary address: production
+  // deploy_contract() rejects them via is_banned_redeploy_native_contract().
+  // The setup path must apply the same ban -- otherwise a native contract can
+  // be deployed at a child address and later invoked in a nested frame, where
+  // e.g. the default wallet's root-only CHECK aborts the process instead of
+  // returning a structured error (#3592). Every native id currently defined is
+  // banned, so rejecting the type is sufficient.
+  if (contract.contract_type() == ContractType::kNative) {
+    best_effort_log([] {
+      error("Attempt to deploy a native precompile contract, which is "
+            "installed at genesis and cannot be redeployed");
+    });
+    return kTestFFIErrorCodeInvalidArgument;
   }
 
   try {
@@ -1144,8 +1277,10 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
 }
 
 VerifyAuthResult
-verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
-                                    FFISourceAuthData source_auth_data) noexcept
+verify_signed_transaction_auth_impl(
+    FFISerializedSignedTransaction signed_tx,
+    FFISourceAuthData source_auth_data,
+    const uint8_t *serialized_network_hash) noexcept
 {
   constexpr auto kNullptrError =
       make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
@@ -1165,6 +1300,14 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
       return kNullptrError;
     }
 
+    static_assert(sizeof(NetworkHash) == 32);
+    if (serialized_network_hash == nullptr) {
+      return kNullptrError;
+    }
+    NetworkHash network_hash{};
+    std::memcpy(network_hash.data(), serialized_network_hash,
+                network_hash.size());
+
     std::optional<AddressAuthData> source_data;
     if (source_auth_data.data) {
       source_data.emplace();
@@ -1174,7 +1317,7 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
 
     // Perform the appropriate level of verification
     AuthVerifyStatus<void> result =
-        verify_auth(stx, source_data ? &*source_data : nullptr);
+        verify_auth(stx, source_data ? &*source_data : nullptr, network_hash);
 
     if (result.has_value()) {
       return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
@@ -1280,18 +1423,43 @@ extern "C" {
 
 CreateDBResult
 create_db(const uint8_t *serialized_cost_model,
-          uint32_t serialized_cost_model_len)
+          uint32_t serialized_cost_model_len,
+          const uint8_t *serialized_network_hash,
+          const uint8_t *serialized_genesis_root_contract,
+          uint32_t serialized_genesis_root_contract_len,
+          const uint8_t *serialized_network_config,
+          uint32_t serialized_network_config_len)
 {
-  hogd::do_ffi_trace("FFI (start): create_db(serialized_cost_model={}, "
-                     "serialized_cost_model_len={})",
-                     static_cast<const void *>(serialized_cost_model),
-                     serialized_cost_model_len);
-  auto result =
-      hogd::make_new_db(serialized_cost_model, serialized_cost_model_len);
-  hogd::do_ffi_trace("FFI (end): create_db(serialized_cost_model={}, "
-                     "serialized_cost_model_len={}) -> {}",
-                     static_cast<const void *>(serialized_cost_model),
-                     serialized_cost_model_len, result);
+  hogd::do_ffi_trace(
+      "FFI (start): create_db(serialized_cost_model={}, "
+      "serialized_cost_model_len={}, serialized_network_hash={}, "
+      "serialized_genesis_root_contract={}, "
+      "serialized_genesis_root_contract_len={}, "
+      "serialized_network_config={}, serialized_network_config_len={})",
+      static_cast<const void *>(serialized_cost_model),
+      serialized_cost_model_len,
+      static_cast<const void *>(serialized_network_hash),
+      static_cast<const void *>(serialized_genesis_root_contract),
+      serialized_genesis_root_contract_len,
+      static_cast<const void *>(serialized_network_config),
+      serialized_network_config_len);
+  auto result = hogd::make_new_db(
+      serialized_cost_model, serialized_cost_model_len, serialized_network_hash,
+      serialized_genesis_root_contract, serialized_genesis_root_contract_len,
+      serialized_network_config, serialized_network_config_len);
+  hogd::do_ffi_trace(
+      "FFI (end): create_db(serialized_cost_model={}, "
+      "serialized_cost_model_len={}, serialized_network_hash={}, "
+      "serialized_genesis_root_contract={}, "
+      "serialized_genesis_root_contract_len={}, "
+      "serialized_network_config={}, serialized_network_config_len={}) -> {}",
+      static_cast<const void *>(serialized_cost_model),
+      serialized_cost_model_len,
+      static_cast<const void *>(serialized_network_hash),
+      static_cast<const void *>(serialized_genesis_root_contract),
+      serialized_genesis_root_contract_len,
+      static_cast<const void *>(serialized_network_config),
+      serialized_network_config_len, result);
   return result;
 }
 
@@ -1301,6 +1469,19 @@ get_cost_model(void *db)
   hogd::do_ffi_trace("FFI (start): get_cost_model(db={})", db);
   auto result = hogd::get_cost_model(db);
   hogd::do_ffi_trace("FFI (end): get_cost_model(db={}) -> {}", db, result);
+  return result;
+}
+
+GetNetworkConfigResult
+get_network_config(void *db)
+{
+  hogd::do_ffi_trace("FFI (start): get_network_config(db={})", db);
+  auto result = hogd::get_network_config(db);
+  hogd::do_ffi_trace("FFI (end): get_network_config(db={}) -> "
+                     "ffi_error_code={}, data={}, len={}",
+                     db, static_cast<int>(result.ffi_error_code),
+                     static_cast<const void *>(result.data.data),
+                     result.data.len);
   return result;
 }
 
@@ -1331,10 +1512,13 @@ free_db(void *ptr)
 }
 
 TestFFIErrorCode
-advance_new_block(void *db)
+advance_new_block(void *db, const uint64_t *block_timepoint)
 {
-  hogd::do_ffi_trace("FFI (start): advance_new_block(db={})", db);
-  auto result = hogd::advance_new_block(db);
+  hogd::do_ffi_trace(
+      "FFI (start): advance_new_block(db={}, block_timepoint={})", db,
+      block_timepoint ? std::to_string(*block_timepoint)
+                      : std::string("wall clock"));
+  auto result = hogd::advance_new_block(db, block_timepoint);
   hogd::do_ffi_trace("FFI (end): advance_new_block(db={}) -> {}", db, result);
   return result;
 }
@@ -1606,12 +1790,14 @@ enable_syscall_logging(int32_t level)
 
 VerifyAuthResult
 verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
-                               FFISourceAuthData source_auth_data)
+                               FFISourceAuthData source_auth_data,
+                               const uint8_t *serialized_network_hash)
 {
   hogd::do_ffi_trace(
       "FFI (start): verify_signed_transaction_auth(signed_tx={}, "
-      "source_auth_data={})",
-      signed_tx, source_auth_data);
+      "source_auth_data={}, serialized_network_hash={})",
+      signed_tx, source_auth_data,
+      static_cast<const void *>(serialized_network_hash));
   // Install a logger before entering auth verification: an invalid signature
   // logs a debug-build trace() that would otherwise dereference a null logger
   // when this is the first test_ffi call in the process (issue #2464).
@@ -1625,10 +1811,13 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
                                 kTestFFIErrorCodeUnrecoverableError};
   }
   auto result =
-      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
+      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
+                                                serialized_network_hash);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "
-                     "source_auth_data={}) -> {}",
-                     signed_tx, source_auth_data, result);
+                     "source_auth_data={}, serialized_network_hash={}) -> {}",
+                     signed_tx, source_auth_data,
+                     static_cast<const void *>(serialized_network_hash),
+                     result);
   return result;
 }
 

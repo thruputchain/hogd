@@ -15,13 +15,10 @@ namespace x23 {
 namespace detail {
 
 template<typename Ptr> struct RefOps {
-  static auto incref(Ptr p) noexcept(noexcept(p->incref()))
-  {
-    return p->incref();
-  }
+  static auto incref(Ptr p) noexcept { return p->incref(); }
   using tag_type = decltype(incref(declval<Ptr>()));
 
-  static void decref(Ptr p, auto... tag) noexcept(noexcept(p->decref(tag...)))
+  static void decref(Ptr p, auto... tag) noexcept
       requires (sizeof...(tag) == !std::is_void_v<tag_type>)
   {
     p->decref(tag...);
@@ -43,8 +40,8 @@ public:
 protected:
   pointer_type p_{};
 
-  void ref() { ops::incref(p_); }
-  static void unref(pointer_type p) { ops::decref(p); }
+  void ref() noexcept { ops::incref(p_); }
+  static void unref(pointer_type p) noexcept { ops::decref(p); }
   void movefrom(RefTag &other) noexcept
   {
     using std::exchange;
@@ -66,10 +63,10 @@ public:
 
 protected:
   pointer_type p_{};
-  tag_type tag_;
+  tag_type tag_{};
 
-  void ref() { tag_ = ops::incref(p_); }
-  void unref(pointer_type p) { ops::decref(p, tag_); }
+  void ref() noexcept { tag_ = ops::incref(p_); }
+  void unref(pointer_type p) noexcept { ops::decref(p, tag_); }
   void movefrom(RefTag &other) noexcept
   {
     using std::exchange;
@@ -80,11 +77,11 @@ protected:
 
 } // namespace detail
 
-// Refcounted pointer for classes with incref()/decref() methods.  For
-// types derived from RefCount, this will act like a std::shared_ptr,
-// except you can use AtomicRefPtr instead of relying on
-// std::atomic<std::shared_ptr<T>> (which in GCC just has a set of 16
-// global mutexes).
+// Refcounted pointer for classes with non-throwing incref()/decref()
+// methods.  For types derived from RefCount, this will act like a
+// std::shared_ptr, except you can use AtomicRefPtr instead of relying
+// on std::atomic<std::shared_ptr<T>> (which in GCC just has a set of
+// 16 global mutexes).
 //
 // You can of course generalize `incref()` and `decref()` methods on
 // your class, or define some other Ops adapter type for other
@@ -109,7 +106,7 @@ public:
   //
   // need to provide a factory function that creates RefPtrs.
   template<std::same_as<T> U = T> requires (U::kAllowRefPtrConversion)
-  RefPtr(T &t)
+  RefPtr(T &t) noexcept
   {
     p_ = &t;
     ref();
@@ -117,10 +114,10 @@ public:
 
   RefPtr() noexcept = default;
   RefPtr(std::nullptr_t) noexcept : RefPtr() {}
-  RefPtr(const RefPtr &other)
+  RefPtr(const RefPtr &other) noexcept
   {
-    p_ = other.p_;
-    ref();
+    if ((p_ = other.p_)) // NOLINT
+      ref();
   }
   RefPtr(RefPtr &&other) noexcept { movefrom(other); }
 
@@ -132,11 +129,10 @@ public:
     self.reset();
     return (self);
   }
-  RefPtr &operator=(const RefPtr &other)
+  RefPtr &operator=(const RefPtr &other) noexcept
   {
     if (p_ != other.p_) {
-      if (p_)
-        unref(p_);
+      RefPtr _tmp(std::move(*this));
       if ((p_ = other.p_)) // NOLINT
         ref();
     }
@@ -145,7 +141,7 @@ public:
   RefPtr &operator=(RefPtr &&other) noexcept
   {
     if (this != &other) {
-      reset();
+      RefPtr _tmp(std::move(*this));
       movefrom(other);
     }
     return *this;
@@ -153,7 +149,7 @@ public:
   auto get() const noexcept { return ops::get(this->p_); }
   decltype(auto) operator*() const noexcept { return *get(); }
   auto operator->() const noexcept { return get(); }
-  void reset()
+  void reset() noexcept
   {
     using std::exchange;
     if (this->p_)
@@ -172,7 +168,7 @@ public:
 protected:
   template<std::same_as<T> U = T>
   requires (!requires { requires bool(U::kAllowRefPtrConversion); })
-  RefPtr(T &t)
+  RefPtr(T &t) noexcept
   {
     this->p_ = &t;
     this->ref();

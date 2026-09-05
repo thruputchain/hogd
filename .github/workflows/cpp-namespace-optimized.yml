@@ -13,6 +13,10 @@ on:
   pull_request:
     branches: ["main"]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Reusable setup steps as a composite (defined inline since GHA doesn't support job templates)
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"

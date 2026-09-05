@@ -1,5 +1,7 @@
 #include "hogd/devnode/runtime_manifest.h"
 
+#include "hogd/base/network_hash.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -24,9 +26,10 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_hex.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 
 namespace hogd {
@@ -119,7 +122,7 @@ write_storage_cost_model(json::Writer &w, StorageCostModel const &model)
 
 std::string
 build_runtime_manifest_json(HogDevnodeNode const &node,
-                            std::string_view network_id)
+                            NetworkHash const &network_hash)
 {
   using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
@@ -129,15 +132,15 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
   const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
       node.genesis_configuration().storage_cost_model);
-  const SHA256Hash genesis_hash = sha256(node.genesis_configuration());
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{1});
-    w.field("kind", "hog-devnode-runtime");
-    w.field("networkId", network_id);
-    w.field("protocol", version::kHogdProtocol());
-    w.field("genesisHash", hex_string(genesis_hash));
+    w.field("schemaVersion", std::int64_t{2});
+    w.field("kind", "hogd-dev-runtime");
+    w.field("chainState",
+            node.recovered_existing_chain() ? "recovered" : "fresh");
+    w.field("networkHash", format_network_hash(network_hash));
+    w.field("protocol", protocol_text(version::kHogdProtocol()));
     w.object_field("producer", [&](json::Writer &w) {
       w.field("binary", "hog-devnode");
       w.field("version", version::kHogdVersion);
@@ -166,7 +169,9 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
            node.bootstrap_accounts()) {
         w.object([&](json::Writer &w) {
           w.field("index", static_cast<std::int64_t>(account.index));
-          w.field("role", "local_user");
+          w.field("role", account.role == BootstrapAccountRole::kFaucet
+                              ? "faucet"
+                              : "local_user");
           w.field("publicKey", hex_string(account.public_key));
           w.field("walletAddress", hex_string(account.address));
           w.field("initialStorageTokens",
@@ -180,11 +185,11 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
         w.field("deployedCodeHash", hex_string(dev_wallet_hash));
         w.field("artifactHint", wallet_profile.artifact_hint);
         w.field("deployEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
         w.field("doActionEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
         w.field("createWalletEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
       });
       w.object_field("storageCostModel", [&](json::Writer &w) {
         write_storage_cost_model(w, storage_cost_model);
@@ -268,7 +273,7 @@ build_readiness_payload(std::filesystem::path const &manifest_path,
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{1});
+    w.field("schemaVersion", std::int64_t{2});
     w.field("status", "ready");
     w.field("manifestPath", manifest_path.string());
     w.field("manifestHash", hex_string(manifest_hash));
@@ -286,11 +291,11 @@ format_hex_hash(SHA256Hash const &hash)
 
 RuntimeManifestPointer
 write_hog_devnode_runtime_manifest(HogDevnodeNode const &node,
-                                   std::string_view network_id)
+                                   NetworkHash const &network_hash)
 {
   std::filesystem::path manifest_path =
       std::filesystem::path(node.runtime_dir()) / kManifestFileName;
-  std::string manifest = build_runtime_manifest_json(node, network_id);
+  std::string manifest = build_runtime_manifest_json(node, network_hash);
   write_manifest_atomically(manifest_path, manifest);
 
   SHA256Hash manifest_hash = hash_bytes(manifest);

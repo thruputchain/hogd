@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <print>
 #include <string>
@@ -27,6 +29,22 @@ namespace {
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
+
+std::string
+json_string_field(std::string_view json, std::string_view field)
+{
+  std::string prefix = "\"" + std::string(field) + "\":\"";
+  std::size_t start = json.find(prefix);
+  if (start == std::string_view::npos) {
+    return {};
+  }
+  start += prefix.size();
+  std::size_t end = json.find('"', start);
+  if (end == std::string_view::npos) {
+    return {};
+  }
+  return std::string(json.substr(start, end - start));
+}
 
 // Honor HOG_DEVNODE_STARTUP_TIMEOUT_SECS just like hog_devnode_test.cc, so slow
 // sanitizer schedules (e.g. TSAN, which sets it to 180) can give hog-devnode
@@ -240,6 +258,20 @@ main() // NOLINT(bugprone-exception-escape)
         "stderr tail:\n{}",
         child_exited ? "child exited before" : "timed out", child_status,
         stdout_output, stderr_output);
+    return EXIT_FAILURE;
+  }
+
+  std::string manifest_path = json_string_field(stdout_output, "manifestPath");
+  std::ifstream manifest_file(manifest_path);
+  std::string manifest((std::istreambuf_iterator<char>(manifest_file)),
+                       std::istreambuf_iterator<char>());
+  if (!manifest_file || !manifest.contains(R"("chainState":"fresh")")) {
+    cleanup_child(pid);
+    close_if_open(stdout_pipe[0]);
+    close_if_open(stderr_pipe[0]);
+    std::println(stderr,
+                 "fresh launch manifest did not report chainState=fresh: {}",
+                 manifest);
     return EXIT_FAILURE;
   }
 

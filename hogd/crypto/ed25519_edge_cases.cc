@@ -25,6 +25,8 @@
 
 namespace hogd {
 
+namespace {
+
 struct Iacr20201244TestVector {
 
   Iacr20201244TestVector(std::string_view message, std::string_view public_key,
@@ -47,7 +49,7 @@ struct Iacr20201244TestVector {
   bool should_fail_;
 };
 
-// NOLINTNEXTLINE(readability-identifier-naming)
+// NOLINTNEXTLINE(readability-identifier-naming,bugprone-throwing-static-initialization)
 const Iacr20201244TestVector IACR_2020_1244_TEST_VECTORS[12] = {
     // Case 0: Small-order A and R components (should be rejected) but verifies
     // under either equality check, allowed in ZIP215
@@ -183,7 +185,7 @@ struct ZcashTestVector {
   Ed25519Signature signature_;
 };
 
-// NOLINTNEXTLINE(readability-identifier-naming)
+// NOLINTNEXTLINE(readability-identifier-naming,bugprone-throwing-static-initialization)
 ZcashTestVector const ZCASH_TEST_VECTORS[196] = {
     ZcashTestVector{
         "0100000000000000000000000000000000000000000000000000000000000000",
@@ -1180,5 +1182,7 @@ TEST(Ed25519Test, ZcashTestVectors)
               true);
   }
 }
+
+} // namespace
 
 } // namespace hogd

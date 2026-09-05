@@ -6,11 +6,10 @@
 
 #include "exec_result.hh"
 #include "hogd/base/xdr_util.h"
-#include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/test_main.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/test_main.h"
 #include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "hogd/loadgen/status.h"
@@ -21,13 +20,14 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class ERC20ExperimentTest : public ::testing::Test,
                             public NativeContractTestFramework {
 public:
   ERC20ExperimentTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB, false)
+          TestDB::kHogDb, false)
   {}
 
 protected:
@@ -38,55 +38,47 @@ protected:
     EXPECT_TRUE(uniquifiers_.insert(uniquifier).second);
   }
 
-  void check_initial_balance()
+  void run_initialization_block(InitializationBlock const &block)
   {
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    auto bal =
-        lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
-            GenesisConfigurationLoader::kDeployContractAddress));
-    ASSERT_TRUE(bal.has_value());
-    EXPECT_LT(from_xdr(bal.value().nnint()),
-              GenesisConfigurationLoader::initial_hog_token_supply());
-    // TODO(geoff): assert balance = initial_supply - storage_cost(nnint)
-    // NOLINTEND(bugprone-unchecked-optional-access)
+    for (auto const &tx : block) {
+      check_uniquifier(tx.tx.uniquifier);
+      auto handler = make_new_system_call_handler(tx, *runtime_context_);
+      auto invoke_res = handler.root_invoke()();
+      ASSERT_TRUE(invoke_res.is_root_success())
+          << "invoke error: " << invoke_res.result_.error().raw_code()
+          << ", gas consumed: " << invoke_res.gas_consumed_;
+      auto res = handler.try_commit_transaction()();
+      ASSERT_TRUE(res == ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{.signed_tx = tx})());
+    }
+    advance_block();
+  }
+
+  void run_initialization(LoadgenSuccessResult const &result)
+  {
+    run_genesis_initialization(result.genesis_configuration);
+    run_initialization_block(result.genesis_ceremony_txs);
+    for (auto const &init_block : result.initialization_txs) {
+      run_initialization_block(init_block);
+    }
   }
 
   std::unique_ptr<RuntimeContext> runtime_context_;
 
-  void SetUp() override { runtime_context_ = make_hogexec_context(); }
+  void SetUp() override { runtime_context_ = make_hog_exec_context(); }
 
   // Runs the full erc20 payments experiment in-process: genesis deploy, the
   // initialization/mint blocks, then 100 wallet-authorized transfer work txs.
-  // use_rv32 selects the rv32 vs wasm contract builds; the workload is
-  // otherwise identical, which is what makes the two runtimes comparable.
-  void run_payments_experiment(bool use_rv32)
+  void run_payments_experiment()
   {
-    auto state = std::make_shared<ERC20ExperimentState>(
-        ERC20PaymentsConfig{
-            .num_addresses = 10,
-        },
-        use_rv32);
+    auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
+        .num_addresses = 10,
+    });
     auto result = state->generate_experiment()();
     ASSERT_TRUE(result.has_value());
 
-    run_genesis_initialization(result.value().genesis_configuration);
-    check_initial_balance();
-
-    for (auto &init_block : result.value().initialization_txs) {
-      for (auto &tx : init_block) {
-        check_uniquifier(tx.tx.uniquifier);
-        auto handler = make_new_system_call_handler(tx, *runtime_context_);
-        auto invoke_res = handler.root_invoke();
-        ASSERT_TRUE(invoke_res.is_root_success());
-        auto res = handler.try_commit_transaction();
-        ASSERT_TRUE(res == ExecResult::ExecResultOK);
-        ASSERT_TRUE(
-            handler.emit_events(ExecResult::ExecResultOK,
-                                ProposedTransaction{.signed_tx = tx})());
-      }
-
-      advance_block();
-    }
+    run_initialization(result.value());
 
     std::optional<GasAmount> gas_used;
 
@@ -95,14 +87,15 @@ protected:
     ASSERT_TRUE(work_txs_raw.has_value());
 
     SignedTransactionBatch work_txs;
-    parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+    parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs,
+                        kNoBatchSizeLimit)();
     ASSERT_EQ(work_txs.size(), 100);
     for (auto &tx : work_txs) {
       check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
+      auto invoke_res = handler.root_invoke()();
       ASSERT_TRUE(invoke_res.is_root_success());
-      auto res = handler.try_commit_transaction();
+      auto res = handler.try_commit_transaction()();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
       if (!gas_used) {
         gas_used = invoke_res.gas_consumed_;
@@ -114,45 +107,26 @@ protected:
   }
 };
 
-TEST_F(ERC20ExperimentTest, Basic)
-{
-  run_payments_experiment(/*use_rv32=*/false);
-}
-
 // Same payments workload, but the erc20 and wallet contracts are the compiled
 // rv32 artifacts run through the RV32 runtime. Exercises the rv32 wallet
 // do_action -> ed25519 verify -> cross-call erc20 transfer path end to end.
 TEST_F(ERC20ExperimentTest, BasicRv32)
 {
-  run_payments_experiment(/*use_rv32=*/true);
+  run_payments_experiment();
 }
 
 TEST_F(ERC20ExperimentTest, BasicAuth)
 {
   auto state =
       std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
-          .num_addresses = 10,
+          // Cross the genesis ceremony's per-transaction distribution limit
+          // so this test exercises a multi-transaction ceremony.
+          .num_addresses = 17,
       });
   auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());
 
-  run_genesis_initialization(result.value().genesis_configuration);
-  check_initial_balance();
-
-  for (auto &init_block : result.value().initialization_txs) {
-    for (auto &tx : init_block) {
-      check_uniquifier(tx.tx.uniquifier);
-      auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
-      ASSERT_TRUE(invoke_res.is_root_success());
-      auto res = handler.try_commit_transaction();
-      ASSERT_TRUE(res == ExecResult::ExecResultOK);
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                      ProposedTransaction{.signed_tx = tx})());
-    }
-
-    advance_block();
-  }
+  run_initialization(result.value());
 
   std::optional<GasAmount> gas_used;
 
@@ -161,14 +135,15 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
   ASSERT_TRUE(work_txs_raw.has_value());
 
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs,
+                      kNoBatchSizeLimit)();
   ASSERT_EQ(work_txs.size(), 100);
   for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
-    auto invoke_res = handler.root_invoke();
+    auto invoke_res = handler.root_invoke()();
     ASSERT_TRUE(invoke_res.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_TRUE(res == ExecResult::ExecResultOK);
     if (!gas_used) {
       gas_used = invoke_res.gas_consumed_;
@@ -193,6 +168,8 @@ TEST_F(ERC20ExperimentTest, BasicAuthGenesisIsStableAcrossRegeneration)
   ASSERT_TRUE(result2.has_value());
   EXPECT_EQ(result1.value().genesis_configuration,
             result2.value().genesis_configuration);
+  EXPECT_EQ(result1.value().genesis_ceremony_txs,
+            result2.value().genesis_ceremony_txs);
   EXPECT_EQ(result1.value().initialization_txs,
             result2.value().initialization_txs);
 }
@@ -205,23 +182,7 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
   auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());
 
-  run_genesis_initialization(result.value().genesis_configuration);
-  check_initial_balance();
-
-  for (auto &init_block : result.value().initialization_txs) {
-    for (auto &tx : init_block) {
-      check_uniquifier(tx.tx.uniquifier);
-      auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
-      ASSERT_TRUE(invoke_res.is_root_success());
-      auto res = handler.try_commit_transaction();
-      ASSERT_TRUE(res == ExecResult::ExecResultOK);
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                      ProposedTransaction{.signed_tx = tx})());
-    }
-
-    advance_block();
-  }
+  run_initialization(result.value());
 
   std::optional<GasAmount> gas_used;
 
@@ -230,13 +191,14 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
   ASSERT_TRUE(work_txs_raw.has_value());
 
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs,
+                      kNoBatchSizeLimit)();
   for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
-    auto invoke_res = handler.root_invoke();
+    auto invoke_res = handler.root_invoke()();
     ASSERT_TRUE(invoke_res.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_TRUE(res == ExecResult::ExecResultOK);
     if (!gas_used) {
       gas_used = invoke_res.gas_consumed_;
@@ -252,5 +214,5 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
-  return hogd::run_hogexec_tests(argc, argv);
+  return hogd::run_hog_exec_tests(argc, argv);
 }
