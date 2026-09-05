@@ -31,6 +31,7 @@
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -67,6 +68,7 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
+#include "x23/rpc_common.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -3140,6 +3142,54 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// A stack restarted over a database that another network produced must fail
+// at startup, the way a shard given the wrong --network-hash would, instead of
+// publishing that network's tip to every downstream and then failing every
+// propose and validate on the parent-id gate.
+TEST(Mempool, RestartRejectsDatabaseFromAnotherNetwork)
+{
+  TmpDir db_dir;
+  NetworkHash other_network = MempoolTestInfra::kNetworkHash;
+  other_network[0] ^= 0x01;
+
+  // Bring the stack up as one network and let it commit genesis, so the
+  // database carries a tip stamped with that network's hash.
+  {
+    MempoolTestInfra server(
+        MempoolTestInfra::Options{.network_hash =
+                                      MempoolTestInfra::kNetworkHash,
+                                  .db_directory = db_dir.directory()});
+    const SchedulerGetTipResult tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.network_hash,
+              MempoolTestInfra::kNetworkHash);
+  }
+
+  // Restart over the same database as another network. The mempool rejects
+  // the coordinator intro that recovers the tip, which fails startup.
+  const MempoolTestInfra::Options other_network_options{
+      .skip_genesis_block = true,
+      .network_hash = other_network,
+      .db_directory = db_dir.directory()};
+  EXPECT_THROW(
+      { MempoolTestInfra rejected(other_network_options); },
+      x23::XdrCallFailed);
+
+  // Restarting as the network that produced the database recovers its tip.
+  MempoolTestInfra restarted(
+      MempoolTestInfra::Options{.skip_genesis_block = true,
+                                .network_hash = MempoolTestInfra::kNetworkHash,
+                                .db_directory = db_dir.directory()});
+  const SchedulerGetTipResult tip =
+      restarted.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.network_hash,
+            MempoolTestInfra::kNetworkHash);
 }
 
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)

@@ -24,6 +24,7 @@
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -476,8 +477,22 @@ private:
     {
       DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
       if (db_res.result() == DbSchedResult::DbSchedResultOK) {
-        last_committed_block_ = db_res.db_tip();
-        CHECK_GE(last_committed_block_.value.proposal_header.block_height, 0);
+        const DbTip &recovered_tip = db_res.db_tip();
+        CHECK_GE(recovered_tip.value.proposal_header.block_height, 0);
+        // The recovered tip is the identity of the chain behind hog_db. No
+        // registration card carries a network hash, so this is the only place
+        // a shard holding another network's state can be caught before its tip
+        // is published, seeds the scheduler, and reaches every executor. The
+        // failure surfaces to the coordinator as a rejected intro.
+        if (recovered_tip.value.proposal_header.network_hash != network_hash_) {
+          throw std::runtime_error(std::format(
+              "recovered chain network hash {} does not match requested "
+              "network hash {}",
+              format_network_hash(
+                  recovered_tip.value.proposal_header.network_hash),
+              format_network_hash(network_hash_)));
+        }
+        last_committed_block_ = recovered_tip;
         auth_data_height_.store(
             last_committed_block_.value.proposal_header.block_height);
       }
