@@ -1966,9 +1966,11 @@ TEST(Mempool, CommitPublishesTipOnlyAfterJointCommit)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
 
-  std::optional<DbTip> tip_during_joint_commit;
+  bool hook_ran = false;
+  DbTip tip_during_joint_commit{};
   server.mempool_coord_rpc().set_commit_block_result_test_hook(
       [&](MempoolCoordinatorRpc::JointCommitResult &) {
+        hook_ran = true;
         tip_during_joint_commit =
             server.mempool_coord_rpc().test_last_committed_block();
       });
@@ -1977,9 +1979,9 @@ TEST(Mempool, CommitPublishesTipOnlyAfterJointCommit)
   server.mempool_coord_rpc().set_commit_block_result_test_hook({});
 
   // While the joint commit was in flight, the tip was still the parent.
-  ASSERT_TRUE(tip_during_joint_commit.has_value());
-  EXPECT_EQ(tip_during_joint_commit->id, parent_tip.id);
-  EXPECT_EQ(tip_during_joint_commit->value, parent_tip.value);
+  ASSERT_TRUE(hook_ran);
+  EXPECT_EQ(tip_during_joint_commit.id, parent_tip.id);
+  EXPECT_EQ(tip_during_joint_commit.value, parent_tip.value);
 
   // After the commit finalized, the tip is the committed block.
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
