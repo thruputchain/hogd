@@ -305,14 +305,9 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     void *db, void *rc, struct FFISerializedAuthClaimData auth_claim_data,
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
-// The two codes are mutually exclusive: ffi_error_code reports misuse of the
-// test API, syscall_error_code reports production refusing a well-formed call.
 struct OpenMockInvocationFrameResult {
-  // Which rule refused the frame, as production's own SyscallErrorCode:
-  // kSyscallErrorCodeInvalidSyscallInput, kSyscallErrorCodeReentrance or
-  // kSyscallErrorCodeInvokeDepthExceeded. Always kSyscallErrorCodeNone when
-  // ffi_error_code is set; a frame opened, and a
-  // finish_mock_invocation_frame() is owed, only when both are None.
+  // SyscallErrorCode: why production refused the frame, none if it opened.
+  // Never set together with ffi_error_code.
   int32_t syscall_error_code;
   // FFI-level error code
   enum TestFFIErrorCode ffi_error_code;
@@ -323,10 +318,8 @@ struct OpenMockInvocationFrameResult {
 // ReadOnly); an address that already has a frame on the stack cannot be invoked
 // again -- nested frames need distinct invoked_addresses; and
 // max_cross_invoke_depth caps how many frames a transaction may hold open.
-// Breaking one is not a misuse of this API -- production refuses the same call
-// from a contract -- so it returns kTestFFIErrorCodeNone with the refusing rule
-// in syscall_error_code, and opens no frame, so the handler stays usable and no
-// finish_mock_invocation_frame() is owed.
+// Breaking one is a refusal, not misuse: syscall_error_code names the rule, no
+// frame opens, and no finish_mock_invocation_frame() is owed.
 struct OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,

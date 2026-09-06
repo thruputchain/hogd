@@ -1497,25 +1497,17 @@ make_mocked_handler(void *db, void *rc)
                                      source_tx_hash.data(), 1);
 }
 
-// Helper: open a mock invocation frame, with the whole result
-OpenMockInvocationFrameResult
-open_frame_result(void *syscall_handler, Invocation const &invocation,
-                  int32_t flags = 0)
+// Helper: open a mock invocation frame
+TestFFIErrorCode
+open_frame(void *syscall_handler, Invocation const &invocation,
+           int32_t flags = 0)
 {
   auto serialized = x23::serialize(invocation);
   FFISerializedInvocation ffi = {
       .data = serialized.data(),
       .len = static_cast<uint32_t>(serialized.size()),
   };
-  return open_mock_invocation_frame(syscall_handler, ffi, flags);
-}
-
-// Helper: open a mock invocation frame, keeping only the FFI-level code
-TestFFIErrorCode
-open_frame(void *syscall_handler, Invocation const &invocation,
-           int32_t flags = 0)
-{
-  return open_frame_result(syscall_handler, invocation, flags).ffi_error_code;
+  return open_mock_invocation_frame(syscall_handler, ffi, flags).ffi_error_code;
 }
 
 // Helper: deploy a mock contract at a specific address and return it
