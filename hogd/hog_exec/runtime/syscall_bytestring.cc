@@ -42,15 +42,9 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
       copy_to_guest_buffer(output_bytestring,
                            std::as_bytes(std::span(bs->data(), bs->size())));
 
-  // Priced on the bytes that actually reached the guest, not on the buffer it
-  // offered. Charging the buffer would be the more predictable rule, and it is
-  // the one the rest of this table follows, but it bills the SDK's own
-  // zero-alloc read path for its whole scratch buffer: bytestring_read_into
-  // hands the syscall spare_capacity_mut(), so reading a 32-byte address out
-  // of a 4 KiB scratch would cost eight blocks instead of one. That penalises
-  // the path that allocates nothing, which is backwards. A guest can still
-  // bound this before calling -- BytestringGetLen is exactly that -- and the
-  // copy is what the block term is paying for.
+  // The bytes copied, not the buffer offered: the SDK's zero-alloc read path
+  // hands the syscall its whole scratch buffer, so pricing the buffer would
+  // charge a 32-byte read out of a 4 KiB scratch for eight blocks.
   const WrappedGasAmount gas{
       GasCost::bytestring_get(std::min(output_bytestring.size(), bs->size()))};
 

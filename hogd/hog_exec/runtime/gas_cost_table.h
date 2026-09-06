@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstdint>
 
 namespace hogd {
@@ -175,39 +176,38 @@ static_assert(kSHA512BlockBytes == 128 && kSHA512PadBytes == 17);
 // Grouped as static members rather than left as free lambdas so they follow
 // the repository's ordinary function naming; the previous shape needed a
 // readability-identifier-naming suppression to keep its CamelCase.
+// The largest length any of these may be handed.
+//
+// Every argument they price is the length of a guest span, which
+// rv32::kMaxMemoryBytes caps at 64 KiB, and a bytestring is capped further by
+// the configured limit. This sits far above that and far below the point where
+// the arithmetic could overflow a uint64_t -- the dearest reachable cost is
+// under 10^5 against a 10^19 range -- so a length beyond it is a caller passing
+// something that is not a guest length, which is a bug to catch rather than a
+// case to price.
+constexpr static uint64_t kMaxCostBytes = uint64_t{1} << 32;
+
 struct GasCost {
   // Blocks a hash compresses, padding included. One helper per hash rather
   // than one taking the geometry as arguments: three interchangeable uint64_t
-  // parameters is a call that transposes silently. Guarded against overflow on
-  // a length near the top of the range.
+  // parameters is a call that transposes silently.
   static constexpr uint64_t sha256_blocks(uint64_t message_bytes)
   {
-    if (message_bytes > UINT64_MAX - kSHA256PadBytes)
-      return UINT64_MAX / kSHA256BlockBytes;
+    assert(message_bytes <= kMaxCostBytes);
     return (message_bytes + kSHA256PadBytes + kSHA256BlockBytes - 1) /
            kSHA256BlockBytes;
   }
 
   static constexpr uint64_t sha512_blocks(uint64_t message_bytes)
   {
-    if (message_bytes > UINT64_MAX - kSHA512PadBytes)
-      return UINT64_MAX / kSHA512BlockBytes;
+    assert(message_bytes <= kMaxCostBytes);
     return (message_bytes + kSHA512PadBytes + kSHA512BlockBytes - 1) /
            kSHA512BlockBytes;
   }
 
-  // Saturating: a length chosen to overflow must bill the maximum, not wrap.
-  static constexpr uint64_t saturating(uint64_t base, uint64_t per_block,
-                                       uint64_t blocks)
-  {
-    if (per_block != 0 && blocks > (UINT64_MAX - base) / per_block)
-      return UINT64_MAX;
-    return base + (blocks * per_block);
-  }
-
   static constexpr uint64_t sha256_hash(uint64_t bytes_len)
   {
-    return saturating(0, kSHA256HashBlockCost, sha256_blocks(bytes_len));
+    return kSHA256HashBlockCost * sha256_blocks(bytes_len);
   }
 
   // Whole blocks only: a partial tail stays buffered and is charged by
@@ -216,51 +216,46 @@ struct GasCost {
   // paid.
   static constexpr uint64_t sha256_update(uint64_t bytes_len)
   {
-    return saturating(kSHA256StreamCost, kSHA256HashBlockCost,
-                      bytes_len / kSHA256BlockBytes);
+    assert(bytes_len <= kMaxCostBytes);
+    return kSHA256StreamCost +
+           kSHA256HashBlockCost * (bytes_len / kSHA256BlockBytes);
   }
 
-  // Blocks a bytestring of `bytes_len` occupies, rounded up, with an empty one
-  // costing none: a zero-length write copies nothing, and its storage access
-  // is already charged.
+  // Blocks a bytestring occupies, rounded up, with an empty one costing none:
+  // a zero-length write copies nothing, and its storage access is already
+  // charged.
   static constexpr uint64_t bytestring_blocks(uint64_t bytes_len)
   {
-    if (bytes_len > UINT64_MAX - (kBytestringBlockBytes - 1))
-      return UINT64_MAX / kBytestringBlockBytes;
+    assert(bytes_len <= kMaxCostBytes);
     return (bytes_len + kBytestringBlockBytes - 1) / kBytestringBlockBytes;
   }
 
   // Charged on the bytes copied: the value handed to a write, and for a read
-  // the bytes that actually reach the guest rather than the buffer it offered.
+  // the bytes that reach the guest rather than the buffer it offered.
   //
-  // The buffer would be the more predictable rule, and the one the rest of
-  // this table follows -- a bill that is a function of its arguments is a bill
-  // a contract can estimate before running. It is not used here because the
-  // SDK's zero-alloc read path hands the syscall its whole scratch buffer
-  // (bytestring_read_into passes spare_capacity_mut()), so a 32-byte read out
-  // of a 4 KiB scratch would cost eight blocks rather than one, and the path
-  // that allocates nothing would be the dearer one. A guest that wants the
-  // bound before it calls has BytestringGetLen, which is most of why that call
-  // earns its place.
+  // Pricing the buffer would be more predictable, since a guest knows it
+  // before it calls. It is not used because bytestring_read_into, the SDK's
+  // zero-alloc read, passes spare_capacity_mut() -- its whole scratch buffer
+  // -- so a 32-byte read out of a 4 KiB scratch would cost eight blocks, and
+  // the path that allocates nothing would be the dearer one.
   static constexpr uint64_t bytestring_set(uint64_t bytes_len)
   {
-    return saturating(kStorageAccessCost, kBytestringWriteBlockCost,
-                      bytestring_blocks(bytes_len));
+    return kStorageAccessCost +
+           kBytestringWriteBlockCost * bytestring_blocks(bytes_len);
   }
 
   static constexpr uint64_t bytestring_get(uint64_t bytes_len)
   {
-    return saturating(kStorageAccessCost, kBytestringReadBlockCost,
-                      bytestring_blocks(bytes_len));
+    return kStorageAccessCost +
+           kBytestringReadBlockCost * bytestring_blocks(bytes_len);
   }
 
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
-    const uint64_t hashed = message_len > UINT64_MAX - kEd25519HashedPrefixBytes
-                                ? UINT64_MAX - kEd25519HashedPrefixBytes
-                                : message_len + kEd25519HashedPrefixBytes;
-    return saturating(kVerifySignatureBaseCost, kVerifySignatureBlockCost,
-                      sha512_blocks(hashed));
+    assert(message_len <= kMaxCostBytes);
+    return kVerifySignatureBaseCost +
+           kVerifySignatureBlockCost *
+               sha512_blocks(message_len + kEd25519HashedPrefixBytes);
   }
 };
 
