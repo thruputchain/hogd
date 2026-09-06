@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -8,6 +9,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -40,6 +42,18 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
       copy_to_guest_buffer(output_bytestring,
                            std::as_bytes(std::span(bs->data(), bs->size())));
 
+  // Priced on the bytes that actually reached the guest, not on the buffer it
+  // offered. Charging the buffer would be the more predictable rule, and it is
+  // the one the rest of this table follows, but it bills the SDK's own
+  // zero-alloc read path for its whole scratch buffer: bytestring_read_into
+  // hands the syscall spare_capacity_mut(), so reading a 32-byte address out
+  // of a 4 KiB scratch would cost eight blocks instead of one. That penalises
+  // the path that allocates nothing, which is backwards. A guest can still
+  // bound this before calling -- BytestringGetLen is exactly that -- and the
+  // copy is what the block term is paying for.
+  const WrappedGasAmount gas{
+      BytestringGetCost(std::min(output_bytestring.size(), bs->size()))};
+
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
     // The ceiling, not the limit in force: items outlive a lowered limit.
@@ -47,8 +61,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(SyscallBytestringGetOutputs{.bytestring = *bs});
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, gas};
 };
 
 MaybeAsyncSyscallInnerResult
@@ -77,7 +90,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{kBytestringGetLenCost}};
 };
 
 MaybeAsyncSyscallInnerResult
@@ -100,7 +113,8 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{
+                                   BytestringSetCost(input_bytestring.size())}};
 }
 
 } // namespace hogd

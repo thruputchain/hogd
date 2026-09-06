@@ -103,6 +103,13 @@ BYTESTRING_ROW = re.compile(
     r"^(entry|vm)/(BytestringSet|BytestringGet|BytestringGetLen)/(\d+)$")
 BYTESTRING_FAMILIES = ("BytestringSet", "BytestringGet", "BytestringGetLen")
 
+# The block a bytestring copy is proposed in, mirroring gas_cost_table.h's
+# kBytestringBlockBytes. Unlike a hash's compression block this is chosen, not
+# forced: large enough that rounding a fractional per-byte rate up to a whole
+# gas wastes little, small enough that a short write does not pay for a long
+# one.
+BYTESTRING_BLOCK_BYTES = 512
+
 # The storage rows. frame/ rows time one iteration of "open D frames, issue
 # the call on K distinct keys in the innermost, close them all", so they are
 # read as a line in K per depth; frame/Push/D is the K=0 point measured
@@ -1370,6 +1377,32 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         if commits:
             proposal["storage_commit_item_gas"] = to_gas(
                 max(per_item for _, _, _, per_item in commits))
+
+    bytestrings = bytestring_summary(measured, stddevs(bench))
+    if bytestrings:
+        proposal["bytestrings"] = bytestrings
+        # A block rather than a per-byte rate: the measured rate is a fraction
+        # of a gas unit, and a fraction needs a divisor, which is one more
+        # billing-relevant constant in the digest. Sized to the dearest band,
+        # because the per-byte cost is not constant across the sweep and there
+        # is no single rate to be right about -- the same rule the storage
+        # numbers above are proposed under.
+        blocks = {}
+        for family, entry in bytestrings.items():
+            if entry["flat"] or not entry.get("per_byte_hi"):
+                continue
+            per_block_ns = entry["per_byte_hi"] * BYTESTRING_BLOCK_BYTES
+            blocks[family] = {
+                "block_bytes": BYTESTRING_BLOCK_BYTES,
+                "per_byte_ns": entry["per_byte_hi"],
+                "block_gas": to_gas(per_block_ns),
+                # What the rounding to a whole gas costs. A block small enough
+                # that this is large is a block that overcharges by rounding
+                # alone, which is the reason not to pick the hash's 64.
+                "rounding": (to_gas(per_block_ns) * unit) / per_block_ns,
+            }
+        if blocks:
+            proposal["bytestring_blocks"] = blocks
     return proposal
 
 
@@ -1544,6 +1577,27 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         print("  kSyscallGasCostSchedule's names and costs, not the formula,")
         print("  so any constant the formula reads has to be an")
         print("  entry in kSyscallGasCostSchedule to be hashed.")
+    blocks = proposal.get("bytestring_blocks")
+    if blocks:
+        print()
+        print("  Bytestrings, priced per block rather than per byte: the")
+        print(f"  measured rate is a fraction of the {unit:.4f} ns gas unit,")
+        print("  and a fraction needs a divisor, which is one more constant")
+        print("  in the digest.")
+        print(f"    kBytestringBlockBytes = {BYTESTRING_BLOCK_BYTES};")
+        for family, block in sorted(blocks.items()):
+            name = ("kBytestringWriteBlockCost" if family == "BytestringSet"
+                    else "kBytestringReadBlockCost")
+            print(f"    {name} = {block['block_gas']};"
+                  f"   // {family}, {block['per_byte_ns']:.4f} ns/byte at its "
+                  "dearest band")
+            print(f"      rounding a whole gas onto that block costs "
+                  f"{block['rounding']:.2f}x.")
+        flat = [f for f, e in proposal["bytestrings"].items() if e["flat"]]
+        if flat:
+            print(f"    {', '.join(sorted(flat))}: no block term -- flat in "
+                  "length, so the storage access is the whole cost.")
+
     if storage:
         print()
         print("  Storage, measured and not yet priced. These are charges on")

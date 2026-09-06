@@ -120,6 +120,38 @@ constexpr static uint64_t kVerifySignatureBlockCost = 131;
 // docs/rv32/rv32-gas-calibration.md.
 constexpr static uint64_t kStorageAccessCost = 150;
 
+// What copying a bytestring costs, per block of kBytestringBlockBytes, on top
+// of the storage access every bytestring call already pays.
+//
+// A block rather than a per-byte rate, for the reason SHA256HashBlockCost
+// gives: the measured rate is a fraction of a gas unit (0.039 ns/byte against
+// a 1.62 ns unit on hog10), and a fraction needs a divisor, which is one more
+// billing-relevant constant in the digest. 512 bytes is chosen rather than
+// forced by anything -- unlike a hash's compression block -- so it is hashed
+// into the schedule alongside the costs, not static_asserted beside them.
+//
+// Two constants, unlike the single kStorageAccessCost that covers an NNInt
+// read and write alike. There the difference was in the first touch, which is
+// a fact about the frame's state; here it is the copy itself, which is a
+// function of the argument: a write allocates a Bytestring and copies into it
+// before handing it to the item view, so it moves the bytes twice and measures
+// almost exactly twice a read's rate (0.0388 against 0.0196 ns/byte). One
+// constant sized to the write bills a read at 2.3x, past the band the rest of
+// this table holds to.
+//
+// Each is sized to the dearest band its sweep measured, not to an average.
+// The per-byte cost is not constant -- it nearly doubles between a 1 KiB item
+// and a 32 KiB one as the item stops fitting in cache -- so there is no single
+// rate to be right about, and the schedule takes the dear end the same way it
+// rounds everywhere else. Across the sweep that bills 1.19-2.03x for a write
+// and 1.35-1.96x for a read, the wide end being the zero-length call, where
+// kStorageAccessCost's own deliberate margin is the whole of it.
+//
+// See docs/rv32/rv32-gas-calibration.md, "Bytestrings: the length axis".
+constexpr static uint64_t kBytestringBlockBytes = 512;
+constexpr static uint64_t kBytestringWriteBlockCost = 13;
+constexpr static uint64_t kBytestringReadBlockCost = 7;
+
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
@@ -185,6 +217,43 @@ constexpr static uint64_t kSHA256CopyCost = kSHA256StreamCost;
 // create-side call already paid for both halves of the slot's life.
 constexpr static uint64_t kSHA256FinalizeCost = kSHA256HashBlockCost;
 
+// Blocks a bytestring of `bytes_len` occupies, rounded up, with an empty one
+// costing none: a zero-length write copies nothing, and its storage access is
+// already charged.
+constexpr static auto BytestringBlockCount =
+    [](uint64_t bytes_len) -> uint64_t {
+  if (bytes_len > UINT64_MAX - (kBytestringBlockBytes - 1))
+    return UINT64_MAX / kBytestringBlockBytes;
+  return (bytes_len + kBytestringBlockBytes - 1) / kBytestringBlockBytes;
+};
+
+// Charged on the bytes copied: the value handed to a write, and for a read the
+// bytes that actually reach the guest rather than the buffer it offered.
+//
+// The buffer would be the more predictable rule, and the one the rest of this
+// table follows -- a bill that is a function of its arguments is a bill a
+// contract can estimate before running. It is not used here because the SDK's
+// zero-alloc read path hands the syscall its whole scratch buffer
+// (bytestring_read_into passes spare_capacity_mut()), so a 32-byte read out of
+// a 4 KiB scratch would cost eight blocks rather than one, and the path that
+// allocates nothing would be the dearer one. A guest that wants the bound
+// before it calls has BytestringGetLen, which is most of why that call earns
+// its place.
+constexpr static auto BytestringSetCost = [](uint64_t bytes_len) -> uint64_t {
+  return SaturatingCost(kStorageAccessCost, kBytestringWriteBlockCost,
+                        BytestringBlockCount(bytes_len));
+};
+
+constexpr static auto BytestringGetCost = [](uint64_t bytes_len) -> uint64_t {
+  return SaturatingCost(kStorageAccessCost, kBytestringReadBlockCost,
+                        BytestringBlockCount(bytes_len));
+};
+
+// A length read copies nothing and is flat in the item's size -- measured flat
+// to within 0.6 ns across three decades of length -- so it pays the storage
+// access and no block term.
+constexpr static uint64_t kBytestringGetLenCost = kStorageAccessCost;
+
 constexpr static auto VerifySignatureCost =
     [](uint64_t message_len) -> uint64_t {
   const uint64_t hashed = message_len > UINT64_MAX - kEd25519HashedPrefixBytes
@@ -206,13 +275,16 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 8> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 11> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
     {.name = u8"VerifySignatureBase", .cost = kVerifySignatureBaseCost},
     {.name = u8"VerifySignatureBlock", .cost = kVerifySignatureBlockCost},
     {.name = u8"StorageAccess", .cost = kStorageAccessCost},
+    {.name = u8"BytestringBlockBytes", .cost = kBytestringBlockBytes},
+    {.name = u8"BytestringWriteBlock", .cost = kBytestringWriteBlockCost},
+    {.name = u8"BytestringReadBlock", .cost = kBytestringReadBlockCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
 }};

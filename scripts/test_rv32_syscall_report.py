@@ -589,6 +589,69 @@ def write_reference(case, text):
     return path
 
 
+class BytestringScheduleTest(unittest.TestCase):
+    """The proposal a bench-pool run turns into gas_cost_table.h constants."""
+
+    def setUp(self):
+        # hog10, seven repetitions. Kept as literals so this test says what
+        # the committed constants were derived from.
+        self.run = guardable_run()
+        hog10 = {
+            "BytestringSet": [(0, 142.2), (32, 166.4), (256, 171.2),
+                              (1024, 186.8), (4096, 282.6), (16384, 748.4),
+                              (32768, 1383.9)],
+            "BytestringGet": [(0, 149.4), (32, 153.4), (256, 154.1),
+                              (1024, 163.4), (4096, 202.7), (16384, 443.6),
+                              (32768, 757.9)],
+            "BytestringGetLen": [(0, 132.2), (32, 132.5), (256, 131.9),
+                                 (1024, 132.3), (4096, 132.1), (16384, 132.2),
+                                 (32768, 132.2)],
+        }
+        for family, points in hog10.items():
+            for size, ns in points:
+                name = f"entry/{family}/{size}"
+                self.run["benchmarks"].append(row(name, ns, gas=50))
+                self.run["benchmarks"].append(
+                    row(name, ns * 0.002, aggregate="stddev"))
+        self.calibration = synthetic_calibration(1.6222)
+        self.calibration["provenance"]["engine_fingerprint"] = "abc123"
+        self.calibration["provenance"]["host"] = "test"
+
+    def proposal(self):
+        return report.build_schedule(self.run, self.calibration, 1)
+
+    def test_it_proposes_the_committed_constants(self):
+        blocks = self.proposal()["bytestring_blocks"]
+        self.assertEqual(blocks["BytestringSet"]["block_gas"], 13)
+        self.assertEqual(blocks["BytestringGet"]["block_gas"], 7)
+        self.assertEqual(blocks["BytestringSet"]["block_bytes"], 512)
+
+    def test_a_flat_family_gets_no_block_term(self):
+        self.assertNotIn("BytestringGetLen",
+                         self.proposal()["bytestring_blocks"])
+
+    def test_the_block_is_large_enough_that_rounding_is_cheap(self):
+        # The reason not to reuse the hash's 64-byte block: at 64 bytes a
+        # write's rate rounds up to 2 gas, a 31% overcharge on the rate alone.
+        for block in self.proposal()["bytestring_blocks"].values():
+            self.assertLess(block["rounding"], 1.20)
+
+    def test_the_proposal_never_undercharges_the_sweep(self):
+        # The property that matters in a gas schedule. Billed against measured
+        # at every length, with the crossing and the storage access the
+        # schedule already charges.
+        proposal = self.proposal()
+        unit = proposal["unit_ns"]
+        seam = proposal["seam_ns"]
+        blocks = proposal["bytestring_blocks"]
+        for family, block in blocks.items():
+            for size, ns in proposal["bytestrings"][family]["points"]:
+                whole = -(-size // block["block_bytes"])
+                gas = 50 + 150 + block["block_gas"] * whole
+                self.assertGreaterEqual(gas * unit, ns + seam,
+                                        msg=f"{family}/{size} undercharged")
+
+
 class GateTests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

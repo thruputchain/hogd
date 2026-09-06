@@ -1142,6 +1142,8 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 // the full length.
 TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
 {
+  // Deliberately shorter than the stored value: the point of the test.
+  constexpr size_t kSmallBufferBytes = 4;
   const StorageKeyContractData key = make_storage_key("trace_bs_key");
   const std::array<uint8_t, 8> value = {'1', '2', '3', '4', '5', '6', '7', '8'};
 
@@ -1156,7 +1158,7 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        std::array<std::byte, 4> small_buffer{};
+        std::array<std::byte, kSmallBufferBytes> small_buffer{};
         RuntimeMemoryLength written_len = 0;
         auto g = co_await ctx.syscall<SyscallNo::kBytestringGet>(
             key, std::span<std::byte>(small_buffer), written_len);
@@ -1183,7 +1185,11 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
     body.bytestring_set().inputs.flags = 0;
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    // Named rather than spelled as a literal, the way the SHA256 and storage
+    // expectations in this file already are, so the next repricing moves these
+    // with the schedule instead of through them.
+    expected.push_back(step_entry(gas, BytestringSetCost(value.size()),
+                                  std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kBytestringGet);
@@ -1191,7 +1197,10 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     SyscallBytestringGetOutputs outputs;
     outputs.bytestring.append_range(value);
     body.bytestring_get().outputs = std::move(outputs);
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    // The bytes that reached the guest: the buffer is shorter than the item,
+    // so the truncated copy is what is charged.
+    expected.push_back(step_entry(gas, BytestringGetCost(kSmallBufferBytes),
+                                  std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);

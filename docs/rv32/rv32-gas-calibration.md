@@ -1541,11 +1541,71 @@ whole-sweep line is still printed, labelled as a cross-check, beside the two
 numbers that say how much to trust it: the leverage of the top point, and the
 intercept's disagreement with the measured base.
 
-Pricing them is the next step. A flat per-byte term will not fit a cost that
-doubles across the sweep, so the open question is whether to price the dearest
-band everywhere -- simple, and overcharges a 1 KiB write by about 2x -- or to
-charge in size classes. Whichever it is, `BytestringGetLen` needs no per-byte
-term at all.
+**What was priced, and why in that shape.** Three constants, hashed into
+`kSyscallGasCostSchedule` like the rest:
+
+```
+kBytestringBlockBytes     = 512
+kBytestringWriteBlockCost = 13
+kBytestringReadBlockCost  =  7
+```
+
+A block rather than a per-byte rate, for the reason `kSHA256HashBlockCost`
+gives: the measured rate is a fraction of a gas unit (0.039 ns/byte against a
+1.62 ns unit on hog10), and a fraction needs a divisor -- one more
+billing-relevant constant in the digest. Unlike a hash's compression block,
+512 is chosen rather than forced, so it is hashed into the schedule rather
+than `static_assert`ed beside it. It is large enough that rounding the rate up
+to a whole gas wastes 6% for a write and 13% for a read; the hash's 64 would
+waste 31%.
+
+Two constants rather than one, unlike `kStorageAccessCost` covering an NNInt
+read and write alike. There the difference was in the first touch, which is a
+fact about the frame's state; here it is the copy, which is a function of the
+argument -- a write allocates a `Bytestring` and copies into it before handing
+it to the item view, so it moves the bytes twice and measures almost exactly
+twice a read's rate. One constant sized to the write bills a read at 2.29x,
+past the band the rest of the table holds to.
+
+Each is sized to the **dearest band**, not to an average, since there is no
+single rate to be right about. And each call pays `kStorageAccessCost` on top,
+because a bytestring call reaches the same item view, frame map and prepaid
+commit an NNInt call does -- the measured bases (142-149 ns) sit right beside
+`NNIntGet`'s 157 ns.
+
+Charged on the **bytes copied**: the value handed to a write, and for a read
+the bytes that actually reach the guest rather than the buffer it offered.
+
+The buffer is the more predictable rule and the one the rest of the table
+follows -- a bill that is a function of its arguments is one a contract can
+estimate before running -- and it is what this was first written to do. The
+SDK settles it the other way. `bytestring_read_into`, the zero-alloc read
+path, hands the syscall `spare_capacity_mut()`: its whole scratch buffer, not
+the item's length. Pricing the buffer would bill a 32-byte address read out of
+a 4 KiB scratch for eight blocks instead of one, making the path that
+allocates nothing the dearer one. A guest that wants the bound before it calls
+has `BytestringGetLen`, which is most of why that call earns its place.
+
+What that bills across the sweep:
+
+| bytes | `Set` billed/measured | `Get` billed/measured |
+|---:|---:|---:|
+| 0 | 2.03x | 1.94x |
+| 1024 | 1.81x | 2.04x |
+| 4096 | 1.68x | 2.29x |
+| 32768 | 1.27x | 2.29x |
+
+The wide end is the zero-length call, where `kStorageAccessCost`'s own
+deliberate margin is the whole of it -- the same 1.83x `NNIntGet` already
+carries. What it replaces is worse in the only direction that matters: a
+32 KiB write was **undercharged 17x** and a 32 KiB read 10x, both billed a
+flat 50 gas.
+
+Both pinned digests move with this: `rv32::kGasScheduleDigest` becomes
+`0xbd9a5e2f5bf216fd` and `kArtifactFormatFingerprint`, which folds it in,
+becomes `0x002a3cb88d80b403`. The previous digest joins
+`kAcceptedGasSchedules` as a transitional entry, so artifacts already deployed
+keep loading and simply get the new prices.
 
 ### What follows
 
@@ -1574,8 +1634,8 @@ term at all.
   `kSyscallGasCostSchedule` is already in `kGasScheduleDigest` so the input
   exists, and `HOGD_RV32_ENGINE_SOURCES` wants a syscall-path equivalent, or a
   rewrite of `syscall_entry_outer.h` moves these numbers with nothing saying so.
-- NNInt and the bytestrings are measured (above) and not yet priced. The rest
-  of the storage family is not measured at all: `DeleteObject` and the
+- The bytestrings are measured and priced (above); NNInt is measured and
+  priced. The rest of the storage family is not measured at all: `DeleteObject` and the
   retrocausal queue calls follow the same frame-and-snapshot pattern with their
   own item types; the auth registry calls reach a different table. What none of the rows reach is the root commit --
   `try_commit_transaction`'s delta batch and hog_db's item locks -- which is
