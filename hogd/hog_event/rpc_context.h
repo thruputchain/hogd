@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -32,7 +33,7 @@ class EventRPCContext {
 public:
   explicit EventRPCContext(std::string_view work_directory);
 
-  // Releases every indexer pull parked on the next publication so it answers
+  // Wakes every indexer pull parked on the next publication so it answers
   // now. ~EventIndexerServer calls this before RpcServer drains: destruction
   // waits for in-flight handlers but cannot cancel a suspended one, and a
   // parked pull is exactly that.
@@ -105,6 +106,10 @@ private:
   // goes away.  Caller holds lock_.
   void release_events_file(SHA256Hash const &hash);
 
+  // Bumps indexer_publications_ and schedules its waiters. Caller holds
+  // outbox_commit_lock_.
+  void publish_indexer_wake();
+
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
   x23::Async<void>
@@ -155,11 +160,11 @@ private:
   std::optional<IndexerOutboxOrigin> current_indexer_origin_;
   std::vector<IndexerOutboxEpochOriginInfo> indexer_origins_;
 
-  // Indexer pulls parked at the finalized tail. Guarded by
-  // outbox_commit_lock_. Each is woken with true when the tail advances and
-  // false on release; either way the handler re-reads the tail, but only a
-  // true lets it park again.
-  std::vector<x23::CoroCB<bool>> indexer_pull_waiters_;
+  // Publication counter that caught-up indexer pulls park on. Bumped and
+  // broadcast under outbox_commit_lock_ whenever the finalized tail moves, and
+  // once more on release. A parked handler re-reads the tail on wake: a moved
+  // tail is served, an unmoved one is answered rather than re-parked.
+  x23::CoroFutex<std::uint64_t> indexer_publications_{0};
   // The progress most recently answered "caught up". Repeating it is the
   // client asking to wait, so that pull parks. The first caught-up answer at
   // any progress stays immediate: IndexerPullController marks itself caught

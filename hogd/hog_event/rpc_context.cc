@@ -118,20 +118,29 @@ void
 EventRPCContext::release_indexer_pulls()
 {
   // Not a coroutine -- the caller is a destructor -- so hop onto the pool and
-  // block on the result. The waiters are taken under the publication lock and
-  // woken after it is released: waking resumes each handler inline, and its
-  // first act is to re-take that lock.
+  // block on the result. The tail does not move, so woken handlers answer
+  // rather than re-park.
   [](EventRPCContext &self) -> x23::Async<void> {
     co_await default_threadpool().bg();
     x23::CoroGuard guard;
     co_await guard(self.outbox_commit_lock_);
-    auto woken = std::exchange(self.indexer_pull_waiters_, {});
     self.last_caught_up_progress_.reset();
-    guard.reset();
-    for (const auto &waiter : woken) {
-      waiter(false);
-    }
+    self.publish_indexer_wake();
   } (*this)();
+}
+
+void
+EventRPCContext::publish_indexer_wake()
+{
+  indexer_publications_.rmw([](std::uint64_t &count) { ++count; });
+  // broadcast() only schedules the waiters, so it is safe under the lock. It
+  // defaults to the calling thread's pool, which is null when a caller such
+  // as reconcile_outbox_tip runs inline on a non-pool thread.
+  auto *pool = x23::ThreadPool::get_thread_pool();
+  if (pool == nullptr) {
+    pool = &default_threadpool();
+  }
+  indexer_publications_.broadcast(pool);
 }
 
 x23::Async<EventStatus<void>>
@@ -425,21 +434,14 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     co_await finish_block_operation(block_id, context_ptr, false);
     co_return EventError{EventErrorCode::kInternal};
   }
-  std::vector<x23::CoroCB<bool>> woken;
   if (finalized_indexer_tail_) {
     finalized_indexer_tail_ = block_height;
-    // Taken under the publication lock, so a pull that found itself caught up
-    // under this same lock is either in this list or already saw the new
-    // tail. Nothing can fall between.
-    woken = std::exchange(indexer_pull_waiters_, {});
+    // Bumped under the publication lock: a pull that sampled the counter under
+    // this same lock either already saw the new tail or wakes on this bump.
+    publish_indexer_wake();
   }
 
   outbox_guard.reset();
-  // Woken only after the lock is released: waking resumes each handler
-  // inline, and its first act is to re-take it.
-  for (const auto &waiter : woken) {
-    waiter(true);
-  }
 
   // The committed record references the events file rather than embedding the
   // pairs, so the file must outlive every block context that shares its root.
@@ -736,11 +738,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   indexer_origins_ = std::move(*origins);
   outbox_reconciled_.store(true, std::memory_order_release);
   // A pull parked across a re-reconcile must re-read the tail it installed.
-  auto woken = std::exchange(indexer_pull_waiters_, {});
-  outbox_guard.reset();
-  for (const auto &waiter : woken) {
-    waiter(true);
-  }
+  publish_indexer_wake();
   co_return EventStatus<void>();
 }
 
@@ -919,6 +917,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
   // how long a committed block took to become queryable. Each pass re-reads
   // the tail under the publication lock, and a pass that finds a block falls
   // through to serve it.
+  bool woken = false;
   while (caught_up_at(finalized_tail)) {
     x23::CoroGuard guard;
     co_await guard(outbox_commit_lock_);
@@ -934,6 +933,12 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     finalized_tail = *finalized_indexer_tail_;
     if (!caught_up_at(finalized_tail)) {
       break;
+    }
+    if (woken) {
+      // Woken without a publication for this caller: a release at teardown,
+      // or a re-reconcile that kept the tail. Answer so the server can drain;
+      // a live client simply asks again.
+      co_return pull_caught_up(response_origin);
     }
     // The first caught-up answer at a given progress is immediate: the client
     // marks itself caught up only on that reply (IndexerPullController gates
@@ -951,16 +956,14 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
       last_caught_up_progress_ = request.progress;
       co_return pull_caught_up(response_origin);
     }
-    auto [parked, wake] = x23::make_async<bool>();
-    indexer_pull_waiters_.push_back(wake);
-    // Released before parking: commit needs this lock to publish the very
-    // record being waited for.
+    // Sampled under the publication lock, which is also where commit bumps
+    // it, so wait(seen) cannot miss a publication that lands after the tail
+    // was read: it simply does not suspend. The lock is released first;
+    // commit needs it to publish the very record being waited for.
+    const std::uint64_t seen = indexer_publications_.load();
     guard.reset();
-    if (!co_await parked) {
-      // Released by teardown rather than a publication. Answer so the server
-      // can finish draining; a live client simply asks again.
-      co_return pull_caught_up(response_origin);
-    }
+    co_await indexer_publications_.wait(seen);
+    woken = true;
   }
 
   auto record =
