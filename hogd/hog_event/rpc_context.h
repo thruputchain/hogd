@@ -1,14 +1,11 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
-#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -33,24 +30,13 @@ namespace hogd {
 
 class EventRPCContext {
 public:
-  // How long a caught-up indexer pull may stay parked before it is answered
-  // anyway. This is a liveness bound, not a latency knob: a commit wakes a
-  // parked handler immediately, so shortening it does not make ingest slower,
-  // it only makes an idle chain produce more otherwise pointless "caught up"
-  // round trips.
-  //
-  // It has to stay well under the indexer's rpc_timeout (30s), and it is also
-  // the worst case for three other things: how long [wait_until_caught_up]
-  // blocks on a node with nothing to pull, how long a suspended handler can
-  // pin RpcServer destruction, and what each caught-up assertion costs in
-  // event_rpc_test. The default is short enough that all three stay
-  // unremarkable while the park still absorbs essentially every commit.
-  static constexpr auto kDefaultIndexerPullParkBound =
-      std::chrono::milliseconds(250);
+  explicit EventRPCContext(std::string_view work_directory);
 
-  explicit EventRPCContext(std::string_view work_directory,
-                           std::chrono::milliseconds indexer_pull_park_bound =
-                               kDefaultIndexerPullParkBound);
+  // Releases every indexer pull parked on the next publication so it answers
+  // now. ~EventIndexerServer calls this before RpcServer drains: destruction
+  // waits for in-flight handlers but cannot cancel a suspended one, and a
+  // parked pull is exactly that.
+  void release_indexer_pulls();
 
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
@@ -119,10 +105,6 @@ private:
   // goes away.  Caller holds lock_.
   void release_events_file(SHA256Hash const &hash);
 
-  // Releases every parked indexer pull so each re-reads the finalized tail.
-  // Safe to call from a plain thread as well as from a coroutine.
-  void wake_indexer_pullers();
-
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
   x23::Async<void>
@@ -173,16 +155,17 @@ private:
   std::optional<IndexerOutboxOrigin> current_indexer_origin_;
   std::vector<IndexerOutboxEpochOriginInfo> indexer_origins_;
 
-  // Monotonic publication counter parked indexer pulls wait on. Bumped when
-  // the finalized tail moves (under outbox_commit_lock_, so a handler that
-  // sampled it under the same lock cannot park past a commit), and on a
-  // periodic tick to bound the park.
-  //
-  // Declared before the ticker so member destruction joins the ticker first:
-  // ~CoroFutex asserts it has no waiters left.
-  x23::CoroFutex<std::uint64_t> indexer_wake_{0};
-  const std::chrono::milliseconds indexer_pull_park_bound_;
-  std::jthread indexer_wake_ticker_;
+  // Indexer pulls parked at the finalized tail. Guarded by
+  // outbox_commit_lock_. Each is woken with true when the tail advances and
+  // false on release; either way the handler re-reads the tail, but only a
+  // true lets it park again.
+  std::vector<x23::CoroCB<bool>> indexer_pull_waiters_;
+  // The progress most recently answered "caught up". Repeating it is the
+  // client asking to wait, so that pull parks. The first caught-up answer at
+  // any progress stays immediate: IndexerPullController marks itself caught
+  // up only on that reply, and on a busy chain it would otherwise never see
+  // one. Cleared on release so a reconnecting client is answered, not parked.
+  std::optional<IndexerProgress> last_caught_up_progress_;
 
   std::mutex tx_failure_mutex_;
   std::vector<IndexerTxFailureNotice> tx_failure_mailbox_;

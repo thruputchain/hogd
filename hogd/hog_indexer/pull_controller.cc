@@ -240,8 +240,8 @@ IndexerPullController::run(const std::stop_token &stop)
           .progress = requested_progress,
       };
       EventIndexerPullResult result =
-          call_with_timeout(*client, options_.rpc_timeout, "indexer block pull",
-                            [&] {
+          call_with_timeout(*client, options_.pull_timeout,
+                            "indexer block pull", [&] {
                               return client->event_indexer_pull_next(request)();
                             });
       if (stop.stop_requested()) {

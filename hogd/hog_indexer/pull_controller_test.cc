@@ -651,7 +651,7 @@ TEST(IndexerPullController, RpcTimeoutReconnectsAfterBlockedPull)
   IndexerPullControllerOptions options;
   options.retry_delay = std::chrono::milliseconds(1);
   options.caught_up_poll_delay = std::chrono::seconds(1);
-  options.rpc_timeout = std::chrono::milliseconds(20);
+  options.pull_timeout = std::chrono::milliseconds(20);
   IndexerPullController controller(
       std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
       options);

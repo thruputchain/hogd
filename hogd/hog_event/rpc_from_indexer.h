@@ -32,10 +32,25 @@ static_assert(is_EventIndexer1<EventIndexerRpc *, x23::MaybeAsync>);
 
 class EventIndexerServer : public RpcServer<EventIndexerRpc> {
 public:
-  explicit EventIndexerServer(EventRPCContext &ctx) : RpcServer(ctx)
+  explicit EventIndexerServer(EventRPCContext &ctx) : RpcServer(ctx), ctx_(ctx)
   {
     max_message_size_ = kIndexerRpcMaxMessageSize;
   }
+
+  // ~RpcServer waits for in-flight handlers but cannot cancel a suspended one
+  // (RpcServerShutdown.SuspendedIndexerPullPinsServerDestruction). A pull
+  // parked on the next publication is exactly that, so release them here,
+  // before the base destructor drains.
+  ~EventIndexerServer() { ctx_.release_indexer_pulls(); }
+
+  // Disable copy and move.
+  EventIndexerServer(const EventIndexerServer &) = delete;
+  EventIndexerServer &operator=(const EventIndexerServer &) = delete;
+  EventIndexerServer(EventIndexerServer &&) = delete;
+  EventIndexerServer &operator=(EventIndexerServer &&) = delete;
+
+private:
+  EventRPCContext &ctx_;
 };
 
 } // namespace hogd
