@@ -122,14 +122,10 @@ struct AcceptedGasSchedule {
   uint64_t digest;
 };
 
-inline constexpr std::array<AcceptedGasSchedule, 3> kAcceptedGasSchedules = {{
+inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
     {.version = kGasTableVersion, .digest = kGasScheduleDigest},
-    // v4 as it stood before NNInt storage access was priced. Every artifact
-    // stamped since v4 shipped declares this, so dropping it would reject
-    // contracts that are already deployed. Remove once the lowerer stamps the
-    // priced schedule.
-    {.version = 4, .digest = 0x86dd48334941726cULL},
-    // groundhog-cli <= 0.11.0. Remove once the lowerer stamps v4.
+    // groundhog-cli <= 0.11.0, which is what every deployed artifact was
+    // stamped by. Remove once the lowerer stamps v4.
     {.version = 3, .digest = 0x918317c21c46bb60ULL},
 }};
 

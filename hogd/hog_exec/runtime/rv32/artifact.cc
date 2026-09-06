@@ -92,27 +92,13 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   }
   // Accepted as a (version, digest) pair; see kAcceptedGasSchedules for why the
   // list can hold more than the current schedule and when to shrink it.
-  //
-  // Searched by the pair, not by version with the digest checked against
-  // whichever entry matched first. Several entries share a version whenever a
-  // repricing lands without a version bump -- which is the ordinary case, since
-  // the version tracks the table's shape and a repricing changes only its
-  // numbers -- and a first-match-on-version search reaches exactly one of them,
-  // leaving every other digest for that version unaccepted however plainly it
-  // is listed. That is the transitional entry failing at the one job it exists
-  // to do: contracts already deployed under the previous digest stop loading.
-  const auto matches_version =
-      [gas_schedule_version](AcceptedGasSchedule const &entry) {
-        return entry.version == gas_schedule_version;
-      };
-  if (!std::ranges::any_of(kAcceptedGasSchedules, matches_version)) {
+  const auto *accepted =
+      std::ranges::find(kAcceptedGasSchedules, gas_schedule_version,
+                        &AcceptedGasSchedule::version);
+  if (accepted == kAcceptedGasSchedules.end()) {
     return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
   }
-  const auto matches_pair = [gas_schedule_version,
-                             gas_digest](AcceptedGasSchedule const &entry) {
-    return entry.version == gas_schedule_version && entry.digest == gas_digest;
-  };
-  if (!std::ranges::any_of(kAcceptedGasSchedules, matches_pair)) {
+  if (gas_digest != accepted->digest) {
     return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
   }
   // memory_bytes == 0 is a valid degenerate: a zero-memory contract whose

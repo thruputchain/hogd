@@ -1612,13 +1612,10 @@ Both pinned digests move with this: `rv32::kGasScheduleDigest` becomes
 `0xbd9a5e2f5bf216fd` and `kArtifactFormatFingerprint`, which folds it in,
 becomes `0x002a3cb88d80b403`.
 
-The previous digest does **not** join `kAcceptedGasSchedules`. A transitional
-entry is for a repricing that has to reach artifacts already stamped with the
-old digest, and there are none: no shipped lowerer stamps v4 at all -- the
-released `groundhog-cli` is still on the v3 entry the list already carries. An
-entry for a digest nothing ever stamped would be a permanent widening of the
-check for no artifact's benefit, and the list is explicitly not a compatibility
-surface to grow by default.
+`kAcceptedGasSchedules` gains nothing. A transitional entry is for a repricing
+that has to reach artifacts already stamped with the old digest, and there are
+none: no shipped lowerer stamps v4 at all, so every deployed artifact declares
+the v3 entry the list already carries.
 
 ### What follows
 

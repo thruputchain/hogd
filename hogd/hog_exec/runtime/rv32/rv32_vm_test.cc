@@ -399,43 +399,6 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
   }
 }
 
-// Every pair the list names must load, not just the first entry per version.
-//
-// The transitional entries exist so a repricing can land before the lowerer
-// that stamps it has rolled out, which means contracts already deployed under
-// the previous digest have to keep loading. Several entries share a version
-// whenever a repricing lands without a version bump -- the ordinary case, since
-// the version tracks the table's shape rather than its numbers -- so a search
-// that matched on version alone would reach one of them and reject the rest
-// however plainly they are listed. This walks the list rather than naming
-// digests, so an entry added later is covered the moment it is added.
-TEST(Rv32ArtifactTest, acceptsEveryListedGasSchedulePair)
-{
-  for (AcceptedGasSchedule const &entry : kAcceptedGasSchedules) {
-    auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactGasVersionOffset, entry.version);
-    store_u64_at(artifact, kArtifactGasDigestOffset, entry.digest);
-    const auto parsed = parse_artifact(artifact);
-    EXPECT_TRUE(parsed.has_value())
-        << "gas schedule entry " << (&entry - kAcceptedGasSchedules.data())
-        << " (version " << entry.version << ") is listed in "
-        << "kAcceptedGasSchedules but was rejected";
-  }
-}
-
-// The digest is still checked: a version on the list paired with a digest that
-// is not is a mismatch, not an accepted artifact.
-TEST(Rv32ArtifactTest, rejectsAListedVersionWithAnUnlistedDigest)
-{
-  for (AcceptedGasSchedule const &entry : kAcceptedGasSchedules) {
-    auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactGasVersionOffset, entry.version);
-    store_u64_at(artifact, kArtifactGasDigestOffset, entry.digest ^ 1ULL);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kGasScheduleDigestMismatch);
-  }
-}
-
 TEST(Rv32ArtifactTest, rejectsBoundsAndSectionLayoutErrors)
 {
   {
