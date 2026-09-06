@@ -131,6 +131,21 @@ record_metric_cleanup(F &&f) noexcept
   }
 }
 
+// Whether a proposal's timepoint runs backwards from the tip it extends.
+// Equal is allowed, matching [RPCContext::update_dbtip]: two blocks sharing a
+// nanosecond is implausible, not incoherent.
+//
+// Height is deliberately not checked here. [schedulercoord_validate_block]
+// establishes height == tip + 1 before it calls this -- the catch-up loop
+// votes TooLateToValidate below that and waits above it, and the CHECK after
+// the loop asserts what remains -- so a caller that has reached this point
+// already knows [tip] is the proposal's parent.
+bool
+timepoint_precedes_tip(const ProposalHeader &header, const DbTip &tip)
+{
+  return header.block_timepoint < tip.value.proposal_header.block_timepoint;
+}
+
 } // namespace
 
 void
@@ -2082,11 +2097,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   // A backwards timepoint passes every hash check but is then fatally refused
-  // by [update_dbtip], after the block is externalized (#3873). Equal is
-  // allowed, matching update_dbtip.
-  if (last_committed_block_.value.proposal_header.block_height >= 0 &&
-      proposal.header.block_timepoint <
-          last_committed_block_.value.proposal_header.block_timepoint) {
+  // by [update_dbtip], after the block is externalized (#3873).
+  if (timepoint_precedes_tip(proposal.header, last_committed_block_)) {
     co_await decrement_num_validations_in_progress();
     error("Rejecting block at height {}: its timepoint {} precedes the "
           "committed tip's timepoint {}",
