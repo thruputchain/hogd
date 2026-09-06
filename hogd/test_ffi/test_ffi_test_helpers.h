@@ -92,7 +92,11 @@ open_frame(void *syscall_handler, Invocation const &invocation,
       .data = serialized.data(),
       .len = static_cast<uint32_t>(serialized.size()),
   };
-  return open_mock_invocation_frame(syscall_handler, ffi, flags).ffi_error_code;
+  auto res = open_mock_invocation_frame(syscall_handler, ffi, flags);
+  // Refusals read as successful opens otherwise; see expect_frame_refused().
+  EXPECT_EQ(res.syscall_error_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
+  return res.ffi_error_code;
 }
 
 // Expect production to refuse the frame, naming the rule; returns the result
