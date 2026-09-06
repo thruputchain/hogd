@@ -902,8 +902,9 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
                          kParityGas - 13 - (2 * kSyscallBaseCost) - write_cost,
                          std::move(body), ok_status()));
   }
-  expected.push_back(return_trace_entry(
-      kParityGas - 20 - (2 * kSyscallBaseCost) - write_cost, {}));
+  expected.push_back(
+      return_trace_entry(kParityGas - 20 - (2 * kSyscallBaseCost) - write_cost,
+                         {}));
 
   EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(trace.status.return_buffer().empty());
