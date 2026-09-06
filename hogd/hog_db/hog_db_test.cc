@@ -36,6 +36,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/lthash16.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -119,7 +120,9 @@ protected:
       BackgroundCommitWorker(subscription_manager_, nullptr);
 
   template<typename F>
-  void commit_block_expect_db_hash_matches_full(BlockHeight height, F &&fn)
+  void commit_block_expect_db_hash_matches_full(
+      BlockHeight height, F &&fn,
+      WorkerPool &pool = WorkerPool::get_default_pool())
   {
     StorageLongHash base_hash = db_.compute_full_db_hash();
 
@@ -134,10 +137,10 @@ protected:
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
 
-    auto hash_result = block_tx.get().close(base_hash);
+    auto hash_result = block_tx.get().close(base_hash, pool);
     ASSERT_TRUE(hash_result.has_value());
     StorageLongHash incremental_hash = *hash_result;
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(pool));
 
     StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash);
@@ -1196,6 +1199,26 @@ TEST_F(HogDbTest, DbHashDeltaBalanceLockMatchesFullStateHash)
                                            std::to_underlying(
                                                StorageDeltaFlags::None)));
   });
+}
+
+TEST_F(HogDbTest, CloseStagesLocksOnCallerSuppliedWorkerPool)
+{
+  Address addr = make_address(kAddress + 20);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000));
+
+  // stage_locks() partitions the lock maps into one job per pool worker, so
+  // the staged ChangeSet must not depend on how wide the caller's pool is.
+  // A single-worker pool scans every bucket in one job; the delta hash it
+  // produces still has to match the full recomputed state hash.
+  WorkerPool pool(1);
+  commit_block_expect_db_hash_matches_full(
+      1,
+      [&](InvokeTX &invoke_tx) {
+        ASSERT_TRUE(invoke_tx.request_nnint128(
+            make_address_balance_item_key(addr), 456,
+            std::to_underlying(StorageDeltaFlags::None)));
+      },
+      pool);
 }
 
 TEST_F(HogDbTest, DbHashDeltaNNInt128LockMatchesFullStateHash)
