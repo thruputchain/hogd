@@ -373,6 +373,7 @@ def bytestring_summary(measured, sd=None):
         entry = {
             "points": points,
             "base_ns": base,
+            **bytestring_seam(measured, family),
             "intervals": intervals,
             "flat": bytestring_is_flat(family, points, sd),
             "fit": fit,
@@ -395,6 +396,31 @@ def bytestring_summary(measured, sd=None):
             entry["intercept_error"] = fit[0] - base
         summary[family] = entry
     return summary
+
+
+def bytestring_seam(measured, family):
+    """What this family's ecall crossing costs, from its own vm row.
+
+    The bench drives one length end to end per family, so the gap between that
+    vm row and the entry row at the same length is this family's crossing --
+    measured rather than taken from the table's median, which is a different
+    mix of syscalls with a different amount of argument setup ahead of the
+    ecall. Empty when the run has no vm row for the family.
+    """
+    for name, row in measured.items():
+        match = BYTESTRING_ROW.match(name)
+        if not match or match.group(1) != "vm" or match.group(2) != family:
+            continue
+        size = int(match.group(3))
+        entry_row = measured.get(f"entry/{family}/{size}")
+        vm_ns = vm_ns_per_call(row)
+        if not entry_row or not vm_ns:
+            continue
+        return {"seam_ns": vm_ns - entry_row["real_time"],
+                "seam_bytes": size,
+                "vm_ns": vm_ns,
+                "seam_entry_ns": entry_row["real_time"]}
+    return {}
 
 
 def bytestring_is_flat(family, points, sd):
@@ -448,6 +474,15 @@ def print_bytestring(summary, measured, sd):
             continue
         print(f"{family}: base {entry['base_ns']:.1f} ns, measured at zero "
               "length")
+        if entry.get("seam_ns") is not None:
+            # The crossing this family actually pays, from its own vm row
+            # rather than from the table's median. A call with more arguments
+            # spends longer materialising them before the ecall, so the seam
+            # is not one number shared across the surface.
+            print(f"  the ecall crossing adds {entry['seam_ns']:.1f} ns at "
+                  f"{entry['seam_bytes']} bytes "
+                  f"({entry['vm_ns']:.1f} ns/call through the VM against "
+                  f"{entry['seam_entry_ns']:.1f} at the entry)")
         if entry["flat"]:
             print("  flat: the longest row is within noise of the base, so "
                   "there is no per-byte cost to price")
@@ -1683,10 +1718,20 @@ def guard_cv(name, measured, sd):
 def guardable(measured, sd):
     """Every quantity worth gating, as {key: ratio-to-baseline}.
 
-    Two families. `syscall/<name>` is an entry row: the production path for one
-    call, which is what a contract pays. `storage/<family>/<depth>/<keys>` is a
-    per-key cost from a sweep, which is what it pays per key it has not touched
-    -- the term the syscall rows cannot see.
+    Three families. `syscall/<name>` is an entry row: the production path for
+    one call, which is what a contract pays. `storage/<family>/<depth>/<keys>`
+    is a per-key cost from a sweep, which is what it pays per key it has not
+    touched -- the term the syscall rows cannot see.
+    `bytestring/<family>/<bytes>` is one point of a length sweep, gated at
+    every length because the per-byte cost is not constant across it: a
+    regression confined to the long end is invisible in the short rows, and it
+    is the long end the block term is priced from.
+
+    The bytestring rows are gated here rather than through syscall_names, which
+    they stay out of -- that set also drives the syscall table's layout and
+    --schedule, and a per-length "syscall" is neither. Their presence does not
+    disturb the baseline: it is the median of the rows within GUARD_BASE_SPREAD
+    of the cheapest, and the cheapest bytestring row sits well above that.
 
     cold/ rows are deliberately absent. They are bounded by the benchmark's own
     mock rather than by hogd, so gating them would gate the harness.
@@ -1716,6 +1761,13 @@ def guardable(measured, sd):
                 if (per_key * keys) / iteration < GUARD_MIN_SIGNAL_SHARE:
                     continue
                 guards[f"storage/{family}/{depth}/{keys}"] = per_key / baseline
+    for family, entry in sorted(bytestring_summary(measured, sd).items()):
+        for size, ns in entry["points"]:
+            row_name = f"entry/{family}/{size}"
+            cv = guard_cv(row_name, measured, sd)
+            if cv is None or cv > GUARD_MAX_CV:
+                continue
+            guards[f"bytestring/{family}/{size}"] = ns / baseline
     return baseline, guards
 
 

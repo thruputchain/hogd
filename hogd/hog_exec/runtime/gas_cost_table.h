@@ -143,9 +143,11 @@ constexpr static uint64_t kStorageAccessCost = 150;
 // The per-byte cost is not constant -- it nearly doubles between a 1 KiB item
 // and a 32 KiB one as the item stops fitting in cache -- so there is no single
 // rate to be right about, and the schedule takes the dear end the same way it
-// rounds everywhere else. Across the sweep that bills 1.19-2.03x for a write
-// and 1.35-1.96x for a read, the wide end being the zero-length call, where
-// kStorageAccessCost's own deliberate margin is the whole of it.
+// rounds everywhere else. Against the measured cost plus each call's own ecall
+// crossing that bills 1.18-1.87x for a write and 1.34-1.85x for a read, and a
+// flat 2.21x for a length read, which takes no block term and so carries
+// kStorageAccessCost's own deliberate margin alone -- the ratio
+// NNIntGetNoLoad already sits at. Nothing undercharges at any length.
 //
 // See docs/rv32/rv32-gas-calibration.md, "Bytestrings: the length axis".
 constexpr static uint64_t kBytestringBlockBytes = 512;

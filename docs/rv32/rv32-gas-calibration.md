@@ -1586,23 +1586,27 @@ a 4 KiB scratch for eight blocks instead of one, making the path that
 allocates nothing the dearer one. A guest that wants the bound before it calls
 has `BytestringGetLen`, which is most of why that call earns its place.
 
-What that bills across the sweep:
+What that bills across the sweep, against the measured entry cost plus each
+family's own ecall crossing (30.9 / 28.5 / 14.9 ns, from its `vm/` row at 1024
+bytes -- a call with more arguments spends longer materialising them before the
+ecall, so the crossing is not one number shared across the surface):
 
-| bytes | `Set` billed/measured | `Get` billed/measured |
-|---:|---:|---:|
-| 0 | 2.03x | 1.94x |
-| 1024 | 1.81x | 2.04x |
-| 4096 | 1.68x | 2.29x |
-| 32768 | 1.27x | 2.29x |
+| bytes | `Set` | `Get` | `GetLen` |
+|---:|---:|---:|---:|
+| 0 | 1.87x | 1.82x | 2.21x |
+| 1024 | 1.68x | 1.81x | 2.20x |
+| 4096 | 1.57x | 1.80x | 2.21x |
+| 32768 | 1.18x | 1.34x | 2.21x |
 
-The wide end is the zero-length call, where `kStorageAccessCost`'s own
-deliberate margin is the whole of it -- the same 1.83x `NNIntGet` already
-carries. That table is computed against the measured entry rows plus an 18 ns
-seam, the median of `vm - entry` across the syscall rows in the same run; the
-bytestring `vm/` rows are a single length each, so the seam is taken from the
-table rather than from them. What it replaces is worse in the only direction that matters: a
-32 KiB write was **undercharged 17x** and a 32 KiB read 10x, both billed a
-flat 50 gas.
+Nothing undercharges at any length. The wide end is not the long rows but the
+short ones, where `kStorageAccessCost`'s own deliberate margin is the whole of
+it. `BytestringGetLen` carries that margin at every length, since it takes no
+block term at all -- 2.21x for a call that costs 147 ns and is billed 324. That
+is not a new anomaly: `NNIntGetNoLoad`, the other storage call that does the
+least work for the same 200 gas, sits at essentially the same ratio. Splitting
+it out would need a fourth constant in the digest to save a contract 50 gas on
+the cheapest storage call there is, and would not change the incentive that
+matters -- a `GetLen` is still cheaper than the `Get` it lets a guest size.
 
 Both pinned digests move with this: `rv32::kGasScheduleDigest` becomes
 `0xbd9a5e2f5bf216fd` and `kArtifactFormatFingerprint`, which folds it in,

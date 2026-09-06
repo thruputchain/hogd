@@ -671,23 +671,40 @@ class GateTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("guard(s) hold", text)
 
-    def test_the_bytestring_sweep_is_not_guarded(self):
-        # Adding rows to the benchmark must not change the committed
-        # reference: these are a length sweep of three syscalls, and gating
-        # each point would both bloat the reference and make the gating
-        # baseline -- the median of the cheapest crossing rows -- depend on
-        # where a sweep happened to start.
+    def test_the_bytestring_sweep_is_guarded_at_every_length(self):
+        # Every length, not just the ends. The per-byte cost is not constant
+        # across the sweep, so a regression confined to the long rows is
+        # invisible in the short ones -- and the long end is where the block
+        # term is priced from.
         run = guardable_run()
-        plain = reference_text(run)
-        for entry in synthetic_bytestring_run()["benchmarks"]:
+        for entry in stepped_bytestring_run()["benchmarks"]:
             if entry["name"].startswith("entry/Bytestring"):
                 run["benchmarks"].append(entry)
                 run["benchmarks"].append(
                     row(entry["name"], entry["real_time"] * 0.002,
                         aggregate="stddev"))
         text = reference_text(run)
-        self.assertNotIn("Bytestring", text)
-        self.assertEqual(text, plain)
+        for size in BYTESTRING_SIZES:
+            self.assertIn(f"guard bytestring/BytestringSet/{size} ", text)
+
+    def test_the_sweep_does_not_disturb_the_gating_baseline(self):
+        # The reason they can be gated at all. The baseline is the median of
+        # the rows within GUARD_BASE_SPREAD of the cheapest, and a bytestring
+        # call -- which reaches storage -- sits far above that, so adding the
+        # sweep cannot drag the anchor and move every other guard with it.
+        plain = guardable_run()
+        with_sweep = guardable_run()
+        for entry in stepped_bytestring_run()["benchmarks"]:
+            if entry["name"].startswith("entry/Bytestring"):
+                with_sweep["benchmarks"].append(entry)
+                with_sweep["benchmarks"].append(
+                    row(entry["name"], entry["real_time"] * 0.002,
+                        aggregate="stddev"))
+        before = report.guard_baseline(report.rows(plain),
+                                       report.stddevs(plain))
+        after = report.guard_baseline(report.rows(with_sweep),
+                                      report.stddevs(with_sweep))
+        self.assertEqual(before, after)
 
     def test_reference_guards_both_syscalls_and_storage(self):
         text = reference_text(guardable_run())
