@@ -1950,7 +1950,7 @@ TEST_F(Erc20ParityTest, FundedMintParity)
 }
 
 // A zero-amount mint: a no-op credit both backends accept identically
-// (including the zero-amount Transfer event path).
+// (including the zero-amount Mint event path).
 TEST_F(Erc20ParityTest, ZeroAmountMintParity)
 {
   auto nk = make_result_keys("native_step", 3);

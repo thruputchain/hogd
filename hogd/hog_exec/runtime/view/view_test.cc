@@ -251,19 +251,25 @@ TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
   EXPECT_EQ(result.error_code(), SyscallErrorCode::kSyscallErrorCodeReentrance);
 }
 
-TEST_F(ViewTest, ViewContractSelfInvokeFaults)
+TEST_F(ViewTest, ViewContractSelfInvokeAborts)
 {
   ContractTraitClient<read_only_test::ReadOnlyTest> client(kReadOnlyAddress);
   // Pointing the entrypoint's callee at its own address makes the inner invoke
-  // reentrant, which the guard rejects -- faulting the frame.
+  // reentrant, which the guard rejects. The entrypoint calls through the
+  // plain (non-try) client, which re-throws that rejection as the SDK's
+  // CallingError::Reentrance -- a library exception, so the frame aborts.
+  // It faulted instead until sdk_rs#421 stopped reporting reentrance and the
+  // depth bound as callee faults.
   auto invocation =
       client.make_invocation<u8"read_only_aliasing_before_read_only_check">(
           UINT64_MAX, kReadOnlyAddress);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
-  EXPECT_EQ(result.result().output,
-            InvocationFrameOutput(InvocationFrameStatusCode::Fault));
+  // Only the status code: the abort carries the library exception's payload,
+  // which is the SDK's to shape, not this test's to pin.
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Abort);
 }
 
 TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
