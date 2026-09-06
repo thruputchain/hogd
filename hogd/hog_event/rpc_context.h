@@ -1,11 +1,14 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -30,7 +33,25 @@ namespace hogd {
 
 class EventRPCContext {
 public:
-  explicit EventRPCContext(std::string_view work_directory);
+  // How long a caught-up indexer pull may stay parked before it is answered
+  // anyway. This is a liveness bound, not a latency knob: a commit wakes a
+  // parked handler immediately, so shortening it does not make ingest slower,
+  // it only makes an idle chain produce more otherwise pointless "caught up"
+  // round trips.
+  //
+  // It has to stay well under the indexer's rpc_timeout (30s), and it is also
+  // the worst case for three other things: how long [wait_until_caught_up]
+  // blocks on a node with nothing to pull, how long a suspended handler can
+  // pin RpcServer destruction, and what each caught-up assertion costs in
+  // event_rpc_test. The default is short enough that all three stay
+  // unremarkable while the park still absorbs essentially every commit.
+  static constexpr auto kDefaultIndexerPullParkBound =
+      std::chrono::milliseconds(250);
+
+  explicit EventRPCContext(
+      std::string_view work_directory,
+      std::chrono::milliseconds indexer_pull_park_bound =
+          kDefaultIndexerPullParkBound);
 
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
@@ -99,6 +120,10 @@ private:
   // goes away.  Caller holds lock_.
   void release_events_file(SHA256Hash const &hash);
 
+  // Releases every parked indexer pull so each re-reads the finalized tail.
+  // Safe to call from a plain thread as well as from a coroutine.
+  void wake_indexer_pullers();
+
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
   x23::Async<void>
@@ -148,6 +173,17 @@ private:
   std::optional<BlockHeight> finalized_indexer_tail_;
   std::optional<IndexerOutboxOrigin> current_indexer_origin_;
   std::vector<IndexerOutboxEpochOriginInfo> indexer_origins_;
+
+  // Monotonic publication counter parked indexer pulls wait on. Bumped when
+  // the finalized tail moves (under outbox_commit_lock_, so a handler that
+  // sampled it under the same lock cannot park past a commit), and on a
+  // periodic tick to bound the park.
+  //
+  // Declared before the ticker so member destruction joins the ticker first:
+  // ~CoroFutex asserts it has no waiters left.
+  x23::CoroFutex<uint64_t> indexer_wake_{0};
+  const std::chrono::milliseconds indexer_pull_park_bound_;
+  std::jthread indexer_wake_ticker_;
 
   std::mutex tx_failure_mutex_;
   std::vector<IndexerTxFailureNotice> tx_failure_mailbox_;
