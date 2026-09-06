@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
@@ -124,7 +125,7 @@ EventRPCContext::EventRPCContext(
   // next commit, which on an idle chain is past the client's rpc_timeout and,
   // worse, would hold up RpcServer destruction: poisoning the fd stops the
   // stream reader but does not cancel a suspended handler.
-  indexer_wake_ticker_ = std::jthread([this](std::stop_token stop) {
+  indexer_wake_ticker_ = std::jthread([this](const std::stop_token &stop) {
     std::mutex tick_mutex;
     std::condition_variable_any tick_cv;
     while (!stop.stop_requested()) {
@@ -145,8 +146,17 @@ EventRPCContext::EventRPCContext(
 void
 EventRPCContext::wake_indexer_pullers()
 {
-  indexer_wake_.rmw([](uint64_t &counter) { ++counter; });
-  indexer_wake_.broadcast();
+  indexer_wake_.rmw([](std::uint64_t &counter) { ++counter; });
+  // broadcast() defaults to the calling thread's own pool, which is null on
+  // the ticker: that is a plain jthread, not a pool worker, and the default
+  // trips x23assert(pool). Resuming on the default poll's pool is right from
+  // any waker -- a parked handler is a coroutine, not bound to whoever woke
+  // it -- so fall back to it when there is no calling-thread pool.
+  auto *pool = x23::ThreadPool::get_thread_pool();
+  if (pool == nullptr) {
+    pool = &default_threadpool();
+  }
+  indexer_wake_.broadcast(pool);
 }
 
 x23::Async<EventStatus<void>>
@@ -924,7 +934,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     // so a commit landing between this snapshot and the park below cannot be
     // missed: publication bumps the counter first, and [wait(observed)] then
     // does not suspend at all.
-    uint64_t wake_observed = 0;
+    std::uint64_t wake_observed = 0;
     {
       x23::CoroGuard guard;
       co_await guard(outbox_commit_lock_);

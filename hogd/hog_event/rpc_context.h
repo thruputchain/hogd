@@ -48,10 +48,9 @@ public:
   static constexpr auto kDefaultIndexerPullParkBound =
       std::chrono::milliseconds(250);
 
-  explicit EventRPCContext(
-      std::string_view work_directory,
-      std::chrono::milliseconds indexer_pull_park_bound =
-          kDefaultIndexerPullParkBound);
+  explicit EventRPCContext(std::string_view work_directory,
+                           std::chrono::milliseconds indexer_pull_park_bound =
+                               kDefaultIndexerPullParkBound);
 
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
@@ -181,7 +180,7 @@ private:
   //
   // Declared before the ticker so member destruction joins the ticker first:
   // ~CoroFutex asserts it has no waiters left.
-  x23::CoroFutex<uint64_t> indexer_wake_{0};
+  x23::CoroFutex<std::uint64_t> indexer_wake_{0};
   const std::chrono::milliseconds indexer_pull_park_bound_;
   std::jthread indexer_wake_ticker_;
 
