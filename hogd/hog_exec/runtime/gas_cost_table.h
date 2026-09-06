@@ -189,7 +189,7 @@ struct GasCost {
   {
     assert(bytes_len <= kMaxCostBytes);
     return kSHA256StreamCost +
-           kSHA256HashBlockCost * (bytes_len / kSHA256BlockBytes);
+           (kSHA256HashBlockCost * (bytes_len / kSHA256BlockBytes));
   }
 
   // Rounded up, with an empty bytestring costing none: it copies nothing, and
@@ -205,21 +205,21 @@ struct GasCost {
   static constexpr uint64_t bytestring_set(uint64_t bytes_len)
   {
     return kStorageAccessCost +
-           kBytestringWriteBlockCost * bytestring_blocks(bytes_len);
+           (kBytestringWriteBlockCost * bytestring_blocks(bytes_len));
   }
 
   static constexpr uint64_t bytestring_get(uint64_t bytes_len)
   {
     return kStorageAccessCost +
-           kBytestringReadBlockCost * bytestring_blocks(bytes_len);
+           (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
     assert(message_len <= kMaxCostBytes);
     return kVerifySignatureBaseCost +
-           kVerifySignatureBlockCost *
-               sha512_blocks(message_len + kEd25519HashedPrefixBytes);
+           (kVerifySignatureBlockCost *
+            sha512_blocks(message_len + kEd25519HashedPrefixBytes));
   }
 };
 
