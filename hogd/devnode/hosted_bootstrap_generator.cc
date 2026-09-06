@@ -182,19 +182,6 @@ write_storage_cost_model_xdr(json::Writer &w, StorageCostModelXdr const &model)
   w.field("balance_cost", uint64_string(model.balance_cost));
 }
 
-void
-write_network_config(json::Writer &w, NetworkConfig const &config)
-{
-  // Reports the values in force rather than the list as written, so a reader
-  // sees what the chain runs under whether or not it states each parameter.
-  w.field("max_sha256_buffers", uint64_string(max_sha256_buffers(config)));
-  w.field("max_cross_invoke_depth",
-          uint64_string(max_cross_invoke_depth(config)));
-  w.field("max_new_contracts_per_tx",
-          uint64_string(max_new_contracts_per_tx(config)));
-  w.field("max_bytestring_len", uint64_string(max_bytestring_len(config)));
-}
-
 std::string
 build_genesis_json(GenesisConfiguration const &genesis)
 {
@@ -205,7 +192,41 @@ build_genesis_json(GenesisConfiguration const &genesis)
       write_storage_cost_model_xdr(w, genesis.storage_cost_model);
     });
     w.object_field("network_config", [&](json::Writer &w) {
-      write_network_config(w, genesis.network_config);
+      // Genesis needs JSON-XDR unions, not a flat effective-value summary.
+      // Preserve the stated parameter list: expanding defaults changes its
+      // hash.
+      const NetworkConfig &config = genesis.network_config;
+      w.object_field(std::format("{}", config.v()), [&](json::Writer &w) {
+        w.object_field("v0", [&](json::Writer &w) {
+          w.array_field("params", [&](json::Writer &w) {
+            for (const ConfigParam &param : config.v0().params) {
+              w.object([&](json::Writer &w) {
+                w.object_field(
+                    std::format("{}", param.param()), [&](json::Writer &w) {
+                      switch (param.param()) {
+                      case ConfigParamID::kConfigParamMaxSHA256Buffers:
+                        w.field("max_sha256_buffers",
+                                std::int64_t{param.max_sha256_buffers()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
+                        w.field("max_cross_invoke_depth",
+                                std::int64_t{param.max_cross_invoke_depth()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxNewContractsPerTx:
+                        w.field("max_new_contracts_per_tx",
+                                std::int64_t{param.max_new_contracts_per_tx()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxBytestringLen:
+                        w.field("max_bytestring_len",
+                                std::int64_t{param.max_bytestring_len()});
+                        break;
+                      }
+                    });
+              });
+            }
+          });
+        });
+      });
     });
     w.object_field("root_contract", [&](json::Writer &w) {
       w.field("contract_type",
