@@ -679,7 +679,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
     BlockID block_id, x23::span<const SignedTransaction> txs,
     x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
-    x23::span<bool> ret)
+    x23::span<bool> ret, size_t executor_offset)
 {
   co_await default_coropoll().pool_.bg();
 
@@ -701,12 +701,12 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
     x23::span<bool> ret_chunk(ret.begin() + chunk.start,
                               ret.begin() + chunk.end);
 
-    // We multiplex the small chunks across multiple TCP connections and
-    // multiple executors by setting the [executor_idx] to [i %
-    // exec_clients_.size()].
+    // Rotate the starting connection between large chunks. With larger RPC
+    // batches a large chunk may contain fewer RPCs than available streams.
     handles.push_back(propose_batch(block_id, tx_chunk, nomination_chunks[i],
                                     ret_chunk,
-                                    /*executor_idx=*/i % exec_clients_.size()));
+                                    /*executor_idx=*/(executor_offset + i) %
+                                        exec_clients_.size()));
   }
 
   // Wait for the executor to finish executing the txs.
@@ -760,7 +760,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
                                  ret.begin() + chunk.end);
 
     handles.push_back(multiplex_large_chunk_across_executors(
-        block_id, tx_chunk, nomination_chunks[i], status_chunk));
+        block_id, tx_chunk, nomination_chunks[i], status_chunk, i));
   }
 
   transaction_nominations.reserve(txs.size());

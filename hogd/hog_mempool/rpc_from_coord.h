@@ -580,7 +580,7 @@ private:
   x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
-      x23::span<bool> ret);
+      x23::span<bool> ret, size_t executor_offset);
 
   x23::Async<void> propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
