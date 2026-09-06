@@ -146,12 +146,9 @@ HogDbSchedRpc::commit_block(BlockID id, ConsensusValue value,
     return HogDbError(HogDbCode::kExists);
   }
 
-  // Check what update_dbtip would refuse *before* commit() applies this
-  // block's state and invalidates its siblings, neither of which is rolled
-  // back. Rejecting below that point leaves the in-memory DB carrying the
-  // block while the tip still names its parent; rejecting here leaves the DB
-  // untouched. update_dbtip repeats the check under the tip lock, which is
-  // what actually guards the transition -- this is the early, cheap copy.
+  // Ask before commit() applies this block's state and invalidates its
+  // siblings, neither of which is rolled back. update_dbtip repeats the check
+  // under the tip lock, which is what actually guards the transition.
   if (HogDbStatus<void> tip_ok =
           RPCContext::check_dbtip_transition(id, value, parent_tip);
       !tip_ok) [[unlikely]] {
