@@ -991,8 +991,8 @@ it be discovered later; picking it is yours.
 The first stateful family, measured in the same binary. NNInt is the smallest
 storage syscall -- a 16-byte value, no length axis -- so what it isolates is
 the machinery every storage syscall shares: the item view, the frame stack, the
-snapshot cache. Bytestrings add a byte term on top of this and are the next
-row set.
+snapshot cache. Bytestrings add a byte term on top of this and are measured
+below.
 
 **Why a storage syscall cannot be priced from its arguments.** The stateless
 rows above cost what they cost whatever came before them. A storage read does
@@ -1440,6 +1440,79 @@ A note on pinning: `taskset -c <one core>` crashes this binary with SIGFPE in
 itself from the affinity mask and a single-core mask leaves it dividing by
 zero. A mask of several cores does not trip it. These numbers are unpinned.
 
+### Bytestrings: the length axis
+
+The same storage machinery with a value length attached. `BytestringSet`,
+`BytestringGet` and `BytestringGetLen` are swept over
+`0, 32, 256, 1024, 4096, 16384, 32768` bytes -- the SHA256 sweep's lengths, so
+a Set can be read directly against the cost of hashing the bytes it copies.
+All three rows are warm: the key's view is already in the active frame, so what
+the sweep isolates is the length term and not the frame walk the NNInt sweeps
+above measure.
+
+`BytestringGetLen` is swept beside the other two although its cost should not
+depend on length at all. It reads the same items and copies none of them, so
+the gap between it and `BytestringGet` is the copy, and a `GetLen` whose own
+slope is not flat would mean the read path does work its signature does not
+admit to.
+
+**Two things bound the sweep, and neither is `kBytestringCeilingLen`.**
+
+The first is the chain's own configured limit. Since #3869 the write bound is
+`kConfigParamMaxBytestringLen`, checked in `SystemCallHandler::set_bytestring`;
+above it a write is refused as invalid input, which is a cheaper path than the
+one being priced, so a sweep past the limit would publish rejections as costs.
+`stock_network_config()` states 1024. The fixture therefore serves its own
+network config -- stock, with the bytestring limit raised to the top of the
+sweep -- through `BlockSnapshotRpc`, which now takes one instead of always
+serving the stock parameters. Raised rather than swept to 1024, because 1024 is
+a choice a dev chain makes rather than a bound the syscall carries: the
+parameter is settable up to 65000, and a per-byte term fit over 1 KiB and
+extrapolated 64x describes very little.
+
+The second is guest memory, which is 64 KiB in total
+(`rv32::kMaxMemoryBytes`). The argument blocks occupy everything below
+`0x1000`, and the payload buffer starts there, so the most a row can pass is
+what is left above it. 32768 is half the ceiling and leaves the extrapolation
+to a chain running the maximum at one doubling rather than six. Both bounds are
+`static_assert`ed against the constants rather than spelled out, so a later
+change to the memory map or to the ceiling fails the build instead of silently
+overrunning -- which is how an earlier sweep here put a public key on top of a
+signature.
+
+**What the first local run says.** From the development container, which is a
+shared 4-core VM and not the bench pool, so these are shapes and not numbers:
+
+| family | fit |
+|---|---|
+| `BytestringSet` | 301.6 ns + 0.0618 ns/byte (R2=0.9988) |
+| `BytestringGet` | 271.5 ns + 0.0288 ns/byte (R2=0.9860) |
+| `BytestringGetLen` | 270.3 ns, flat (slope -0.0000, R2=0.04) |
+
+Three readings, in the order they matter:
+
+- `BytestringGetLen` is flat, as it should be. Its R2 is near zero because
+  there is no slope to explain, which is the result rather than a bad fit.
+- A Set costs about twice a Get per byte. A Get copies the item into guest
+  memory; a Set allocates a fresh `Bytestring`, copies into it, and hands it to
+  the item view, so it moves the bytes twice.
+- **All three are charged the same 50 gas at every length.** None of them
+  appears in `kSyscallGasCostSchedule`, so each is billed `kSyscallBaseCost`
+  and nothing per byte. Across the sweep that is an 8x spread in ns/gas within
+  `BytestringSet` alone -- a 32 KiB write costs eight times per gas what a
+  zero-length one does, for the same price. That is the same shape the
+  zero-gas reads have, with a length axis making it arbitrarily wide.
+
+The report prints the marginal cost at every length (`ns/byte>0`, each row
+against the family's own zero-length row) beside the fit, for the reason the
+NNInt sweeps read their per-key cost at every K: a per-byte term that is not
+constant shows as a column that drifts, where R2 over a sweep this wide would
+hide it. The `0` and `32` rows are where to look -- a zero-length Set skips the
+allocation, so the fitted intercept sits above the measured zero row and the
+32-byte marginal is not the slope.
+
+Pricing them is the next step and needs bench-pool numbers, not these.
+
 ### What follows
 
 - **The zero-gas reads are the urgent item.** On hog10 a loop of
@@ -1467,11 +1540,10 @@ zero. A mask of several cores does not trip it. These numbers are unpinned.
   `kSyscallGasCostSchedule` is already in `kGasScheduleDigest` so the input
   exists, and `HOGD_RV32_ENGINE_SOURCES` wants a syscall-path equivalent, or a
   rewrite of `syscall_entry_outer.h` moves these numbers with nothing saying so.
-- NNInt is measured (above) and not yet priced. The rest of the storage family
-  is not: bytestrings add a length axis to the same machinery and are the next
-  rows; `DeleteObject` and the retrocausal queue calls follow the same
-  frame-and-snapshot pattern with their own item types; the auth registry calls
-  reach a different table. What none of the rows reach is the root commit --
+- NNInt and the bytestrings are measured (above) and not yet priced. The rest
+  of the storage family is not measured at all: `DeleteObject` and the
+  retrocausal queue calls follow the same frame-and-snapshot pattern with their
+  own item types; the auth registry calls reach a different table. What none of the rows reach is the root commit --
   `try_commit_transaction`'s delta batch and hog_db's item locks -- which is
   where a write's cost lands last, and needs a real database rather than the
   mock to measure.

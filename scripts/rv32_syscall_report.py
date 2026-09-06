@@ -94,6 +94,14 @@ RATE_DENOMINATORS = (1, 2, 4, 8, 16, 32, 64)
 RATE_OVERCHARGE_TARGET = 1.10
 
 SHA256_ROW = re.compile(r"^(entry|vm)/SHA256/(\d+)$")
+# The bytestring family, swept on value length. Kept out of the syscall table
+# for the reason the SHA256 rows are: a length sweep is one syscall measured
+# many times, and listing every point beside the one-shot rows would both bury
+# them and pull the gating baseline -- which is the median of the cheapest
+# crossing rows -- toward whichever end of the sweep happened to be cheap.
+BYTESTRING_ROW = re.compile(
+    r"^(entry|vm)/(BytestringSet|BytestringGet|BytestringGetLen)/(\d+)$")
+BYTESTRING_FAMILIES = ("BytestringSet", "BytestringGet", "BytestringGetLen")
 
 # The storage rows. frame/ rows time one iteration of "open D frames, issue
 # the call on K distinct keys in the innermost, close them all", so they are
@@ -244,7 +252,9 @@ def vm_ns_per_call(row):
 def syscall_names(measured):
     names = []
     for name in measured:
-        if not name.startswith("entry/") or SHA256_ROW.match(name):
+        if not name.startswith("entry/"):
+            continue
+        if SHA256_ROW.match(name) or BYTESTRING_ROW.match(name):
             continue
         names.append(name[len("entry/"):])
     return sorted(names)
@@ -259,8 +269,8 @@ def sha256_points(measured, prefix="entry"):
     return sorted(points)
 
 
-def fit_sha256(points):
-    """Least squares over the size sweep: (base_ns, ns_per_byte, r_squared).
+def fit_line(points):
+    """Least squares over a size sweep: (base_ns, ns_per_byte, r_squared).
 
     A fit rather than the endpoints, because the endpoints are the two points
     most exposed to a single bad sample and the whole sweep is cheap to use.
@@ -280,6 +290,107 @@ def fit_sha256(points):
     total = sum((y - mean_y) ** 2 for y in ys)
     r_squared = 1.0 if total == 0.0 else 1.0 - residual / total
     return intercept, slope, r_squared
+
+
+def bytestring_points(measured, family, prefix="entry"):
+    """(bytes, ns) for one bytestring family's sweep, ascending."""
+    points = []
+    for name, row in measured.items():
+        match = BYTESTRING_ROW.match(name)
+        if match and match.group(1) == prefix and match.group(2) == family:
+            points.append((int(match.group(3)), row["real_time"]))
+    return sorted(points)
+
+
+def bytestring_summary(measured):
+    """{family: {"points": [...], "fit": (base, per_byte, r2) or None}}.
+
+    Only families this run measured; a run from before these rows existed has
+    none, and the section is skipped rather than printed empty.
+    """
+    summary = {}
+    for family in BYTESTRING_FAMILIES:
+        points = bytestring_points(measured, family)
+        if points:
+            summary[family] = {"points": points, "fit": fit_line(points)}
+    return summary
+
+
+def print_bytestring(summary, measured, sd):
+    """The length sweep, per family, with the base/per-byte split it gives."""
+    print()
+    header = (f"{'bytestring bytes':<28}{'entry ns':>11}{'±':>9}"
+              f"{'ns/byte>0':>12}{'gas':>8}")
+    print(header)
+    print("-" * len(header))
+    for family, entry in summary.items():
+        # Marginal over the family's own zero-length row, not the whole call
+        # divided by its length. The zero row is the per-call base measured
+        # directly, and dividing a call that is mostly base by a small length
+        # reports a per-byte cost an order of magnitude off. Read at every
+        # length rather than taken from the fit, so a per-byte term that is
+        # not constant shows as a column that drifts rather than as one R2.
+        zero = dict(entry["points"]).get(0)
+        for size, ns in entry["points"]:
+            row_name = f"entry/{family}/{size}"
+            error = sd.get(row_name, {}).get("real_time", 0.0)
+            gas = int(measured[row_name].get("gas", 0))
+            rate = f"{(ns - zero) / size:>12.4f}" \
+                if size and zero is not None else f"{'-':>12}"
+            label = f"{family}/{size}"
+            print(f"{label:<28}{ns:>11.1f}{error:>9.2f}{rate}{gas:>8}")
+
+    print()
+    for family, entry in summary.items():
+        fit = entry["fit"]
+        if not fit:
+            print(f"{family}: too few points to fit")
+            continue
+        base, per_byte, r_squared = fit
+        # Signed, so a family whose slope is a hair below zero reads as one
+        # rather than as "+ -0.0000". A flat family is what GetLen should be,
+        # and its R2 is meaningless when there is no slope to explain.
+        print(f"{family}: {base:.1f} ns, {per_byte:+.4f} ns/byte "
+              f"(R2={r_squared:.4f})")
+
+    # What the pair says. A Get copies the item into guest memory and a GetLen
+    # reads the same item without copying it, so the difference across the
+    # sweep is the copy -- and a GetLen whose own cost tracks length would mean
+    # the read path is doing work its signature does not admit to.
+    get = summary.get("BytestringGet", {}).get("fit")
+    get_len = summary.get("BytestringGetLen", {}).get("fit")
+    if get and get_len:
+        print()
+        print(f"the copy: BytestringGet costs {get[1] - get_len[1]:.4f} "
+              "ns/byte more than BytestringGetLen, which reads the same item "
+              "and copies none of it")
+        print(f"BytestringGetLen's own slope is {get_len[1]:.4f} ns/byte; a "
+              "length-independent read is supposed to be flat")
+
+    # What the schedule charges, against what the sweep measured. None of the
+    # three appears in kSyscallGasCostSchedule, so each is billed
+    # kSyscallBaseCost and nothing per byte -- and ns/gas across the sweep is
+    # how far apart a flat charge and a linear cost end up, in the same terms
+    # the SHA256 section reports its own spread.
+    print()
+    for family, entry in summary.items():
+        rates = []
+        charged = set()
+        for size, ns in entry["points"]:
+            gas = int(measured[f"entry/{family}/{size}"].get("gas", 0))
+            charged.add(gas)
+            if gas:
+                rates.append(ns / gas)
+        if not rates:
+            print(f"{family}: charged nothing at any length")
+        elif len(charged) == 1:
+            print(f"{family}: charged {charged.pop()} gas at every length; "
+                  f"ns/gas runs {min(rates):.4f} .. {max(rates):.4f} "
+                  f"({max(rates) / min(rates):.0f}x spread within one "
+                  "syscall)")
+        else:
+            print(f"{family}: ns/gas runs {min(rates):.4f} .. "
+                  f"{max(rates):.4f}")
 
 
 def warm_syscall_for(family):
@@ -723,7 +834,7 @@ def print_crosscheck(data, openssl):
 
     lines = []
     sha_rates = speed["sha256"]
-    fit = fit_sha256(sha256_points(measured))
+    fit = fit_line(sha256_points(measured))
     if sha_rates and fit:
         # openssl's own per-call overhead is amortised away at its largest
         # block, which is where its number is closest to pure compression --
@@ -850,7 +961,7 @@ def print_table(data):
             gas = int(measured[f"entry/SHA256/{size}"].get("gas", 0))
             rate = ns / gas if gas else float("inf")
             print(f"{size:<28}{ns:>11.1f}{error:>9.2f}{gas:>12}{rate:>10.4f}")
-        fit = fit_sha256(points)
+        fit = fit_line(points)
         if fit:
             base, per_byte, r_squared = fit
             print()
@@ -866,6 +977,10 @@ def print_table(data):
                 print(f"ns/gas across the sweep: {min(rates):.4f} .. "
                       f"{max(rates):.4f} ({max(rates) / min(rates):.0f}x "
                       "spread within one syscall)")
+
+    bytestrings = bytestring_summary(measured)
+    if bytestrings:
+        print_bytestring(bytestrings, measured, sd)
 
     storage = storage_summary(measured, sd)
     if storage:
@@ -1030,7 +1145,7 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
     proposal["base_ns"] = worst_ns
     proposal["base_from"] = worst_name
 
-    fit = fit_sha256(sha256_points(measured))
+    fit = fit_line(sha256_points(measured))
     if fit:
         base_ns, per_byte_ns, r_squared = fit
         # SHA256's own cost is what it adds on top of a crossing every syscall

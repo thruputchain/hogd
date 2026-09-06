@@ -67,6 +67,35 @@ def synthetic_run(push_ns=300.0, first_touch_ns=120.0, walk_ns=15.0,
             "benchmarks": benchmarks}
 
 
+BYTESTRING_SIZES = (0, 32, 256, 1024, 4096, 16384, 32768)
+
+
+def synthetic_bytestring_run(set_base=180.0, set_per_byte=0.05,
+                             get_base=150.0, get_per_byte=0.03,
+                             get_len_base=110.0):
+    """A run whose bytestring sweeps lie exactly on known lines.
+
+    GetLen is deliberately flat: it reads the item's length and copies none of
+    it, so a slope there is a finding rather than a shape to fit around.
+    """
+    benchmarks = [row("entry/GetBlockHeight", 100.0),
+                  row("entry/GetMsgSender", 105.0),
+                  row("entry/GetCurrentAddress", 110.0)]
+    for size in BYTESTRING_SIZES:
+        # gas is the flat kSyscallBaseCost every syscall pays: none of the
+        # three has a schedule entry, so the charge does not move with length
+        # even though the cost does.
+        benchmarks.append(row(f"entry/BytestringSet/{size}",
+                              set_base + size * set_per_byte, gas=50))
+        benchmarks.append(row(f"entry/BytestringGet/{size}",
+                              get_base + size * get_per_byte, gas=50))
+        benchmarks.append(row(f"entry/BytestringGetLen/{size}",
+                              get_len_base, gas=50))
+    return {"context": {"hogd_host": "test", "engine_fingerprint": "fp",
+                        "hogd_production_build": "true"},
+            "benchmarks": benchmarks}
+
+
 def synthetic_calibration(baseline_ns=1.6):
     return {"provenance": {"host": "test", "engine_fingerprint": "fp",
                            "production_build": True},
@@ -96,6 +125,66 @@ class StorageParsingTest(unittest.TestCase):
         self.assertEqual(list(pairs), ["NNIntSetAdd"])
         self.assertEqual([k for k, _, _ in pairs["NNIntSetAdd"]],
                          [1, 16, 256, 4096])
+
+
+class BytestringTest(unittest.TestCase):
+    def setUp(self):
+        self.run = synthetic_bytestring_run()
+        self.measured = report.rows(self.run)
+
+    def test_sweep_rows_are_not_syscall_table_rows(self):
+        names = report.syscall_names(self.measured)
+        self.assertIn("GetBlockHeight", names)
+        self.assertFalse([n for n in names if n.startswith("Bytestring")])
+
+    def test_sweep_rows_do_not_move_the_gating_baseline(self):
+        # The baseline is the median of the cheapest crossing rows. GetLen at
+        # 110 ns is cheaper than two of the three stateless rows, so a
+        # bytestring row that leaked into syscall_names would pull it down and
+        # every committed guard ratio with it.
+        sd = report.stddevs(self.run)
+        self.assertEqual(report.guard_baseline(self.measured, sd), 105.0)
+
+    def test_points_are_grouped_by_family_and_sorted(self):
+        points = report.bytestring_points(self.measured, "BytestringSet")
+        self.assertEqual([size for size, _ in points], list(BYTESTRING_SIZES))
+        self.assertNotEqual(points,
+                            report.bytestring_points(self.measured,
+                                                     "BytestringGet"))
+
+    def test_fit_recovers_the_base_and_the_per_byte_term(self):
+        summary = report.bytestring_summary(self.measured)
+        self.assertEqual(sorted(summary), ["BytestringGet",
+                                           "BytestringGetLen",
+                                           "BytestringSet"])
+        base, per_byte, r_squared = summary["BytestringSet"]["fit"]
+        self.assertAlmostEqual(base, 180.0, places=6)
+        self.assertAlmostEqual(per_byte, 0.05, places=9)
+        self.assertAlmostEqual(r_squared, 1.0, places=9)
+
+    def test_a_flat_family_fits_a_zero_slope(self):
+        summary = report.bytestring_summary(self.measured)
+        base, per_byte, _ = summary["BytestringGetLen"]["fit"]
+        self.assertAlmostEqual(base, 110.0, places=6)
+        self.assertAlmostEqual(per_byte, 0.0, places=12)
+
+    def test_a_run_without_the_rows_has_no_section(self):
+        self.assertEqual(report.bytestring_summary(report.rows(
+            synthetic_run())), {})
+
+    def test_report_names_the_copy_and_says_the_calls_are_unpriced(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            report.print_table(self.run)
+        text = buffer.getvalue()
+        # 0.03 - 0.00: the copy is the whole of Get's slope here.
+        self.assertIn("0.0300 ns/byte more than BytestringGetLen", text)
+        self.assertIn("BytestringSet: 180.0 ns, +0.0500 ns/byte", text)
+        # 180 ns at zero length against 1818.4 ns at 32768, both for 50 gas.
+        self.assertIn("BytestringSet: charged 50 gas at every length", text)
+        self.assertIn("10x spread within one syscall", text)
+        self.assertIn("BytestringGetLen: charged 50 gas at every length",
+                      text)
 
 
 class StorageFitTest(unittest.TestCase):
@@ -370,6 +459,24 @@ class GateTests(unittest.TestCase):
         status, text = self.check(run, path)
         self.assertEqual(status, 0)
         self.assertIn("guard(s) hold", text)
+
+    def test_the_bytestring_sweep_is_not_guarded(self):
+        # Adding rows to the benchmark must not change the committed
+        # reference: these are a length sweep of three syscalls, and gating
+        # each point would both bloat the reference and make the gating
+        # baseline -- the median of the cheapest crossing rows -- depend on
+        # where a sweep happened to start.
+        run = guardable_run()
+        plain = reference_text(run)
+        for entry in synthetic_bytestring_run()["benchmarks"]:
+            if entry["name"].startswith("entry/Bytestring"):
+                run["benchmarks"].append(entry)
+                run["benchmarks"].append(
+                    row(entry["name"], entry["real_time"] * 0.002,
+                        aggregate="stddev"))
+        text = reference_text(run)
+        self.assertNotIn("Bytestring", text)
+        self.assertEqual(text, plain)
 
     def test_reference_guards_both_syscalls_and_storage(self):
         text = reference_text(guardable_run())
