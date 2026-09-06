@@ -121,34 +121,14 @@ constexpr static uint64_t kVerifySignatureBlockCost = 131;
 // docs/rv32/rv32-gas-calibration.md.
 constexpr static uint64_t kStorageAccessCost = 150;
 
-// What copying a bytestring costs, per block of kBytestringBlockBytes, on top
-// of the storage access every bytestring call already pays.
-//
-// A block rather than a per-byte rate, for the reason SHA256HashBlockCost
-// gives: the measured rate is a fraction of a gas unit (0.039 ns/byte against
-// a 1.62 ns unit on hog10), and a fraction needs a divisor, which is one more
-// billing-relevant constant in the digest. 512 bytes is chosen rather than
-// forced by anything -- unlike a hash's compression block -- so it is hashed
-// into the schedule alongside the costs, not static_asserted beside them.
-//
-// Two constants, unlike the single kStorageAccessCost that covers an NNInt
-// read and write alike. There the difference was in the first touch, which is
-// a fact about the frame's state; here it is the copy itself, which is a
-// function of the argument: a write allocates a Bytestring and copies into it
-// before handing it to the item view, so it moves the bytes twice and measures
-// almost exactly twice a read's rate (0.0388 against 0.0196 ns/byte). One
-// constant sized to the write bills a read at 2.3x, past the band the rest of
-// this table holds to.
-//
-// Each is sized to the dearest band its sweep measured, not to an average.
-// The per-byte cost is not constant -- it nearly doubles between a 1 KiB item
-// and a 32 KiB one as the item stops fitting in cache -- so there is no single
-// rate to be right about, and the schedule takes the dear end the same way it
-// rounds everywhere else. Against the measured cost plus each call's own ecall
-// crossing that bills 1.18-1.87x for a write and 1.34-1.85x for a read, and a
-// flat 2.21x for a length read, which takes no block term and so carries
-// kStorageAccessCost's own deliberate margin alone -- the ratio
-// NNIntGetNoLoad already sits at. Nothing undercharges at any length.
+// What copying a bytestring costs, per block, on top of the storage access
+// every bytestring call already pays. A block rather than a per-byte rate
+// because the measured rate is a fraction of a gas unit, and a fraction needs
+// a divisor. 512 is chosen rather than forced by a hash's geometry, so it is
+// hashed into the schedule with the costs. Two constants because a write moves
+// the bytes twice and measures almost exactly twice a read's rate; each is
+// sized to the dearest band its sweep measured, the per-byte cost not being
+// constant across it.
 //
 // See docs/rv32/rv32-gas-calibration.md, "Bytestrings: the length axis".
 constexpr static uint64_t kBytestringBlockBytes = 512;
@@ -170,23 +150,14 @@ constexpr static uint64_t kSHA512PadBytes = 17;
 constexpr static uint64_t kEd25519HashedPrefixBytes = 64;
 static_assert(kSHA512BlockBytes == 128 && kSHA512PadBytes == 17);
 
-// Costs a syscall computes from its arguments, as opposed to the flat
-// constants above.
-//
-// Grouped as static members rather than left as free lambdas so they follow
-// the repository's ordinary function naming; the previous shape needed a
-// readability-identifier-naming suppression to keep its CamelCase.
-// The largest length any of these may be handed.
-//
-// Every argument they price is the length of a guest span, which
-// rv32::kMaxMemoryBytes caps at 64 KiB, and a bytestring is capped further by
-// the configured limit. This sits far above that and far below the point where
-// the arithmetic could overflow a uint64_t -- the dearest reachable cost is
-// under 10^5 against a 10^19 range -- so a length beyond it is a caller passing
-// something that is not a guest length, which is a bug to catch rather than a
-// case to price.
+// The largest length a cost function may be handed. Every argument they price
+// is a guest span length, which rv32::kMaxMemoryBytes caps at 64 KiB, so
+// anything past this is a caller passing something that is not a length -- a
+// bug to catch, not a case to price.
 constexpr static uint64_t kMaxCostBytes = uint64_t{1} << 32;
 
+// Costs a syscall computes from its arguments, as opposed to the flat
+// constants above.
 struct GasCost {
   // Blocks a hash compresses, padding included. One helper per hash rather
   // than one taking the geometry as arguments: three interchangeable uint64_t
@@ -221,9 +192,8 @@ struct GasCost {
            kSHA256HashBlockCost * (bytes_len / kSHA256BlockBytes);
   }
 
-  // Blocks a bytestring occupies, rounded up, with an empty one costing none:
-  // a zero-length write copies nothing, and its storage access is already
-  // charged.
+  // Rounded up, with an empty bytestring costing none: it copies nothing, and
+  // its storage access is charged anyway.
   static constexpr uint64_t bytestring_blocks(uint64_t bytes_len)
   {
     assert(bytes_len <= kMaxCostBytes);
@@ -232,12 +202,6 @@ struct GasCost {
 
   // Charged on the bytes copied: the value handed to a write, and for a read
   // the bytes that reach the guest rather than the buffer it offered.
-  //
-  // Pricing the buffer would be more predictable, since a guest knows it
-  // before it calls. It is not used because bytestring_read_into, the SDK's
-  // zero-alloc read, passes spare_capacity_mut() -- its whole scratch buffer
-  // -- so a 32-byte read out of a 4 KiB scratch would cost eight blocks, and
-  // the path that allocates nothing would be the dearer one.
   static constexpr uint64_t bytestring_set(uint64_t bytes_len)
   {
     return kStorageAccessCost +
