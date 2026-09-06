@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -45,7 +46,11 @@ namespace hogd {
 // and a condition variable for the delay so a stop request is prompt.
 class IndexerLatencyProbe {
 public:
-  static constexpr auto kPollInterval = std::chrono::microseconds(200);
+  // ~1k watermark reads per second against the indexer under test. Tighter
+  // sharpens each sample, but the RPC load starts to perturb the very path
+  // being measured; anything the fsync-per-block ingest can do is well above
+  // 1ms, so this loses nothing that matters.
+  static constexpr auto kPollInterval = std::chrono::milliseconds(1);
 
   // Fails loudly: a probe that silently measured nothing would publish an
   // empty metric that reads exactly like "latency is fine".
@@ -147,14 +152,15 @@ private:
     return std::move(*client_res);
   }
 
-  // Nearest-rank, so every reported value is a value that actually occurred
-  // rather than an interpolation between two blocks.
+  // Nearest-rank: the ceil(q * N)th smallest sample, 1-indexed, so every
+  // reported value is one that actually occurred rather than an interpolation
+  // between two blocks. For N = 10, p90 is the 9th sample, not the maximum.
+  // Callers guarantee [sorted] is non-empty.
   static uint64_t quantile(const std::vector<uint64_t> &sorted, double q)
   {
-    const size_t rank =
-        std::min(sorted.size() - 1,
-                 static_cast<size_t>(q * static_cast<double>(sorted.size())));
-    return sorted[rank];
+    const auto rank =
+        static_cast<size_t>(std::ceil(q * static_cast<double>(sorted.size())));
+    return sorted[std::clamp<size_t>(rank, 1, sorted.size()) - 1];
   }
 
   static uint64_t mean(const std::vector<uint64_t> &samples)

@@ -63,4 +63,11 @@ if [ "$(grep -c '^indexer_latency_summary:' indexer_latency_log)" -eq 0 ]; then
   echo 'no indexer latency summaries in runner log' >&2
   exit 1
 fi
+# A summary with no observed blocks, or with committed heights the indexer
+# never served, is a broken run, not a fast one. Refuse to publish it as data.
+if grep -Eq 'blocks=0[^0-9]|unobserved=[1-9]' indexer_latency_log; then
+  echo 'indexer latency summary reports unobserved or zero blocks:' >&2
+  grep -E 'blocks=0[^0-9]|unobserved=[1-9]' indexer_latency_log >&2
+  exit 1
+fi
 ./scripts/log_metric.sh indexer_commit_latency indexer_latency_log
