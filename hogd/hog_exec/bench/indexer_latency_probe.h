@@ -40,15 +40,11 @@ namespace hogd {
 // to one poll interval; [kPollInterval] keeps that error small against
 // anything the ingest path can produce.
 //
-// The polling thread makes blocking RPC calls the same way
-// [IndexerPullController] does: a plain thread, a blocking [()] on the call,
-// and a condition variable for the delay so a stop request is prompt.
+// The poller is a plain thread making blocking RPC calls, paced by a
+// condition variable so a stop request is prompt.
 class IndexerLatencyProbe {
 public:
-  // ~1k watermark reads per second against the indexer under test. Tighter
-  // sharpens each sample, but the RPC load starts to perturb the very path
-  // being measured; anything the fsync-per-block ingest can do is well above
-  // 1ms, so this loses nothing that matters.
+  // ~1k RPCs/s against the indexer under test; tighter starts to perturb it.
   static constexpr auto kPollInterval = std::chrono::milliseconds(1);
 
   // Fails loudly: a probe that silently measured nothing would publish an
