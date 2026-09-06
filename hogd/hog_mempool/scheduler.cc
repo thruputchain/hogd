@@ -1108,17 +1108,34 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
     std::vector<Removal> txs;
     size_t removed = 0;
   };
+  // Resolve cache entries in parallel before grouping. A serial million-key
+  // cache walk otherwise dominates the batched erase it is preparing.
+  std::vector<std::shared_ptr<TxValue>> values(tx_hashes.size());
+  {
+    WorkerPool::JobScope scope;
+    const auto chunks = make_chunks(tx_hashes.size(), available_parallelism());
+    scope.reserve(chunks.size());
+    for (const ChunkRange &chunk : chunks) {
+      scope.submit([&, chunk] {
+        for (size_t i = chunk.start; i < chunk.end; ++i) {
+          auto [value, cache_lock] = txs_.find(tx_hashes[i]);
+          CHECK_PTR(value);
+          values[i] = *value;
+        }
+      });
+    }
+    scope.wait();
+  }
   std::unordered_map<ContractAddress, size_t, SipHash24Hasher> indices;
   std::vector<Group> groups;
-  for (const TransactionHash &hash : tx_hashes) {
-    auto [value, cache_lock] = txs_.find(hash);
-    CHECK_PTR(value);
-    const auto &account = (*value)->tx.tx.invocation.invoked_address;
+  for (size_t i = 0; i < tx_hashes.size(); ++i) {
+    const auto &account = values[i]->tx.tx.invocation.invoked_address;
     auto [it, inserted] = indices.try_emplace(account, groups.size());
     if (inserted) {
       groups.push_back(Group{.account = account});
     }
-    groups[it->second].txs.push_back(Removal{.hash = hash, .value = *value});
+    groups[it->second].txs.push_back(
+        Removal{.hash = tx_hashes[i], .value = std::move(values[i])});
   }
 
   {
@@ -1165,5 +1182,18 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   // Retained transaction references are destroyed after releasing the global
   // lock, so freeing their payloads does not extend the critical section.
   cg.reset();
+  // Destruction can release millions of payload allocations. Keep it off the
+  // serial return path as well as outside the scheduler critical section.
+  WorkerPool::JobScope cleanup;
+  const auto chunks = make_chunks(groups.size(), available_parallelism());
+  cleanup.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    cleanup.submit([&, chunk] {
+      for (size_t i = chunk.start; i < chunk.end; ++i) {
+        groups[i].txs.clear();
+      }
+    });
+  }
+  cleanup.wait();
 }
 } // namespace hogd
