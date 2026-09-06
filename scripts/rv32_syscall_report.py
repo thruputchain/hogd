@@ -269,13 +269,18 @@ def sha256_points(measured, prefix="entry"):
     return sorted(points)
 
 
-def fit_line(points):
+def fit_line(points, min_points=MIN_SWEEP_POINTS):
     """Least squares over a size sweep: (base_ns, ns_per_byte, r_squared).
 
     A fit rather than the endpoints, because the endpoints are the two points
     most exposed to a single bad sample and the whole sweep is cheap to use.
+
+    `min_points` is lowered by callers fitting a sub-range that is short by
+    construction -- the settled tail of a bytestring sweep is often three
+    points. Note that r_squared is not a goodness-of-fit statement when the
+    x-values span decades; see top_leverage.
     """
-    if len(points) < MIN_SWEEP_POINTS:
+    if len(points) < min_points:
         return None
     xs = [float(p[0]) for p in points]
     ys = [float(p[1]) for p in points]
@@ -302,75 +307,199 @@ def bytestring_points(measured, family, prefix="entry"):
     return sorted(points)
 
 
-def bytestring_summary(measured):
-    """{family: {"points": [...], "fit": (base, per_byte, r2) or None}}.
+def top_leverage(points):
+    """The share of a sweep's x-variance carried by its longest point.
+
+    Why R2 is not a goodness-of-fit statement on a sweep like this one. The
+    lengths span three decades, so the top point sits enormously far from the
+    mean and the fit is very nearly a line through it: R2 then reports whether
+    that one point landed near the line, which it does by construction, and
+    says nothing about the six points that carry the pricing.
+    """
+    xs = [float(x) for x, _ in points]
+    if len(xs) < 2:
+        return None
+    mean_x = statistics.fmean(xs)
+    var_x = sum((x - mean_x) ** 2 for x in xs)
+    if var_x == 0.0:
+        return None
+    return (max(xs) - mean_x) ** 2 / var_x
+
+
+def interval_slopes(points):
+    """[(lo, hi, ns per byte)] between successive lengths in a sweep.
+
+    The per-byte cost read in each band rather than fitted once across all of
+    them -- the same reason the storage sweeps read their per-key cost at
+    every K. A bytestring's per-byte cost is not constant: it roughly doubles
+    between the short lengths and the long ones as the item stops fitting in
+    cache, and one slope through that describes none of the bands. The first
+    band, from zero, is not a per-byte cost at all; it is the fixed cost of
+    the call having a length, divided by a short length.
+    """
+    return [(lo, hi, (hi_ns - lo_ns) / (hi - lo))
+            for (lo, lo_ns), (hi, hi_ns) in zip(points, points[1:])
+            if hi > lo]
+
+
+def bytestring_summary(measured, sd=None):
+    """Per family: the measured base, and the per-byte cost band by band.
+
+    Built from directly measured quantities. A least squares line over the
+    whole sweep is carried alongside as a cross-check -- `fit`, and the
+    `intercept_error` by which it disagrees with the measured base -- but
+    nothing here is derived from it, because on a sweep spanning three decades
+    a line describes neither end well while still scoring R2 near 1.
 
     Only families this run measured; a run from before these rows existed has
     none, and the section is skipped rather than printed empty.
     """
+    sd = sd or {}
     summary = {}
     for family in BYTESTRING_FAMILIES:
         points = bytestring_points(measured, family)
-        if points:
-            summary[family] = {"points": points, "fit": fit_line(points)}
+        if not points:
+            continue
+        base = dict(points).get(0)
+        intervals = interval_slopes(points)
+        fit = fit_line(points)
+        entry = {
+            "points": points,
+            "base_ns": base,
+            "intervals": intervals,
+            "flat": bytestring_is_flat(family, points, sd),
+            "fit": fit,
+            "leverage": top_leverage(points),
+        }
+        # The first band is the fixed cost of a nonzero length, not a rate.
+        if base is not None and points[0][0] == 0 and len(points) > 1:
+            entry["first_jump_bytes"] = points[1][0]
+            entry["first_jump_ns"] = points[1][1] - base
+            rates = [r for lo, _, r in intervals if lo > 0]
+        else:
+            rates = [r for _, _, r in intervals]
+        if rates and min(rates) > 0:
+            entry["per_byte_lo"] = min(rates)
+            # What a price has to cover. The dearest band, not the average of
+            # them -- the same rule the storage schedule builds under.
+            entry["per_byte_hi"] = max(rates)
+            entry["growth"] = max(rates) / min(rates)
+        if fit and base is not None:
+            entry["intercept_error"] = fit[0] - base
+        summary[family] = entry
     return summary
 
 
+def bytestring_is_flat(family, points, sd):
+    """Whether a family's cost does not move with length at all.
+
+    Measured, not assumed: `BytestringGetLen` reads an item's length and
+    copies none of it, so it should be flat, and a run where it is not is a
+    finding rather than a fit to widen. Judged against the row's own stddev
+    where the run has repetitions, and against 1% of the base otherwise --
+    a single-repetition run reports no deviation and would call everything
+    flat on a zero error bar.
+    """
+    base = dict(points).get(0)
+    if base is None or len(points) < 2:
+        return False
+    top_x, top_ns = points[-1]
+    gap = abs(top_ns - base)
+    top_sd = sd.get(f"entry/{family}/{top_x}", {}).get("real_time", 0.0)
+    base_sd = sd.get(f"entry/{family}/0", {}).get("real_time", 0.0)
+    noise = 2.0 * math.hypot(top_sd, base_sd)
+    return gap <= max(noise, 0.01 * base)
+
+
 def print_bytestring(summary, measured, sd):
-    """The length sweep, per family, with the base/per-byte split it gives."""
+    """The length sweep, per family, and what can honestly be read off it."""
     print()
     header = (f"{'bytestring bytes':<28}{'entry ns':>11}{'±':>9}"
-              f"{'ns/byte>0':>12}{'gas':>8}")
+              f"{'ns/B since prev':>17}{'gas':>8}")
     print(header)
     print("-" * len(header))
     for family, entry in summary.items():
-        # Marginal over the family's own zero-length row, not the whole call
-        # divided by its length. The zero row is the per-call base measured
-        # directly, and dividing a call that is mostly base by a small length
-        # reports a per-byte cost an order of magnitude off. Read at every
-        # length rather than taken from the fit, so a per-byte term that is
-        # not constant shows as a column that drifts rather than as one R2.
-        zero = dict(entry["points"]).get(0)
+        # The rate since the previous length, not the whole call divided by
+        # its length: the base is most of a short call, and dividing it in
+        # reports a per-byte cost an order of magnitude off. Reading it band
+        # by band is also what makes a rate that grows with length visible in
+        # the table rather than buried in one fitted slope.
+        rates = {hi: rate for _, hi, rate in entry["intervals"]}
         for size, ns in entry["points"]:
             row_name = f"entry/{family}/{size}"
             error = sd.get(row_name, {}).get("real_time", 0.0)
             gas = int(measured[row_name].get("gas", 0))
-            rate = f"{(ns - zero) / size:>12.4f}" \
-                if size and zero is not None else f"{'-':>12}"
+            rate = f"{rates[size]:>17.4f}" if size in rates else f"{'-':>17}"
             label = f"{family}/{size}"
             print(f"{label:<28}{ns:>11.1f}{error:>9.2f}{rate}{gas:>8}")
 
-    print()
     for family, entry in summary.items():
-        fit = entry["fit"]
-        if not fit:
-            print(f"{family}: too few points to fit")
+        print()
+        if entry["base_ns"] is None:
+            print(f"{family}: no zero-length row, so nothing to read the "
+                  "per-byte cost against")
             continue
-        base, per_byte, r_squared = fit
-        # Signed, so a family whose slope is a hair below zero reads as one
-        # rather than as "+ -0.0000". A flat family is what GetLen should be,
-        # and its R2 is meaningless when there is no slope to explain.
-        print(f"{family}: {base:.1f} ns, {per_byte:+.4f} ns/byte "
-              f"(R2={r_squared:.4f})")
+        print(f"{family}: base {entry['base_ns']:.1f} ns, measured at zero "
+              "length")
+        if entry["flat"]:
+            print("  flat: the longest row is within noise of the base, so "
+                  "there is no per-byte cost to price")
+        else:
+            if "first_jump_ns" in entry:
+                jump = entry["first_jump_ns"]
+                width = entry["first_jump_bytes"]
+                print(f"  the first {width} bytes cost {jump:.1f} ns "
+                      f"({jump / width:.4f} ns/byte) -- a fixed cost of the "
+                      "call having a length, not a rate")
+            if "per_byte_hi" in entry:
+                trend = bytestring_trend(entry)
+                print(f"  per byte {entry['per_byte_lo']:.4f} .. "
+                      f"{entry['per_byte_hi']:.4f} ns across the rest of the "
+                      f"sweep ({entry['growth']:.1f}x, {trend})")
+                print(f"  a price has to cover the dearest band: "
+                      f"{entry['per_byte_hi']:.4f} ns/byte")
+            else:
+                print("  the per-byte cost does not resolve in this sweep")
+        # No cross-check to print for a flat family: there is no slope to
+        # check, and an R2 near zero is what a flat line correctly produces.
+        fit = None if entry["flat"] else entry["fit"]
+        if fit:
+            fit_base, per_byte, r_squared = fit
+            leverage = entry.get("leverage")
+            # Printed as a cross-check; nothing above is derived from it. Two
+            # numbers say why not. The intercept has a directly measured
+            # counterpart, so where it lands is a real check -- and it is the
+            # one that bites, since the fixed first-band cost is folded into
+            # it. R2 has no such counterpart on a sweep this wide, and the
+            # leverage figure is what that costs.
+            detail = f"R2={r_squared:.4f}"
+            if leverage is not None:
+                detail += (f", but the {entry['points'][-1][0]}-byte point "
+                           f"carries {100 * leverage:.0f}% of the x-variance")
+            print(f"  one line over the whole sweep would be {fit_base:.1f} "
+                  f"ns + {per_byte:.4f} ns/byte ({detail})")
+            error = entry.get("intercept_error")
+            if error is not None:
+                share = 100 * error / entry["base_ns"]
+                print(f"  its intercept is {error:+.1f} ns ({share:+.1f}%) "
+                      "against the measured base, which is the check R2 "
+                      "cannot make")
 
     # What the pair says. A Get copies the item into guest memory and a GetLen
-    # reads the same item without copying it, so the difference across the
-    # sweep is the copy -- and a GetLen whose own cost tracks length would mean
-    # the read path is doing work its signature does not admit to.
-    get = summary.get("BytestringGet", {}).get("fit")
-    get_len = summary.get("BytestringGetLen", {}).get("fit")
-    if get and get_len:
+    # reads the same item without copying it, so the difference is the copy.
+    get = summary.get("BytestringGet")
+    get_len = summary.get("BytestringGetLen")
+    if get and get.get("per_byte_hi") and get_len and get_len["flat"]:
         print()
-        print(f"the copy: BytestringGet costs {get[1] - get_len[1]:.4f} "
-              "ns/byte more than BytestringGetLen, which reads the same item "
-              "and copies none of it")
-        print(f"BytestringGetLen's own slope is {get_len[1]:.4f} ns/byte; a "
-              "length-independent read is supposed to be flat")
+        print(f"the copy: BytestringGet reaches {get['per_byte_hi']:.4f} "
+              "ns/byte, and BytestringGetLen, which reads the same item and "
+              "copies none of it, is flat at every length -- so the whole "
+              "per-byte cost is the copy")
 
     # What the schedule charges, against what the sweep measured. None of the
     # three appears in kSyscallGasCostSchedule, so each is billed
     # kSyscallBaseCost and nothing per byte -- and ns/gas across the sweep is
-    # how far apart a flat charge and a linear cost end up, in the same terms
+    # how far apart a flat charge and a growing cost end up, in the same terms
     # the SHA256 section reports its own spread.
     print()
     for family, entry in summary.items():
@@ -391,6 +520,23 @@ def print_bytestring(summary, measured, sd):
         else:
             print(f"{family}: ns/gas runs {min(rates):.4f} .. "
                   f"{max(rates):.4f}")
+
+
+def bytestring_trend(entry):
+    """How the per-byte cost moves across the sweep, as a phrase.
+
+    Which direction it moves is the finding, not a detail: a cost that grows
+    with length cannot be priced from its cheap end, and one that shrinks
+    cannot be priced from its dear end without overcharging every small write.
+    """
+    if entry["growth"] <= STORAGE_FLATNESS_TOLERANCE:
+        return "flat within tolerance"
+    rates = [rate for lo, _, rate in entry["intervals"] if lo > 0]
+    if len(rates) >= 2 and rates[-1] > rates[0]:
+        return "RISING with length"
+    if len(rates) >= 2 and rates[-1] < rates[0]:
+        return "FALLING with length"
+    return "NOT FLAT"
 
 
 def warm_syscall_for(family):
@@ -978,7 +1124,7 @@ def print_table(data):
                       f"{max(rates):.4f} ({max(rates) / min(rates):.0f}x "
                       "spread within one syscall)")
 
-    bytestrings = bytestring_summary(measured)
+    bytestrings = bytestring_summary(measured, sd)
     if bytestrings:
         print_bytestring(bytestrings, measured, sd)
 

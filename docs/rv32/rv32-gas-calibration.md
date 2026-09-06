@@ -1480,38 +1480,72 @@ change to the memory map or to the ceiling fails the build instead of silently
 overrunning -- which is how an earlier sweep here put a public key on top of a
 signature.
 
-**What the first local run says.** From the development container, which is a
-shared 4-core VM and not the bench pool, so these are shapes and not numbers:
+**What the sweep says.** From hog10, seven repetitions, run-to-run deviation
+0.1-0.4%:
 
-| family | fit |
-|---|---|
-| `BytestringSet` | 301.6 ns + 0.0618 ns/byte (R2=0.9988) |
-| `BytestringGet` | 271.5 ns + 0.0288 ns/byte (R2=0.9860) |
-| `BytestringGetLen` | 270.3 ns, flat (slope -0.0000, R2=0.04) |
+| bytes | `BytestringSet` | `BytestringGet` | `BytestringGetLen` |
+|---:|---:|---:|---:|
+| 0 | 142.2 | 149.4 | 132.2 |
+| 32 | 166.4 | 153.4 | 132.5 |
+| 256 | 171.2 | 154.1 | 131.9 |
+| 1024 | 186.8 | 163.4 | 132.3 |
+| 4096 | 282.6 | 202.7 | 132.1 |
+| 16384 | 748.4 | 443.6 | 132.2 |
+| 32768 | 1383.9 | 757.9 | 132.2 |
 
 Three readings, in the order they matter:
 
-- `BytestringGetLen` is flat, as it should be. Its R2 is near zero because
-  there is no slope to explain, which is the result rather than a bad fit.
-- A Set costs about twice a Get per byte. A Get copies the item into guest
-  memory; a Set allocates a fresh `Bytestring`, copies into it, and hands it to
-  the item view, so it moves the bytes twice.
-- **All three are charged the same 50 gas at every length.** None of them
-  appears in `kSyscallGasCostSchedule`, so each is billed `kSyscallBaseCost`
-  and nothing per byte. Across the sweep that is an 8x spread in ns/gas within
-  `BytestringSet` alone -- a 32 KiB write costs eight times per gas what a
-  zero-length one does, for the same price. That is the same shape the
-  zero-gas reads have, with a length axis making it arbitrarily wide.
+- **`BytestringGetLen` is flat**, to within 0.6 ns across three decades of
+  length, on error bars of 0.1-0.4 ns. It reads a length and copies nothing,
+  and the measurement says exactly that. Its whole per-byte gap against
+  `BytestringGet` is therefore the copy.
+- **Neither of the other two is linear in length.** Read band by band, a
+  `BytestringSet` costs 0.0203 ns/byte between 256 and 1024 bytes and 0.0388
+  between 16384 and 32768; a `BytestringGet` goes from 0.0031 to 0.0196, a
+  factor of six. The cost per byte grows as the item stops fitting in cache.
+  On top of that, the first 32 bytes cost 24.2 ns for a Set -- a fixed cost of
+  the call having a length at all, not a rate.
+- **All three are charged the same 50 gas at every length.** None appears in
+  `kSyscallGasCostSchedule`, so each is billed `kSyscallBaseCost` and nothing
+  per byte. That is a 10x spread in ns/gas within `BytestringSet` alone: a
+  32 KiB write costs ten times per gas what a zero-length one does, for the
+  same price. Same shape as the zero-gas reads, with a length axis making it
+  arbitrarily wide.
 
-The report prints the marginal cost at every length (`ns/byte>0`, each row
-against the family's own zero-length row) beside the fit, for the reason the
-NNInt sweeps read their per-key cost at every K: a per-byte term that is not
-constant shows as a column that drifts, where R2 over a sweep this wide would
-hide it. The `0` and `32` rows are where to look -- a zero-length Set skips the
-allocation, so the fitted intercept sits above the measured zero row and the
-32-byte marginal is not the slope.
+**Why the report does not fit one line to this, and why R2 is not the check.**
+A least squares line over the whole sweep scores R2 = 0.9991 for `Set` and
+0.9985 for `Get`. Both numbers are meaningless here, for a reason that is
+arithmetic rather than judgement: the lengths span three decades, so the
+32768-byte point sits 67% of the x-variance away from the mean on its own and
+the fit is very nearly a line through it. R2 then reports whether that one
+point landed near the line, which it does by construction.
 
-Pricing them is the next step and needs bench-pool numbers, not these.
+What the fit is actually doing is visible in a quantity R2 cannot see. Its
+intercept is a per-call base, and the zero-length row measures that base
+directly, to a tenth of a nanosecond:
+
+| family | fitted intercept | measured 0-byte row | error bar |
+|---|---:|---:|---:|
+| `BytestringSet` | 148.5 ns | 142.2 ns | ±0.29 |
+| `BytestringGet` | 144.4 ns | 149.4 ns | ±0.11 |
+
+Both are off by 3-4%, tens of sigma, while scoring 0.999. The fixed first-band
+cost is part of why: a line has nowhere to put it except the intercept.
+
+So the report reads the sweep the way the storage sweeps above are read --
+band by band, not through one slope -- and prints, per family: the base as
+measured at zero length; the first band as a cost rather than a rate; the
+per-byte cost across every later band with its range, its growth factor and
+its direction; and the dearest band, which is what a price has to cover. The
+whole-sweep line is still printed, labelled as a cross-check, beside the two
+numbers that say how much to trust it: the leverage of the top point, and the
+intercept's disagreement with the measured base.
+
+Pricing them is the next step. A flat per-byte term will not fit a cost that
+doubles across the sweep, so the open question is whether to price the dearest
+band everywhere -- simple, and overcharges a 1 KiB write by about 2x -- or to
+charge in size classes. Whichever it is, `BytestringGetLen` needs no per-byte
+term at all.
 
 ### What follows
 

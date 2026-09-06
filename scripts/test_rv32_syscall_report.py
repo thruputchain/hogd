@@ -96,6 +96,56 @@ def synthetic_bytestring_run(set_base=180.0, set_per_byte=0.05,
             "benchmarks": benchmarks}
 
 
+def stepped_bytestring_run(base=142.0, step=23.0, per_byte=0.037):
+    """A sweep with the shape the real rows have, not a clean line.
+
+    base + a fixed step for any nonzero length + a per-byte term. This is what
+    a bytestring write actually costs, and it is exactly the shape a single
+    least-squares line describes badly while reporting R2 near 1: the step
+    lands in the intercept, and the top point carries so much of the
+    x-variance that nothing about the fit says so.
+    """
+    benchmarks = [row("entry/GetBlockHeight", 70.0, gas=50),
+                  row("entry/GetCalldataLen", 72.0, gas=50),
+                  row("entry/GetMsgSender", 71.0, gas=50)]
+    for size in BYTESTRING_SIZES:
+        ns = base + (step + per_byte * size if size else 0.0)
+        benchmarks.append(row(f"entry/BytestringSet/{size}", ns, gas=50))
+    for entry in list(benchmarks):
+        benchmarks.append(row(entry["name"], entry["real_time"] * 0.002,
+                              aggregate="stddev"))
+    return {"context": {"hogd_host": "test", "engine_fingerprint": "fp"},
+            "benchmarks": benchmarks}
+
+
+def rising_bytestring_run(base=142.0, step=23.0, rates=(0.020, 0.020, 0.031,
+                                                          0.038, 0.039)):
+    """A sweep whose per-byte cost grows with length, as the real one does.
+
+    On hog10 a BytestringSet costs 0.0203 ns/byte between 256 and 1024 bytes
+    and 0.0388 between 16384 and 32768 -- it nearly doubles as the item stops
+    fitting in cache. No single slope describes that, and a least-squares line
+    through it still scores R2 above 0.999.
+    """
+    benchmarks = [row("entry/GetBlockHeight", 70.0, gas=50),
+                  row("entry/GetCalldataLen", 72.0, gas=50),
+                  row("entry/GetMsgSender", 71.0, gas=50)]
+    ns = base
+    benchmarks.append(row("entry/BytestringSet/0", ns, gas=50))
+    ns += step
+    benchmarks.append(row(f"entry/BytestringSet/{BYTESTRING_SIZES[1]}", ns,
+                          gas=50))
+    for (lo, hi), rate in zip(zip(BYTESTRING_SIZES[1:], BYTESTRING_SIZES[2:]),
+                              rates):
+        ns += rate * (hi - lo)
+        benchmarks.append(row(f"entry/BytestringSet/{hi}", ns, gas=50))
+    for entry in list(benchmarks):
+        benchmarks.append(row(entry["name"], entry["real_time"] * 0.002,
+                              aggregate="stddev"))
+    return {"context": {"hogd_host": "test", "engine_fingerprint": "fp"},
+            "benchmarks": benchmarks}
+
+
 def synthetic_calibration(baseline_ns=1.6):
     return {"provenance": {"host": "test", "engine_fingerprint": "fp",
                            "production_build": True},
@@ -178,13 +228,111 @@ class BytestringTest(unittest.TestCase):
             report.print_table(self.run)
         text = buffer.getvalue()
         # 0.03 - 0.00: the copy is the whole of Get's slope here.
-        self.assertIn("0.0300 ns/byte more than BytestringGetLen", text)
-        self.assertIn("BytestringSet: 180.0 ns, +0.0500 ns/byte", text)
+        self.assertIn("BytestringGet reaches 0.0300 ns/byte", text)
+        self.assertIn("copies none of it, is flat", text)
+        self.assertIn("BytestringSet: base 180.0 ns", text)
         # 180 ns at zero length against 1818.4 ns at 32768, both for 50 gas.
         self.assertIn("BytestringSet: charged 50 gas at every length", text)
         self.assertIn("10x spread within one syscall", text)
         self.assertIn("BytestringGetLen: charged 50 gas at every length",
                       text)
+
+
+class BytestringShapeTest(unittest.TestCase):
+    """The checks that bite on a sweep spanning three decades.
+
+    R2 does not. The longest length sits so far from the mean that the fit is
+    very nearly a line through it, so R2 reports whether that one point landed
+    near the line -- which it does by construction -- while saying nothing
+    about the six that carry the pricing. These pin the quantities that do say
+    something, on data whose true shape is known.
+    """
+
+    def setUp(self):
+        self.run = stepped_bytestring_run()
+        self.measured = report.rows(self.run)
+        self.summary = report.bytestring_summary(self.measured,
+                                                 report.stddevs(self.run))
+        self.entry = self.summary["BytestringSet"]
+
+    def test_the_longest_point_carries_most_of_the_variance(self):
+        self.assertGreater(report.top_leverage(self.entry["points"]), 0.6)
+
+    def test_r_squared_is_near_one_even_though_the_line_is_wrong(self):
+        # The premise of every other assertion here. A fit that misplaces the
+        # per-call base by 23 ns still scores above 0.999, which is why
+        # nothing is derived from it and why it is never printed unqualified.
+        self.assertGreater(self.entry["fit"][2], 0.999)
+
+    def test_the_base_is_the_measured_row_not_the_intercept(self):
+        self.assertAlmostEqual(self.entry["base_ns"], 142.0, places=6)
+        self.assertNotAlmostEqual(self.entry["fit"][0], 142.0, places=1)
+
+    def test_the_intercept_error_catches_what_r_squared_misses(self):
+        # The fixed step lands in the intercept, so the fit puts the base well
+        # above a directly measured number. That gap is the check R2 cannot
+        # make, and it is the one that fires here.
+        self.assertGreater(self.entry["intercept_error"], 5.0)
+
+    def test_the_first_band_is_reported_as_a_cost_not_a_rate(self):
+        # 23 ns of step plus 32 bytes of real work reads as 0.76 ns/byte,
+        # twenty times the true rate. Calling it a rate is how a step gets
+        # priced as a per-byte term.
+        self.assertEqual(self.entry["first_jump_bytes"], 32)
+        self.assertAlmostEqual(self.entry["first_jump_ns"],
+                               23.0 + 0.037 * 32, places=6)
+
+    def test_the_per_byte_cost_excludes_the_first_band(self):
+        self.assertAlmostEqual(self.entry["per_byte_hi"], 0.037, places=6)
+        self.assertAlmostEqual(self.entry["growth"], 1.0, places=6)
+
+    def test_a_run_without_repetitions_is_not_called_flat(self):
+        # Every stddev absent reads as a zero error bar, which would make any
+        # sweep "within noise of the base". The 1%-of-base fallback is what
+        # stops a single-repetition run from reporting no per-byte cost.
+        no_sd = report.bytestring_summary(self.measured, {})
+        self.assertFalse(no_sd["BytestringSet"]["flat"])
+
+    def test_the_report_shows_its_working(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            report.print_table(self.run)
+        text = buffer.getvalue()
+        self.assertIn("base 142.0 ns, measured at zero length", text)
+        self.assertIn("not a rate", text)
+        self.assertIn("% of the x-variance", text)
+        self.assertIn("against the measured base", text)
+
+
+class BytestringGrowthTest(unittest.TestCase):
+    def setUp(self):
+        self.run = rising_bytestring_run()
+        self.summary = report.bytestring_summary(report.rows(self.run),
+                                                 report.stddevs(self.run))
+        self.entry = self.summary["BytestringSet"]
+
+    def test_a_growing_per_byte_cost_is_reported_as_a_range(self):
+        self.assertAlmostEqual(self.entry["per_byte_lo"], 0.020, places=6)
+        self.assertAlmostEqual(self.entry["per_byte_hi"], 0.039, places=6)
+        self.assertAlmostEqual(self.entry["growth"], 0.039 / 0.020, places=6)
+
+    def test_the_direction_is_named(self):
+        self.assertEqual(report.bytestring_trend(self.entry),
+                         "RISING with length")
+
+    def test_the_price_covers_the_dearest_band(self):
+        # Not the average of the bands, and not the whole-sweep slope. The
+        # storage schedule builds from the dearest point for the same reason.
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            report.print_table(self.run)
+        text = buffer.getvalue()
+        self.assertIn("a price has to cover the dearest band: 0.0390", text)
+        self.assertIn("RISING with length", text)
+
+    def test_one_slope_would_still_score_well(self):
+        # The whole point: R2 near 1 on data that is visibly not a line.
+        self.assertGreater(self.entry["fit"][2], 0.99)
 
 
 class StorageFitTest(unittest.TestCase):
