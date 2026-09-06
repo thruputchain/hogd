@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -38,8 +39,6 @@
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
-#include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
@@ -92,11 +91,6 @@ namespace hogd {
 namespace {
 
 constexpr uint64_t kPlentyOfGas = 1'000'000'000;
-// The mock serves a genesis tip at height 0, so the executing block is 1.
-constexpr BlockExecutionContext kBenchBlockExecution{
-    .block_height = 1,
-    .block_timepoint = 1'700'000'000,
-};
 constexpr uint32_t kGuestMemoryBytes = rv32::kMaxMemoryBytes;
 // Output pointers the guest hands the syscall. Two, because GetCalldataLen
 // writes through two.
@@ -338,49 +332,17 @@ public:
   }
 };
 
-// Everything a SystemCallHandler needs, and nothing else.
+// Everything a SystemCallHandler needs.
 //
-// What answers a snapshot-cache miss.
-//
-// Every row whose key is already in the cache measures the same thing either
-// way, so those keep the light server: it seeds an item with a map insert and
-// costs nothing at startup. A row measuring the miss itself does not -- what a
-// miss costs is what the database does -- so those take a real hog_db over a
-// real ramdb, which is what production reads from. See "What the cold row is,
-// and is not" in docs/rv32/rv32-gas-calibration.md.
-enum class ItemBackend : uint8_t {
-  kSnapshotServer,
-  kHogDb,
-};
-
-// Deliberately not NativeContractTestFramework: that stands up genesis and the
-// contract loader, neither of which a stateless syscall touches, and both of
-// which would have to be linked and paid for at startup. This is the same shape
-// native_contract_test.cc uses -- an in-process server and event aggregator
-// behind the ordinary proxies -- so the handler under measurement is the
-// production class, constructed the production way. Under kHogDb the server
-// answering is a real database rather than a map.
+// Set up the way every other test sets one up: NativeContractTestFramework
+// against a real hog_db, which runs genesis and opens the block. The one row
+// that measures a snapshot-cache miss then measures a database rather than a
+// stand-in map; every other row has its key in a frame or in the cache and
+// never reaches it while timed.
 class SyscallBenchFixture {
 public:
-  explicit SyscallBenchFixture(
-      ItemBackend backend = ItemBackend::kSnapshotServer)
+  SyscallBenchFixture()
   {
-    const uint16_t item_port = start_item_backend(backend);
-    const auto event_exec_port = event_server_exec_server_.start_server(0);
-    db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = item_port});
-    event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_exec_port});
-    event_server_.open_block(0)();
-    runtime_context_ = std::make_unique<NoChildRuntimeContext>();
-    snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(0, kBenchBlockExecution,
-                                               *db_proxy_);
-    handler_ = std::make_unique<SystemCallHandler>(
-        Transaction{}, *snapshot_cache_,
-        PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-        PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
-        ProposalModeCtor{}, *runtime_context_);
 
     // Pin the db tip. Production entry paths (invoke(), root_invoke()) await
     // init_db_tip() before dispatching anything, because the pin is the
@@ -393,7 +355,7 @@ public:
     // static, so its constructor runs inside whichever benchmark row runs
     // first, and panicking there truncates the JSON mid-write and costs every
     // row in the run.
-    if (auto pinned = handler_->init_db_tip()(); !pinned.has_value()) {
+    if (auto pinned = handler_.init_db_tip()(); !pinned.has_value()) {
       setup_error_ = std::format("could not pin the db tip: system error {}",
                                  pinned.error().raw_code());
       return;
@@ -444,10 +406,10 @@ public:
     }
     // Completed, not discarded: finish_frame() returns a MaybeAsync, and
     // dropping one on its Async arm abandons the coroutine unrun.
-    (void)handler_->finish_frame(InvokeStatus<void>{},
-                                 std::move(inner_trace_))();
-    (void)handler_->finish_frame(InvokeStatus<void>{},
-                                 std::move(outer_trace_))();
+    (void)handler_.finish_frame(InvokeStatus<void>{},
+                                std::move(inner_trace_))();
+    (void)handler_.finish_frame(InvokeStatus<void>{},
+                                std::move(outer_trace_))();
   }
 
   SyscallBenchFixture(const SyscallBenchFixture &) = delete;
@@ -455,7 +417,7 @@ public:
   SyscallBenchFixture(SyscallBenchFixture &&) = delete;
   SyscallBenchFixture &operator=(SyscallBenchFixture &&) = delete;
 
-  [[nodiscard]] SystemCallHandler &handler() { return *handler_; }
+  [[nodiscard]] SystemCallHandler &handler() { return handler_; }
 
   // Why the fixture is unusable, if it is. Empty when setup completed. Every
   // row checks this before touching the handler: a fixture that could not be
@@ -513,7 +475,7 @@ public:
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   push_frame(ContractAddress address)
   {
-    return handler_->start_frame(
+    return handler_.start_frame(
         Invocation{
             .invoked_address = address,
             .entrypoint = ContractEntrypointID{},
@@ -540,7 +502,7 @@ public:
     // happens when it is invoked; dropping one on its Async arm abandons the
     // coroutine with the frame still open, and has_value() on the undriven
     // MaybeAsync answers which arm it took rather than whether it succeeded.
-    auto finished = handler_->finish_frame(result, std::move(trace))();
+    auto finished = handler_.finish_frame(result, std::move(trace))();
     if (!finished.has_value()) {
       return std::format("could not finish a frame: system error {}",
                          finished.error().raw_code());
@@ -623,48 +585,30 @@ private:
     return model;
   }
 
-  // Bring up the chosen backend and answer with the port the executor's
-  // DatabaseProxy should talk to. Exactly one of the two is ever constructed:
-  // a hog_db opens a temporary ramdb and starts three servers, which no row on
-  // the light path should pay for.
-  uint16_t start_item_backend(ItemBackend backend)
-  {
-    if (backend == ItemBackend::kHogDb) {
-      hog_db_.emplace(kHogDbHeapBytes);
-      // Same block id and height the snapshot server serves. Proposal mode
-      // to match the handler's ProposalModeCtor below.
-      hog_db_->prepare_block(/*block_id=*/0, /*tip_block_height=*/0,
-                             bench_network_config(),
-                             BlockExecutionMode::kBlockExecutionModeProposal);
-      return hog_db_->exec_port();
-    }
-    snapshot_server_.emplace(/*block_id=*/0, /*tip_block_height=*/0,
-                             bench_network_config());
-    snapshot_server_->start_server(/*port=*/0);
-    return snapshot_server_->port();
-  }
-
-  // Put one item where this fixture's backend will find it.
   void seed_item(AddressAndKey const &addrkey, StorageItemWrapper item)
   {
-    if (hog_db_.has_value()) {
-      hog_db_->write_item(addrkey, std::make_shared<const StorageItemWrapper>(
+    framework_.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
                                        std::move(item)));
-      return;
-    }
-    snapshot_server_->impl()->setup_create_item(addrkey, std::move(item));
   }
 
-  std::optional<BlockSnapshotServer> snapshot_server_;
-  std::optional<HogdbWrapper> hog_db_;
-  TestEventAggregator event_server_;
-  TestEventAggregatorExecServer event_server_exec_server_ =
-      TestEventAggregatorExecServer(event_server_);
-  std::unique_ptr<DatabaseProxy> db_proxy_;
-  std::unique_ptr<EventServerProxy> event_server_proxy_;
-  std::unique_ptr<RuntimeContext> runtime_context_;
-  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-  std::unique_ptr<SystemCallHandler> handler_;
+  NativeContractTestFramework framework_{
+      /*log=*/false,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      TestDB::kHogDb,
+      /*empty_genesis=*/true,
+      /*genesis_cost_model=*/std::nullopt,
+      bench_network_config(),
+      kBulkRpcMaxMessageSize,
+      kHogDbHeapBytes,
+  };
+  Transaction tx_{};
+  // SystemCallHandler is neither movable nor copyable, so it is built in place
+  // here rather than assigned in the constructor body. Declaration order is
+  // load-bearing: the framework and the context both have to outlive it.
+  std::unique_ptr<RuntimeContext> runtime_context_ =
+      std::make_unique<NoChildRuntimeContext>();
+  SystemCallHandler handler_ =
+      framework_.make_new_system_call_handler(tx_, *runtime_context_);
   std::unique_ptr<InvocationFrameTrace> outer_trace_;
   std::unique_ptr<InvocationFrameTrace> inner_trace_;
   std::string setup_error_;
@@ -1051,37 +995,19 @@ shared_fixture()
   return fixture;
 }
 
-// The fixture whose misses reach a real hog_db.
-//
-// Separate from shared_fixture() rather than a mode on it: the two hold
-// different snapshot caches, and a row measuring a miss wants a cache holding
-// only its own keys. Also lazy, so a run selecting no db-backed row never
-// opens a database or pays its seeding.
-SyscallBenchFixture &
-shared_db_fixture()
-{
-  static SyscallBenchFixture fixture(ItemBackend::kHogDb);
-  return fixture;
-}
-
 // The fixture, or nullptr with this row already failed. Every benchmark starts
 // here: fixture construction is lazy and shared, so a setup step that could not
 // complete surfaces on whichever row ran first and would otherwise take the
 // process down with it.
 SyscallBenchFixture *
-fixture_or_fail(benchmark::State &state, SyscallBenchFixture &fixture)
+fixture_or_fail(benchmark::State &state)
 {
+  SyscallBenchFixture &fixture = shared_fixture();
   if (!fixture.setup_error().empty()) {
     state.SkipWithError(fixture.setup_error());
     return nullptr;
   }
   return &fixture;
-}
-
-SyscallBenchFixture *
-fixture_or_fail(benchmark::State &state)
-{
-  return fixture_or_fail(state, shared_fixture());
 }
 
 // Fail one benchmark row, naming the syscall and the code, and leave the rest
@@ -1674,8 +1600,7 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
 void
 bm_nnint_cold(benchmark::State &state)
 {
-  SyscallBenchFixture *fixture_ptr =
-      fixture_or_fail(state, shared_db_fixture());
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
   if (fixture_ptr == nullptr) {
     return;
   }
