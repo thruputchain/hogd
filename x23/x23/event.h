@@ -171,6 +171,13 @@ struct WriteBuffer : RefCount {
   // buffer writes.
   std::atomic_bool waiting_for_read_{false};
 
+  size_t enqueue(Buf buf)
+  {
+    auto ptr = writer_.take();
+    ptr->append(std::move(buf));
+    return ptr->nbytes();
+  }
+
   Errno write(CoroPoll &cp, BorrowedFd fd, Buf buf)
   {
     writer_->append(std::move(buf));
@@ -352,6 +359,7 @@ protected:
   void wake();
   RefPtr<ReadBuffer> get_reader(BorrowedFd fd);
   RefPtr<WriteBuffer> get_writer(BorrowedFd fd);
+  friend class RpcStreamImpl;
   std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>> get_rw(BorrowedFd fd);
 
 private:

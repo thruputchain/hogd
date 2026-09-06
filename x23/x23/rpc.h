@@ -87,13 +87,14 @@
 #include <cstdio>
 #include <exception>
 #include <expected>
-#include <map>
+#include <memory_resource>
 #include <print>
 #include <stop_token>
 #include <string>
 #include <sys/socket.h>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 
 #include <x23/async.h>
@@ -329,15 +330,22 @@ protected:
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
+  void send_request(Buf record);
   Detached reader(SLOC_DECL0);
   virtual void log_message(std::string msg) = 0;
 
 private:
   struct ClientState {
     std::uint32_t lastxid_{};
-    std::map<std::uint32_t, CpuHinted<CoroCB<Buf>>> xidmap_;
+    // Access, including allocation, is serialized by cstate_.
+    std::pmr::unsynchronized_pool_resource storage_;
+    std::pmr::unordered_map<std::uint32_t, CpuHinted<CoroCB<Buf>>> xidmap_{
+        &storage_};
   };
   MVar<ClientState> cstate_;
+  RefPtr<WriteBuffer> writer_;
+  std::atomic_bool flush_scheduled_{false};
+  Buf read_marker_;
 
   void send_msg(const rpc_msg &msg, const is_xdr_type auto &...x)
   {
@@ -455,7 +463,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     putbe(record.data() + 4, msg.xid = gen_call_xid(a));
 
     logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
-    cp_->awrite(fd_, std::move(record));
+    send_request(std::move(record));
 
     Buf rbuf;
     BufView rv;

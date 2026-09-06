@@ -529,8 +529,18 @@ serialize_to(Buf *bufp, const is_xdr_serializable auto &x)
 Buf
 serialize(const is_xdr_serializable auto &...x)
 {
+  size_t size = 0;
+  [[maybe_unused]] auto add_size = [&](const auto &arg) {
+    const size_t n = xdr_size(arg);
+    if (n > size_t(PTRDIFF_MAX) - size)
+      throw XdrBadInput("serialized arguments exceed maximum buffer size");
+    size += n;
+  };
+  (add_size(x), ...);
   Buf ret;
-  (serialize_to(&ret, x), ...);
+  ret.resize_uninitialized(size);
+  detail::Serializer serializer{ret.data()};
+  (serializer(x), ...);
   return ret;
 }
 

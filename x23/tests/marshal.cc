@@ -238,6 +238,19 @@ check_box()
 int
 main()
 {
+  {
+    std::uint32_t a = 0x12345678;
+    BoundedStr<> b = "padding";
+    std::uint64_t c = 0x123456789abcdef0;
+    Buf expected;
+    serialize_to(&expected, a);
+    serialize_to(&expected, b);
+    serialize_to(&expected, c);
+    if (serialize(a, b, c) != expected || !serialize().empty() ||
+        !serialize(std::monostate{}).empty() ||
+        serialize(std::monostate{}, a, std::monostate{}) != serialize(a))
+      throw std::runtime_error("multi-argument serialization mismatch");
+  }
   check_sizes();
   round_trip();
   projected_view();

@@ -386,11 +386,13 @@ private:
   };
   struct QueueState {
     std::deque<QueueItem> q;
+    size_t sleepers{0};
     bool need_consumed_signal{false};
     std::condition_variable nonempty;
     std::condition_variable consumed;
   };
   using QPtr = MVar<QueueState>::Ptr;
+  static void notify_ready(QPtr &ptr);
   struct alignas(hardware_destructive_interference_size) RunQueue
     : public MVar<QueueState> {
     // qtime of oldest Job at front of queue, or kEmpty if empty.  Kept

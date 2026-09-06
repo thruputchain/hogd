@@ -27,6 +27,7 @@ RpcStreamImpl::RpcStreamImpl(CoroPoll &cp, UniqueFd fd)
   : cp_(cp), fd_(std::move(fd))
 {
   set_nonblock(fd_);
+  writer_ = cp_->get_writer(fd_);
 }
 
 RpcStreamImpl::~RpcStreamImpl()
@@ -42,17 +43,49 @@ RpcStreamImpl::fail()
   if (!ss_.request_stop())
     return;
 
-  auto oldmap = std::exchange(cstate_->xidmap_, {});
+  auto oldmap = [&] {
+    auto cs = cstate_.take();
+    // Once stopped, gen_call_xid cannot allocate from the pool again.
+    // Keep the resource alive here, but invoke callbacks outside the lock.
+    return std::move(cs->xidmap_);
+  }();
   for (auto [_xid, cb] : oldmap)
     cb(Buf{});
   cp_->poison(fd_);
 }
 
+void
+RpcStreamImpl::send_request(Buf record)
+{
+  if (!writer_ || ss_.stop_requested()) {
+    fail();
+    return;
+  }
+  if (writer_->enqueue(std::move(record)) >= WriteBuffer::kFlushThreshold) {
+    if (writer_->flush(*cp_, fd_))
+      fail();
+    return;
+  }
+  if (!flush_scheduled_.exchange(true)) {
+    // A stream reference keeps both the descriptor and poller alive until
+    // the queued flush completes. Never queue a bare descriptor: it can be
+    // reused by a different connection during shutdown.
+    [](RefPtr<RpcStreamImpl> self) -> Detached {
+      co_await self->cp_->pool_.bg();
+      // Clear before flushing so a concurrent append schedules more work.
+      self->flush_scheduled_ = false;
+      if (!self->ss_.stop_requested() &&
+          self->writer_->flush(*self->cp_, self->fd_))
+        self->fail();
+    }(RefPtr<RpcStreamImpl>{*this});
+  }
+}
+
 Async<std::expected<std::uint32_t, Errno>>
 RpcStreamImpl::read_uint(SLOC_ARG0)
 {
-  Buf b;
-  auto r = co_await cp_->read(fd_, &b, 4, true, true);
+  read_marker_.clear();
+  auto r = co_await cp_->read(fd_, &read_marker_, 4, true, true);
   if (!r) {
     debug("read_uint(fd {}): {}", get_fd(), r.error());
     co_return r.error();
@@ -62,7 +95,7 @@ RpcStreamImpl::read_uint(SLOC_ARG0)
       debug("read_uint(fd {}): received only {} bytes", get_fd(), *r);
     co_return Errno{ENOMSG};
   }
-  co_return getbe<std::uint32_t>(b.data());
+  co_return getbe<std::uint32_t>(read_marker_.data());
 }
 
 Async<Errno>

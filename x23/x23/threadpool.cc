@@ -109,6 +109,18 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
 }
 
 void
+ThreadPool::notify_ready(QPtr &ptr)
+{
+  if (!ptr)
+    return;
+  const size_t count = std::min(ptr->q.size(), ptr->sleepers);
+  auto *nonempty = &ptr->nonempty;
+  ptr.reset();
+  for (size_t i = 0; i < count; ++i)
+    nonempty->notify_one();
+}
+
+void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
   x23assert(!ss_.stop_requested());
@@ -119,20 +131,13 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  std::condition_variable *nonempty = nullptr;
   for (auto &j : jobs) {
     int affinity_queue = llc_map->bucket(j.cpuhint);
-    if (nonempty && qno(lq) != affinity_queue) {
-      lq.reset();
-      nonempty->notify_all();
-      nonempty = nullptr;
-    }
-    if (enqueue_selected(lq, j, now))
-      nonempty = &lq->nonempty;
+    if (qno(lq) != affinity_queue)
+      notify_ready(lq);
+    enqueue_selected(lq, j, now);
   }
-  lq.reset();
-  if (nonempty)
-    nonempty->notify_all();
+  notify_ready(lq);
 }
 
 void
@@ -142,11 +147,8 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  bool wasempty = enqueue_selected(lq, job, now);
-  auto *nonempty = &lq->nonempty;
-  lq.reset();
-  if (wasempty)
-    nonempty->notify_all();
+  enqueue_selected(lq, job, now);
+  notify_ready(lq);
 }
 
 void
@@ -311,14 +313,19 @@ ThreadPool::Worker::getq() noexcept
     if (pool_->ss_.stop_requested())
       return {};
     if (count >= kTimeouts.size() || nqueues == 1) {
+      ++ptr->sleepers;
       ptr.wait(ptr->nonempty);
+      --ptr->sleepers;
       continue;
     }
 
     // Wait a little bit, and if we timeout try work stealing
     auto delay = kTimeouts[count++];
     if (delay.count() != 0 && ptr.with_lock([&ptr, delay](auto &ul) {
-          return ptr->nonempty.wait_for(ul, delay);
+          ++ptr->sleepers;
+          auto result = ptr->nonempty.wait_for(ul, delay);
+          --ptr->sleepers;
+          return result;
         }) == std::cv_status::no_timeout)
       continue;
 
