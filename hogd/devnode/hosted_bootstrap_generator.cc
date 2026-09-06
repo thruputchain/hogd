@@ -192,6 +192,7 @@ write_network_config(json::Writer &w, NetworkConfig const &config)
           uint64_string(max_cross_invoke_depth(config)));
   w.field("max_new_contracts_per_tx",
           uint64_string(max_new_contracts_per_tx(config)));
+  w.field("max_bytestring_len", uint64_string(max_bytestring_len(config)));
 }
 
 std::string

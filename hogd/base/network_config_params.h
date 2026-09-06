@@ -10,6 +10,7 @@
 
 #include "hogd/base/log.h"
 #include "network_config.hh"
+#include "storage_item.hh"
 
 namespace hogd {
 
@@ -46,6 +47,8 @@ stated_param(NetworkConfigV0 const &config, ConfigParamID id)
     return param.max_cross_invoke_depth();
   case ConfigParamID::kConfigParamMaxNewContractsPerTx:
     return param.max_new_contracts_per_tx();
+  case ConfigParamID::kConfigParamMaxBytestringLen:
+    return param.max_bytestring_len();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", index);
 }
@@ -63,6 +66,9 @@ make_param(ConfigParamID id, uint32_t value)
     break;
   case ConfigParamID::kConfigParamMaxNewContractsPerTx:
     out.max_new_contracts_per_tx() = value;
+    break;
+  case ConfigParamID::kConfigParamMaxBytestringLen:
+    out.max_bytestring_len() = value;
     break;
   }
   return out;
@@ -113,12 +119,23 @@ max_new_contracts_per_tx(NetworkConfig const &config)
       .value_or(kDefaultMaxNewContractsPerTx);
 }
 
+// Bytes one bytestring storage item may hold. Checked where a bytestring is
+// written; `kBytestringCeilingLen` is what every node must be able to decode.
+inline uint32_t
+max_bytestring_len(NetworkConfig const &config)
+{
+  return detail::stated_param(config.v0(),
+                              ConfigParamID::kConfigParamMaxBytestringLen)
+      .value_or(static_cast<uint32_t>(kDefaultMaxBytestringLen));
+}
+
 // The parameters in force, flattened from the list that states them.
 // Resolve once where a tip is pinned; the invoke path reads these per frame.
 struct NetworkConfigParams {
   uint32_t max_sha256_buffers;
   uint32_t max_cross_invoke_depth;
   uint32_t max_new_contracts_per_tx;
+  uint32_t max_bytestring_len;
 };
 
 // The parameters `config` puts in force, flattened.
@@ -129,6 +146,7 @@ resolve_config_params(NetworkConfig const &config)
       .max_sha256_buffers = max_sha256_buffers(config),
       .max_cross_invoke_depth = max_cross_invoke_depth(config),
       .max_new_contracts_per_tx = max_new_contracts_per_tx(config),
+      .max_bytestring_len = max_bytestring_len(config),
   };
 }
 
@@ -144,6 +162,8 @@ in_force(NetworkConfigParams const &params, ConfigParamID id)
     return params.max_cross_invoke_depth;
   case ConfigParamID::kConfigParamMaxNewContractsPerTx:
     return params.max_new_contracts_per_tx;
+  case ConfigParamID::kConfigParamMaxBytestringLen:
+    return params.max_bytestring_len;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }

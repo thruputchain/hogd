@@ -15,6 +15,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "storage_item.hh"
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/network_config_params.h"
@@ -362,6 +363,15 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
           "commit in one message",
           stated, admissible);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // The ceiling bounds the wire type, so a genesis naming more would let a
+  // contract write a bytestring no peer could carry.
+  if (const uint32_t stated =
+          max_bytestring_len(genesis_configuration.network_config);
+      stated > static_cast<uint32_t>(kBytestringCeilingLen)) {
+    error("genesis max_bytestring_len {} exceeds the protocol ceiling of {}",
+          stated, kBytestringCeilingLen);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);

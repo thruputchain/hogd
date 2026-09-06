@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -553,7 +554,9 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
           ADD_FAILURE() << "Abort payload should be available";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (*status.value().value() != abort_payload) {
+        // Compared as ranges: the return buffer and a bytestring are
+        // separately bounded XDR types, so they are not the same type.
+        if (!std::ranges::equal(*status.value().value(), abort_payload)) {
           ADD_FAILURE() << "Abort payload content mismatch";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
