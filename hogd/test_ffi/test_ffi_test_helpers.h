@@ -82,39 +82,34 @@ make_mocked_handler(void *db, void *rc)
                                      source_tx_hash.data(), 1);
 }
 
-// Open a mock invocation frame on a mocked handler, with the whole result.
-inline OpenMockInvocationFrameResult
-open_frame_result(void *syscall_handler, Invocation const &invocation,
-                  int32_t flags = 0)
+// Open a mock invocation frame on a mocked handler.
+inline TestFFIErrorCode
+open_frame(void *syscall_handler, Invocation const &invocation,
+           int32_t flags = 0)
 {
   auto serialized = x23::serialize(invocation);
   FFISerializedInvocation ffi = {
       .data = serialized.data(),
       .len = static_cast<uint32_t>(serialized.size()),
   };
-  return open_mock_invocation_frame(syscall_handler, ffi, flags);
+  return open_mock_invocation_frame(syscall_handler, ffi, flags).ffi_error_code;
 }
 
-// Open a mock invocation frame, keeping only the FFI-level code. Use this to
-// open a frame that should succeed; a production refusal also reports
-// kTestFFIErrorCodeNone here, so pair it with expect_frame_refused() below
-// rather than reading "no FFI error" as "a frame opened".
-inline TestFFIErrorCode
-open_frame(void *syscall_handler, Invocation const &invocation,
-           int32_t flags = 0)
-{
-  return open_frame_result(syscall_handler, invocation, flags).ffi_error_code;
-}
-
-// Expect production to refuse the frame, naming the rule. The test API was
-// used correctly, so no FFI error accompanies it.
-inline void
+// Expect production to refuse the frame, naming the rule; returns the result
+// so a caller can tell whether a regression admitted one after all.
+inline OpenMockInvocationFrameResult
 expect_frame_refused(void *syscall_handler, Invocation const &invocation,
                      SyscallErrorCode code, int32_t flags = 0)
 {
-  auto res = open_frame_result(syscall_handler, invocation, flags);
+  auto serialized = x23::serialize(invocation);
+  FFISerializedInvocation ffi = {
+      .data = serialized.data(),
+      .len = static_cast<uint32_t>(serialized.size()),
+  };
+  auto res = open_mock_invocation_frame(syscall_handler, ffi, flags);
   EXPECT_EQ(res.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(res.syscall_error_code, std::to_underlying(code));
+  return res;
 }
 
 // Register, create, and deploy a kMockTest contract at the given address.

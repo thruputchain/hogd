@@ -89,12 +89,10 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
   };
 
   for (int32_t flags : kRejectedFlags) {
-    auto res = open_frame_result(handler.syscall_handler, invocation, flags);
-    EXPECT_EQ(res.ffi_error_code, kTestFFIErrorCodeNone) << "flags = " << flags;
-    EXPECT_EQ(res.syscall_error_code,
-              std::to_underlying(
-                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput))
-        << "flags = " << flags;
+    SCOPED_TRACE(flags);
+    auto res = expect_frame_refused(
+        handler.syscall_handler, invocation,
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, flags);
     // A refusal is reported in syscall_error_code, so that -- not the FFI
     // code, which is None either way -- is what says a frame was admitted.
     if (res.syscall_error_code ==
