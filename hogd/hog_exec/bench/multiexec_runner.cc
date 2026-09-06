@@ -486,8 +486,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       "hogd/hog_event/hog-event",
       {"--bind-ip", hog_ip(server_addrs[server_idx]), "--mempool-addr",
        std::format("{}:{}", mempool_ip, sched_event_port), "--work-dir",
-       work_dir_str, "--indexer-port",
-       std::to_string(kBenchEventIndexerPort)});
+       work_dir_str, "--indexer-port", std::to_string(kBenchEventIndexerPort)});
   const std::string event_ip = hog_ip(server_addrs[server_idx]);
   server_idx++;
 
@@ -599,8 +598,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   for (auto const &init_block : loadgen_result.success().initialization_txs) {
     run_block(&init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
-              batch_size, parent_block_number, current_block_number,
-              prev_value, &indexer_probe);
+              batch_size, parent_block_number, current_block_number, prev_value,
+              &indexer_probe);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -674,8 +673,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     warn("indexer latency probe: timed out draining committed heights");
   }
   indexer_probe.stop();
-  indexer_probe.report(std::format("nexec={},batch={}", exec_cards.size(),
-                                   batch_size));
+  indexer_probe.report(
+      std::format("nexec={},batch={}", exec_cards.size(), batch_size));
 }
 
 } // namespace

@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
-#include <optional>
 #include <print>
 #include <stop_token>
 #include <string>
@@ -51,20 +50,14 @@ public:
   // Fails loudly: a probe that silently measured nothing would publish an
   // empty metric that reads exactly like "latency is fine".
   explicit IndexerLatencyProbe(const std::string &indexer_addr)
+    : client_(connect(indexer_addr))
   {
-    auto client_res = make_rpc_client<IndexerBlockExplorer1>(
-        server_address_to_sockaddr(indexer_addr), /*retry=*/true)();
-    if (!client_res) {
-      panic("indexer latency probe: connect to {} failed: {}", indexer_addr,
-            client_res.error().error_code().message());
-    }
-    client_.emplace(std::move(*client_res));
     const IndexerBlockExplorerIntroOutcome intro =
-        client_->indexer_block_explorer_intro(version::kHogdProtocol())();
+        client_.indexer_block_explorer_intro(version::kHogdProtocol())();
     if (intro != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
       panic("indexer latency probe: intro rejected ({})", intro);
     }
-    poller_ = std::jthread([this](std::stop_token stop) { poll(stop); });
+    poller_ = std::jthread([this](const std::stop_token &stop) { poll(stop); });
   }
 
   ~IndexerLatencyProbe() { stop(); }
@@ -129,15 +122,31 @@ public:
     }
 
     std::ranges::sort(samples);
-    std::println(
-        "indexer_latency_summary: label={} blocks={} unobserved={} "
-        "min_ns={} p50_ns={} p90_ns={} p99_ns={} max_ns={} mean_ns={}",
-        label, samples.size(), missed, samples.front(), quantile(samples, 0.50),
-        quantile(samples, 0.90), quantile(samples, 0.99), samples.back(),
-        mean(samples));
+    std::println("indexer_latency_summary: label={} blocks={} unobserved={} "
+                 "min_ns={} p50_ns={} p90_ns={} p99_ns={} max_ns={} mean_ns={}",
+                 label, samples.size(), missed, samples.front(),
+                 quantile(samples, 0.50), quantile(samples, 0.90),
+                 quantile(samples, 0.99), samples.back(), mean(samples));
   }
 
 private:
+  using indexer_block_explorer_client_t =
+      IndexerBlockExplorer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  // Connects in the member init list so [client_] is never an empty optional
+  // that every later use has to re-check.
+  static indexer_block_explorer_client_t connect(const std::string &addr)
+  {
+    auto client_res =
+        make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(addr),
+                                               /*retry=*/true)();
+    if (!client_res) {
+      panic("indexer latency probe: connect to {} failed: {}", addr,
+            client_res.error().error_code().message());
+    }
+    return std::move(*client_res);
+  }
+
   // Nearest-rank, so every reported value is a value that actually occurred
   // rather than an interpolation between two blocks.
   static uint64_t quantile(const std::vector<uint64_t> &sorted, double q)
@@ -196,7 +205,7 @@ private:
     query.limit = 1;
     try {
       const TransactionRefPageResult result =
-          client_->get_transactions_by_block(query)();
+          client_.get_transactions_by_block(query)();
       if (result.outcome() != IndexerQueryOutcome::IndexerQueryOk) {
         // Expected while the indexer is still opening its database.
         return -1;
@@ -209,10 +218,7 @@ private:
     }
   }
 
-  using indexer_block_explorer_client_t =
-      IndexerBlockExplorer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  std::optional<indexer_block_explorer_client_t> client_;
+  indexer_block_explorer_client_t client_;
 
   std::mutex mtx_;
   std::condition_variable drained_;
