@@ -169,46 +169,99 @@ constexpr static uint64_t kSHA512PadBytes = 17;
 constexpr static uint64_t kEd25519HashedPrefixBytes = 64;
 static_assert(kSHA512BlockBytes == 128 && kSHA512PadBytes == 17);
 
-// NOLINTBEGIN(readability-identifier-naming)
+// Costs a syscall computes from its arguments, as opposed to the flat
+// constants above.
+//
+// Grouped as static members rather than left as free lambdas so they follow
+// the repository's ordinary function naming; the previous shape needed a
+// readability-identifier-naming suppression to keep its CamelCase.
+struct GasCost {
+  // Blocks a hash compresses, padding included. One helper per hash rather
+  // than one taking the geometry as arguments: three interchangeable uint64_t
+  // parameters is a call that transposes silently. Guarded against overflow on
+  // a length near the top of the range.
+  static constexpr uint64_t sha256_blocks(uint64_t message_bytes)
+  {
+    if (message_bytes > UINT64_MAX - kSHA256PadBytes)
+      return UINT64_MAX / kSHA256BlockBytes;
+    return (message_bytes + kSHA256PadBytes + kSHA256BlockBytes - 1) /
+           kSHA256BlockBytes;
+  }
 
-// Blocks a hash compresses, padding included. One helper per hash rather than
-// one taking the geometry as arguments: three interchangeable uint64_t
-// parameters is a call that transposes silently. Guarded against overflow on a
-// length near the top of the range.
-constexpr static auto SHA256BlockCount =
-    [](uint64_t message_bytes) -> uint64_t {
-  if (message_bytes > UINT64_MAX - kSHA256PadBytes)
-    return UINT64_MAX / kSHA256BlockBytes;
-  return (message_bytes + kSHA256PadBytes + kSHA256BlockBytes - 1) /
-         kSHA256BlockBytes;
-};
+  static constexpr uint64_t sha512_blocks(uint64_t message_bytes)
+  {
+    if (message_bytes > UINT64_MAX - kSHA512PadBytes)
+      return UINT64_MAX / kSHA512BlockBytes;
+    return (message_bytes + kSHA512PadBytes + kSHA512BlockBytes - 1) /
+           kSHA512BlockBytes;
+  }
 
-constexpr static auto SHA512BlockCount =
-    [](uint64_t message_bytes) -> uint64_t {
-  if (message_bytes > UINT64_MAX - kSHA512PadBytes)
-    return UINT64_MAX / kSHA512BlockBytes;
-  return (message_bytes + kSHA512PadBytes + kSHA512BlockBytes - 1) /
-         kSHA512BlockBytes;
-};
+  // Saturating: a length chosen to overflow must bill the maximum, not wrap.
+  static constexpr uint64_t saturating(uint64_t base, uint64_t per_block,
+                                       uint64_t blocks)
+  {
+    if (per_block != 0 && blocks > (UINT64_MAX - base) / per_block)
+      return UINT64_MAX;
+    return base + (blocks * per_block);
+  }
 
-// Saturating: a length chosen to overflow must bill the maximum, not wrap.
-constexpr static auto SaturatingCost = [](uint64_t base, uint64_t per_block,
-                                          uint64_t blocks) -> uint64_t {
-  if (per_block != 0 && blocks > (UINT64_MAX - base) / per_block)
-    return UINT64_MAX;
-  return base + (blocks * per_block);
-};
+  static constexpr uint64_t sha256_hash(uint64_t bytes_len)
+  {
+    return saturating(0, kSHA256HashBlockCost, sha256_blocks(bytes_len));
+  }
 
-constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
-  return SaturatingCost(0, kSHA256HashBlockCost, SHA256BlockCount(bytes_len));
-};
+  // Whole blocks only: a partial tail stays buffered and is charged by
+  // whichever later call completes it. The carry this under-counts by is at
+  // most one block per call, far less than the crossing that call already
+  // paid.
+  static constexpr uint64_t sha256_update(uint64_t bytes_len)
+  {
+    return saturating(kSHA256StreamCost, kSHA256HashBlockCost,
+                      bytes_len / kSHA256BlockBytes);
+  }
 
-// Whole blocks only: a partial tail stays buffered and is charged by whichever
-// later call completes it. The carry this under-counts by is at most one block
-// per call, far less than the crossing that call already paid.
-constexpr static auto SHA256UpdateCost = [](uint64_t bytes_len) -> uint64_t {
-  return SaturatingCost(kSHA256StreamCost, kSHA256HashBlockCost,
-                        bytes_len / kSHA256BlockBytes);
+  // Blocks a bytestring of `bytes_len` occupies, rounded up, with an empty one
+  // costing none: a zero-length write copies nothing, and its storage access
+  // is already charged.
+  static constexpr uint64_t bytestring_blocks(uint64_t bytes_len)
+  {
+    if (bytes_len > UINT64_MAX - (kBytestringBlockBytes - 1))
+      return UINT64_MAX / kBytestringBlockBytes;
+    return (bytes_len + kBytestringBlockBytes - 1) / kBytestringBlockBytes;
+  }
+
+  // Charged on the bytes copied: the value handed to a write, and for a read
+  // the bytes that actually reach the guest rather than the buffer it offered.
+  //
+  // The buffer would be the more predictable rule, and the one the rest of
+  // this table follows -- a bill that is a function of its arguments is a bill
+  // a contract can estimate before running. It is not used here because the
+  // SDK's zero-alloc read path hands the syscall its whole scratch buffer
+  // (bytestring_read_into passes spare_capacity_mut()), so a 32-byte read out
+  // of a 4 KiB scratch would cost eight blocks rather than one, and the path
+  // that allocates nothing would be the dearer one. A guest that wants the
+  // bound before it calls has BytestringGetLen, which is most of why that call
+  // earns its place.
+  static constexpr uint64_t bytestring_set(uint64_t bytes_len)
+  {
+    return saturating(kStorageAccessCost, kBytestringWriteBlockCost,
+                      bytestring_blocks(bytes_len));
+  }
+
+  static constexpr uint64_t bytestring_get(uint64_t bytes_len)
+  {
+    return saturating(kStorageAccessCost, kBytestringReadBlockCost,
+                      bytestring_blocks(bytes_len));
+  }
+
+  static constexpr uint64_t verify_signature(uint64_t message_len)
+  {
+    const uint64_t hashed = message_len > UINT64_MAX - kEd25519HashedPrefixBytes
+                                ? UINT64_MAX - kEd25519HashedPrefixBytes
+                                : message_len + kEd25519HashedPrefixBytes;
+    return saturating(kVerifySignatureBaseCost, kVerifySignatureBlockCost,
+                      sha512_blocks(hashed));
+  }
 };
 
 // Copy compresses nothing; the stream it clones into is the whole cost.
@@ -218,53 +271,6 @@ constexpr static uint64_t kSHA256CopyCost = kSHA256StreamCost;
 // It creates no stream -- it erases one -- so it pays no stream cost: the
 // create-side call already paid for both halves of the slot's life.
 constexpr static uint64_t kSHA256FinalizeCost = kSHA256HashBlockCost;
-
-// Blocks a bytestring of `bytes_len` occupies, rounded up, with an empty one
-// costing none: a zero-length write copies nothing, and its storage access is
-// already charged.
-constexpr static auto BytestringBlockCount =
-    [](uint64_t bytes_len) -> uint64_t {
-  if (bytes_len > UINT64_MAX - (kBytestringBlockBytes - 1))
-    return UINT64_MAX / kBytestringBlockBytes;
-  return (bytes_len + kBytestringBlockBytes - 1) / kBytestringBlockBytes;
-};
-
-// Charged on the bytes copied: the value handed to a write, and for a read the
-// bytes that actually reach the guest rather than the buffer it offered.
-//
-// The buffer would be the more predictable rule, and the one the rest of this
-// table follows -- a bill that is a function of its arguments is a bill a
-// contract can estimate before running. It is not used here because the SDK's
-// zero-alloc read path hands the syscall its whole scratch buffer
-// (bytestring_read_into passes spare_capacity_mut()), so a 32-byte read out of
-// a 4 KiB scratch would cost eight blocks rather than one, and the path that
-// allocates nothing would be the dearer one. A guest that wants the bound
-// before it calls has BytestringGetLen, which is most of why that call earns
-// its place.
-constexpr static auto BytestringSetCost = [](uint64_t bytes_len) -> uint64_t {
-  return SaturatingCost(kStorageAccessCost, kBytestringWriteBlockCost,
-                        BytestringBlockCount(bytes_len));
-};
-
-constexpr static auto BytestringGetCost = [](uint64_t bytes_len) -> uint64_t {
-  return SaturatingCost(kStorageAccessCost, kBytestringReadBlockCost,
-                        BytestringBlockCount(bytes_len));
-};
-
-// A length read copies nothing and is flat in the item's size -- measured flat
-// to within 0.6 ns across three decades of length -- so it pays the storage
-// access and no block term.
-constexpr static uint64_t kBytestringGetLenCost = kStorageAccessCost;
-
-constexpr static auto VerifySignatureCost =
-    [](uint64_t message_len) -> uint64_t {
-  const uint64_t hashed = message_len > UINT64_MAX - kEd25519HashedPrefixBytes
-                              ? UINT64_MAX - kEd25519HashedPrefixBytes
-                              : message_len + kEd25519HashedPrefixBytes;
-  return SaturatingCost(kVerifySignatureBaseCost, kVerifySignatureBlockCost,
-                        SHA512BlockCount(hashed));
-};
-// NOLINTEND(readability-identifier-naming)
 
 struct SyscallGasCostEntry {
   // `u8"..."` literal: folded into the RV32 gas-schedule digest (an artifact

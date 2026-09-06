@@ -405,7 +405,7 @@ TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
 
 TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)
 {
-  // SHA256HashCost(64) far exceeds the limit, so the syscall host charge
+  // GasCost::sha256_hash(64) far exceeds the limit, so the syscall host charge
   // exhausts the budget after the setup instructions execute. Out-of-gas is
   // consensus-distinguishable from other faults only by the gas signature:
   // the whole limit is consumed.

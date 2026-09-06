@@ -784,7 +784,7 @@ sha256_trace_entry(GasAmount gas_at_start, std::span<const uint8_t> input,
   body.sha256().inputs.input.append_range(input);
   body.sha256().outputs = SyscallSHA256Outputs{.hash = hash};
   return make_trace_entry(gas_at_start,
-                          gas_at_start - SHA256HashCost(input.size()) -
+                          gas_at_start - GasCost::sha256_hash(input.size()) -
                               kSyscallBaseCost,
                           std::move(body), ok_status());
 }
@@ -880,7 +880,7 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   // plus one block for these bytes -- and every later entry starts that much
   // lower. Named rather than folded into the literals so the next repricing
   // moves these expectations with the schedule instead of through them.
-  const GasAmount write_cost = BytestringSetCost(value.size());
+  const GasAmount write_cost = GasCost::bytestring_set(value.size());
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
@@ -955,7 +955,7 @@ TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
 
   // SHA256 is 4 addi + ecall; the hash-returning Return is 6 addi + ecall.
   const GasAmount sha_gas = kParityGas - (5 * rv32::kBaseInstructionGas);
-  const GasAmount return_gas = sha_gas - SHA256HashCost(input.size()) -
+  const GasAmount return_gas = sha_gas - GasCost::sha256_hash(input.size()) -
                                kSyscallBaseCost -
                                (7 * rv32::kBaseInstructionGas);
   SyscallTraceVec expected;

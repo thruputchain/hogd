@@ -408,7 +408,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.buffer.append_range(part1);
     body.sha256_update().inputs.reset = true;
-    expected.push_back(step_entry(gas, SHA256UpdateCost(part1.size()),
+    expected.push_back(step_entry(gas, GasCost::sha256_update(part1.size()),
                                   std::move(body), ok_status()));
   }
   {
@@ -416,7 +416,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.buffer.append_range(part2);
     body.sha256_update().inputs.reset = false;
-    expected.push_back(step_entry(gas, SHA256UpdateCost(part2.size()),
+    expected.push_back(step_entry(gas, GasCost::sha256_update(part2.size()),
                                   std::move(body), ok_status()));
   }
   {
@@ -529,7 +529,8 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
     body.sha256_update().inputs.index = index;
     body.sha256_update().inputs.buffer.append_range(buffer);
     body.sha256_update().inputs.reset = reset;
-    const GasAmount cost = is_ok(status) ? SHA256UpdateCost(buffer.size()) : 0;
+    const GasAmount cost =
+        is_ok(status) ? GasCost::sha256_update(buffer.size()) : 0;
     return step_entry(gas, cost, std::move(body), std::move(status));
   };
   auto finalize_entry = [&gas](uint32_t index, std::optional<SHA256Hash> hash,
@@ -648,7 +649,8 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
     body.sha256_update().inputs.index = index;
     body.sha256_update().inputs.buffer.append_range(buffer);
     body.sha256_update().inputs.reset = reset;
-    const GasAmount cost = is_ok(status) ? SHA256UpdateCost(buffer.size()) : 0;
+    const GasAmount cost =
+        is_ok(status) ? GasCost::sha256_update(buffer.size()) : 0;
     return step_entry(gas, cost, std::move(body), std::move(status));
   };
   auto copy_entry = [&gas](uint32_t src_index, uint32_t dst_index,
@@ -697,7 +699,7 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
 // moves those fixtures and nothing objects -- right for a fixture, useless as
 // a guard. This one spells the prices out, and it guards something the
 // artifact digest cannot: gas_schedule_digest() hashes the schedule's names
-// and costs, not the cost *functions*, so SHA256UpdateCost could drop its
+// and costs, not the cost *functions*, so GasCost::sha256_update could drop its
 // stream term, or kSHA256CopyCost could go back to zero, and every digest and
 // fingerprint in the tree would still match. Here it fails.
 //
@@ -797,8 +799,8 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
 // What the artifact digest cannot check.
 //
 // gas_schedule_digest() hashes kSyscallGasCostSchedule's names and costs, not
-// the cost *functions* that read them. SHA256UpdateCost could drop its stream
-// term, or kSHA256CopyCost could be set to zero, and every digest and
+// the cost *functions* that read them. GasCost::sha256_update could drop its
+// stream term, or kSHA256CopyCost could be set to zero, and every digest and
 // fingerprint in the tree would still match -- verified by reverting each and
 // watching rv32_vm_test stay green. So the shapes are pinned here.
 //
@@ -810,17 +812,18 @@ TEST(Sha256GasModelTest, CostFunctionShapesAreLockedIn)
 {
   // No per-call base on the one-shot: every call compresses at least its
   // padding, so there is no zero-block call for a base to describe.
-  EXPECT_EQ(SHA256HashCost(0), kSHA256HashBlockCost);
+  EXPECT_EQ(GasCost::sha256_hash(0), kSHA256HashBlockCost);
   // The 9-byte pad decides where a block boundary falls, and 55 vs 56 is it.
-  EXPECT_EQ(SHA256HashCost(55), kSHA256HashBlockCost);
-  EXPECT_EQ(SHA256HashCost(56), 2 * kSHA256HashBlockCost);
+  EXPECT_EQ(GasCost::sha256_hash(55), kSHA256HashBlockCost);
+  EXPECT_EQ(GasCost::sha256_hash(56), 2 * kSHA256HashBlockCost);
 
   // Creating a stream is not free, however few bytes it carries.
-  EXPECT_EQ(SHA256UpdateCost(0), kSHA256StreamCost);
+  EXPECT_EQ(GasCost::sha256_update(0), kSHA256StreamCost);
   // A partial block stays buffered and is billed by whichever call completes
   // it, so a sub-block update pays the stream and nothing else.
-  EXPECT_EQ(SHA256UpdateCost(63), kSHA256StreamCost);
-  EXPECT_EQ(SHA256UpdateCost(64), kSHA256StreamCost + kSHA256HashBlockCost);
+  EXPECT_EQ(GasCost::sha256_update(63), kSHA256StreamCost);
+  EXPECT_EQ(GasCost::sha256_update(64),
+            kSHA256StreamCost + kSHA256HashBlockCost);
 
   // Copy clones a stream and compresses nothing.
   EXPECT_EQ(kSHA256CopyCost, kSHA256StreamCost);
@@ -851,9 +854,10 @@ TEST(Sha256GasModelTest, CostFunctionShapesAreLockedIn)
 TEST(Sha256GasModelTest, IncrementalHashingIsNeverCheaperThanOneShot)
 {
   for (uint64_t bytes = 0; bytes <= 8192; ++bytes) {
-    const uint64_t one_shot = SHA256HashCost(bytes) + kSyscallBaseCost;
-    const uint64_t incremental = SHA256UpdateCost(bytes) + kSyscallBaseCost +
-                                 kSHA256FinalizeCost + kSyscallBaseCost;
+    const uint64_t one_shot = GasCost::sha256_hash(bytes) + kSyscallBaseCost;
+    const uint64_t incremental = GasCost::sha256_update(bytes) +
+                                 kSyscallBaseCost + kSHA256FinalizeCost +
+                                 kSyscallBaseCost;
     ASSERT_GE(incremental, one_shot) << "bytes = " << bytes;
   }
 }
@@ -1188,7 +1192,7 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     // Named rather than spelled as a literal, the way the SHA256 and storage
     // expectations in this file already are, so the next repricing moves these
     // with the schedule instead of through them.
-    expected.push_back(step_entry(gas, BytestringSetCost(value.size()),
+    expected.push_back(step_entry(gas, GasCost::bytestring_set(value.size()),
                                   std::move(body), ok_status()));
   }
   {
@@ -1199,7 +1203,8 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     body.bytestring_get().outputs = std::move(outputs);
     // The bytes that reached the guest: the buffer is shorter than the item,
     // so the truncated copy is what is charged.
-    expected.push_back(step_entry(gas, BytestringGetCost(kSmallBufferBytes),
+    expected.push_back(step_entry(gas,
+                                  GasCost::bytestring_get(kSmallBufferBytes),
                                   std::move(body), ok_status()));
   }
 

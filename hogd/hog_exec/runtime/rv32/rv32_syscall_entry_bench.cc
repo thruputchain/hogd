@@ -693,8 +693,8 @@ stateless_calls()
 
 // SHA256(buffer) -> hash. The one syscall family gas_cost_table.h actually
 // prices, and the only stateless one whose cost is supposed to depend on an
-// argument: SHA256HashCost is base 500 + 100/byte. A size sweep is what says
-// whether that shape is right and what the two constants should be.
+// argument: GasCost::sha256_hash is base 500 + 100/byte. A size sweep is what
+// says whether that shape is right and what the two constants should be.
 SyscallCall
 sha256_call(uint32_t bytes)
 {
@@ -1313,9 +1313,10 @@ bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
 }
 
 // The same question on the other path that creates a slot. A reset update to an
-// index with no stream emplaces exactly as copy does, and SHA256UpdateCost
-// charges whole blocks only -- so a zero-byte reset update creates a stream for
-// no body gas at all. If slot creation needs pricing, it needs it here too.
+// index with no stream emplaces exactly as copy does, and
+// GasCost::sha256_update charges whole blocks only -- so a zero-byte reset
+// update creates a stream for no body gas at all. If slot creation needs
+// pricing, it needs it here too.
 //
 // No seed here, so its /0 row is the bare table construct and destroy, and its
 // small rows are correspondingly less distorted than the copy sweep's.
@@ -1671,7 +1672,7 @@ register_benchmarks()
                                  call);
   }
   // SHA256 over a size sweep. 0 bytes isolates the per-call base from the
-  // per-byte term, which is exactly the split SHA256HashCost claims.
+  // per-byte term, which is exactly the split GasCost::sha256_hash claims.
   for (const uint32_t bytes : {0U, 32U, 256U, 1024U, 4096U, 16384U, 32768U}) {
     const SyscallCall call = sha256_call(bytes);
     benchmark::RegisterBenchmark(
