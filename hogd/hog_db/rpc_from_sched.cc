@@ -140,9 +140,22 @@ HogDbSchedRpc::commit_block(BlockID id, ConsensusValue value,
                             const StorageLongHash &db_hash)
 {
   // check if already committed.
-  if (ctx_.get_tip().id == id) {
+  const DbTip parent_tip = ctx_.get_tip();
+  if (parent_tip.id == id) {
     error("tried to commit the same block '{}' more than once", id);
     return HogDbError(HogDbCode::kExists);
+  }
+
+  // Check what update_dbtip would refuse *before* commit() applies this
+  // block's state and invalidates its siblings, neither of which is rolled
+  // back. Rejecting below that point leaves the in-memory DB carrying the
+  // block while the tip still names its parent; rejecting here leaves the DB
+  // untouched. update_dbtip repeats the check under the tip lock, which is
+  // what actually guards the transition -- this is the early, cheap copy.
+  if (HogDbStatus<void> tip_ok =
+          RPCContext::check_dbtip_transition(id, value, parent_tip);
+      !tip_ok) [[unlikely]] {
+    return tip_ok.error();
   }
 
   assert(btx != nullptr);

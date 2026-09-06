@@ -168,6 +168,15 @@ public:
   // the blocktx is garbage collected.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
+  // Preconditions on advancing the committed tip from [tip] to [value], and
+  // the only reasons update_dbtip refuses a commit. Checked twice: once by
+  // [HogDbSchedRpc::commit_block] before it applies the block's state to the
+  // DAO, where a refusal costs nothing, and again inside [update_dbtip] under
+  // the tip lock, which is authoritative. Logs the reason on failure.
+  static HogDbStatus<void> check_dbtip_transition(BlockTXID bid,
+                                                  const ConsensusValue &value,
+                                                  const DbTip &tip);
+
   // Advance the committed tip. Carries the chain-configuration fields
   // (default_wallet, network_config) forward by mutating the tip in place, so
   // a commit that does not change them leaves them in force.

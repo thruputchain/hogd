@@ -2081,6 +2081,29 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
+  // Blocks only move forward in time, and [RPCContext::update_dbtip] enforces
+  // that when the tip advances. The timepoint is taken from the proposal's
+  // header rather than recomputed (see [validation_block_execution] below), so
+  // without this check a proposer whose clock ran backwards -- an NTP step, a
+  // suspended VM, hosts that are simply not tightly synchronized -- produces a
+  // block that passes every hash check, is externalized, and is then refused
+  // by the db on every node that accepted it. Voting it Invalid here is the
+  // only point at which the block can still be rejected safely. Equal is
+  // allowed, matching update_dbtip: two blocks sharing a nanosecond is
+  // implausible, not incoherent.
+  if (last_committed_block_.value.proposal_header.block_height >= 0 &&
+      proposal.header.block_timepoint <
+          last_committed_block_.value.proposal_header.block_timepoint) {
+    co_await decrement_num_validations_in_progress();
+    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
+    error("Rejecting block at height {}: its timepoint {} precedes the "
+          "committed tip's timepoint {}",
+          proposal.header.block_height, proposal.header.block_timepoint,
+          last_committed_block_.value.proposal_header.block_timepoint);
+    info("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
 
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.

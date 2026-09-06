@@ -1528,6 +1528,59 @@ TEST(Mempool, RejectsMismatchedConfigHash)
             SchedulerValidationOutcome::SchedulerValidationInvalid);
 }
 
+// #3873: a proposer whose clock ran backwards -- an NTP step, a suspended VM,
+// hosts that are simply not tightly synchronized -- stamps the next block with
+// a timepoint earlier than the committed tip's. Every hash in its header still
+// checks out, so before this check the block validated, was externalized, and
+// was then refused by [RPCContext::update_dbtip] on every node that had
+// accepted it, including the proposer. Reject it here, where a block can still
+// be voted down safely.
+TEST(Mempool, ValidateRejectsBackwardsTimepoint)
+{
+  constexpr TimePoint kTipTimepoint = 1'700'000'000;
+
+  MempoolTestInfra server;
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  // Commit a block so that the tip carries a real timepoint to compare
+  // against; genesis leaves it at zero, which nothing can precede.
+  SchedulerProposalResult stamped =
+      propose_block(server, get_tip.db_tip(),
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(stamped.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  ASSERT_EQ(commit_block(server, get_tip.db_tip(), stamped.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip tip = get_tip.db_tip();
+  ASSERT_EQ(tip.value.proposal_header.block_timepoint, kTipTimepoint);
+
+  // Equal is allowed, matching [update_dbtip]: two blocks sharing a
+  // nanosecond is implausible, not incoherent. Validating this proposal first
+  // establishes that everything else about it is in order, so the rejection
+  // below can only be the timepoint.
+  SchedulerProposalResult nominated =
+      propose_block(server, tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(nominated.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  const Proposal proposal = nominated.proposed_block().proposal;
+  ASSERT_EQ(proposal.header.block_timepoint, kTipTimepoint);
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, proposal)()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationOK);
+
+  Proposal backwards = proposal;
+  backwards.header.block_timepoint = kTipTimepoint - 1;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(backwards))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+}
+
 TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
 {
   MempoolTestInfra server;

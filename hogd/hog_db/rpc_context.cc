@@ -220,36 +220,58 @@ RPCContext::CommitPublicationGuard::~CommitPublicationGuard()
 }
 
 HogDbStatus<void>
+RPCContext::check_dbtip_transition(BlockTXID bid, const ConsensusValue &value,
+                                   const DbTip &tip)
+{
+  // Genesis installs both fields; the tip before it is pre-genesis, at height
+  // -1, and has nothing to compare against.
+  if (!has_committed_tip(tip)) {
+    return {};
+  }
+  // The network hash is fixed for the life of the chain, but it lives in
+  // the consensus value, which a commit replaces wholesale rather than
+  // carrying forward the way default_wallet and network_config are. A caller
+  // that builds a value without it moves the chain onto network zero, and
+  // contracts reading GetNetworkHash then see a different network than
+  // signatures are verified against.
+  if (value.proposal_header.network_hash !=
+      tip.value.proposal_header.network_hash) [[unlikely]] {
+    error("Refusing to commit block {}: its consensus value carries a "
+          "different network hash than the committed tip",
+          bid);
+    return HogDbError(HogDbCode::kInternal);
+  }
+  // Blocks only move forward in time. The timepoint reaches the db the same
+  // way the network hash does -- carried on a consensus value that replaces
+  // the tip wholesale -- so the same class of caller bug puts an older
+  // timepoint on a newer block, and anything reading the chain back then
+  // sees time run backwards across a commit. Equal is left alone: two
+  // blocks sharing a nanosecond is implausible, not incoherent.
+  //
+  // A proposer whose clock ran backwards is the ordinary way to get here, so
+  // [MempoolCoordinatorRpc::schedulercoord_validate_block] applies the same
+  // comparison to an incoming proposal and votes it Invalid: by the time a
+  // block reaches this function it has been externalized, and refusing it
+  // here is no longer a recoverable outcome.
+  if (value.proposal_header.block_timepoint <
+      tip.value.proposal_header.block_timepoint) [[unlikely]] {
+    error("Refusing to commit block {}: its consensus value carries a "
+          "timepoint earlier than the committed tip's",
+          bid);
+    return HogDbError(HogDbCode::kInternal);
+  }
+  return {};
+}
+
+HogDbStatus<void>
 RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
                          const StorageLongHash &db_hash)
 {
   DbTip new_tip;
-  bool network_hash_mismatch = false;
-  bool timepoint_went_backwards = false;
+  HogDbStatus<void> precondition;
   tip_.with([&](DbTip &tip) {
-    // The network hash is fixed for the life of the chain, but it lives in
-    // the consensus value, which this replaces wholesale rather than carrying
-    // forward the way default_wallet and network_config are. A caller that
-    // builds a value without it moves the chain onto network zero, and
-    // contracts reading GetNetworkHash then see a different network than
-    // signatures are verified against. Genesis installs it -- the tip before
-    // it is pre-genesis, at height -1 -- and every commit after must agree.
-    if (tip.value.proposal_header.block_height >= 0 &&
-        value.proposal_header.network_hash !=
-            tip.value.proposal_header.network_hash) {
-      network_hash_mismatch = true;
-      return;
-    }
-    // Blocks only move forward in time. The timepoint reaches the db the same
-    // way the network hash does -- carried on a consensus value that replaces
-    // the tip wholesale -- so the same class of caller bug puts an older
-    // timepoint on a newer block, and anything reading the chain back then
-    // sees time run backwards across a commit. Equal is left alone: two
-    // blocks sharing a nanosecond is implausible, not incoherent.
-    if (tip.value.proposal_header.block_height >= 0 &&
-        value.proposal_header.block_timepoint <
-            tip.value.proposal_header.block_timepoint) {
-      timepoint_went_backwards = true;
+    precondition = check_dbtip_transition(bid, value, tip);
+    if (!precondition) [[unlikely]] {
       return;
     }
     tip.value = std::move(value);
@@ -260,17 +282,8 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
     current_committed_id_.store(bid, std::memory_order_release);
     new_tip = tip;
   });
-  if (network_hash_mismatch) [[unlikely]] {
-    error("Refusing to commit block {}: its consensus value carries a "
-          "different network hash than the committed tip",
-          bid);
-    return HogDbError(HogDbCode::kInternal);
-  }
-  if (timepoint_went_backwards) [[unlikely]] {
-    error("Refusing to commit block {}: its consensus value carries a "
-          "timepoint earlier than the committed tip's",
-          bid);
-    return HogDbError(HogDbCode::kInternal);
+  if (!precondition) [[unlikely]] {
+    return precondition;
   }
   return get_db().write_dbtip(new_tip);
 }
