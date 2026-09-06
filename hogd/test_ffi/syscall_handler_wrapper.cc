@@ -386,9 +386,6 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     finish_pending_trace(admitted->error().code());
     error("invalid argument: mock invocation frame not admitted: {}",
           admitted->error().code());
-    // The refusing rule, reported as production reports it. The caller's
-    // synthetic kInvoke above carries the same code; this hands it to a caller
-    // that has not finished the parent frame yet and so cannot read the trace.
     return {.syscall_error_code = std::to_underlying(admitted->error().code()),
             .ffi_error_code = kTestFFIErrorCodeInvalidArgument};
   }

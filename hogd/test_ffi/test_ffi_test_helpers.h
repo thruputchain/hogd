@@ -94,9 +94,7 @@ open_frame_result(void *syscall_handler, Invocation const &invocation,
   return open_mock_invocation_frame(syscall_handler, ffi, flags);
 }
 
-// Open a mock invocation frame, keeping only the FFI-level code. Most tests
-// care whether the frame opened, not which rule refused it; the ones that
-// assert on the refusing rule use open_frame_result() above.
+// Open a mock invocation frame, keeping only the FFI-level code.
 inline TestFFIErrorCode
 open_frame(void *syscall_handler, Invocation const &invocation,
            int32_t flags = 0)

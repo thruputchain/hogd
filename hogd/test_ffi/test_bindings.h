@@ -306,20 +306,10 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
 struct OpenMockInvocationFrameResult {
-  // Which admission rule refused the frame, as production's own
-  // SyscallErrorCode: the code a contract would observe from the kInvoke
-  // production turns away for that same reason
-  // (kSyscallErrorCodeInvalidSyscallInput for undefined flags,
-  // kSyscallErrorCodeReentrance, kSyscallErrorCodeInvokeDepthExceeded).
-  //
-  // The admission verdict itself, not a test_ffi restatement of it: both
-  // pathways run one validate_new_invocation(), so a rule added there reaches
-  // callers through this field without a new FFI error code to define, map,
-  // and keep in step.
-  //
-  // kSyscallErrorCodeNone (0) unless ffi_error_code is
-  // kTestFFIErrorCodeInvalidArgument. Every other failure happens before
-  // admission is reached or after it has passed, and has no verdict to report.
+  // Which rule refused the frame, as production's own SyscallErrorCode:
+  // kSyscallErrorCodeInvalidSyscallInput, kSyscallErrorCodeReentrance or
+  // kSyscallErrorCodeInvokeDepthExceeded. kSyscallErrorCodeNone unless
+  // ffi_error_code is kTestFFIErrorCodeInvalidArgument.
   int32_t syscall_error_code;
   // FFI-level error code
   enum TestFFIErrorCode ffi_error_code;
@@ -327,12 +317,12 @@ struct OpenMockInvocationFrameResult {
 
 // Frames are admitted on production's terms, so three rules bind the caller:
 // invoke_flags may contain only defined, implemented bits (TryInvoke |
-// ReadOnly); an address that already has a frame on the stack cannot be
-// invoked again -- nested frames need distinct invoked_addresses; and the
-// chain's max_cross_invoke_depth caps how many frames one transaction may hold
-// open at once. Any of the three returns kTestFFIErrorCodeInvalidArgument with
-// the refusing rule in syscall_error_code, and opens no frame, so the handler
-// stays usable and no finish_mock_invocation_frame() is owed.
+// ReadOnly); an address that already has a frame on the stack cannot be invoked
+// again -- nested frames need distinct invoked_addresses; and
+// max_cross_invoke_depth caps how many frames a transaction may hold open. Any
+// violation returns kTestFFIErrorCodeInvalidArgument with the refusing rule in
+// syscall_error_code and opens no frame, so the handler stays usable and no
+// finish_mock_invocation_frame() is owed.
 struct OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,

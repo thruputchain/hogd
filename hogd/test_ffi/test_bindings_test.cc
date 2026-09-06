@@ -1331,7 +1331,6 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
   auto open_res =
       open_mock_invocation_frame(handler.syscall_handler, ffi_invocation, 0);
   EXPECT_EQ(open_res.ffi_error_code, kTestFFIErrorCodeNone);
-  // An admitted frame refuses nothing, so there is no verdict to report.
   EXPECT_EQ(open_res.syscall_error_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 

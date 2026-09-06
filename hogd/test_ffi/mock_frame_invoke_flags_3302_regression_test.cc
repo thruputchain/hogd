@@ -91,7 +91,6 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
     auto res = open_frame_result(handler.syscall_handler, invocation, flags);
     EXPECT_EQ(res.ffi_error_code, kTestFFIErrorCodeInvalidArgument)
         << "flags = " << flags;
-    // Which of the three admission rules refused it, as production names it.
     EXPECT_EQ(res.syscall_error_code,
               std::to_underlying(
                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput))

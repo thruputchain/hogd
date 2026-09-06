@@ -331,9 +331,8 @@ private:
     };
   };
 
-  // A frame-open failure with no admission verdict behind it. Only
-  // validate_new_invocation() produces one, so every exit that does not reach
-  // it -- or that has already passed it -- reports kSyscallErrorCodeNone.
+  // A frame-open failure with no verdict: only validate_new_invocation()
+  // produces one.
   constexpr static auto kMakeFrameOpenError =
       [](TestFFIErrorCode code) -> OpenMockInvocationFrameResult {
     return {
