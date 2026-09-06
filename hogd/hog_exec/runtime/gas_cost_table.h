@@ -223,14 +223,6 @@ struct GasCost {
   }
 };
 
-// Copy compresses nothing; the stream it clones into is the whole cost.
-constexpr static uint64_t kSHA256CopyCost = kSHA256StreamCost;
-
-// Finalize compresses the padding block the streaming path has not yet done.
-// It creates no stream -- it erases one -- so it pays no stream cost: the
-// create-side call already paid for both halves of the slot's life.
-constexpr static uint64_t kSHA256FinalizeCost = kSHA256HashBlockCost;
-
 struct SyscallGasCostEntry {
   // `u8"..."` literal: folded into the RV32 gas-schedule digest (an artifact
   // wire constant), so the hashed bytes must be the standard's UTF-8 code units

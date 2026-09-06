@@ -70,8 +70,9 @@ syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
     return {r.error().code(), WrappedGasAmount{0}};
   }
 
+  // Cloning a stream compresses nothing, so the stream is the whole cost.
   return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{kSHA256CopyCost}};
+          WrappedGasAmount{kSHA256StreamCost}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -88,8 +89,10 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
     trace_data->outputs.emplace(
         SyscallSHA256FinalizeOutputs{.hash = output_output});
   }
+  // The padding block the streaming path has not compressed yet. Finalize
+  // erases a stream rather than creating one, so it pays no stream cost.
   return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{kSHA256FinalizeCost}};
+          WrappedGasAmount{kSHA256HashBlockCost}};
 }
 
 // Verifies a cryptographic signature against a message using the provided

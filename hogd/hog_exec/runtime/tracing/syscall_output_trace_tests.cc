@@ -425,7 +425,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
     body.sha256_finalize().outputs =
         SyscallSHA256FinalizeOutputs{.hash = expected_hash};
     expected.push_back(
-        step_entry(gas, kSHA256FinalizeCost, std::move(body), ok_status()));
+        step_entry(gas, kSHA256HashBlockCost, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -543,7 +543,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
     }
     // A finalize that produced a hash compressed the padding block; one that
     // errored did not, and bills only the crossing.
-    return step_entry(gas, hash.has_value() ? kSHA256FinalizeCost : 0,
+    return step_entry(gas, hash.has_value() ? kSHA256HashBlockCost : 0,
                       std::move(body), std::move(status));
   };
   const auto invalid =
@@ -658,7 +658,7 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = src_index;
     body.sha256_copy().inputs.dst_index = dst_index;
-    const GasAmount cost = is_ok(status) ? kSHA256CopyCost : 0;
+    const GasAmount cost = is_ok(status) ? kSHA256StreamCost : 0;
     return step_entry(gas, cost, std::move(body), std::move(status));
   };
   auto finalize_entry = [&gas](uint32_t index, SHA256Hash hash,
@@ -666,7 +666,7 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
     SyscallTraceBody body(SyscallNo::kSHA256Finalize);
     body.sha256_finalize().inputs.index = index;
     body.sha256_finalize().outputs = SyscallSHA256FinalizeOutputs{.hash = hash};
-    const GasAmount cost = is_ok(status) ? kSHA256FinalizeCost : 0;
+    const GasAmount cost = is_ok(status) ? kSHA256HashBlockCost : 0;
     return step_entry(gas, cost, std::move(body), std::move(status));
   };
   const auto invalid =
@@ -699,9 +699,9 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
 // moves those fixtures and nothing objects -- right for a fixture, useless as
 // a guard. This one spells the prices out, and it guards something the
 // artifact digest cannot: gas_schedule_digest() hashes the schedule's names
-// and costs, not the cost *functions*, so GasCost::sha256_update could drop its
-// stream term, or kSHA256CopyCost could go back to zero, and every digest and
-// fingerprint in the tree would still match. Here it fails.
+// and costs, not the cost *functions*, so GasCost::sha256_update could drop
+// its stream term, or SHA256Copy could go back to charging nothing, and every
+// digest and fingerprint in the tree would still match. Here it fails.
 //
 // Charges, crossing included, at kSyscallBaseCost = 50:
 //
@@ -800,9 +800,9 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
 //
 // gas_schedule_digest() hashes kSyscallGasCostSchedule's names and costs, not
 // the cost *functions* that read them. GasCost::sha256_update could drop its
-// stream term, or kSHA256CopyCost could be set to zero, and every digest and
-// fingerprint in the tree would still match -- verified by reverting each and
-// watching rv32_vm_test stay green. So the shapes are pinned here.
+// stream term, or SHA256Copy could be set to charge nothing, and every digest
+// and fingerprint in the tree would still match -- verified by reverting each
+// and watching rv32_vm_test stay green. So the shapes are pinned here.
 //
 // Written against the constants rather than as literals on purpose: this test
 // says what the formulas mean and survives a repricing, while
@@ -824,13 +824,6 @@ TEST(Sha256GasModelTest, CostFunctionShapesAreLockedIn)
   EXPECT_EQ(GasCost::sha256_update(63), kSHA256StreamCost);
   EXPECT_EQ(GasCost::sha256_update(64),
             kSHA256StreamCost + kSHA256HashBlockCost);
-
-  // Copy clones a stream and compresses nothing.
-  EXPECT_EQ(kSHA256CopyCost, kSHA256StreamCost);
-  // Finalize compresses the padding block. It erases a stream rather than
-  // creating one, so it pays no stream cost -- the create-side call already
-  // covered both halves of the slot's life.
-  EXPECT_EQ(kSHA256FinalizeCost, kSHA256HashBlockCost);
 }
 
 // The property the incremental family was repriced to restore, swept rather
@@ -856,7 +849,7 @@ TEST(Sha256GasModelTest, IncrementalHashingIsNeverCheaperThanOneShot)
   for (uint64_t bytes = 0; bytes <= 8192; ++bytes) {
     const uint64_t one_shot = GasCost::sha256_hash(bytes) + kSyscallBaseCost;
     const uint64_t incremental = GasCost::sha256_update(bytes) +
-                                 kSyscallBaseCost + kSHA256FinalizeCost +
+                                 kSyscallBaseCost + kSHA256HashBlockCost +
                                  kSyscallBaseCost;
     ASSERT_GE(incremental, one_shot) << "bytes = " << bytes;
   }

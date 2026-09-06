@@ -177,7 +177,7 @@ push_static_key_entries(SyscallTraceVec &expected,
     body.sha256_copy().inputs.src_index = 0;
     body.sha256_copy().inputs.dst_index = 1;
     expected.push_back(make_entry(gas[2],
-                                  gas[2] - kSHA256CopyCost - kSyscallBaseCost,
+                                  gas[2] - kSHA256StreamCost - kSyscallBaseCost,
                                   std::move(body), ok_status()));
   }
   {
@@ -197,7 +197,7 @@ push_static_key_entries(SyscallTraceVec &expected,
     body.sha256_finalize().outputs =
         SyscallSHA256FinalizeOutputs{.hash = storage_key};
     expected.push_back(
-        make_entry(gas[4], gas[4] - kSHA256FinalizeCost - kSyscallBaseCost,
+        make_entry(gas[4], gas[4] - kSHA256HashBlockCost - kSyscallBaseCost,
                    std::move(body), ok_status()));
   }
   {
@@ -206,7 +206,7 @@ push_static_key_entries(SyscallTraceVec &expected,
     body.sha256_finalize().outputs =
         SyscallSHA256FinalizeOutputs{.hash = sha256(name_preimage)};
     expected.push_back(
-        make_entry(gas[5], gas[5] - kSHA256FinalizeCost - kSyscallBaseCost,
+        make_entry(gas[5], gas[5] - kSHA256HashBlockCost - kSyscallBaseCost,
                    std::move(body), ok_status()));
   }
 }
