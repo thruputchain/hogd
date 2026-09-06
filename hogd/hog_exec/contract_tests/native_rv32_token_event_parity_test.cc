@@ -463,9 +463,11 @@ TEST_F(NativeRv32TokenEventParityTest, MintBurnEventsMatchRv32AndNative)
   // the Mint signature and a burn the Burn signature, which is the whole
   // point of the interface change.
   auto signature_topic = [](TxEmittedEvent const &ev) {
-    Topic topic;
+    Topic topic{};
     EXPECT_GE(ev.serialized_event.size(), sizeof(Topic));
-    std::memcpy(topic.data(), ev.serialized_event.data(), sizeof(Topic));
+    if (ev.serialized_event.size() >= sizeof(Topic)) {
+      std::memcpy(topic.data(), ev.serialized_event.data(), sizeof(Topic));
+    }
     return topic;
   };
   EXPECT_EQ(signature_topic(*native_mint), native_token_mint_event_signature());
