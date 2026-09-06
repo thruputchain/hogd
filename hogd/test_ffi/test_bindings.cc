@@ -839,8 +839,8 @@ open_mock_invocation_frame(void *syscall_handler,
     auto res =
         context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
     if (res.ffi_error_code != kTestFFIErrorCodeNone) {
-      error("failed to start mock invocation frame: {} (syscall error {})",
-            std::to_underlying(res.ffi_error_code), res.syscall_error_code);
+      error("failed to start mock invocation frame: {}",
+            std::to_underlying(res.ffi_error_code));
     }
     return res;
   } catch (std::exception const &e) {

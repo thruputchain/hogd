@@ -310,9 +310,9 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
 struct OpenMockInvocationFrameResult {
   // Which rule refused the frame, as production's own SyscallErrorCode:
   // kSyscallErrorCodeInvalidSyscallInput, kSyscallErrorCodeReentrance or
-  // kSyscallErrorCodeInvokeDepthExceeded. kSyscallErrorCodeNone means the
-  // frame opened, so this -- not ffi_error_code -- is what says whether a
-  // finish_mock_invocation_frame() is owed.
+  // kSyscallErrorCodeInvokeDepthExceeded. Always kSyscallErrorCodeNone when
+  // ffi_error_code is set; a frame opened, and a
+  // finish_mock_invocation_frame() is owed, only when both are None.
   int32_t syscall_error_code;
   // FFI-level error code
   enum TestFFIErrorCode ffi_error_code;
