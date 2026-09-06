@@ -39,6 +39,7 @@
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
@@ -305,6 +306,12 @@ constexpr uint64_t kFirstTouchKeys = 262144;
 // the warm-up calls and a few extra repetitions. Exhausting it fails the row
 // with a message rather than recycling keys and quietly measuring hits.
 constexpr uint64_t kColdPoolKeys = uint64_t{1} << 18;
+// Heap for the bench's hog_db. The cold pool alone is a quarter-million NNInt
+// items, each carrying its key, and ramdb's allocator fails a write rather
+// than growing, so this is sized well past what the pool needs -- an
+// over-estimate costs address space in one benchmark process and an
+// under-estimate fails the row.
+constexpr size_t kHogDbHeapBytes = size_t{1} << 30;
 constexpr int64_t kColdIterations = 20000;
 
 // A RuntimeContext that can build nothing.
@@ -333,20 +340,35 @@ public:
 
 // Everything a SystemCallHandler needs, and nothing else.
 //
-// Deliberately not NativeContractTestFramework: that stands up genesis, the
-// contract loader and a real hog_db, none of which a stateless syscall touches,
-// and all of which would have to be linked and paid for at startup. This is the
-// same shape native_contract_test.cc uses -- an in-process snapshot server and
-// event aggregator behind the ordinary proxies -- so the handler under
-// measurement is the production class, constructed the production way.
+// What answers a snapshot-cache miss.
+//
+// Every row whose key is already in the cache measures the same thing either
+// way, so those keep the light server: it seeds an item with a map insert and
+// costs nothing at startup. A row measuring the miss itself does not -- what a
+// miss costs is what the database does -- so those take a real hog_db over a
+// real ramdb, which is what production reads from. See "What the cold row is,
+// and is not" in docs/rv32/rv32-gas-calibration.md.
+enum class ItemBackend : uint8_t {
+  kSnapshotServer,
+  kHogDb,
+};
+
+// Deliberately not NativeContractTestFramework: that stands up genesis and the
+// contract loader, neither of which a stateless syscall touches, and both of
+// which would have to be linked and paid for at startup. This is the same shape
+// native_contract_test.cc uses -- an in-process server and event aggregator
+// behind the ordinary proxies -- so the handler under measurement is the
+// production class, constructed the production way. Under kHogDb the server
+// answering is a real database rather than a map.
 class SyscallBenchFixture {
 public:
-  SyscallBenchFixture()
+  explicit SyscallBenchFixture(
+      ItemBackend backend = ItemBackend::kSnapshotServer)
   {
-    snapshot_server_.start_server(/*port=*/0);
+    const uint16_t item_port = start_item_backend(backend);
     const auto event_exec_port = event_server_exec_server_.start_server(0);
     db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = snapshot_server_.port()});
+        LocalMockDB{.read_port_number_ = item_port});
     event_server_proxy_ = std::make_unique<EventServerProxy>(
         x23::HostPort{"localhost", event_exec_port});
     event_server_.open_block(0)();
@@ -534,9 +556,8 @@ public:
     for (uint64_t index = first; index < last; ++index) {
       StorageKey key(StorageKeyType::ContractData);
       key.contract_data_key() = make_item_key(space, index);
-      snapshot_server_.impl()->setup_create_item(
-          AddressAndKey{.address = address, .key = key},
-          StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
+      seed_item(AddressAndKey{.address = address, .key = key},
+                StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
     }
   }
 
@@ -553,9 +574,8 @@ public:
       // Not zeros: a path that special-cased an empty or all-zero value would
       // be measuring something other than the copy it is meant to.
       std::ranges::fill(value, uint8_t{0xAB});
-      snapshot_server_.impl()->setup_create_item(
-          AddressAndKey{.address = address, .key = key},
-          StorageItemWrapper(std::move(value), &cost_model()));
+      seed_item(AddressAndKey{.address = address, .key = key},
+                StorageItemWrapper(std::move(value), &cost_model()));
     }
   }
 
@@ -603,9 +623,40 @@ private:
     return model;
   }
 
-  BlockSnapshotServer snapshot_server_ =
-      BlockSnapshotServer(/*block_id=*/0, /*tip_block_height=*/0,
-                          bench_network_config());
+  // Bring up the chosen backend and answer with the port the executor's
+  // DatabaseProxy should talk to. Exactly one of the two is ever constructed:
+  // a hog_db opens a temporary ramdb and starts three servers, which no row on
+  // the light path should pay for.
+  uint16_t start_item_backend(ItemBackend backend)
+  {
+    if (backend == ItemBackend::kHogDb) {
+      hog_db_.emplace(kHogDbHeapBytes);
+      // Same block id and height the snapshot server serves. Proposal mode
+      // to match the handler's ProposalModeCtor below.
+      hog_db_->prepare_block(/*block_id=*/0, /*tip_block_height=*/0,
+                             bench_network_config(),
+                             BlockExecutionMode::kBlockExecutionModeProposal);
+      return hog_db_->exec_port();
+    }
+    snapshot_server_.emplace(/*block_id=*/0, /*tip_block_height=*/0,
+                             bench_network_config());
+    snapshot_server_->start_server(/*port=*/0);
+    return snapshot_server_->port();
+  }
+
+  // Put one item where this fixture's backend will find it.
+  void seed_item(AddressAndKey const &addrkey, StorageItemWrapper item)
+  {
+    if (hog_db_.has_value()) {
+      hog_db_->write_item(addrkey, std::make_shared<const StorageItemWrapper>(
+                                       std::move(item)));
+      return;
+    }
+    snapshot_server_->impl()->setup_create_item(addrkey, std::move(item));
+  }
+
+  std::optional<BlockSnapshotServer> snapshot_server_;
+  std::optional<HogdbWrapper> hog_db_;
   TestEventAggregator event_server_;
   TestEventAggregatorExecServer event_server_exec_server_ =
       TestEventAggregatorExecServer(event_server_);
@@ -1000,19 +1051,37 @@ shared_fixture()
   return fixture;
 }
 
+// The fixture whose misses reach a real hog_db.
+//
+// Separate from shared_fixture() rather than a mode on it: the two hold
+// different snapshot caches, and a row measuring a miss wants a cache holding
+// only its own keys. Also lazy, so a run selecting no db-backed row never
+// opens a database or pays its seeding.
+SyscallBenchFixture &
+shared_db_fixture()
+{
+  static SyscallBenchFixture fixture(ItemBackend::kHogDb);
+  return fixture;
+}
+
 // The fixture, or nullptr with this row already failed. Every benchmark starts
 // here: fixture construction is lazy and shared, so a setup step that could not
 // complete surfaces on whichever row ran first and would otherwise take the
 // process down with it.
 SyscallBenchFixture *
-fixture_or_fail(benchmark::State &state)
+fixture_or_fail(benchmark::State &state, SyscallBenchFixture &fixture)
 {
-  SyscallBenchFixture &fixture = shared_fixture();
   if (!fixture.setup_error().empty()) {
     state.SkipWithError(fixture.setup_error());
     return nullptr;
   }
   return &fixture;
+}
+
+SyscallBenchFixture *
+fixture_or_fail(benchmark::State &state)
+{
+  return fixture_or_fail(state, shared_fixture());
 }
 
 // Fail one benchmark row, naming the syscall and the code, and leave the rest
@@ -1576,15 +1645,19 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
 // What this measures: get_item_view's miss, the UnmodifiedItem load,
 // StorageSnapshotCache::try_get_snapshot_item missing under its shared lock,
 // DatabaseProxy::get_snapshot_item -- an x23 RPC, serialized, over a local
-// socket, to BlockSnapshotRpc -- the SnapshotStorageItem built from the reply,
-// and the cache insert. Everything on the executor's side of a cold read.
+// socket -- the lookup a real hog_db does over a real ramdb, the
+// SnapshotStorageItem built from the reply, and the cache insert. A cold read
+// end to end.
 //
-// What it does not measure: hog_db. The server answering is the in-process
-// mock, whose lookup is an unordered_map find, so this is the fixed cost of
-// going to the db and not the cost of the db. Read it as a floor under a
-// cold read and as the size of the thing the schedule declines to price,
-// and not as a number to put in gas_cost_table.h. The report keeps it out of
-// --schedule for that reason.
+// It answers from hog_db rather than the light server every other row uses,
+// because what a miss costs is mostly what the database does; against the
+// light server's map find this row reported the cost of *going* to a database
+// and not the cost of one.
+//
+// What it still does not measure: the shard topology. hog_db is in-process and
+// the socket is local, so a chain whose executor and database sit on different
+// hosts pays a network hop this does not. Read it as a floor in that one
+// respect.
 //
 // Keys come from a pool used strictly once: the cache is never reset within
 // the process, so a key read by any earlier call -- an earlier repetition,
@@ -1601,7 +1674,8 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
 void
 bm_nnint_cold(benchmark::State &state)
 {
-  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  SyscallBenchFixture *fixture_ptr =
+      fixture_or_fail(state, shared_db_fixture());
   if (fixture_ptr == nullptr) {
     return;
   }
