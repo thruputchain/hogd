@@ -5,7 +5,9 @@
 #include <span>
 #include <utility>
 
+#include "consensus.hh"
 #include "contract.hh"
+#include "db_sched.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
@@ -18,6 +20,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "network_config.hh"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "storage_item.hh"
 #include "types.hh"
