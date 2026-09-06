@@ -24,6 +24,7 @@
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
 #include "invoke_flag.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -87,9 +88,15 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
   };
 
   for (int32_t flags : kRejectedFlags) {
-    auto res = open_frame(handler.syscall_handler, invocation, flags);
-    EXPECT_EQ(res, kTestFFIErrorCodeInvalidArgument) << "flags = " << flags;
-    if (res == kTestFFIErrorCodeNone) {
+    auto res = open_frame_result(handler.syscall_handler, invocation, flags);
+    EXPECT_EQ(res.ffi_error_code, kTestFFIErrorCodeInvalidArgument)
+        << "flags = " << flags;
+    // Which of the three admission rules refused it, as production names it.
+    EXPECT_EQ(res.syscall_error_code,
+              std::to_underlying(
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput))
+        << "flags = " << flags;
+    if (res.ffi_error_code == kTestFFIErrorCodeNone) {
       // A regression admitted the frame. Finish it so the rest of this test and
       // the handler teardown still run: an unfinished mock frame blocks close,
       // which would turn a clear assertion failure into a hung test binary.

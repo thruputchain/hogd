@@ -81,10 +81,10 @@ make_mocked_handler(void *db, void *rc)
                                      source_tx_hash.data(), 1);
 }
 
-// Open a mock invocation frame on a mocked handler.
-inline TestFFIErrorCode
-open_frame(void *syscall_handler, Invocation const &invocation,
-           int32_t flags = 0)
+// Open a mock invocation frame on a mocked handler, with the whole result.
+inline OpenMockInvocationFrameResult
+open_frame_result(void *syscall_handler, Invocation const &invocation,
+                  int32_t flags = 0)
 {
   auto serialized = x23::serialize(invocation);
   FFISerializedInvocation ffi = {
@@ -92,6 +92,16 @@ open_frame(void *syscall_handler, Invocation const &invocation,
       .len = static_cast<uint32_t>(serialized.size()),
   };
   return open_mock_invocation_frame(syscall_handler, ffi, flags);
+}
+
+// Open a mock invocation frame, keeping only the FFI-level code. Most tests
+// care whether the frame opened, not which rule refused it; the ones that
+// assert on the refusing rule use open_frame_result() above.
+inline TestFFIErrorCode
+open_frame(void *syscall_handler, Invocation const &invocation,
+           int32_t flags = 0)
+{
+  return open_frame_result(syscall_handler, invocation, flags).ffi_error_code;
 }
 
 // Register, create, and deploy a kMockTest contract at the given address.

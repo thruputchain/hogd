@@ -85,9 +85,15 @@ TEST(TestBindingsTest, ReentrantMockFrameRejectedAndTraced)
   ASSERT_EQ(open_frame(handler.syscall_handler, make_invocation(kAddr, 0x1111)),
             kTestFFIErrorCodeNone);
 
-  // Same address, parent still active.
-  EXPECT_EQ(open_frame(handler.syscall_handler, make_invocation(kAddr, 0x2222)),
-            kTestFFIErrorCodeInvalidArgument);
+  // Same address, parent still active. The refusal names the rule that made
+  // it: the same kSyscallErrorCodeReentrance the parent's trace carries below,
+  // handed to a caller that has not finished the parent frame and so cannot
+  // read that trace yet.
+  auto refused = open_frame_result(handler.syscall_handler,
+                                   make_invocation(kAddr, 0x2222));
+  EXPECT_EQ(refused.ffi_error_code, kTestFFIErrorCodeInvalidArgument);
+  EXPECT_EQ(refused.syscall_error_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeReentrance));
 
   auto parent_finish = finish_frame_ok(handler.syscall_handler);
   x23::Defer free_parent([&] { free_finish_result(parent_finish); });

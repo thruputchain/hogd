@@ -1330,7 +1330,10 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
   };
   auto open_res =
       open_mock_invocation_frame(handler.syscall_handler, ffi_invocation, 0);
-  EXPECT_EQ(open_res, kTestFFIErrorCodeNone);
+  EXPECT_EQ(open_res.ffi_error_code, kTestFFIErrorCodeNone);
+  // An admitted frame refuses nothing, so there is no verdict to report.
+  EXPECT_EQ(open_res.syscall_error_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
@@ -1495,10 +1498,10 @@ make_mocked_handler(void *db, void *rc)
                                      source_tx_hash.data(), 1);
 }
 
-// Helper: open a mock invocation frame
-TestFFIErrorCode
-open_frame(void *syscall_handler, Invocation const &invocation,
-           int32_t flags = 0)
+// Helper: open a mock invocation frame, with the whole result
+OpenMockInvocationFrameResult
+open_frame_result(void *syscall_handler, Invocation const &invocation,
+                  int32_t flags = 0)
 {
   auto serialized = x23::serialize(invocation);
   FFISerializedInvocation ffi = {
@@ -1506,6 +1509,14 @@ open_frame(void *syscall_handler, Invocation const &invocation,
       .len = static_cast<uint32_t>(serialized.size()),
   };
   return open_mock_invocation_frame(syscall_handler, ffi, flags);
+}
+
+// Helper: open a mock invocation frame, keeping only the FFI-level code
+TestFFIErrorCode
+open_frame(void *syscall_handler, Invocation const &invocation,
+           int32_t flags = 0)
+{
+  return open_frame_result(syscall_handler, invocation, flags).ffi_error_code;
 }
 
 // Helper: deploy a mock contract at a specific address and return it

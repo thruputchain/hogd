@@ -185,7 +185,8 @@ TEST(TestBindingsTest, UnparseableMockFrameOpenAppendsNoInvokeTrace)
       .data = serialized.data(),
       .len = static_cast<uint32_t>(serialized.size() - 4),
   };
-  EXPECT_EQ(open_mock_invocation_frame(handler.syscall_handler, truncated, 0),
+  EXPECT_EQ(open_mock_invocation_frame(handler.syscall_handler, truncated, 0)
+                .ffi_error_code,
             kTestFFIErrorCodeDeserializeError);
 
   auto trace = finish_frame_and_take_trace(handler.syscall_handler);
