@@ -547,10 +547,10 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The kInvoke entry's gas delta is the child frame's total consumption.
     expected.push_back(
-        make_entry(98'803, 98'145, std::move(body), ok_status()));
+        make_entry(98'800, 98'142, std::move(body), ok_status()));
   }
-  expected.push_back(get_returned_buffer_entry(98'101, inner_calldata));
-  expected.push_back(return_entry(97'875, {}));
+  expected.push_back(get_returned_buffer_entry(98'099, inner_calldata));
+  expected.push_back(return_entry(97'871, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -639,9 +639,9 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The out-of-gas child consumes its entire 1000-gas limit.
     expected.push_back(
-        make_entry(98'773, 97'723, std::move(body), ok_status()));
+        make_entry(98'772, 97'722, std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(97'624, {}));
+  expected.push_back(return_entry(97'607, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

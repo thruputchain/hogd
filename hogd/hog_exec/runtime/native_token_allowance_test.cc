@@ -1017,7 +1017,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
 // native-token balance row. Because the native token has no transfer-to-zero
 // burn semantics, the zero recipient is NOT special-cased as a
 // supply-reducing burn: total_supply() stays unchanged and a standard
-// Transfer(owner, zero, amount) event is emitted.
+// Transfer(owner, zero, amount) event is emitted --- a real burn says so by
+// name, through burn() and its own Burn event.
 // This locks in the behavior as working-as-intended.
 TEST_F(NativeTokenAllowanceTest,
        TransferFromToZeroConsumesAllowanceAndKeepsSupply)
@@ -1757,14 +1758,14 @@ TEST_F(NativeTokenAllowanceTest,
   ASSERT_EQ(event_log->events.size(), 1U);
   auto const &event = event_log->events.front();
   EXPECT_EQ(event.contract_address, kNativeTokenContractAddress);
-  EXPECT_EQ(event.num_topics, 3U);
+  // A burn names itself: two topics (signature + the debited address), not a
+  // Transfer's three.
+  EXPECT_EQ(event.num_topics, 2U);
 
-  ContractAddress zero{};
   auto expected_event =
-      make_event_from_cxs_struct(native_token_transfer_event_signature(),
-                                 TransferEvent{
+      make_event_from_cxs_struct(native_token_burn_event_signature(),
+                                 NativeTokenBurnEvent{
                                      .from_address = kOwnerAddr,
-                                     .to_address = zero,
                                      .amount = to_xdr(kBurnAmount),
                                  });
   ASSERT_TRUE(expected_event);
