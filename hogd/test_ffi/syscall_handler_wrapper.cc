@@ -384,10 +384,11 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
   if (!admitted->has_value()) {
     finish_pending_trace(admitted->error().code());
-    error("invalid argument: mock invocation frame not admitted: {}",
-          admitted->error().code());
+    error("mock invocation frame refused: {}", admitted->error().code());
+    // Not a test-API misuse: the caller asked for something production
+    // refuses, and gets production's answer with no FFI error.
     return {.syscall_error_code = std::to_underlying(admitted->error().code()),
-            .ffi_error_code = kTestFFIErrorCodeInvalidArgument};
+            .ffi_error_code = kTestFFIErrorCodeNone};
   }
 
   // TODO(geoff): current API does not support passing auth tokens via the mock

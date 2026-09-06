@@ -87,11 +87,8 @@ TEST(TestBindingsTest, ReentrantMockFrameRejectedAndTraced)
 
   // Same address, parent still active. The refusal names the rule, without
   // finishing the parent frame to read it off the trace below.
-  auto refused = open_frame_result(handler.syscall_handler,
-                                   make_invocation(kAddr, 0x2222));
-  EXPECT_EQ(refused.ffi_error_code, kTestFFIErrorCodeInvalidArgument);
-  EXPECT_EQ(refused.syscall_error_code,
-            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeReentrance));
+  expect_frame_refused(handler.syscall_handler, make_invocation(kAddr, 0x2222),
+                       SyscallErrorCode::kSyscallErrorCodeReentrance);
 
   auto parent_finish = finish_frame_ok(handler.syscall_handler);
   x23::Defer free_parent([&] { free_finish_result(parent_finish); });
@@ -143,9 +140,9 @@ TEST(TestBindingsTest, ReentranceGuardRejectedOpenLeavesFrameStackUsable)
                        make_invocation(kParent, 0x1111)),
             kTestFFIErrorCodeNone);
 
-  EXPECT_EQ(open_frame(handler.syscall_handler,
-                       make_invocation(kParent, 0x2222)),
-            kTestFFIErrorCodeInvalidArgument);
+  expect_frame_refused(handler.syscall_handler,
+                       make_invocation(kParent, 0x2222),
+                       SyscallErrorCode::kSyscallErrorCodeReentrance);
 
   // The parent is still the innermost frame, so a distinct-address child opens
   // on top of it as usual.
@@ -187,8 +184,8 @@ TEST(TestBindingsTest, ReentranceGuardChecksEntireStack)
             kTestFFIErrorCodeNone);
 
   // 0xA0 is two frames down, not the active one.
-  EXPECT_EQ(open_frame(handler.syscall_handler, make_invocation(kRoot, 0x3333)),
-            kTestFFIErrorCodeInvalidArgument);
+  expect_frame_refused(handler.syscall_handler, make_invocation(kRoot, 0x3333),
+                       SyscallErrorCode::kSyscallErrorCodeReentrance);
 
   auto child_finish = finish_frame_ok(handler.syscall_handler);
   free_finish_result(child_finish);

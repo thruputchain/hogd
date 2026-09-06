@@ -78,7 +78,7 @@ enum TestFFIErrorCode {
   // be translated)
   kTestFFIErrorCodeContractVerificationFailed = 6,
   // An argument violated a documented precondition (e.g. a negative
-  // storage-token grant, or a mock invocation frame production would not admit)
+  // storage-token grant)
   kTestFFIErrorCodeInvalidArgument = 7,
 };
 
@@ -305,11 +305,14 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     void *db, void *rc, struct FFISerializedAuthClaimData auth_claim_data,
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
+// The two codes are mutually exclusive: ffi_error_code reports misuse of the
+// test API, syscall_error_code reports production refusing a well-formed call.
 struct OpenMockInvocationFrameResult {
   // Which rule refused the frame, as production's own SyscallErrorCode:
   // kSyscallErrorCodeInvalidSyscallInput, kSyscallErrorCodeReentrance or
-  // kSyscallErrorCodeInvokeDepthExceeded. kSyscallErrorCodeNone unless
-  // ffi_error_code is kTestFFIErrorCodeInvalidArgument.
+  // kSyscallErrorCodeInvokeDepthExceeded. kSyscallErrorCodeNone means the
+  // frame opened, so this -- not ffi_error_code -- is what says whether a
+  // finish_mock_invocation_frame() is owed.
   int32_t syscall_error_code;
   // FFI-level error code
   enum TestFFIErrorCode ffi_error_code;
@@ -319,9 +322,10 @@ struct OpenMockInvocationFrameResult {
 // invoke_flags may contain only defined, implemented bits (TryInvoke |
 // ReadOnly); an address that already has a frame on the stack cannot be invoked
 // again -- nested frames need distinct invoked_addresses; and
-// max_cross_invoke_depth caps how many frames a transaction may hold open. Any
-// violation returns kTestFFIErrorCodeInvalidArgument with the refusing rule in
-// syscall_error_code and opens no frame, so the handler stays usable and no
+// max_cross_invoke_depth caps how many frames a transaction may hold open.
+// Breaking one is not a misuse of this API -- production refuses the same call
+// from a contract -- so it returns kTestFFIErrorCodeNone with the refusing rule
+// in syscall_error_code, and opens no frame, so the handler stays usable and no
 // finish_mock_invocation_frame() is owed.
 struct OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,

@@ -118,14 +118,15 @@ TEST(TestBindingsTest, RefusedMockFrameOpenLeavesNoUnfinishedInvokeTrace)
             kTestFFIErrorCodeNone);
 
   // Reentrance (#3301): refused by validate_new_invocation().
-  EXPECT_EQ(open_frame(handler.syscall_handler,
-                       make_invocation(kParent, 0x2222, kChildGas)),
-            kTestFFIErrorCodeInvalidArgument);
+  expect_frame_refused(handler.syscall_handler,
+                       make_invocation(kParent, 0x2222, kChildGas),
+                       SyscallErrorCode::kSyscallErrorCodeReentrance);
 
   // Undefined flag bits (#3302): the other validate_new_invocation() refusal.
-  EXPECT_EQ(open_frame(handler.syscall_handler,
-                       make_invocation(kChild, 0x3333, kChildGas), 0x40),
-            kTestFFIErrorCodeInvalidArgument);
+  expect_frame_refused(handler.syscall_handler,
+                       make_invocation(kChild, 0x3333, kChildGas),
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+                       0x40);
 
   auto trace = finish_frame_and_take_trace(handler.syscall_handler);
 

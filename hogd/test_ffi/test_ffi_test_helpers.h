@@ -27,6 +27,7 @@
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_genesis_root_contract.h"
 #include "invoke_flag.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -94,12 +95,26 @@ open_frame_result(void *syscall_handler, Invocation const &invocation,
   return open_mock_invocation_frame(syscall_handler, ffi, flags);
 }
 
-// Open a mock invocation frame, keeping only the FFI-level code.
+// Open a mock invocation frame, keeping only the FFI-level code. Use this to
+// open a frame that should succeed; a production refusal also reports
+// kTestFFIErrorCodeNone here, so pair it with expect_frame_refused() below
+// rather than reading "no FFI error" as "a frame opened".
 inline TestFFIErrorCode
 open_frame(void *syscall_handler, Invocation const &invocation,
            int32_t flags = 0)
 {
   return open_frame_result(syscall_handler, invocation, flags).ffi_error_code;
+}
+
+// Expect production to refuse the frame, naming the rule. The test API was
+// used correctly, so no FFI error accompanies it.
+inline void
+expect_frame_refused(void *syscall_handler, Invocation const &invocation,
+                     SyscallErrorCode code, int32_t flags = 0)
+{
+  auto res = open_frame_result(syscall_handler, invocation, flags);
+  EXPECT_EQ(res.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(res.syscall_error_code, std::to_underlying(code));
 }
 
 // Register, create, and deploy a kMockTest contract at the given address.
