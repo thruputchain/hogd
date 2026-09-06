@@ -875,6 +875,12 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   // BytestringSet is 5 addi + ecall, LogEvent 6 addi + ecall, and the empty
   // Return 6 addi + ecall; syscall costs beyond base instruction gas come
   // from the gas cost table.
+  //
+  // The write pays its own cost on top of the crossing -- the storage access
+  // plus one block for these bytes -- and every later entry starts that much
+  // lower. Named rather than folded into the literals so the next repricing
+  // moves these expectations with the schedule instead of through them.
+  const GasAmount write_cost = BytestringSetCost(value.size());
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
@@ -882,21 +888,22 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
     body.bytestring_set().inputs.bytestring.append_range(value);
     body.bytestring_set().inputs.flags =
         static_cast<uint32_t>(StorageDeltaFlags::None);
-    expected.push_back(make_trace_entry(kParityGas - 6,
-                                        kParityGas - 6 - kSyscallBaseCost,
-                                        std::move(body), ok_status()));
+    expected.push_back(
+        make_trace_entry(kParityGas - 6,
+                         kParityGas - 6 - kSyscallBaseCost - write_cost,
+                         std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kLogEvent);
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
     expected.push_back(
-        make_trace_entry(kParityGas - 13 - kSyscallBaseCost,
-                         kParityGas - 13 - (2 * kSyscallBaseCost),
+        make_trace_entry(kParityGas - 13 - kSyscallBaseCost - write_cost,
+                         kParityGas - 13 - (2 * kSyscallBaseCost) - write_cost,
                          std::move(body), ok_status()));
   }
-  expected.push_back(
-      return_trace_entry(kParityGas - 20 - (2 * kSyscallBaseCost), {}));
+  expected.push_back(return_trace_entry(
+      kParityGas - 20 - (2 * kSyscallBaseCost) - write_cost, {}));
 
   EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(trace.status.return_buffer().empty());
