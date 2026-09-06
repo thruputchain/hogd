@@ -122,11 +122,8 @@ struct AcceptedGasSchedule {
   uint64_t digest;
 };
 
-inline constexpr std::array<AcceptedGasSchedule, 4> kAcceptedGasSchedules = {{
+inline constexpr std::array<AcceptedGasSchedule, 3> kAcceptedGasSchedules = {{
     {.version = kGasTableVersion, .digest = kGasScheduleDigest},
-    // v4 as it stood before the bytestring copy was priced. Remove once the
-    // lowerer stamps the priced schedule.
-    {.version = 4, .digest = 0x35d721c30a42777bULL},
     // v4 as it stood before NNInt storage access was priced. Every artifact
     // stamped since v4 shipped declares this, so dropping it would reject
     // contracts that are already deployed. Remove once the lowerer stamps the
