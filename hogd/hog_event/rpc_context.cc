@@ -43,6 +43,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -939,10 +940,13 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     // health and startup on it), and on a busy chain a pull that always parked
     // would never produce one. A bootstrap pull is never parked either. Only
     // a repeat of the same initialized progress is the client asking to wait.
+    // XDR unions carry no operator==, so compare encodings -- the same test
+    // the pull controller applies to this type.
     const bool repeat = request.progress.state() ==
                             IndexerProgressState::IndexerProgressInitialized &&
                         last_caught_up_progress_ &&
-                        xdr_equal(*last_caught_up_progress_, request.progress);
+                        x23::serialize(*last_caught_up_progress_) ==
+                            x23::serialize(request.progress);
     if (!repeat) {
       last_caught_up_progress_ = request.progress;
       co_return pull_caught_up(response_origin);
