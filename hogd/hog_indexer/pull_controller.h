@@ -25,12 +25,6 @@ struct IndexerPullControllerOptions {
   // park and there is nothing to wait for first. Nonzero only matters against
   // a server that answers every caught-up pull eagerly.
   std::chrono::milliseconds caught_up_poll_delay = std::chrono::milliseconds(0);
-  // Bound on the fast RPCs (the tx-failure pull).
-  std::chrono::milliseconds rpc_timeout = std::chrono::seconds(30);
-  // Bound on the block pull, which legitimately outlives rpc_timeout: it parks
-  // on the event server until the next commit. This is a hung-server liveness
-  // check, and it is also how often an idle chain reconnects.
-  std::chrono::milliseconds pull_timeout = std::chrono::minutes(5);
 };
 
 // Owns the standalone indexer's event connection and durable replay loop.
