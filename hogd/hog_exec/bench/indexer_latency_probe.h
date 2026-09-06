@@ -37,9 +37,8 @@ namespace hogd {
 // clock but the runner's is involved, and no log shipping is needed.
 //
 // Sampling is poll-based, so a reported latency is the true latency plus up
-// to one poll interval. [kPollInterval] sits two orders of magnitude below
-// the indexer's own [caught_up_poll_delay] (100ms), which is the term this
-// probe exists to expose, so the sampling error is small against the signal.
+// to one poll interval; [kPollInterval] keeps that error small against
+// anything the ingest path can produce.
 //
 // The polling thread makes blocking RPC calls the same way
 // [IndexerPullController] does: a plain thread, a blocking [()] on the call,
