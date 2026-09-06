@@ -1480,8 +1480,8 @@ change to the memory map or to the ceiling fails the build instead of silently
 overrunning -- which is how an earlier sweep here put a public key on top of a
 signature.
 
-**What the sweep says.** From hog10, seven repetitions, run-to-run deviation
-0.1-0.4%:
+**What the sweep says.** From hog10 (run 34001119814), five repetitions at
+0.5s, run-to-run deviation 0.03-1.7% on these rows:
 
 | bytes | `BytestringSet` | `BytestringGet` | `BytestringGetLen` |
 |---:|---:|---:|---:|
@@ -1597,7 +1597,10 @@ What that bills across the sweep:
 
 The wide end is the zero-length call, where `kStorageAccessCost`'s own
 deliberate margin is the whole of it -- the same 1.83x `NNIntGet` already
-carries. What it replaces is worse in the only direction that matters: a
+carries. That table is computed against the measured entry rows plus an 18 ns
+seam, the median of `vm - entry` across the syscall rows in the same run; the
+bytestring `vm/` rows are a single length each, so the seam is taken from the
+table rather than from them. What it replaces is worse in the only direction that matters: a
 32 KiB write was **undercharged 17x** and a 32 KiB read 10x, both billed a
 flat 50 gas.
 
