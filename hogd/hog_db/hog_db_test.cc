@@ -2869,6 +2869,51 @@ TEST_F(HogDbTest, RCQInsertAndCurrentBlockConsumeSameBlock)
   });
 }
 
+// A value inserted several times and consumed once in the same block must
+// leave exactly the surplus copies behind. This is the case where the
+// current-block consume filter has to honour multiset semantics rather than
+// treating an entry as merely present-or-absent, and where the surviving
+// entries are not a prefix or suffix of added_entries_.
+TEST_F(HogDbTest, RCQPartialDuplicateCurrentBlockConsume)
+{
+  Address addr = make_address(kAddress + 36);
+  ItemKey rcq_key = make_key(kAddress + 36, 1);
+  setup_contract_address(addr);
+
+  // Insert 0x07 three times, interleaved with other values in an order that is
+  // neither sorted nor consumed-entries-first, then consume a single 0x07.
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x09});
+    delta.insert.added_entries.push_back(QueueEntry{0x07});
+    delta.insert.added_entries.push_back(QueueEntry{0x07});
+    delta.insert.added_entries.push_back(QueueEntry{0x01});
+    delta.insert.added_entries.push_back(QueueEntry{0x07});
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number = 0;
+    delta.consume->past_block_consume.partial_consumed_number = 0;
+    delta.consume->current_block_consumed.push_back(QueueEntry{0x07});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, std::move(delta),
+        std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto block_result = db_.read_retrocausal_queue_block(rcq_key, 1);
+  ASSERT_TRUE(block_result.has_value());
+
+  // One 0x07 was consumed and two remain; blocks are stored sorted.
+  const std::vector<QueueEntry> expected{QueueEntry{0x01}, QueueEntry{0x07},
+                                         QueueEntry{0x07}, QueueEntry{0x09}};
+  ASSERT_EQ(block_result->entries.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(block_result->entries[i], expected[i]) << "entry " << i;
+  }
+
+  auto meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
+  ASSERT_TRUE(meta_result.has_value());
+  EXPECT_EQ(meta_result->live_entries, expected.size());
+}
+
 // BugHunt: RCQ consume all past blocks AND all current block entries.
 // Everything inserted in this block is also consumed, plus past blocks.
 TEST_F(HogDbTest, RCQConsumeAllPastAndCurrentEntries)
