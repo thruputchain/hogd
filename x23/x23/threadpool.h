@@ -429,15 +429,27 @@ private:
     }
   }
 
-  // Returns true if the queue was previously empty
-  bool enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
+  // Enqueue job on a queue selected by qselect, waking a worker if the
+  // queue was previously empty.
+  //
+  // The wakeup has to be signalled while the queue lock is still held.
+  // Dropping the lock first and notifying afterwards is the usual way
+  // to keep a woken thread from immediately blocking on the mutex, but
+  // it is not safe here: the lock is the only thing keeping a worker
+  // from popping this job, and once the job runs, whoever was waiting
+  // on it may conclude the pool is idle and destroy it -- freeing the
+  // condition variable underneath a notify_all() that has not returned
+  // yet.  ~ThreadPool joins the workers, but nothing makes it wait for
+  // an enqueuer that has already let go of the queue.
+  void enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
   {
     qselect(&lq, job.cpuhint);
     bool wasempty = lq->q.empty();
     lq->q.emplace_back(job, now);
-    if (wasempty)
+    if (wasempty) {
       RunQueue::set_qtime(lq, now);
-    return wasempty;
+      lq->nonempty.notify_all();
+    }
   }
 
   class Worker {

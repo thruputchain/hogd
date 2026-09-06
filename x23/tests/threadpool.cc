@@ -97,6 +97,41 @@ TEST(ThreadPoolOnQuiesce, DestructionWakeupStress)
   }
 }
 
+// A job enqueued on an empty runqueue wakes a worker on that queue's
+// `nonempty` condition variable, and the notify has to happen before
+// the queue lock is dropped.  The lock is what keeps a worker from
+// popping the job, so once it is dropped the job can run, and running
+// the job is what tells the rest of the program the pool is idle and
+// may be destroyed.  Signalling after the unlock instead lets
+// ~ThreadPool free the condition variable while the enqueuing thread
+// is still inside notify_all() -- reported by TSAN as a race between
+// pthread_cond_broadcast and pthread_cond_destroy.
+//
+// The submit has to come from a thread other than the one destroying
+// the pool, or the submitter's own notify_all() is trivially ordered
+// before the destructor; hence the deliberately late join().  Unlike
+// DestructionWakeupStress this needs a real worker thread, since
+// on_quiesce never touches a runqueue.  The window is a few
+// instructions wide, so iterate to make hitting it likely.
+TEST(ThreadPool, DestructionRacesEnqueueWakeup)
+{
+  for (unsigned i = 0; i < 500; ++i) {
+    std::atomic_bool job_ran{false};
+    auto pool = std::make_unique<ThreadPool>(1);
+
+    std::thread submitter([tp = pool.get(), &job_ran] {
+      tp->spawn([&job_ran]() noexcept {
+        job_ran.store(true, std::memory_order_release);
+        job_ran.notify_all();
+      });
+    });
+
+    job_ran.wait(false, std::memory_order_acquire);
+    pool.reset();
+    submitter.join();
+  }
+}
+
 TEST(ThreadPoolOnQuiesce, RepeatedWakeups)
 {
   constexpr unsigned kCoroutines = 64;
