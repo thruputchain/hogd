@@ -602,9 +602,8 @@ private:
       kHogDbHeapBytes,
   };
   Transaction tx_{};
-  // SystemCallHandler is neither movable nor copyable, so it is built in place
-  // here rather than assigned in the constructor body. Declaration order is
-  // load-bearing: the framework and the context both have to outlive it.
+  // Built in place: SystemCallHandler is neither movable nor copyable. Declared
+  // after what it borrows.
   std::unique_ptr<RuntimeContext> runtime_context_ =
       std::make_unique<NoChildRuntimeContext>();
   SystemCallHandler handler_ =
