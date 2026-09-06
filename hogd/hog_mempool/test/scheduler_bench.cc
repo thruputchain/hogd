@@ -135,6 +135,47 @@ BENCHMARK(bm_scheduler_add_txs)
     ->UseManualTime()
     ->Unit(benchmark::kMicrosecond);
 
+void
+bm_scheduler_batch_lifecycle(benchmark::State &state)
+{
+  const size_t num_txs = state.range(0);
+  const auto accounts = make_benchmark_accounts(state.range(1));
+  MempoolTestInfra server;
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  seed_benchmark_hog_ages(server, accounts);
+  fib_client_t client(accounts.front());
+  auto txs = generate_unsigned_txs(client, num_txs);
+  std::vector<TransactionHash> hashes;
+  hashes.reserve(num_txs);
+  for (size_t i = 0; i < num_txs; ++i) {
+    txs[i].tx.invocation.invoked_address = accounts[i % accounts.size()];
+    hashes.push_back(sha256(txs[i].tx));
+  }
+  double add_seconds = 0;
+  double remove_seconds = 0;
+  for (auto _ : state) {
+    ElapsedTimer add_timer;
+    scheduler->add_txs(txs)();
+    const double add = add_timer.elapsed();
+    ElapsedTimer remove_timer;
+    scheduler->remove_from_scheduler(hashes)();
+    const double remove = remove_timer.elapsed();
+    state.SetIterationTime(add + remove);
+    add_seconds += add;
+    remove_seconds += remove;
+    CHECK_EQ(scheduler->size(), 0UL);
+  }
+  state.counters["add_ms"] = add_seconds * 1000 / state.iterations();
+  state.counters["remove_ms"] = remove_seconds * 1000 / state.iterations();
+  state.SetItemsProcessed(state.iterations() * num_txs);
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_scheduler_batch_lifecycle)
+    ->Args({1'000'000, 10'000})
+    ->Args({1'000'000, 100'000})
+    ->UseManualTime()
+    ->Unit(benchmark::kMillisecond);
+
 } // namespace
 
 } // namespace hogd

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <map>
 #include <memory>
@@ -202,8 +203,7 @@ private:
         TxKey, std::shared_ptr<TxValue>, std::less<TxKey>,
         SharedPoolAllocator<std::pair<const TxKey, std::shared_ptr<TxValue>>>>;
 
-    explicit AccountState(
-        const std::shared_ptr<std::pmr::synchronized_pool_resource> &pool)
+    explicit AccountState(const std::shared_ptr<SharedPoolResource> &pool)
       : txs(std::less<TxKey>{}, Runqueue::allocator_type(pool))
     {}
 
@@ -302,8 +302,18 @@ private:
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
-  std::shared_ptr<std::pmr::synchronized_pool_resource> tx_pool_ =
-      std::make_shared<std::pmr::synchronized_pool_resource>();
+  std::array<std::shared_ptr<SharedPoolResource>, 256> tx_pools_ = [] {
+    std::array<std::shared_ptr<SharedPoolResource>, 256> pools;
+    for (auto &pool : pools) {
+      pool = std::make_shared<SharedPoolResource>();
+    }
+    return pools;
+  }();
+  const std::shared_ptr<SharedPoolResource> &
+  pool_for_account(const ContractAddress &account) const
+  {
+    return tx_pools_[SipHash24Hasher{}(account) % tx_pools_.size()];
+  }
 
   // Tx cache.
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can

@@ -283,7 +283,8 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
     const HogAge &age = res.hog_age();
     CHECK_EQ(age.address, accounts[i]);
     ret.found.insert(age.address);
-    auto [account_state, lock] = accounts_.try_emplace(age.address, tx_pool_);
+    auto [account_state, lock] =
+        accounts_.try_emplace(age.address, pool_for_account(age.address));
     account_state->hog_age = age;
   }
   co_return ret;
@@ -469,6 +470,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
         std::vector<std::pair<TxKey, std::shared_ptr<TxValue>>> prepared;
         for (size_t i = chunk.start; i < chunk.end; ++i) {
           const auto &[account, group] = *groups[i];
+          const SharedPoolAllocator<TxValue> allocator(
+              pool_for_account(account));
           prepared.clear();
           prepared.reserve(group.size());
           for (const SignedTransaction *tx : group) {
@@ -476,8 +479,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
             auto [cached, cache_lock] = txs_.try_emplace(hash);
             if (!*cached) {
               try {
-                *cached = std::allocate_shared<TxValue>(
-                    SharedPoolAllocator<TxValue>(tx_pool_), TxValue{.tx = *tx});
+                *cached = std::allocate_shared<TxValue>(allocator,
+                                                        TxValue{.tx = *tx});
               } catch (...) {
                 txs_.remove(hash, cache_lock);
                 throw;
@@ -789,7 +792,8 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     const auto delta_it = missing_account_deltas.find(account);
     CHECK(delta_it != missing_account_deltas.end());
     CHECK_GT(delta_it->second, static_cast<int128_t>(0));
-    auto [account_state, lock] = accounts_.try_emplace(account, tx_pool_);
+    auto [account_state, lock] =
+        accounts_.try_emplace(account, pool_for_account(account));
     account_state->hog_age.address = account;
   }
 
