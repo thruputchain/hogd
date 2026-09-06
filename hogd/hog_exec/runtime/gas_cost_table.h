@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstdint>
 
 namespace hogd {
@@ -120,6 +121,20 @@ constexpr static uint64_t kVerifySignatureBlockCost = 131;
 // docs/rv32/rv32-gas-calibration.md.
 constexpr static uint64_t kStorageAccessCost = 150;
 
+// What copying a bytestring costs, per block, on top of the storage access
+// every bytestring call already pays. A block rather than a per-byte rate
+// because the measured rate is a fraction of a gas unit, and a fraction needs
+// a divisor. 512 is chosen rather than forced by a hash's geometry, so it is
+// hashed into the schedule with the costs. Two constants because a write moves
+// the bytes twice and measures almost exactly twice a read's rate; each is
+// sized to the dearest band its sweep measured, the per-byte cost not being
+// constant across it.
+//
+// See docs/rv32/rv32-gas-calibration.md, "Bytestrings: the length axis".
+constexpr static uint64_t kBytestringBlockBytes = 512;
+constexpr static uint64_t kBytestringWriteBlockCost = 13;
+constexpr static uint64_t kBytestringReadBlockCost = 7;
+
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
@@ -135,65 +150,78 @@ constexpr static uint64_t kSHA512PadBytes = 17;
 constexpr static uint64_t kEd25519HashedPrefixBytes = 64;
 static_assert(kSHA512BlockBytes == 128 && kSHA512PadBytes == 17);
 
-// NOLINTBEGIN(readability-identifier-naming)
+// The largest length a cost function may be handed. Every argument they price
+// is a guest span length, which rv32::kMaxMemoryBytes caps at 64 KiB, so
+// anything past this is a caller passing something that is not a length -- a
+// bug to catch, not a case to price.
+constexpr static uint64_t kMaxCostBytes = uint64_t{1} << 32;
 
-// Blocks a hash compresses, padding included. One helper per hash rather than
-// one taking the geometry as arguments: three interchangeable uint64_t
-// parameters is a call that transposes silently. Guarded against overflow on a
-// length near the top of the range.
-constexpr static auto SHA256BlockCount =
-    [](uint64_t message_bytes) -> uint64_t {
-  if (message_bytes > UINT64_MAX - kSHA256PadBytes)
-    return UINT64_MAX / kSHA256BlockBytes;
-  return (message_bytes + kSHA256PadBytes + kSHA256BlockBytes - 1) /
-         kSHA256BlockBytes;
+// Costs a syscall computes from its arguments, as opposed to the flat
+// constants above.
+struct GasCost {
+  // Blocks a hash compresses, padding included. One helper per hash rather
+  // than one taking the geometry as arguments: three interchangeable uint64_t
+  // parameters is a call that transposes silently.
+  static constexpr uint64_t sha256_blocks(uint64_t message_bytes)
+  {
+    assert(message_bytes <= kMaxCostBytes);
+    return (message_bytes + kSHA256PadBytes + kSHA256BlockBytes - 1) /
+           kSHA256BlockBytes;
+  }
+
+  static constexpr uint64_t sha512_blocks(uint64_t message_bytes)
+  {
+    assert(message_bytes <= kMaxCostBytes);
+    return (message_bytes + kSHA512PadBytes + kSHA512BlockBytes - 1) /
+           kSHA512BlockBytes;
+  }
+
+  static constexpr uint64_t sha256_hash(uint64_t bytes_len)
+  {
+    return kSHA256HashBlockCost * sha256_blocks(bytes_len);
+  }
+
+  // Whole blocks only: a partial tail stays buffered and is charged by
+  // whichever later call completes it. The carry this under-counts by is at
+  // most one block per call, far less than the crossing that call already
+  // paid.
+  static constexpr uint64_t sha256_update(uint64_t bytes_len)
+  {
+    assert(bytes_len <= kMaxCostBytes);
+    return kSHA256StreamCost +
+           (kSHA256HashBlockCost * (bytes_len / kSHA256BlockBytes));
+  }
+
+  // Rounded up, with an empty bytestring costing none: it copies nothing, and
+  // its storage access is charged anyway.
+  static constexpr uint64_t bytestring_blocks(uint64_t bytes_len)
+  {
+    assert(bytes_len <= kMaxCostBytes);
+    return (bytes_len + kBytestringBlockBytes - 1) / kBytestringBlockBytes;
+  }
+
+  // Charged on the bytes copied: the value handed to a write, and for a read
+  // the bytes that reach the guest rather than the buffer it offered.
+  static constexpr uint64_t bytestring_set(uint64_t bytes_len)
+  {
+    return kStorageAccessCost +
+           (kBytestringWriteBlockCost * bytestring_blocks(bytes_len));
+  }
+
+  static constexpr uint64_t bytestring_get(uint64_t bytes_len)
+  {
+    return kStorageAccessCost +
+           (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
+  }
+
+  static constexpr uint64_t verify_signature(uint64_t message_len)
+  {
+    assert(message_len <= kMaxCostBytes);
+    return kVerifySignatureBaseCost +
+           (kVerifySignatureBlockCost *
+            sha512_blocks(message_len + kEd25519HashedPrefixBytes));
+  }
 };
-
-constexpr static auto SHA512BlockCount =
-    [](uint64_t message_bytes) -> uint64_t {
-  if (message_bytes > UINT64_MAX - kSHA512PadBytes)
-    return UINT64_MAX / kSHA512BlockBytes;
-  return (message_bytes + kSHA512PadBytes + kSHA512BlockBytes - 1) /
-         kSHA512BlockBytes;
-};
-
-// Saturating: a length chosen to overflow must bill the maximum, not wrap.
-constexpr static auto SaturatingCost = [](uint64_t base, uint64_t per_block,
-                                          uint64_t blocks) -> uint64_t {
-  if (per_block != 0 && blocks > (UINT64_MAX - base) / per_block)
-    return UINT64_MAX;
-  return base + (blocks * per_block);
-};
-
-constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
-  return SaturatingCost(0, kSHA256HashBlockCost, SHA256BlockCount(bytes_len));
-};
-
-// Whole blocks only: a partial tail stays buffered and is charged by whichever
-// later call completes it. The carry this under-counts by is at most one block
-// per call, far less than the crossing that call already paid.
-constexpr static auto SHA256UpdateCost = [](uint64_t bytes_len) -> uint64_t {
-  return SaturatingCost(kSHA256StreamCost, kSHA256HashBlockCost,
-                        bytes_len / kSHA256BlockBytes);
-};
-
-// Copy compresses nothing; the stream it clones into is the whole cost.
-constexpr static uint64_t kSHA256CopyCost = kSHA256StreamCost;
-
-// Finalize compresses the padding block the streaming path has not yet done.
-// It creates no stream -- it erases one -- so it pays no stream cost: the
-// create-side call already paid for both halves of the slot's life.
-constexpr static uint64_t kSHA256FinalizeCost = kSHA256HashBlockCost;
-
-constexpr static auto VerifySignatureCost =
-    [](uint64_t message_len) -> uint64_t {
-  const uint64_t hashed = message_len > UINT64_MAX - kEd25519HashedPrefixBytes
-                              ? UINT64_MAX - kEd25519HashedPrefixBytes
-                              : message_len + kEd25519HashedPrefixBytes;
-  return SaturatingCost(kVerifySignatureBaseCost, kVerifySignatureBlockCost,
-                        SHA512BlockCount(hashed));
-};
-// NOLINTEND(readability-identifier-naming)
 
 struct SyscallGasCostEntry {
   // `u8"..."` literal: folded into the RV32 gas-schedule digest (an artifact
@@ -206,13 +234,16 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 8> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 11> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
     {.name = u8"VerifySignatureBase", .cost = kVerifySignatureBaseCost},
     {.name = u8"VerifySignatureBlock", .cost = kVerifySignatureBlockCost},
     {.name = u8"StorageAccess", .cost = kStorageAccessCost},
+    {.name = u8"BytestringBlockBytes", .cost = kBytestringBlockBytes},
+    {.name = u8"BytestringWriteBlock", .cost = kBytestringWriteBlockCost},
+    {.name = u8"BytestringReadBlock", .cost = kBytestringReadBlockCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
 }};
