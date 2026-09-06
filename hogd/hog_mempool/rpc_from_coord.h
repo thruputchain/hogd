@@ -74,7 +74,7 @@ public:
   static constexpr size_t kNumTxsPerNominationChunk =
       kMaxBlockSize / kNumSchedulerIterations;
 
-  static constexpr size_t kChunkSize = 10;
+  static constexpr size_t kChunkSize = 64;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,

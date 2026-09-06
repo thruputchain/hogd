@@ -127,6 +127,16 @@ public:
     return {&it->second, std::move(ul)};
   }
 
+  // Construct the mapped value only when the key is absent.
+  template<typename... Args>
+  std::pair<T *, std::unique_lock<lock_type>> try_emplace(const Key &key,
+                                                          Args &&...args)
+  {
+    auto [map, ul] = get_bucket(key);
+    auto [it, inserted] = map.try_emplace(key, std::forward<Args>(args)...);
+    return {&it->second, std::move(ul)};
+  }
+
   // find_shared with shared lock
   std::pair<const T *, std::shared_lock<lock_type>>
   find_shared(const Key &key) const requires shared_mutex_like<lock_type>

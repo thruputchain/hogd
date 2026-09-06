@@ -58,6 +58,22 @@ TEST(Scheduler, AddVettedTx)
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
+TEST(Scheduler, PooledTransactionRemainsValidAfterSchedulerDestruction)
+{
+  fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
+  const auto txs = generate_unsigned_txs(client, 1);
+  std::shared_ptr<const SignedTransaction> retained;
+  {
+    MempoolTestInfra server;
+    auto scheduler = server.mempool_coord_rpc().scheduler();
+    scheduler->add_txs(txs)();
+    retained = scheduler->find_tx(sha256(txs[0].tx));
+    ASSERT_NE(retained, nullptr);
+  }
+  EXPECT_EQ(x23::serialize(*retained), x23::serialize(txs[0]));
+  retained.reset();
+}
+
 TEST(Scheduler, AddVettedTxFromUnknownAccount)
 {
   const ContractAddress kUnknownAccount = make_account_address(99);

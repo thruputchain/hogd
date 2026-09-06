@@ -527,6 +527,36 @@ private:
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 class MerkleTriePrefix {
 public:
+  // Insert a set of fixed-size hashes with one worker per existing prefix
+  // subtree. The caller must serialize bulk insertions into the same trie.
+  // Existing insert() and the canonical root/proof format are unchanged.
+  bool insert_hashes(std::span<const SHA256Hash> hashes)
+  {
+    std::array<std::vector<const SHA256Hash *>, kNumTries> groups;
+    for (const SHA256Hash &hash : hashes) {
+      groups[hash[0] >> 4].push_back(&hash);
+    }
+    std::atomic<bool> unique{true};
+    WorkerPool::JobScope scope;
+    scope.reserve(kNumTries);
+    for (size_t i = 0; i < kNumTries; ++i) {
+      if (groups[i].empty()) {
+        continue;
+      }
+      scope.submit([&, i] {
+        for (const SHA256Hash *hash : groups[i]) {
+          const auto [prefix, suffix] = get_prefix(HexArray(*hash));
+          CHECK_EQ(prefix, i);
+          if (!tries_[i]->insert(suffix, std::span<const std::byte>())) {
+            unique.store(false, std::memory_order_relaxed);
+          }
+        }
+      });
+    }
+    scope.wait();
+    return unique.load(std::memory_order_relaxed);
+  }
+
   explicit MerkleTriePrefix(
       Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault)
   {

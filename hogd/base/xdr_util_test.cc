@@ -121,6 +121,34 @@ TEST(ParallelBatchToTTest, RoundTripsSingleSignedTransaction)
   EXPECT_EQ(parsed[0], tx);
 }
 
+TEST(ParallelBatchToTTest, EncodingMatchesIndividualSerializationAcrossSegments)
+{
+  for (size_t count : {0UL, 1UL, 19UL, 20UL, 21UL, 131UL}) {
+    SignedTransactionBatch txs;
+    for (size_t i = 0; i < count; ++i) {
+      auto tx = make_minimal_signed_transaction();
+      tx.tx.invocation.calldata.resize(i % 37, static_cast<uint8_t>(i));
+      txs.push_back(std::move(tx));
+    }
+    ParallelBatch expected;
+    ParallelBatch actual;
+    // Repeated appends must also preserve the existing bytes and metadata.
+    for (size_t repeat = 0; repeat < 2; ++repeat) {
+      for (const auto &chunk :
+           make_chunks(count, kNumThreadsForParallelBatch)) {
+        const size_t start = expected.xdr.size();
+        for (size_t j = chunk.start; j < chunk.end; ++j) {
+          expected.xdr += x23::serialize(txs[j]);
+        }
+        expected.segment_tokens.push_back(chunk.end - chunk.start);
+        expected.segment_bytes.push_back(expected.xdr.size() - start);
+      }
+      append_to_parallel_batch(txs, actual)();
+      EXPECT_EQ(x23::serialize(actual), x23::serialize(expected));
+    }
+  }
+}
+
 TEST(ParallelBatchToTTest, AppendToEmptyMatchesTToParallelBatch)
 {
   const SignedTransaction tx = make_minimal_signed_transaction();

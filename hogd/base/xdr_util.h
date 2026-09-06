@@ -19,6 +19,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 #include "parallel.hh"
 #include "types.hh"
@@ -330,43 +331,52 @@ template<typename T>
 inline x23::Async<void>
 append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 {
-  // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
-  // serialize each object individually rather than serialize [objs] once.
-  const std::vector<ChunkRange> chunks =
-      make_chunks(objs.size(), kNumThreadsForParallelBatch);
+  co_await default_coropoll().pool_.bg();
+  const auto chunks = make_chunks(objs.size(), kNumThreadsForParallelBatch);
   const size_t segment_offset = parallel.segment_tokens.size();
-  x23::Vec<x23::Async<void>> handles;
-  handles.reserve(chunks.size());
-  x23::Vec<x23::XdrVec<std::uint8_t>> xdrs;
-  xdrs.resize(chunks.size(), {});
+  std::vector<size_t> offsets(chunks.size() + 1, parallel.xdr.size());
   parallel.segment_bytes.resize(segment_offset + chunks.size(), 0);
   parallel.segment_tokens.resize(segment_offset + chunks.size(), 0);
-  for (size_t i = 0; i < chunks.size(); i++) {
-    const ChunkRange &chunk = chunks[i];
-    handles.push_back([](const ChunkRange &chunk, size_t i,
-                         size_t segment_offset, ParallelBatch &parallel,
-                         x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
-                         x23::span<T> &objs) noexcept -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
-
-      const size_t segment_idx = segment_offset + i;
-      parallel.segment_tokens[segment_idx] = chunk.end - chunk.start;
-      // This is just an educated guess, but hopefully it lowers/eliminates the
-      // resize overhead of the vector.
-      xdrs[i].reserve(parallel.segment_tokens[segment_idx] * sizeof(T) * 3);
-      for (size_t j = chunk.start; j < chunk.end; j++) {
-        xdrs[i] += x23::serialize(objs[j]);
-      }
-      parallel.segment_bytes[segment_idx] = xdrs[i].size();
-      co_return;
-    }(chunk, i, segment_offset, parallel, xdrs, objs));
+  {
+    WorkerPool::JobScope scope;
+    scope.reserve(chunks.size());
+    for (size_t i = 0; i < chunks.size(); ++i) {
+      scope.submit([&, i] {
+        size_t bytes = 0;
+        for (size_t j = chunks[i].start; j < chunks[i].end; ++j) {
+          const size_t size = x23::xdr_size(objs[j]);
+          CHECK_LE(size, UINT32_MAX - bytes);
+          bytes += size;
+        }
+        parallel.segment_bytes[segment_offset + i] = bytes;
+        parallel.segment_tokens[segment_offset + i] =
+            chunks[i].end - chunks[i].start;
+      });
+    }
+    scope.wait();
   }
-  // This is just an educated guess, but hopefully it lowers/eliminates the
-  // resize overhead of the vector.
-  parallel.xdr.reserve(parallel.xdr.size() + (objs.size() * sizeof(T) * 3));
-  for (size_t i = 0; i < chunks.size(); i++) {
-    co_await handles[i];
-    parallel.xdr += xdrs[i];
+  for (size_t i = 0; i < chunks.size(); ++i) {
+    offsets[i + 1] = offsets[i] + parallel.segment_bytes[segment_offset + i];
+  }
+  parallel.xdr.resize_uninitialized(offsets.back());
+  {
+    WorkerPool::JobScope scope;
+    scope.reserve(chunks.size());
+    for (size_t i = 0; i < chunks.size(); ++i) {
+      scope.submit([&, i] {
+        // Serialize objects individually, preserving the existing segment
+        // boundaries and bytes (including the absence of a vector length).
+        if (offsets[i] == offsets[i + 1]) {
+          return;
+        }
+        x23::detail::Serializer serializer(parallel.xdr.data() + offsets[i]);
+        for (size_t j = chunks[i].start; j < chunks[i].end; ++j) {
+          serializer(objs[j]);
+        }
+        CHECK(serializer.p == parallel.xdr.data() + offsets[i + 1]);
+      });
+    }
+    scope.wait();
   }
   co_return;
 }

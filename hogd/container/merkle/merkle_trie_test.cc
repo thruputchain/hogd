@@ -29,6 +29,38 @@
 
 namespace hogd {
 
+TEST(MerkleTriePrefix, BulkHashInsertionPreservesRootsAndDuplicateDetection)
+{
+  for (bool skewed : {false, true}) {
+    MerkleTriePrefix reference(Allocator<Node>::Type::kBump);
+    MerkleTriePrefix grouped(Allocator<Node>::Type::kBump);
+    std::vector<SHA256Hash> hashes;
+    for (size_t i = 0; i < 4096; ++i) {
+      auto hash = sha256(x23::serialize(i));
+      if (skewed) {
+        hash[0] = 0xab;
+      }
+      hashes.push_back(hash);
+      ASSERT_TRUE(reference.insert(HexArray(hash), {}));
+    }
+    EXPECT_TRUE(grouped.insert_hashes({}));
+    std::mt19937 random(17);
+    std::shuffle(hashes.begin(), hashes.end(), random);
+    const std::span<const SHA256Hash> input(hashes);
+    ASSERT_TRUE(grouped.insert_hashes(input.first(113)));
+    ASSERT_TRUE(grouped.insert_hashes(input.subspan(113)));
+    reference.generate_all_hashes();
+    grouped.generate_all_hashes();
+    EXPECT_EQ(reference.get_root_hash(), grouped.get_root_hash());
+    EXPECT_FALSE(grouped.insert_hashes(input.first(1)));
+    grouped.generate_all_hashes();
+    EXPECT_EQ(reference.get_root_hash(), grouped.get_root_hash());
+    grouped.clear();
+    const std::array<SHA256Hash, 2> duplicates{hashes[0], hashes[0]};
+    EXPECT_FALSE(grouped.insert_hashes(duplicates));
+  }
+}
+
 namespace {
 
 // TODO(jhumphri): Compare with an existing Merkle Trie implementation to ensure

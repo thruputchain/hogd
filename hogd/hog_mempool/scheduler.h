@@ -12,6 +12,7 @@
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/shared_pool_allocator.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/shared.h"
@@ -197,8 +198,17 @@ private:
   };
 
   struct AccountState {
+    using Runqueue = std::map<
+        TxKey, std::shared_ptr<TxValue>, std::less<TxKey>,
+        SharedPoolAllocator<std::pair<const TxKey, std::shared_ptr<TxValue>>>>;
+
+    explicit AccountState(
+        const std::shared_ptr<std::pmr::synchronized_pool_resource> &pool)
+      : txs(std::less<TxKey>{}, Runqueue::allocator_type(pool))
+    {}
+
     HogAge hog_age{};
-    std::map<TxKey, std::shared_ptr<TxValue>> txs;
+    Runqueue txs;
   };
 
   struct PendingNominationState {
@@ -248,7 +258,6 @@ private:
   // single tx.
   bool insert_tx_into_runqueue(const TransactionHash &tx_hash,
                                const std::shared_ptr<TxValue> &tx_value);
-  bool add_txs_helper(const SignedTransaction &tx);
 
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
@@ -292,6 +301,9 @@ private:
 
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
+
+  std::shared_ptr<std::pmr::synchronized_pool_resource> tx_pool_ =
+      std::make_shared<std::pmr::synchronized_pool_resource>();
 
   // Tx cache.
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can

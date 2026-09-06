@@ -226,6 +226,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   }
 
   auto txs = std::make_shared<SignedTransactionBatch>();
+  auto original_batch =
+      std::make_shared<ParallelSignedTransactionBatch>(std::move(batch));
+  size_t decoded_tx_count = 0;
   auto commit_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag submit_dag("schedulercoord_submit_unvetted", default_threadpool());
 
@@ -233,7 +236,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
         // Not [mempool_tx_size_limit_]: [enforce capacity] below admits an
         // over-capacity batch up to the free slots rather than dropping it.
-        if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
+        if (!(co_await parallel_batch_to_t(*original_batch, *txs,
+                                           kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_unvetted_rpc_count.increment();
           info("submit_unvetted rejected malformed transaction batch");
@@ -241,6 +245,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           co_return;
         }
         record_submitted_unvetted(txs->size());
+        decoded_tx_count = txs->size();
         co_return;
       });
 
@@ -322,24 +327,28 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   submit_dag.async<void>(
       "launch vetted notify", submit_dag.after(prune_node),
-      [&, txs]() -> x23::Async<void> {
+      [&, txs, original_batch]() -> x23::Async<void> {
         pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
         [](MempoolCoordinatorRpc &coord,
-           std::shared_ptr<SignedTransactionBatch> txs) -> x23::Detached {
+           std::shared_ptr<SignedTransactionBatch> txs,
+           std::shared_ptr<ParallelSignedTransactionBatch> original,
+           bool unchanged) -> x23::Detached {
           // We serialize and send the response in a detached coroutine so that
           // we can release [commit_lock_] as soon as [add_txs()] is finished
           // below. Serializing and sending the response takes longer than
           // [add_txs()] and does not require holding [commit_lock_].
 
-          // TODO(jhumphri): We could avoid serializing [txs] and reuse [batch]
-          // if we do not remove any txs above. I am not sure this is the common
-          // case though.
           ParallelBatch response;
-          co_await t_to_parallel_batch(*txs, response);
+          if (unchanged) {
+            response = std::move(*original);
+          }
+          else {
+            co_await t_to_parallel_batch(*txs, response);
+          }
           co_await coord.coord_client_->coordscheduler_notify_vetted(response);
           coord.pending_detached_coroutines_.fetch_sub(
               1, std::memory_order_release);
-        }(*this, txs);
+        }(*this, txs, original_batch, txs->size() == decoded_tx_count);
         co_return;
       });
 
@@ -616,38 +625,8 @@ MempoolCoordinatorRpc::try_get_txset_hash(
     const x23::XdrVec<TransactionHash> &hashes)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
-  WorkerPool &worker_pool = WorkerPool::get_default_pool();
   const size_t num_threads = available_parallelism();
-  const std::vector<ChunkRange> chunks =
-      make_chunks(hashes.size(), num_threads);
-
-  std::atomic<bool> duplicate_hash{false};
-  // JobScope joins every submitted insertion job before `trie` and `hashes`
-  // can leave scope, even if a later submit() throws mid-loop. Without it, an
-  // allocation failure while queuing a chunk would let this frame unwind while
-  // an earlier worker still holds `&trie`, producing a use-after-return.
-  {
-    WorkerPool::JobScope scope(worker_pool);
-    scope.reserve(chunks.size());
-    for (const ChunkRange &chunk : chunks) {
-      scope.submit([chunk, &trie, &hashes, &duplicate_hash] {
-        for (size_t j = chunk.start; j < chunk.end; j++) {
-          // We add each tx hash to the Merkle trie as a key with an empty
-          // value. So in essence, we are using the Merkle trie as a set.
-          //
-          // The set insertion is itself the uniqueness check: a repeated hash
-          // is the one input the trie rejects, so we report it to the caller
-          // instead of running a separate dedup pass over [hashes].
-          if (!trie.insert(HexArray(hashes[j]), std::span<const std::byte>())) {
-            duplicate_hash.store(true, std::memory_order_relaxed);
-            return;
-          }
-        }
-      });
-    }
-    scope.wait();
-  }
-  if (duplicate_hash.load(std::memory_order_relaxed)) {
+  if (!trie.insert_hashes(std::span<const SHA256Hash>(hashes))) {
     return std::nullopt;
   }
   trie.generate_all_hashes(num_threads);
@@ -1083,33 +1062,21 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   nodes.summarize = previous_summary_node;
 
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
-    auto txset_insert_node = dag.cpu<void>(
-        "insert txset hash batch", dag.after(summary_nodes[i]),
-        [&, state, i, txset_trie = nodes.txset_trie]() {
-          if (!state->scheduled_chunks[i].active) {
-            return;
-          }
-          const x23::XdrVec<TransactionHash> &tx_hashes =
-              state->txset_hash_chunks[i];
-          WorkerPool &worker_pool = WorkerPool::get_default_pool();
-          const size_t num_threads = std::max(available_parallelism() / 2, 1UL);
-          const std::vector<ChunkRange> chunks =
-              make_chunks(tx_hashes.size(), num_threads);
-          // JobScope joins every insertion job before `tx_hashes` leaves scope,
-          // even if a later submit() throws mid-loop.
-          WorkerPool::JobScope scope(worker_pool);
-          scope.reserve(chunks.size());
-          for (const ChunkRange &chunk : chunks) {
-            scope.submit([chunk, &tx_hashes, txset_trie] {
-              for (size_t j = chunk.start; j < chunk.end; j++) {
-                CHECK(txset_trie->insert(HexArray(tx_hashes[j]),
-                                         std::span<const std::byte>()));
-              }
-            });
-          }
-          scope.wait();
-          return;
-        });
+    auto txset_insert_node =
+        dag.cpu<void>("insert txset hash batch",
+                      i == 0 ? dag.after(summary_nodes[i])
+                             : dag.after(summary_nodes[i],
+                                         nodes.txset_insert_chunks.back()),
+                      [&, state, i, txset_trie = nodes.txset_trie]() {
+                        if (!state->scheduled_chunks[i].active) {
+                          return;
+                        }
+                        const x23::XdrVec<TransactionHash> &tx_hashes =
+                            state->txset_hash_chunks[i];
+                        CHECK(txset_trie->insert_hashes(
+                            std::span<const SHA256Hash>(tx_hashes)));
+                        return;
+                      });
     nodes.txset_insert_chunks.push_back(txset_insert_node);
   }
 

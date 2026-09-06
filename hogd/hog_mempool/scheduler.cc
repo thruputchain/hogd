@@ -110,12 +110,11 @@ Scheduler::write_all_average_hog_ages_to_db()
   co_await default_coropoll().pool_.bg();
 
   PerThread<HogAgeBatch> ages_by_thread;
-  accounts_.for_each_parallel(
-      [&](const std::pair<ContractAddress, AccountState> &p) {
-        const HogAge &age = p.second.hog_age;
-        CHECK_EQ(p.first, age.address);
-        ages_by_thread->push_back(age);
-      });
+  accounts_.for_each_parallel([&](const auto &p) {
+    const HogAge &age = p.second.hog_age;
+    CHECK_EQ(p.first, age.address);
+    ages_by_thread->push_back(age);
+  });
 
   HogAgeBatch ages;
   ages.reserve(accounts_.size());
@@ -284,8 +283,8 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
     const HogAge &age = res.hog_age();
     CHECK_EQ(age.address, accounts[i]);
     ret.found.insert(age.address);
-    auto [account_state, lock] = accounts_[age.address];
-    account_state.hog_age = age;
+    auto [account_state, lock] = accounts_.try_emplace(age.address, tx_pool_);
+    account_state->hog_age = age;
   }
   co_return ret;
 }
@@ -437,29 +436,6 @@ Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
   return account_state->txs.insert({key, tx_value}).second;
 }
 
-// TODO(jhumphri): I think we are allocating a new decorated signature vec
-// below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
-bool
-Scheduler::add_txs_helper(const SignedTransaction &tx)
-{
-  const TransactionHash &tx_hash = sha256(tx.tx);
-  std::shared_ptr<TxValue> value;
-  {
-    // The tx may already exist in [txs_] because it is okay to add a tx back
-    // into the scheduler again. This can happen if the tx was originally
-    // added to the scheduler, then the tx was removed during nomination by
-    // [schedule()], then a validated block was committed rather than the
-    // nominated block, and then the tx was added back to the scheduler.
-    const auto [tx_ptr, lock] =
-        txs_.find_or_insert(tx_hash,
-                            std::make_shared<TxValue>(TxValue{.tx = tx}));
-    CHECK_PTR(tx_ptr);
-    value = *tx_ptr;
-  }
-
-  return insert_tx_into_runqueue(tx_hash, value);
-}
-
 x23::Async<void>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
@@ -469,37 +445,62 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   // [read_average_hog_ages] on a separate thread.
   const auto &[found, missing] = co_await read_average_hog_ages(txs);
 
-  const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), available_parallelism());
-  std::vector<x23::Async<void>> handles;
-  handles.reserve(chunks.size());
-  for (const ChunkRange &chunk : chunks) {
-    handles.push_back(
-        [](const ChunkRange *chunk,
-           const x23::XdrVec<hogd::SignedTransaction> &txs,
-           const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
-           Scheduler &scheduler) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
-
-          size_t num_added = 0;
-          for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
-            if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
-              // The account for this tx does not exist in our copy of hog_db,
-              // so we silently drop the tx.
-              info("scheduler: dropping tx for unknown account {}",
-                   show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
-              continue;
-            }
-            if (scheduler.add_txs_helper(txs[tx_idx])) {
-              num_added++;
-            }
-          }
-          scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
-          co_return;
-        }(&chunk, txs, missing, *this));
+  co_await default_coropoll().pool_.bg();
+  using Group = std::vector<const SignedTransaction *>;
+  std::unordered_map<ContractAddress, Group, SipHash24Hasher> by_account;
+  by_account.reserve(found.size());
+  for (const SignedTransaction &tx : txs) {
+    const auto &account = tx.tx.invocation.invoked_address;
+    if (!missing.contains(account)) {
+      by_account[account].push_back(&tx);
+    }
   }
-  for (x23::Async<void> &handle : handles) {
-    co_await handle;
+  std::vector<const decltype(by_account)::value_type *> groups;
+  groups.reserve(by_account.size());
+  for (const auto &group : by_account) {
+    groups.push_back(&group);
+  }
+  {
+    WorkerPool::JobScope scope;
+    const auto chunks = make_chunks(groups.size(), available_parallelism());
+    scope.reserve(chunks.size());
+    for (const ChunkRange &chunk : chunks) {
+      scope.submit([&, chunk] {
+        std::vector<std::pair<TxKey, std::shared_ptr<TxValue>>> prepared;
+        for (size_t i = chunk.start; i < chunk.end; ++i) {
+          const auto &[account, group] = *groups[i];
+          prepared.clear();
+          prepared.reserve(group.size());
+          for (const SignedTransaction *tx : group) {
+            const TransactionHash hash = sha256(tx->tx);
+            auto [cached, cache_lock] = txs_.try_emplace(hash);
+            if (!*cached) {
+              try {
+                *cached = std::allocate_shared<TxValue>(
+                    SharedPoolAllocator<TxValue>(tx_pool_), TxValue{.tx = *tx});
+              } catch (...) {
+                txs_.remove(hash, cache_lock);
+                throw;
+              }
+            }
+            prepared.emplace_back(
+                TxKey{.expiry_block_height =
+                          tx->tx.uniquifier.block_expiry_height,
+                      .tx_hash = hash},
+                *cached);
+          }
+          // Never nest the account lock inside a cache lock: expiry cleanup
+          // can take those locks in the other order.
+          auto [state, account_lock] = get_account_state(account);
+          size_t added = 0;
+          for (const auto &[key, value] : prepared) {
+            added += state->txs.try_emplace(key, value).second;
+          }
+          size_.fetch_add(added, std::memory_order_relaxed);
+        }
+      });
+    }
+    scope.wait();
   }
 
   std::vector<AccountKey> account_keys;
@@ -788,8 +789,8 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     const auto delta_it = missing_account_deltas.find(account);
     CHECK(delta_it != missing_account_deltas.end());
     CHECK_GT(delta_it->second, static_cast<int128_t>(0));
-    auto [account_state, lock] = accounts_[account];
-    account_state.hog_age.address = account;
+    auto [account_state, lock] = accounts_.try_emplace(account, tx_pool_);
+    account_state->hog_age.address = account;
   }
 
   const std::vector<ChunkRange> chunks =
@@ -880,7 +881,7 @@ Scheduler::account_is_ready(const ContractAddress &account,
                             bool remove_expired_txs)
 {
   auto [account_state, lock] = get_account_state(account);
-  std::map<TxKey, std::shared_ptr<TxValue>> &txs = account_state->txs;
+  AccountState::Runqueue &txs = account_state->txs;
   const TxKey lower_bound{.expiry_block_height = current_block(),
                           .tx_hash = {}};
   auto lower_it = txs.lower_bound(lower_bound);
@@ -968,8 +969,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
     HogAge *hog_ages =
         get_hog_age_from_pending_nomination_create_if_needed(*account_state,
                                                              account);
-    std::map<TxKey, std::shared_ptr<TxValue>> &txs_to_schedule =
-        account_state->txs;
+    AccountState::Runqueue &txs_to_schedule = account_state->txs;
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
       auto it = txs_to_schedule.lower_bound(lower_bound);
@@ -1091,104 +1091,75 @@ x23::Async<void>
 Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
 {
   co_await default_coropoll().pool_.bg();
-
-  static SynchronizedMap<ContractAddress, char, SipHash24Hasher> accounts;
-
   ElapsedTimer timer;
-
-  constexpr size_t kNumThreads = 120;
-  const std::vector<ChunkRange> chunks =
-      make_chunks(tx_hashes.size(), kNumThreads);
-  std::vector<x23::Async<size_t>> handles;
-  handles.reserve(chunks.size());
-
   x23::CoroGuard cg;
   co_await cg(global_lock_);
-  // [accounts] is static and therefore used by multiple threads, so we wait to
-  // call [clear()] on it until after we have acquired the lock.
-  accounts.clear();
 
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < chunks.size(); i++) {
-    handles.push_back(
-        [](const ChunkRange *chunk, x23::span<const TransactionHash> tx_hashes,
-           SynchronizedMap<ContractAddress, char, SipHash24Hasher> &accounts,
-           Scheduler &scheduler) noexcept -> x23::Async<size_t> {
-          co_await default_coropoll().pool_.bg();
-
-          x23::span<const TransactionHash> hash_chunk(
-              tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
-          size_t num_removed_from_runqueue = 0;
-          for (const TransactionHash &tx_hash : hash_chunk) {
-            // Even if the *nominated* block is being committed and thus the txs
-            // have been removed from the runqueue, it is possible that the
-            // coordinator called [submit_unvetted()/submit_vetted()] and passed
-            // the same txs to the mempool again, resulting in the txs being
-            // added back onto the runqueue. Thus, we need to check if the txs
-            // are on the runqueue and remove them. We cannot skip this step and
-            // just remove txs from [txs_], even if the *nominated* block is
-            // being committed rather than a *validated* block.
-            auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-            CHECK_PTR(tx_value_ptr);
-
-            const SignedTransaction &tx = (*tx_value_ptr)->tx;
-            const ContractAddress &account = tx.tx.invocation.invoked_address;
-            const TxKey key = {.expiry_block_height =
-                                   tx.tx.uniquifier.block_expiry_height,
-                               .tx_hash = tx_hash};
-            {
-              auto [account_state, account_lock] =
-                  scheduler.get_account_state(account);
-              std::map<TxKey, std::shared_ptr<TxValue>> &txs =
-                  account_state->txs;
-              // The tx may or may not be on the runqueue. If the tx is included
-              // in a block we are *nominating*, then it has already been taken
-              // off of the runqueue. If the tx is included in a block we are
-              // *validating*, then it is still on the runqueue.
-              if (txs.erase(key)) {
-                num_removed_from_runqueue++;
-                accounts.insert(account, 0);
-              }
-            }
-
-            // Careful! We remove the tx from [txs_] at the bottom here because
-            // once we remove it, the references above become invalidated.
-            CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
-          }
-
-          co_return num_removed_from_runqueue;
-        }(&chunks[i], tx_hashes, accounts, *this));
-  }
-  size_t total_removed_from_runqueue = 0;
-  // There may be fewer chunks that [kNumThreads], so we iterate through the
-  // number of chunks. If we were to iterate through all of the awaitables,
-  // we would deadlock waiting on awaitables for coroutines that do not have a
-  // chunk.
-  for (size_t i = 0; i < chunks.size(); i++) {
-    x23::Async<size_t> &handle = handles[i];
-    total_removed_from_runqueue += co_await handle;
-  }
-  accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
-    const ContractAddress &account = kv.first;
-    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-      // We do not CHECK that the account is removed from [ready_accounts_]
-      // because the account may not be currently in [ready_accounts_]. For
-      // example, if a tx is submitted that the contract does not have enough
-      // hogs for, the contract is removed from [ready_accounts_]. If other txs
-      // for that contract are committed in this block (maybe the contract had
-      // enough hogs for some of the txs but not all of them), then the line
-      // below will not remove [account] from [ready_accounts_] because the
-      // contract is already not in [ready_accounts_].
-      ready_accounts_.erase(get_account_key(account));
+  struct Removal {
+    TransactionHash hash;
+    std::shared_ptr<TxValue> value;
+  };
+  struct Group {
+    ContractAddress account;
+    std::vector<Removal> txs;
+    size_t removed = 0;
+  };
+  std::unordered_map<ContractAddress, size_t, SipHash24Hasher> indices;
+  std::vector<Group> groups;
+  for (const TransactionHash &hash : tx_hashes) {
+    auto [value, cache_lock] = txs_.find(hash);
+    CHECK_PTR(value);
+    const auto &account = (*value)->tx.tx.invocation.invoked_address;
+    auto [it, inserted] = indices.try_emplace(account, groups.size());
+    if (inserted) {
+      groups.push_back(Group{.account = account});
     }
-  });
-  size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
-  double c = timer.elapsed();
+    groups[it->second].txs.push_back(Removal{.hash = hash, .value = *value});
+  }
 
+  {
+    WorkerPool::JobScope scope;
+    const auto chunks = make_chunks(groups.size(), available_parallelism());
+    scope.reserve(chunks.size());
+    for (const ChunkRange &chunk : chunks) {
+      scope.submit([&, chunk] {
+        for (size_t i = chunk.start; i < chunk.end; ++i) {
+          Group &group = groups[i];
+          {
+            auto [state, account_lock] = get_account_state(group.account);
+            for (const Removal &tx : group.txs) {
+              // A nominated transaction can have been submitted again; do
+              // not skip the runqueue lookup even for a nominated block.
+              group.removed += state->txs.erase(
+                  TxKey{.expiry_block_height =
+                            tx.value->tx.tx.uniquifier.block_expiry_height,
+                        .tx_hash = tx.hash});
+            }
+          }
+          for (const Removal &tx : group.txs) {
+            CHECK_EQ(txs_.remove(tx.hash), 1UL);
+          }
+        }
+      });
+    }
+    scope.wait();
+  }
+
+  size_t removed = 0;
+  for (const Group &group : groups) {
+    removed += group.removed;
+    if (group.removed &&
+        !account_is_ready(group.account, /*remove_expired_txs=*/true)) {
+      ready_accounts_.erase(get_account_key(group.account));
+    }
+  }
+  size_.fetch_sub(removed, std::memory_order_relaxed);
   MempoolMetrics::instance().last_scheduler_remove_duration_ms.record(
-      mempool_duration_ms(c));
+      mempool_duration_ms(timer.elapsed()));
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
+  // Retained transaction references are destroyed after releasing the global
+  // lock, so freeing their payloads does not extend the critical section.
+  cg.reset();
 }
-
 } // namespace hogd
