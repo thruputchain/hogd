@@ -23,6 +23,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -69,7 +70,7 @@ public:
     co_return ExpectedDBTip(RPCError::kRPCNotFound);
   }
 
-  x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   schedgateway_lookup_tx(TransactionHashBatch tx_hashes)
   {
     co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);
