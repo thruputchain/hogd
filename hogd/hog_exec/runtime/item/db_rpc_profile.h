@@ -41,18 +41,18 @@ public:
       return;
     }
     auto &metrics = Metrics::instance();
-    for (size_t i = 0; i < names_.size(); ++i) {
+    for (size_t i = 0; i < kNames.size(); ++i) {
       calls_[i] =
           metrics.per_thread_counter(Metrics::ComponentName::kExecutor,
-                                     std::format("db_rpc_{}_calls", names_[i]),
+                                     std::format("db_rpc_{}_calls", kNames[i]),
                                      "Database RPC attempts.");
       samples_[i] = metrics.per_thread_counter(
           Metrics::ComponentName::kExecutor,
-          std::format("db_rpc_{}_samples", names_[i]),
+          std::format("db_rpc_{}_samples", kNames[i]),
           "Completed latency samples (one per 1024 calls per worker).");
       nanoseconds_[i] = metrics.per_thread_counter(
           Metrics::ComponentName::kExecutor,
-          std::format("db_rpc_{}_sample_nanoseconds", names_[i]),
+          std::format("db_rpc_{}_sample_nanoseconds", kNames[i]),
           "Sum of sampled RPC elapsed nanoseconds, excluding worker-pool hop.");
     }
   }
@@ -83,7 +83,7 @@ public:
 
 private:
   static constexpr size_t kCount = static_cast<size_t>(Method::kCount);
-  static constexpr std::array<std::string_view, kCount> names_ = {
+  static constexpr std::array<std::string_view, kCount> kNames = {
       "get_snapshot_item",
       "get_contract",
       "get_deployment",
@@ -105,7 +105,7 @@ private:
   inline static std::array<Metrics::Counter, kCount> nanoseconds_;
   size_t index_;
   bool sampled_ = false;
-  std::chrono::steady_clock::time_point start_{};
+  std::chrono::steady_clock::time_point start_;
 };
 
 } // namespace hogd
