@@ -94,15 +94,21 @@ alone do not establish whether disk I/O is a bottleneck.
 
 The first unprofiled optimized run,
 [34105692812](https://github.com/groundhogchain/hogd/actions/runs/34105692812),
-passed at **433,492.45 tx/s**, **2.40% above the baseline median**. Two more
-optimized runs are queued; this is a preliminary single-run comparison.
-The baseline range is 422,401.12–428,188.05 tx/s.
+passed at **433,492.45 tx/s**, **2.40% above the baseline median**. A second,
+[34106016026](https://github.com/groundhogchain/hogd/actions/runs/34106016026),
+passed at **453,453.94 tx/s**, **7.11% above the baseline median**. One more
+optimized run is queued; the final three-run comparison is pending.
+The baseline range is 422,401.12–428,188.05 tx/s. All runs, including the
+capacity-limited second optimized run described below, remain in the comparison.
 
 Its unprofiled process sample, starting at process age 30 seconds, measured
 666.49 CPU seconds over 60.786 seconds for 28,000,000 successful proposals:
 **23.80 hogdb CPU us/proposal**, **7.25% below** the baseline repeat sampled
 at a comparable process age. Hogdb served more work while using roughly
-the same number of CPU cores. Additional unprofiled samples are pending.
+the same number of CPU cores. The second optimized sample, starting at
+process age 35 seconds, measured 789.97 CPU seconds over 60.622 seconds for
+32,426,016 successful proposals: **24.36 CPU us/proposal**, **5.07% below**
+the matched baseline sample. The last unprofiled repeat is pending.
 The coordinator's reported overall throughput
 is the headline metric; the CPU sample's proposal rate is a separate metric.
 
@@ -125,7 +131,7 @@ to start in parallel, for both individual submissions and batches. All six
 scheduler tests and all five RPC stress scenarios passed in Release and
 Debug/O0, with 128 workers for RPC stress. Against the merged `main`, 261
 database, 41 executor-interface, and 26 item tests passed. All nine
-PR-specific CI checks passed on `c926181c` (Linux GCC Release/Debug, LLVM
+PR-specific CI checks passed on `d316b848` (Linux GCC Release/Debug, LLVM
 Debug, macOS Debug, formatting, bindings, and all three tidy jobs).
 
 ## Integration and local cross-check
@@ -136,12 +142,44 @@ updated `get_db_tip(block_id, block_height)` RPC. Fixed comparison runs remain
 pinned to the pre-merge revision, so unrelated main changes are not attributed
 to the optimization.
 
+The merged-head integration run
+[34108735706](https://github.com/groundhogchain/hogd/actions/runs/34108735706)
+at `c926181c` passed at **418,974.74 tx/s**, below the original baseline.
+Its unprofiled sample measured **23.07 CPU us/proposal** (599.78 CPU seconds
+for 26 million proposals over 60.652 seconds). Lower database CPU cost does
+not by itself establish higher system throughput. A matched merged-head
+control, [34118747257](https://github.com/groundhogchain/hogd/actions/runs/34118747257),
+is queued at `9d791472` on `perf/hogdb-merged-control`; this restores only
+the original scheduler implementation and removes its new regression test.
+
 A three-pair localhost RPC cross-check (128 workers per pool, 16 connections,
 128 outstanding calls per connection, 256-byte echo, 10 seconds per run)
 reduced median context switches from 1,793,814 to 1,056,564 (41.1%). Median
 throughput changed from 1,872,303 to 1,849,628 RPC/s (-1.2%). This establishes
 a reduction in scheduling churn, not a payment throughput gain. CI payment
 measurements remain the deciding result.
+
+## Workload capacity limitation
+
+The second optimized repeat reached a late-run failure regime. At process
+age 160 seconds, executors had recorded 79,049,241 successful and 3,489,414
+failed proposals. Over the next 15.766 seconds, successful proposals rose
+by only 101,176 while failures rose by 8,370,795. The coordinator still
+reported its normal final cumulative rate, with 79,150,334 committed
+transactions over 174.55 seconds. The merged-head integration run, by
+comparison, recorded only six failures during its late seven-million-attempt
+sample.
+
+This is consistent with the workload's finite replay-cache capacity:
+`groundhog-go/chuckd/sub/loadgen/loadgen.go` gives all work transactions
+expiry height `1e9`, and `ReplayCacheLock` enforces 8,000 nonces per account
+per expiry height. With 10,000 accounts this permits about 80 million
+nonces, less initialization usage. The generic failure counter does not
+identify individual conflict codes, so this attribution is an inference
+from the code and observed plateau. Do not extrapolate the benchmark's
+final cumulative rate to sustained throughput after that limit. A future
+benchmark should rotate valid expiry heights; changing the workload during
+this comparison would invalidate the original baseline.
 
 ## Reproduction
 
