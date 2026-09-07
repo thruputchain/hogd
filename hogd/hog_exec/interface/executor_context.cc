@@ -203,6 +203,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   case ExecResult::ExecResultTxNonDeterministicError:
   case ExecResult::ExecResultFailedGasSponsorship:
   case ExecResult::ExecResultTxValidationFailure:
+  case ExecResult::ExecResultMalformedTransaction:
   case ExecResult::ExecResultSystemError:
   case ExecResult::ExecResultUnrecoverable:
     // nothing to do: a rejected transaction (e.g. an expired uniquifier, #2568,

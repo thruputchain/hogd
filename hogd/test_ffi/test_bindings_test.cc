@@ -876,11 +876,13 @@ TEST(TestBindingsTest, CostModelRoundtrip)
 TEST(TestBindingsTest, NetworkConfigRoundtrip)
 {
   NetworkConfig custom_config = stock_network_config();
-  set_config_param(custom_config, ConfigParamID::kConfigParamMaxSHA256Buffers,
-                   max_sha256_buffers(custom_config) + 1);
-  set_config_param(custom_config,
-                   ConfigParamID::kConfigParamMaxCrossInvokeDepth,
-                   max_cross_invoke_depth(custom_config) + 1);
+  const NetworkConfigParams stock_params(custom_config.v0());
+  NetworkConfigParams::set_param(custom_config,
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 stock_params.max_sha256_buffers + 1);
+  NetworkConfigParams::set_param(custom_config,
+                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                                 stock_params.max_cross_invoke_depth + 1);
   ASSERT_NE(custom_config, stock_network_config());
 
   auto serialized_config = x23::serialize(custom_config);

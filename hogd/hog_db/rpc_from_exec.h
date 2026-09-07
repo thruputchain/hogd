@@ -50,9 +50,13 @@ public:
   ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  ExpectedDBTip get_db_tip(BlockID block);
+  // A coroutine: it may suspend to wait out a commit publication, and the
+  // rpc server runs handlers on ThreadPool workers, which must not park.
+  x23::Async<ExpectedDBTip> get_db_tip(BlockID block, BlockHeight block_height);
 
-  ExpectedViewingSnapshot open_viewing_snapshot();
+  // A coroutine for the same reason as get_db_tip(): it may suspend on a
+  // commit publication.
+  x23::Async<ExpectedViewingSnapshot> open_viewing_snapshot();
   RPCError close_viewing_snapshot(BlockID block);
 
   void shut_down()
@@ -71,8 +75,11 @@ private:
                               StorageDelta &&delta, StorageDeltaFlagSet flags,
                               DbConflictCode *conflict_code);
 };
+// MaybeAsync rather than type_identity_t: get_db_tip and
+// open_viewing_snapshot are coroutines (they can suspend on a commit
+// publication), which is also the transform RpcServer itself validates.
 static_assert(
-    is_DatabaseToExecutorInterfaceV1<HogDbExecutorRpc *, std::type_identity_t>);
+    is_DatabaseToExecutorInterfaceV1<HogDbExecutorRpc *, x23::MaybeAsync>);
 
 class HogDbExecutorServer : public RpcServer<HogDbExecutorRpc> {
 public:
