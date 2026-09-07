@@ -1,13 +1,13 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <format>
-#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -71,11 +71,6 @@ public:
   explicit IndexerLatencyProbe(const std::string &indexer_addr)
     : indexer_addr_(indexer_addr), client_(connect(indexer_addr))
   {
-    const IndexerBlockExplorerIntroOutcome intro =
-        client_->indexer_block_explorer_intro(version::kHogdProtocol())();
-    if (intro != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
-      panic("indexer latency probe: intro rejected ({})", intro);
-    }
     poller_ = std::jthread([this](const std::stop_token &stop) { poll(stop); });
   }
 
@@ -109,11 +104,20 @@ public:
 
   void stop()
   {
-    if (poller_.joinable()) {
-      poller_.request_stop();
-      wake_.notify_all();
-      poller_.join();
+    if (!poller_.joinable()) {
+      return;
     }
+    stopping_.store(true, std::memory_order_release);
+    poller_.request_stop();
+    wake_.notify_all();
+    // A poll blocked in an RPC on an indexer that accepted the connection and
+    // then stopped answering would otherwise hold this join for as long as
+    // the process lives -- the hang #3891 took out of the connect path.
+    // Failing the stream makes that call throw, so the poller comes back and
+    // sees the stop request; the indexer's own pull loop bounds an RPC the
+    // same way (hog_indexer/pull_controller.cc).
+    fail_client();
+    poller_.join();
   }
 
   // True when the probe measured nothing at all, which is the shape of a
@@ -175,22 +179,70 @@ private:
   using indexer_block_explorer_client_t =
       IndexerBlockExplorer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  // One reconnect attempt, owned by nobody. The probe drops its handle on
-  // stop and the attempt finishes into the shared state and frees it, so an
-  // attempt that outlives the probe -- [tcpconnect] has no deadline of its
-  // own, so a host that black-holes SYNs rather than refusing them holds one
-  // attempt for as long as the kernel retries -- neither reaches freed
-  // memory nor holds up [stop].
+  // One connect-and-handshake attempt, owned by nobody. Whoever started it
+  // drops its handle when it stops caring, and the attempt finishes into the
+  // shared state and frees it, so an attempt that outlives its starter --
+  // [tcpconnect] has no deadline of its own, so a host that black-holes SYNs
+  // rather than refusing them holds one for as long as the kernel retries --
+  // neither reaches freed memory nor holds up [stop].
   struct ConnectAttempt {
     std::mutex mtx;
+    std::condition_variable done_cv;
     bool done = false;
     std::optional<indexer_block_explorer_client_t> client;
     std::string error;
   };
 
-  // Connects in the member init list so the probe is either connected or has
-  // panicked by the time the constructor returns; only [poll] ever empties
-  // [client_], and only it looks at the optional.
+  // Connects and introduces itself on a thread of its own, reporting the
+  // outcome through [attempt]. Both steps belong to the attempt: a peer that
+  // accepts the connection and then never answers the handshake must be no
+  // more able to hold a caller than one that never accepts it at all -- from
+  // the poller that is a [stop] that cannot join (#3891), and from the
+  // initial connect it is the whole benchmark stuck until the CI job's own
+  // timeout (#3890).
+  //
+  // Touches only its arguments, so it is safe to abandon.
+  static void connect_into(const std::shared_ptr<ConnectAttempt> &attempt,
+                           const std::string &addr, bool retry)
+  {
+    std::optional<indexer_block_explorer_client_t> client;
+    std::string error;
+    try {
+      auto client_res = make_rpc_client<IndexerBlockExplorer1>(
+          server_address_to_sockaddr(addr), retry)();
+      if (!client_res) {
+        error = std::format("connect failed: {}",
+                            client_res.error().error_code().message());
+      }
+      else {
+        const IndexerBlockExplorerIntroOutcome intro =
+            client_res->indexer_block_explorer_intro(
+                version::kHogdProtocol())();
+        if (intro == IndexerBlockExplorerIntroOutcome::IntroSuccess) {
+          client.emplace(std::move(*client_res));
+        }
+        else {
+          error = std::format("intro rejected ({})", intro);
+        }
+      }
+    } catch (const std::exception &e) {
+      error = std::format("handshake failed: {}", e.what());
+    }
+
+    {
+      const std::lock_guard g(attempt->mtx);
+      if (client) {
+        attempt->client.emplace(std::move(*client));
+      }
+      attempt->error = std::move(error);
+      attempt->done = true;
+    }
+    attempt->done_cv.notify_all();
+  }
+
+  // The initial connection, made in the member init list so the probe is
+  // either connected and introduced or has panicked by the time the
+  // constructor returns.
   //
   // Bounded, unlike [make_rpc_client]'s own retry, which loops on a refused
   // port for as long as the process lives: an indexer that died at startup
@@ -198,31 +250,24 @@ private:
   // timeout kills it, an hour later, with nothing in the log but the
   // connect retry (#3890). The window is generous because the indexer opens
   // this port only once its startup replay has caught up.
-  //
-  // Waiting on the connect from another thread is what makes the bound hold
-  // in every case: [tcpconnect] itself has no deadline, so a host that
-  // drops SYNs rather than refusing them -- a bench host that went away
-  // mid-run -- would sit in one attempt for as long as the kernel retries.
-  // The abandoned attempt outlives this call only to be torn down with the
-  // process [panic] is about to end.
   static indexer_block_explorer_client_t connect(const std::string &addr)
   {
-    auto pending = std::async(std::launch::async, [addr]() {
-      return make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(
-                                                        addr),
-                                                    /*retry=*/true)();
-    });
-    if (pending.wait_for(kConnectTimeout) != std::future_status::ready) {
+    const std::shared_ptr<ConnectAttempt> attempt =
+        std::make_shared<ConnectAttempt>();
+    std::thread(connect_into, attempt, addr, /*retry=*/true).detach();
+
+    std::unique_lock lock(attempt->mtx);
+    if (!attempt->done_cv.wait_for(lock, kConnectTimeout,
+                                   [&attempt] { return attempt->done; })) {
       panic("indexer latency probe: no connection to {} within {}s; the "
             "indexer is not serving queries",
             addr, kConnectTimeout.count());
     }
-    auto client_res = pending.get();
-    if (!client_res) {
-      panic("indexer latency probe: connect to {} failed: {}", addr,
-            client_res.error().error_code().message());
+    if (!attempt->client) {
+      panic("indexer latency probe: {} did not accept the probe: {}", addr,
+            attempt->error);
     }
-    return std::move(*client_res);
+    return std::move(*attempt->client);
   }
 
   // Nearest-rank: the ceil(q * N)th smallest sample, 1-indexed, so every
@@ -250,9 +295,12 @@ private:
   void poll(const std::stop_token &stop)
   {
     while (!stop.stop_requested()) {
-      const bool connected = client_.has_value();
+      // A copy, so the RPC runs without [client_mtx_] held and [stop] can
+      // still reach the stream to unstick a call that is not coming back.
+      std::optional<indexer_block_explorer_client_t> client = copy_client();
+      const bool connected = client.has_value();
       if (connected) {
-        const BlockHeight watermark = read_watermark();
+        const BlockHeight watermark = read_watermark(*client);
         const uint64_t now = x23::fastclock::get_ns();
         const std::lock_guard g(mtx_);
         // [pending_] is ordered, so this walks exactly the heights this
@@ -284,9 +332,9 @@ private:
   // [get_transactions_by_block] reports its serving bounds and returns no
   // refs, so height and limit here only have to be valid, not meaningful.
   //
-  // Called only with [client_] engaged, and empties it on a transport
-  // failure so the next tick reconnects rather than re-asking a dead fd.
-  BlockHeight read_watermark()
+  // Drops [client_] on a transport failure so the next tick reconnects
+  // rather than re-asking a dead file descriptor.
+  BlockHeight read_watermark(indexer_block_explorer_client_t &client)
   {
     BlockTransactionQuery query{};
     query.height = 0;
@@ -294,7 +342,7 @@ private:
     query.limit = 1;
     try {
       const TransactionRefPageResult result =
-          client_->get_transactions_by_block(query)();
+          client.get_transactions_by_block(query)();
       if (result.outcome() != IndexerQueryOutcome::IndexerQueryOk) {
         // Expected while the indexer is still opening its database. The
         // connection is fine, so this is not a failure to record.
@@ -302,27 +350,65 @@ private:
       }
       return result.page().latest_block;
     } catch (const std::exception &e) {
-      warn_every_n_sec(1.0, "indexer latency probe: watermark read failed: {}",
-                       e.what());
-      note_failure(std::format("watermark read failed: {}", e.what()));
+      // [stop] fails the stream deliberately to unstick a call that is not
+      // coming back, so a failure seen while stopping is this shutdown
+      // rather than anything the report should blame the indexer for.
+      if (!stopping_.load(std::memory_order_acquire)) {
+        warn_every_n_sec(1.0,
+                         "indexer latency probe: watermark read failed: {}",
+                         e.what());
+        note_failure(std::format("watermark read failed: {}", e.what()));
+      }
       // Fail the stream before dropping it, the way the indexer's own pull
       // loop retires a broken event client: the socket is closed here rather
       // than left to the reference count, so the next poll opens a new
       // connection instead of re-asking a dead file descriptor.
-      client_->__send_call.get()->fail();
-      client_.reset();
+      client.__send_call.get()->fail();
+      drop_client();
       return -1;
     }
   }
 
-  // Starts a reconnect attempt, or adopts the one that finished. At most one
-  // attempt is in flight, so a run against a host that never comes back
-  // spends one thread at a time rather than one per tick.
+  std::optional<indexer_block_explorer_client_t> copy_client()
+  {
+    const std::lock_guard g(client_mtx_);
+    return client_;
+  }
+
+  void drop_client()
+  {
+    const std::lock_guard g(client_mtx_);
+    client_.reset();
+  }
+
+  void adopt_client(indexer_block_explorer_client_t &&client)
+  {
+    const std::lock_guard g(client_mtx_);
+    client_.emplace(std::move(client));
+  }
+
+  // Fails whatever stream the poller is on, so a call that is not coming
+  // back throws instead of holding [stop].
+  void fail_client()
+  {
+    std::optional<indexer_block_explorer_client_t> client = copy_client();
+    if (client) {
+      client->__send_call.get()->fail();
+    }
+  }
+
+  // Starts a reconnect attempt, or adopts the one that finished. Blocking
+  // work all happens on the attempt's own thread, so this never holds the
+  // poller; and at most one attempt is in flight, so a run against a host
+  // that never comes back spends one thread at a time rather than one per
+  // tick. Retry is off there: a single attempt reports a refused port
+  // promptly, which is what lets the poller pace the retries itself.
   void service_reconnect()
   {
     if (!attempt_) {
       attempt_ = std::make_shared<ConnectAttempt>();
-      std::thread(connect_into, attempt_, indexer_addr_).detach();
+      std::thread(connect_into, attempt_, indexer_addr_, /*retry=*/false)
+          .detach();
       return;
     }
 
@@ -335,64 +421,17 @@ private:
     // Finished, so this thread is now the only one that touches it.
     const std::shared_ptr<ConnectAttempt> attempt = std::move(attempt_);
     if (!attempt->client) {
-      note_failure(std::format("reconnect to {} failed: {}", indexer_addr_,
-                               attempt->error));
+      note_failure(
+          std::format("reconnect to {}: {}", indexer_addr_, attempt->error));
       return;
     }
 
-    // The handshake belongs to the connection, not to the probe, so a new
-    // connection has to introduce itself again before it is trusted.
-    try {
-      const IndexerBlockExplorerIntroOutcome intro =
-          attempt->client->indexer_block_explorer_intro(
-              version::kHogdProtocol())();
-      if (intro != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
-        warn("indexer latency probe: reconnect intro rejected ({})", intro);
-        note_failure("reconnect intro was rejected");
-        return;
-      }
-    } catch (const std::exception &e) {
-      note_failure(std::format("reconnect intro failed: {}", e.what()));
-      return;
-    }
-
-    client_.emplace(std::move(*attempt->client));
+    adopt_client(std::move(*attempt->client));
     {
       const std::lock_guard g(mtx_);
       ++reconnects_;
     }
     info("indexer latency probe: reconnected to {}", indexer_addr_);
-  }
-
-  // Runs on a detached thread and touches only its own arguments. Retry is
-  // off: one attempt that reports a refused port promptly is what lets the
-  // poller pace the retries itself.
-  static void connect_into(const std::shared_ptr<ConnectAttempt> &attempt,
-                           const std::string &addr)
-  {
-    std::optional<indexer_block_explorer_client_t> client;
-    std::string error;
-    try {
-      auto client_res =
-          make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(
-                                                     addr),
-                                                 /*retry=*/false)();
-      if (client_res) {
-        client.emplace(std::move(*client_res));
-      }
-      else {
-        error = client_res.error().error_code().message();
-      }
-    } catch (const std::exception &e) {
-      error = e.what();
-    }
-
-    const std::lock_guard g(attempt->mtx);
-    if (client) {
-      attempt->client.emplace(std::move(*client));
-    }
-    attempt->error = std::move(error);
-    attempt->done = true;
   }
 
   // Records why the probe could not read a watermark. Kept to one line so it
@@ -425,9 +464,15 @@ private:
   }
 
   const std::string indexer_addr_;
-  // Poller-owned once the constructor returns; empty only while
-  // disconnected.
+  // Set before the poller is asked to stop, so a stream this class failed on
+  // purpose is not reported as the indexer's fault.
+  std::atomic<bool> stopping_ = false;
+  // Guards [client_], which the poller replaces and [stop] reaches into.
+  // Only ever held across a copy, an emplace or a reset -- never across an
+  // RPC, which is the whole point of copying it out to poll.
+  std::mutex client_mtx_;
   std::optional<indexer_block_explorer_client_t> client_;
+  // Poller-owned: the reconnect in flight, if any.
   std::shared_ptr<ConnectAttempt> attempt_;
 
   std::mutex mtx_;
