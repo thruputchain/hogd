@@ -162,12 +162,12 @@ GUARD_BASE_SPREAD = 1.5
 GUARD_MIN_SIGNAL_SHARE = 0.10
 
 STORAGE_COLD_NOTE = (
-    "cold/ rows miss the snapshot cache on every call and read through a real "
-    "hog_db over a real ramdb: the proxy, the RPC, the database's own lookup, "
-    "the cache insert. Still a floor in one respect -- hog_db is in-process "
-    "over a local socket, so a chain whose executor and database sit on "
-    "different hosts pays a hop this does not. Excluded from --schedule until "
-    "there is a rule for what a cold read is charged to.")
+    "cold/ rows miss the snapshot cache on every call and read through the "
+    "database named above: the proxy, the RPC, its own lookup, the cache "
+    "insert. Against hog_db this is still a floor in one respect -- it is "
+    "in-process over a local socket, so a chain whose executor and database "
+    "sit on different hosts pays a hop this does not. Excluded from "
+    "--schedule until there is a rule for what a cold read is charged to.")
 
 
 def load(path):
@@ -233,6 +233,15 @@ def stddevs(data):
 
 def context(data):
     return data.get("context", {})
+
+
+def item_backend(data):
+    """What answered the cold rows' misses, or None for a run that did not say.
+
+    cold/ row names did not change when the backend did, so a JSON recorded
+    before that carries no claim either way and must not be given this one.
+    """
+    return context(data).get("syscall_bench_item_backend")
 
 
 def calls_per_vm_run(row):
@@ -744,7 +753,7 @@ def parent_walk_ns(summary, family="NNIntGetFirstTouch"):
             shallow, deep, keys)
 
 
-def print_storage(summary, unit_ns=None):
+def print_storage(summary, unit_ns=None, backend=None):
     """The storage tables. With a unit, costs are also shown in gas."""
     def gas(ns):
         return f"{ns / unit_ns:>8.1f}" if unit_ns else f"{'-':>8}"
@@ -840,7 +849,11 @@ def print_storage(summary, unit_ns=None):
 
     if summary["cold"]:
         print()
-        header = f"{'cold (hog_db)':<28}{'ns/call':>10}{'±':>9}"
+        # Named by the run rather than by the row: cold/ row names did not
+        # change when the backend did, so a JSON recorded before that carries
+        # no claim either way and must not be given this one.
+        label = f"cold ({backend or 'backend unrecorded'})"
+        header = f"{label:<28}{'ns/call':>10}{'±':>9}"
         print(header)
         print("-" * len(header))
         for name, (ns, err) in sorted(summary["cold"].items()):
@@ -1173,7 +1186,7 @@ def print_table(data):
 
     storage = storage_summary(measured, sd)
     if storage:
-        print_storage(storage)
+        print_storage(storage, backend=item_backend(data))
 
     skipped = failed_rows(data)
     if skipped:
@@ -1577,7 +1590,8 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     if storage:
         print()
         print("Storage (NNInt), in this run's gas unit:")
-        print_storage(storage, unit_ns=proposal["unit_ns"])
+        print_storage(storage, unit_ns=proposal["unit_ns"],
+                      backend=item_backend(bench))
 
     print()
     print("=" * 68)

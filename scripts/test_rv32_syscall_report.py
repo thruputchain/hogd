@@ -522,6 +522,17 @@ class StorageScheduleTest(unittest.TestCase):
         self.assertNotIn("cold/NNIntGet", proposal["syscalls"])
         self.assertTrue(all("cold" not in n for n in proposal["heavy"]))
 
+    def test_cold_table_names_the_backend_the_run_recorded(self):
+        # cold/ row names did not change when the backend did, so the label has
+        # to come from the run. A JSON recorded before the stamp existed makes
+        # no claim, and the report must not make one for it.
+        run = synthetic_run()
+        run.setdefault("context", {})["syscall_bench_item_backend"] = "hog_db"
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report.print_table(run)
+        self.assertIn("cold (hog_db)", out.getvalue())
+
     def test_printers_run(self):
         out = io.StringIO()
         with redirect_stdout(out):
@@ -529,7 +540,9 @@ class StorageScheduleTest(unittest.TestCase):
         self.assertEqual(status, 0)
         text = out.getvalue()
         self.assertIn("parent walk", text)
-        self.assertIn("cold (hog_db)", text)
+        # No backend stamped in this synthetic run, so the table must not
+        # claim one.
+        self.assertIn("cold (backend unrecorded)", text)
         self.assertNotIn("<- NOT FLAT", text)
         out = io.StringIO()
         with redirect_stdout(out):

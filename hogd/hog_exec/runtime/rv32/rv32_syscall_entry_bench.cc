@@ -1894,6 +1894,10 @@ add_provenance_context()
 {
   const rv32::gas_calibration::Provenance provenance =
       rv32::gas_calibration::collect_provenance();
+  // What answered the cold row's misses. Absent in a run recorded before the
+  // bench moved off the light server, which is what lets the report decline to
+  // label those rather than claim this backend for them.
+  benchmark::AddCustomContext("syscall_bench_item_backend", "hog_db");
   benchmark::AddCustomContext("engine_fingerprint",
                               provenance.engine_fingerprint);
   benchmark::AddCustomContext("engine_source_digest",
