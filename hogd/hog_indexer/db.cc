@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <future>
@@ -43,6 +44,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/key_format.h"
 #include "hogd/hog_indexer/status.h"
@@ -61,6 +63,31 @@
 namespace hogd {
 
 namespace {
+
+// What ingest checks about a pulled block before applying it. The event
+// server established both consensus roots over the block's bodies when it
+// published the record, so ingest does not recompute them: it verifies that
+// the block is the one its identity names and that its two batches pair up.
+IndexerPayloadStatus<void>
+check_committed_block_shape(const IndexerCommittedBlock &block)
+{
+  if (block.payload.format_version != kIndexerOutboxFormatVersion) {
+    return std::unexpected(
+        std::format("unknown committed outbox format version {}",
+                    block.payload.format_version));
+  }
+  if (block.payload.consensus_value.proposal_header.block_height < 0) {
+    return std::unexpected("committed outbox height is negative");
+  }
+  if (block.payload.event_logs.size() != block.payload.tx_bodies.size()) {
+    return std::unexpected("event/body batch cardinalities differ");
+  }
+  if (block.identity.consensus_hash != sha256(block.payload.consensus_value)) {
+    return std::unexpected(
+        "committed block identity differs from canonical payload");
+  }
+  return {};
+}
 
 // True when there is nothing at [path] to open: no such path, or an empty
 // directory. A filesystem error reads as false, so an unreadable path is
@@ -1224,7 +1251,7 @@ IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
     apply_validation_test_hook_();
   }
   try {
-    if (auto valid = co_await validate_indexer_committed_block(block); !valid) {
+    if (auto valid = check_committed_block_shape(block); !valid) {
       co_return apply_failure(
           IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
     }
