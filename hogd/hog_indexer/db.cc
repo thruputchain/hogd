@@ -384,6 +384,30 @@ RocksDBDeleter::operator()(rocksdb::DB *db) const
   delete db;
 }
 
+bool
+IndexDB::database_exists_at(const std::filesystem::path &path)
+{
+  // Listing the column families is the cheapest question RocksDB answers
+  // about a path, and it is the one that matters: it succeeds only when a
+  // database's manifest is there to read.
+  rocksdb::Options check_options;
+  check_options.create_if_missing = false;
+  std::vector<std::string> existing_column_families;
+  return rocksdb::DB::ListColumnFamilies(check_options, path.string(),
+                                         &existing_column_families)
+      .ok();
+}
+
+IndexerStatus<IndexDB>
+IndexDB::open_or_make_new(const std::filesystem::path &path,
+                          rocksdb::CompressionType compression_algorithm)
+{
+  if (database_exists_at(path)) {
+    return open(path, compression_algorithm);
+  }
+  return make_new(path, compression_algorithm);
+}
+
 IndexerStatus<IndexDB>
 IndexDB::make_new(const std::filesystem::path &path,
                   rocksdb::CompressionType compression_algorithm)
@@ -392,16 +416,7 @@ IndexDB::make_new(const std::filesystem::path &path,
     return IndexerError(IndexerErrorCode::kUnsupportedCompressionAlgorithm);
   }
 
-  // Check if database already exists by trying to list column families
-  rocksdb::Options check_options;
-  check_options.create_if_missing = false;
-  std::vector<std::string> existing_column_families;
-  rocksdb::Status list_status =
-      rocksdb::DB::ListColumnFamilies(check_options, path.string(),
-                                      &existing_column_families);
-
-  if (list_status.ok()) {
-    // Database already exists
+  if (database_exists_at(path)) {
     error("Database already exists at: {}", path.string());
     return IndexerError(IndexerErrorCode::kDBAlreadyExists);
   }

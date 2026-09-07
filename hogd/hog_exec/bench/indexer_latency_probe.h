@@ -47,6 +47,13 @@ public:
   // ~1k RPCs/s against the indexer under test; tighter starts to perturb it.
   static constexpr auto kPollInterval = std::chrono::milliseconds(1);
 
+  // The indexer only binds its block-explorer port once startup replay has
+  // caught up, so this has to cover a real replay, not just a bind. It is a
+  // bound rather than an open-ended wait because the indexer can also die
+  // during startup: retrying forever turns that into a hang that only the
+  // CI schedule's hour-long timeout ends, with no clue in the log as to why.
+  static constexpr auto kConnectTimeout = std::chrono::minutes(2);
+
   // Fails loudly: a probe that silently measured nothing would publish an
   // empty metric that reads exactly like "latency is fine".
   explicit IndexerLatencyProbe(const std::string &indexer_addr)
@@ -139,9 +146,13 @@ private:
   {
     auto client_res =
         make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(addr),
-                                               /*retry=*/true)();
+                                               /*retry=*/true,
+                                               x23::default_max_message_size,
+                                               kConnectTimeout)();
     if (!client_res) {
-      panic("indexer latency probe: connect to {} failed: {}", addr,
+      panic("indexer latency probe: connect to {} failed after {}s: {}", addr,
+            std::chrono::duration_cast<std::chrono::seconds>(kConnectTimeout)
+                .count(),
             client_res.error().error_code().message());
     }
     return std::move(*client_res);

@@ -91,6 +91,47 @@ TEST_F(IndexDBTest, OpenNonExistent)
   EXPECT_EQ(db.error(), IndexerErrorCode::kDBNotFound);
 }
 
+// An empty directory is not a database. Callers are routinely handed a
+// directory that something else created and left empty -- a benchmark work
+// directory, a deploy-time mkdir -- and [open_or_make_new] has to create a
+// database there rather than try to open one that was never written.
+TEST_F(IndexDBTest, OpenOrMakeNewCreatesInExistingEmptyDirectory)
+{
+  ASSERT_TRUE(std::filesystem::exists(tmp_dir_.directory()));
+  ASSERT_FALSE(IndexDB::database_exists_at(tmp_dir_.directory()));
+
+  auto db = IndexDB::open_or_make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+  EXPECT_TRUE(db->is_open());
+  EXPECT_TRUE(IndexDB::database_exists_at(tmp_dir_.directory()));
+}
+
+// A path that does not exist at all is still created, as before.
+TEST_F(IndexDBTest, OpenOrMakeNewCreatesAtMissingPath)
+{
+  const std::filesystem::path path =
+      std::filesystem::path(tmp_dir_.directory()) / "not-created-yet";
+  ASSERT_FALSE(std::filesystem::exists(path));
+
+  auto db = IndexDB::open_or_make_new(path);
+  ASSERT_TRUE(db.has_value());
+  EXPECT_TRUE(db->is_open());
+}
+
+// An existing database is reopened, not clobbered by a fresh one.
+TEST_F(IndexDBTest, OpenOrMakeNewReopensExistingDatabase)
+{
+  {
+    auto created = IndexDB::make_new(tmp_dir_.directory());
+    ASSERT_TRUE(created.has_value());
+  }
+  ASSERT_TRUE(IndexDB::database_exists_at(tmp_dir_.directory()));
+
+  auto db = IndexDB::open_or_make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+  EXPECT_TRUE(db->is_open());
+}
+
 // Test consuming events and looking them up by transaction
 TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
 {

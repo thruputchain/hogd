@@ -3,6 +3,7 @@
 #include <chrono>
 #include <expected>
 #include <format>
+#include <optional>
 #include <sys/socket.h>
 #include <system_error>
 #include <thread>
@@ -26,18 +27,37 @@ template<typename RpcService>
 using rpc_client_t = typename RpcService::template client<
     x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
+// Passed as [retry_timeout] to keep retrying for as long as it takes. Only
+// appropriate when the peer is guaranteed to come up eventually; a peer that
+// can die during startup should be given a real bound, so its death surfaces
+// as a failure here rather than as a hang for whatever timeout is furthest
+// out.
+constexpr auto kRetryForever = std::chrono::milliseconds::zero();
+
 template<typename RpcService>
 x23::Async<hogd::ErrnoStatus<rpc_client_t<RpcService>>>
 // This function creates a coroutine, so be careful to only pass parameters by
 // reference if you know their lifetime will outlast the coroutine.
 make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
-                size_t max_message_size = x23::default_max_message_size)
+                size_t max_message_size = x23::default_max_message_size,
+                std::chrono::milliseconds retry_timeout = kRetryForever)
 {
   info("make_rpc_client: connecting to {}", x23::HostPort(ss));
+  std::optional<std::chrono::steady_clock::time_point> retry_deadline;
+  if (retry_timeout > kRetryForever) {
+    retry_deadline = std::chrono::steady_clock::now() + retry_timeout;
+  }
   while (true) {
     std::expected<int, x23::Errno> res = co_await cp.tcpconnect(&ss);
     if (!res) {
       if (retry && res.error().error_code() == std::errc::connection_refused) {
+        if (retry_deadline.has_value() &&
+            std::chrono::steady_clock::now() >= *retry_deadline) {
+          error("RPC client on {} was still refusing connections after {}ms; "
+                "giving up",
+                x23::show_ipaddr(ss), retry_timeout.count());
+          co_return std::unexpected(res.error());
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         warn_every_n_sec(5.0F, "RPC client is not ready");
         continue;
@@ -57,35 +77,39 @@ make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
 template<typename RpcService>
 auto
 make_rpc_client(sockaddr_storage &ss, bool retry = false,
-                size_t max_message_size = x23::default_max_message_size)
+                size_t max_message_size = x23::default_max_message_size,
+                std::chrono::milliseconds retry_timeout = kRetryForever)
 {
   return make_rpc_client<RpcService>(ss, default_coropoll(), retry,
-                                     max_message_size);
+                                     max_message_size, retry_timeout);
 }
 
 template<typename RpcService>
 auto
 make_rpc_client(x23::HostPort host_port, x23::CoroPoll &cp, bool retry = false,
-                size_t max_message_size = x23::default_max_message_size)
+                size_t max_message_size = x23::default_max_message_size,
+                std::chrono::milliseconds retry_timeout = kRetryForever)
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
     panic("failed to convert host port to sockaddr_storage: {}", ss.error());
   }
-  return make_rpc_client<RpcService>(*ss, cp, retry, max_message_size);
+  return make_rpc_client<RpcService>(*ss, cp, retry, max_message_size,
+                                     retry_timeout);
 }
 
 template<typename RpcService>
 auto
 make_rpc_client(x23::HostPort host_port, bool retry = false,
-                size_t max_message_size = x23::default_max_message_size)
+                size_t max_message_size = x23::default_max_message_size,
+                std::chrono::milliseconds retry_timeout = kRetryForever)
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
     panic("failed to convert host port to sockaddr_storage: {}", ss.error());
   }
   return make_rpc_client<RpcService>(*ss, default_coropoll(), retry,
-                                     max_message_size);
+                                     max_message_size, retry_timeout);
 }
 
 template<typename RpcService>
