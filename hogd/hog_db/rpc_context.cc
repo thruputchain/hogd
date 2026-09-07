@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
@@ -16,6 +17,7 @@
 #include "hogd/hog_db/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

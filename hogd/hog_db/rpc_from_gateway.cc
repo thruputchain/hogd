@@ -22,6 +22,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 

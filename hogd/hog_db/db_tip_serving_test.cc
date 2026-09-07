@@ -16,14 +16,12 @@
 #include <utility>
 
 #include "consensus.hh"
-#include "executor_to_db_rpc.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
-#include "hogd/base/types.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/rpc_context.h"
