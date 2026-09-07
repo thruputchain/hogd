@@ -808,7 +808,7 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
   }
 }
 
-TestFFIErrorCode
+OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
                            int32_t invoke_flags) noexcept
@@ -816,7 +816,8 @@ open_mock_invocation_frame(void *syscall_handler,
   if (!syscall_handler) {
     best_effort_log(
         [] { error("open_mock_invocation_frame error: no syscall handler!"); });
-    return kTestFFIErrorCodeInvalidPointer;
+    return make_ffi_result_type<OpenMockInvocationFrameResult>(
+        kTestFFIErrorCodeInvalidPointer);
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
 
@@ -826,23 +827,26 @@ open_mock_invocation_frame(void *syscall_handler,
                      x23::BufView{invocation.data, invocation.len});
   } catch (x23::XdrException const &e) {
     log_error("error deserializing invocation: {}", e);
-    return kTestFFIErrorCodeDeserializeError;
+    return make_ffi_result_type<OpenMockInvocationFrameResult>(
+        kTestFFIErrorCodeDeserializeError);
   } catch (std::exception const &e) {
     log_error("unrecoverable: error during open_mock_invocation_frame: {}", e);
-    return kTestFFIErrorCodeUnrecoverableError;
+    return make_ffi_result_type<OpenMockInvocationFrameResult>(
+        kTestFFIErrorCodeUnrecoverableError);
   }
 
   try {
     auto res =
         context->start_mock_invocation_frame(invocation_xdr, invoke_flags);
-    if (res != kTestFFIErrorCodeNone) {
+    if (res.ffi_error_code != kTestFFIErrorCodeNone) {
       error("failed to start mock invocation frame: {}",
-            std::to_underlying(res));
+            std::to_underlying(res.ffi_error_code));
     }
     return res;
   } catch (std::exception const &e) {
     log_error("unrecoverable: error during start_mock_invocation_frame: {}", e);
-    return kTestFFIErrorCodeUnrecoverableError;
+    return make_ffi_result_type<OpenMockInvocationFrameResult>(
+        kTestFFIErrorCodeUnrecoverableError);
   }
 }
 
@@ -1654,7 +1658,7 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   return result;
 }
 
-TestFFIErrorCode
+OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
                            int32_t invoke_flags)

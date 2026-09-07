@@ -231,14 +231,14 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
   return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
 }
 
-TestFFIErrorCode
+OpenMockInvocationFrameResult
 SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
                                                    InvokeFlagSet invoke_flags)
 {
   if (!is_mocked_handler_) {
     error("unrecoverable: start_mock_invocation_frame called on non-mocked "
           "handler");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   // Reject opening a mock frame after the transaction was committed or aborted.
@@ -250,13 +250,13 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   if (is_committed_or_aborted()) {
     error("unrecoverable: start_mock_invocation_frame called on an already "
           "committed/aborted transaction");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   if (to_handler().last_frame_finished()) {
     error("unrecoverable: start_mock_invocation_frame called after last frame "
           "finished");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
@@ -370,7 +370,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // Async::operator() asserts.
   if (auto pinned = to_handler().init_db_tip()(); !pinned.has_value()) {
     error("mock invocation frame admission failed: {}", pinned.error());
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
   auto admitted =
       to_handler().validate_new_invocation(invocation.invoked_address,
@@ -380,13 +380,15 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // one of the caller's admission refusals.
   if (!admitted.has_value()) {
     error("mock invocation frame admission failed: {}", admitted.error());
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
   if (!admitted->has_value()) {
     finish_pending_trace(admitted->error().code());
-    error("invalid argument: mock invocation frame not admitted: {}",
-          admitted->error().code());
-    return kTestFFIErrorCodeInvalidArgument;
+    error("mock invocation frame refused: {}", admitted->error().code());
+    // Not a test-API misuse: the caller asked for something production
+    // refuses, and gets production's answer with no FFI error.
+    return {.syscall_error_code = std::to_underlying(admitted->error().code()),
+            .ffi_error_code = kTestFFIErrorCodeNone};
   }
 
   // TODO(geoff): current API does not support passing auth tokens via the mock
@@ -423,7 +425,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     finish_pending_trace(stashed_parent_trace.error().to_host_fn_error());
     error("unrecoverable: frame admission allocation failed in "
           "start_mock_invocation_frame");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   // finish_mock_invocation_frame() owns the record now. Must disarm: the
@@ -448,7 +450,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
 
   // Capacity was reserved above, so this push_back cannot reallocate or throw.
   push_mock_runtime(mock_runtime.release());
-  return kTestFFIErrorCodeNone;
+  return kMakeFrameOpenError(kTestFFIErrorCodeNone);
 }
 
 ForeignTracedInvokeResult

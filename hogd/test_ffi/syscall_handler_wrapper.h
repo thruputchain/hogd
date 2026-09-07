@@ -88,8 +88,9 @@ public:
   // mock contract callback while the outer root frame is active (issue #2705).
   ForeignTracedInvokeResult root_invoke(bool enable_tracing);
 
-  TestFFIErrorCode start_mock_invocation_frame(Invocation const &invocation,
-                                               InvokeFlagSet invoke_flags);
+  OpenMockInvocationFrameResult
+  start_mock_invocation_frame(Invocation const &invocation,
+                              InvokeFlagSet invoke_flags);
   ForeignTracedInvokeResult
   finish_mock_invocation_frame(InvokeErrorCode invoke_error_code);
 
@@ -326,6 +327,17 @@ private:
         .gas_consumed = 0,
         .serialized_trace = kNullBuffer,
         .serialized_events = kNullBuffer,
+        .ffi_error_code = code,
+    };
+  };
+
+  // A frame-open failure with no verdict: only validate_new_invocation()
+  // produces one.
+  constexpr static auto kMakeFrameOpenError =
+      [](TestFFIErrorCode code) -> OpenMockInvocationFrameResult {
+    return {
+        .syscall_error_code =
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone),
         .ffi_error_code = code,
     };
   };

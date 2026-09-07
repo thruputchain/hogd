@@ -19,7 +19,7 @@ echo 'build (1 of 2)'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=0 -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build (2 of 2)'
-cmake --build release --parallel "$(nproc)" --target control_server hog-db hog-exec hog-event > build2.log 2>&1 || (cat build2.log && exit 1)
+cmake --build release --parallel "$(nproc)" --target control_server hog-db hog-exec hog-event hog-indexer > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'clear hog-db file directory'
 mkdir -p ci_work_dir/
@@ -44,6 +44,9 @@ bench_2 = "hog7"
 bench_3 = "hog8"
 bench_4 = "hog11"
 bench_5 = "hog5"
+# Hosts the indexer each topology now runs, so exec counts stay what they
+# were before the indexer was added to this benchmark.
+bench_6 = "hog4"
 
 
 [[jobs]]
@@ -73,15 +76,16 @@ echo 'wait for bench servers'
 ./scripts/wait-port.sh hog11 11111
 ./scripts/wait-port.sh hog6 11111
 ./scripts/wait-port.sh hog5 11111
+./scripts/wait-port.sh hog4 11111
 
 echo 'launch multiexec runner one exec'
-./release/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -a 100
+./release/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog4 -s hog5 -a 100
 
 echo 'launch multiexec runner two exec'
-./release/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog5 -a 100
+./release/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog4 -s hog11 -s hog5 -a 100
 
 echo 'launch multiexec runner three exec'
-./release/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -s hog5 -a 100
+./release/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog4 -s hog11 -s hog6 -s hog5 -a 100
 
 """
 after = """
@@ -92,6 +96,7 @@ echo 'cleanup control servers'
 ./release/hogd/hog_exec/bench/control_cli hog11 11111 shutdown
 ./release/hogd/hog_exec/bench/control_cli hog6 11111 shutdown
 ./release/hogd/hog_exec/bench/control_cli hog5 11111 shutdown
+./release/hogd/hog_exec/bench/control_cli hog4 11111 shutdown
 
 """
 
