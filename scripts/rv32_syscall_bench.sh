@@ -38,7 +38,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_PATH=""
-REPETITIONS=5
+# Odd, so the median the report reads is a sample rather than an interpolation.
+# Two ceilings on raising it: the cold row draws kColdIterations single-use keys
+# per repetition from a pool of kColdPoolKeys, which runs out past ~13; and the
+# calibration job's own hour, most of which is the build.
+REPETITIONS=9
 BENCH_ARGS=()
 
 usage() {

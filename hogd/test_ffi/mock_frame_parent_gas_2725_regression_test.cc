@@ -77,7 +77,7 @@ namespace {
 // centrally. The tests size the parent frame around this so the child's spend
 // lands exactly on, or just under, the parent budget -- so it has to be the
 // whole charge, not just the body's share.
-constexpr GasAmount kShaGas = SHA256HashCost(1) + kSyscallBaseCost;
+constexpr GasAmount kShaGas = GasCost::sha256_hash(1) + kSyscallBaseCost;
 
 Invocation
 make_invocation(ContractAddress address, uint64_t method, GasAmount gas_limit)

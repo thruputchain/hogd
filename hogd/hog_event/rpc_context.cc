@@ -1020,9 +1020,10 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox identity is invalid");
   }
-  // The loaded record already validated both consensus roots and the header's
-  // consensus_hash, so preserve that durable identity instead of hashing the
-  // consensus value again.
+  // The loaded record validated the header's consensus_hash, and the store
+  // has established the file's roots -- when it published or promoted the
+  // record, or once on this process's first load -- so preserve that durable
+  // identity instead of hashing the consensus value again.
   IndexerCommittedBlock block{
       .payload = std::move(loaded->payload),
       .identity =
