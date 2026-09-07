@@ -13,6 +13,8 @@
 #include <format>
 #include <functional>
 #include <iterator>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -355,6 +357,18 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
             block_id, published.error());
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kInternal};
+    }
+    // The pairs this block streamed are handed to the pull path as they are,
+    // so the indexer is served from memory rather than from the file that was
+    // just written. Bounded by kRetainedCommittedBlocks; older blocks come
+    // off disk.
+    retained_committed_[block_height] =
+        std::make_shared<const RetainedCommittedBlock>(RetainedCommittedBlock{
+            .consensus_value = consensus_value,
+            .pairs = context_ptr->get().take_retained_pairs(),
+        });
+    while (retained_committed_.size() > kRetainedCommittedBlocks) {
+      retained_committed_.erase(retained_committed_.begin());
     }
   }
   else {
@@ -924,30 +938,68 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox record has wrong epoch");
   }
-  auto loaded = co_await indexer_outbox_store_.load_committed_record(
-      next_height, response_origin.protocol);
-  if (!loaded) {
-    error("failed to load pullable committed outbox record {}: {}", next_height,
-          loaded.error());
-    co_return pull_failure(EventIndexerPullInternalFailure,
-                           "pullable durable outbox payload is invalid");
+  std::shared_ptr<const RetainedCommittedBlock> retained;
+  {
+    x23::CoroGuard guard;
+    co_await guard(outbox_commit_lock_);
+    if (auto it = retained_committed_.find(next_height);
+        it != retained_committed_.end()) {
+      retained = it->second;
+    }
   }
-  if (loaded->info != **record) {
-    error("pullable committed outbox record {} failed identity validation",
-          next_height);
-    co_return pull_failure(EventIndexerPullInternalFailure,
-                           "pullable durable outbox identity is invalid");
+  IndexerCommittedBlock block;
+  if (retained &&
+      sha256(retained->consensus_value) == (**record).consensus_hash) {
+    // Served from the pairs this process streamed at close: the bytes the
+    // events file holds, without reading them back, and without recomputing
+    // roots the block's own context established when it built the file.
+    auto pairs =
+        parse_events_file_pairs(retained->pairs, "retained committed block");
+    if (!pairs) {
+      error("retained committed block {} does not parse: {}", next_height,
+            pairs.error());
+      co_return pull_failure(EventIndexerPullInternalFailure,
+                             "retained committed block is invalid");
+    }
+    block = IndexerCommittedBlock{
+        .payload =
+            IndexerCommittedBlockPayload{
+                .format_version = kIndexerOutboxFormatVersion,
+                .consensus_value = retained->consensus_value,
+                .event_logs = std::move(pairs->event_logs),
+                .tx_bodies = std::move(pairs->tx_bodies),
+            },
+        .identity =
+            IndexerCommittedBlockIdentity{
+                .consensus_hash = (**record).consensus_hash,
+            },
+    };
   }
-  // The loaded record already validated both consensus roots and the header's
-  // consensus_hash, so preserve that durable identity instead of hashing the
-  // consensus value again.
-  IndexerCommittedBlock block{
-      .payload = std::move(loaded->payload),
-      .identity =
-          IndexerCommittedBlockIdentity{
-              .consensus_hash = loaded->info.consensus_hash,
-          },
-  };
+  else {
+    auto loaded = co_await indexer_outbox_store_.load_committed_record(
+        next_height, response_origin.protocol);
+    if (!loaded) {
+      error("failed to load pullable committed outbox record {}: {}",
+            next_height, loaded.error());
+      co_return pull_failure(EventIndexerPullInternalFailure,
+                             "pullable durable outbox payload is invalid");
+    }
+    if (loaded->info != **record) {
+      error("pullable committed outbox record {} failed identity validation",
+            next_height);
+      co_return pull_failure(EventIndexerPullInternalFailure,
+                             "pullable durable outbox identity is invalid");
+    }
+    // The loaded record validated the header's consensus_hash, so preserve
+    // that durable identity instead of hashing the consensus value again.
+    block = IndexerCommittedBlock{
+        .payload = std::move(loaded->payload),
+        .identity =
+            IndexerCommittedBlockIdentity{
+                .consensus_hash = loaded->info.consensus_hash,
+            },
+    };
+  }
 
   {
     x23::CoroGuard guard;

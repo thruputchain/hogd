@@ -3,10 +3,12 @@
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <fcntl.h>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -137,6 +139,14 @@ public:
   x23::Async<bool> add_event(TxEventLog event, ProposedTransaction body);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
+
+  // The pair bytes this block streamed to its events file, kept in memory so
+  // the live pull path can serve the block without reading the file back:
+  // the same [TxEventLog][ProposedTransaction] stream the file holds, whole
+  // pairs per flushed chunk, concatenated in flush order. The events file
+  // stays the durable copy. Valid once the file is finished; moves the bytes
+  // out, so it is called once, by commit.
+  std::vector<uint8_t> take_retained_pairs();
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
   x23::Async<void> wait_file_done();
@@ -252,6 +262,13 @@ private:
   x23::CoroLock lock_;
   BlockState state_ = BlockState::kActive;
   uint32_t pending_write_count_ = 0;
+
+  // Every chunk written to the events file, until commit takes them. Pushed
+  // by the detached flush writers and by finish_file_write's drain, taken by
+  // commit after the file is finished; the mutex covers the hand-off.
+  std::mutex retained_mutex_;
+  std::vector<std::vector<uint8_t>> retained_chunks_;
+  size_t retained_bytes_ = 0;
 
   x23::CoroFutex<bool> all_writes_done_ = false;
 

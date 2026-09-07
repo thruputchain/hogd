@@ -15,6 +15,7 @@
 #include <fstream>
 #include <ios>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string_view>
 #include <sys/fcntl.h>
@@ -225,13 +226,16 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
     if (!r) [[unlikely]] {
       panic("failed to write events to file: {}", r.error());
     }
+    {
+      const std::lock_guard retained(retained_mutex_);
+      retained_bytes_ += buf.size();
+      retained_chunks_.push_back(std::move(buf));
+    }
     if (--pending_write_count_ == 0 && state_ == BlockState::kFinishing) {
       all_writes_done_.store(true);
       all_writes_done_.broadcast();
     }
   }
-  // buf clear is out of the critical section holding the lock
-  buf.clear();
   co_return;
 }
 
@@ -331,6 +335,10 @@ EventBlockContext::finish_file_write()
       if (!r) [[unlikely]] {
         panic("failed to write events to file: {}", r.error());
       }
+      const std::lock_guard retained(retained_mutex_);
+      retained_bytes_ += context.buf.size();
+      retained_chunks_.push_back(std::move(context.buf));
+      context.buf.clear();
     });
   }
 
@@ -341,6 +349,20 @@ EventBlockContext::finish_file_write()
   sync_file(g);
   auto ts4 = x23::fastclock::now();
   info("time to sync {} ns,", ts4 - ts3);
+}
+
+std::vector<uint8_t>
+EventBlockContext::take_retained_pairs()
+{
+  const std::lock_guard retained(retained_mutex_);
+  std::vector<uint8_t> pairs;
+  pairs.reserve(retained_bytes_);
+  for (const std::vector<uint8_t> &chunk : retained_chunks_) {
+    pairs.insert(pairs.end(), chunk.begin(), chunk.end());
+  }
+  retained_chunks_.clear();
+  retained_bytes_ = 0;
+  return pairs;
 }
 
 x23::Async<void>
