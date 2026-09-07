@@ -110,10 +110,13 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <x23/async.h>
@@ -269,18 +272,37 @@ public:
     // async() returns, and released by its destructor so the count is still
     // balanced if the jthread constructor throws and no thread ever runs.
     //
+    // f and args go in an optional that the body clears as soon as the call
+    // is done, rather than being captured directly.  Captures are destroyed
+    // in an unspecified order, so a directly captured argument whose
+    // destructor touched the pool could run after the AsyncRef had already
+    // released the last count -- and F and Args are whatever the caller
+    // hands us.  Clearing explicitly puts the whole user-supplied state
+    // firmly behind the invoke and ahead of make_callback(), which leaves
+    // the release as the last thing in the thread that touches anything.
+    //
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
     // be destroyed before they are used.  That incurs a second move
     // into the new thread, but that's unavoidable for safety.
+    using Work = std::tuple<std::decay_t<F>, std::decay_t<Args>...>;
     std::jthread([this, _async = AsyncRef(nasync_), cb = CpuHinted(cb, cpuid()),
-                  f = std::forward<F>(f), ... args = std::forward<Args>(args)] {
+                  work = std::optional<Work>(std::in_place, std::forward<F>(f),
+                                             std::forward<Args>(
+                                                 args)...)]() mutable {
+      auto call = [](auto &fn, auto &...a) -> decltype(auto) {
+        return std::invoke(fn, a...);
+      };
       if constexpr (std::is_void_v<R>) {
-        std::invoke(f, args...);
+        std::apply(call, *work);
+        work.reset();
         make_callback(cb);
       }
-      else
-        make_callback(cb, std::invoke(f, args...));
+      else {
+        R r = std::apply(call, *work);
+        work.reset();
+        make_callback(cb, std::move(r));
+      }
     }).detach();
     return std::move(async);
   }
