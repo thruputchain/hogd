@@ -875,6 +875,16 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 // refused by contract type before verify_contract runs, so this no longer
 // exercises that unknown-id branch, but it still pins what #1512 is about:
 // the panic stays unreachable.
+//
+// The InvokeErrorCode is ValidationFailure even though this handler is in
+// proposal mode. That is the internal representation, shared by both modes:
+// InvokeErrorCode has no "malformed" code, so the mode-dependent verdict is
+// applied later, at the ExecResult, in try_commit_transaction(). Both of
+// those branches are pinned by SelectiveDeploymentTest's
+// RejectsAttachedNativeContract (proposal -> ExecResultMalformedTransaction)
+// and RejectsAttachedNativeContractInValidationMode (validation ->
+// ExecResultTxValidationFailure). This test stops at root_invoke(), which is
+// all #1512 needs.
 TEST_F(NativeContractTest, InvalidNativeContractIdRejectedBeforeDeploy)
 {
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
