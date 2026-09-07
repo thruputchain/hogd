@@ -357,8 +357,9 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   constexpr size_t kBatchOverhead = 1_KiB;
   const size_t admissible =
       (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
-  if (const uint32_t stated =
-          max_new_contracts_per_tx(genesis_configuration.network_config);
+  const NetworkConfigParams config_params(
+      genesis_configuration.network_config.v0());
+  if (const uint32_t stated = config_params.max_new_contracts_per_tx;
       stated > admissible) {
     error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
           "commit in one message",
@@ -367,8 +368,7 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   }
   // The ceiling bounds the wire type, so a genesis naming more would let a
   // contract write a bytestring no peer could carry.
-  if (const uint32_t stated =
-          max_bytestring_len(genesis_configuration.network_config);
+  if (const uint32_t stated = config_params.max_bytestring_len;
       stated > static_cast<uint32_t>(kBytestringCeilingLen)) {
     error("genesis max_bytestring_len {} exceeds the protocol ceiling of {}",
           stated, kBytestringCeilingLen);

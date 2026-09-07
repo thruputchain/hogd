@@ -60,14 +60,19 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
 
   std::array<NetworkConfig, 4> variants;
   variants.fill(stock_network_config());
-  set_config_param(variants[0], ConfigParamID::kConfigParamMaxSHA256Buffers,
-                   max_sha256_buffers(variants[0]) + 1);
-  set_config_param(variants[1], ConfigParamID::kConfigParamMaxCrossInvokeDepth,
-                   max_cross_invoke_depth(variants[1]) + 1);
-  set_config_param(variants[2], ConfigParamID::kConfigParamMaxNewContractsPerTx,
-                   max_new_contracts_per_tx(variants[2]) + 1);
-  set_config_param(variants[3], ConfigParamID::kConfigParamMaxBytestringLen,
-                   max_bytestring_len(variants[3]) + 1);
+  const NetworkConfigParams stock(stock_network_config().v0());
+  NetworkConfigParams::set_param(variants[0],
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 stock.max_sha256_buffers + 1);
+  NetworkConfigParams::set_param(variants[1],
+                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                                 stock.max_cross_invoke_depth + 1);
+  NetworkConfigParams::set_param(
+      variants[2], ConfigParamID::kConfigParamMaxNewContractsPerTx,
+      stock.max_new_contracts_per_tx + 1);
+  NetworkConfigParams::set_param(variants[3],
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 stock.max_bytestring_len + 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(make_config_hash_preimage(model, variant)),
               original);
@@ -75,22 +80,26 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
 }
 
 // The stock configuration is in the only form that may be hashed, and
-// set_config_param keeps it that way rather than appending out of order.
+// set_param keeps it that way rather than appending out of order.
 TEST(ConfigHashTest, StockConfigIsCanonical)
 {
   NetworkConfig config = stock_network_config();
   ASSERT_EQ(config.v(), 0);
-  EXPECT_TRUE(config_params_canonical(config.v0()));
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
   EXPECT_TRUE(config_hashable(config));
 
   // Setting a parameter already stated replaces it in place; setting one out
   // of id order still lands in order.
-  set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx, 8);
-  set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 4);
-  EXPECT_TRUE(config_params_canonical(config.v0()));
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxNewContractsPerTx, 8);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 4);
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
   EXPECT_EQ(config.v0().params.size(), 4U);
-  EXPECT_EQ(max_new_contracts_per_tx(config), 8U);
-  EXPECT_EQ(max_sha256_buffers(config), 4U);
+  const NetworkConfigParams params(config.v0());
+  EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
+  EXPECT_EQ(params.max_sha256_buffers, 4U);
 }
 
 // A configuration predating the bytestring parameter reads as the limit every
@@ -100,16 +109,19 @@ TEST(ConfigHashTest, ShortListYieldsBytestringDefault)
 {
   NetworkConfig config;
   config.v(0);
-  set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx, 4);
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxNewContractsPerTx, 4);
   ASSERT_EQ(config.v0().params.size(), 3U);
-  EXPECT_EQ(max_bytestring_len(config),
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_bytestring_len,
             static_cast<uint32_t>(kDefaultMaxBytestringLen));
 
   // Stating it extends the prefix by one and takes effect.
-  set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen, 4096);
-  EXPECT_TRUE(config_params_canonical(config.v0()));
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 4096);
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
   EXPECT_EQ(config.v0().params.size(), 4U);
-  EXPECT_EQ(max_bytestring_len(config), 4096U);
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_bytestring_len, 4096U);
 }
 
 // A repeated or misordered list is refused, because it would give one
@@ -117,43 +129,44 @@ TEST(ConfigHashTest, ShortListYieldsBytestringDefault)
 TEST(ConfigHashTest, RejectsNonCanonicalParamList)
 {
   NetworkConfigV0 repeated;
-  repeated.params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
-  repeated.params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 9));
-  EXPECT_FALSE(config_params_canonical(repeated));
+  repeated.params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
+  repeated.params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxSHA256Buffers, 9));
+  EXPECT_FALSE(NetworkConfigParams::is_canonical(repeated));
 
   NetworkConfigV0 descending;
-  descending.params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
-  descending.params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
-  EXPECT_FALSE(config_params_canonical(descending));
+  descending.params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
+  descending.params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
+  EXPECT_FALSE(NetworkConfigParams::is_canonical(descending));
 
   // A gap is refused even though the ids ascend: the canonical form is a
   // prefix, so being absent can only mean being past the end.
   NetworkConfigV0 gap;
-  gap.params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
-  gap.params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxNewContractsPerTx, 4));
-  EXPECT_FALSE(config_params_canonical(gap));
+  gap.params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
+  gap.params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxNewContractsPerTx, 4));
+  EXPECT_FALSE(NetworkConfigParams::is_canonical(gap));
 
   // Nor may the list start past the first parameter.
   NetworkConfigV0 offset;
-  offset.params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
-  EXPECT_FALSE(config_params_canonical(offset));
+  offset.params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
+  EXPECT_FALSE(NetworkConfigParams::is_canonical(offset));
 
   NetworkConfigV0 empty;
-  EXPECT_TRUE(config_params_canonical(empty));
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(empty));
 
   // Setting a later parameter fills the ones before it rather than leaving a
   // gap behind.
   NetworkConfig fresh;
   fresh.v(0);
-  set_config_param(fresh, ConfigParamID::kConfigParamMaxNewContractsPerTx, 4);
-  EXPECT_TRUE(config_params_canonical(fresh.v0()));
+  NetworkConfigParams::set_param(
+      fresh, ConfigParamID::kConfigParamMaxNewContractsPerTx, 4);
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(fresh.v0()));
   EXPECT_EQ(fresh.v0().params.size(), 3U);
 }
 
@@ -162,21 +175,23 @@ TEST(ConfigHashTest, ReadsEachParamFromItsOwnIndex)
 {
   NetworkConfig prefix;
   prefix.v(0);
-  prefix.v0().params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 3));
-  prefix.v0().params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxCrossInvokeDepth, 7));
-  ASSERT_TRUE(config_params_canonical(prefix.v0()));
-  EXPECT_EQ(max_sha256_buffers(prefix), 3U);
-  EXPECT_EQ(max_cross_invoke_depth(prefix), 7U);
+  prefix.v0().params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxSHA256Buffers, 3));
+  prefix.v0().params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxCrossInvokeDepth, 7));
+  ASSERT_TRUE(NetworkConfigParams::is_canonical(prefix.v0()));
+  const NetworkConfigParams prefix_params(prefix.v0());
+  EXPECT_EQ(prefix_params.max_sha256_buffers, 3U);
+  EXPECT_EQ(prefix_params.max_cross_invoke_depth, 7U);
   // Past the end of a shorter list, so the default stands.
-  EXPECT_EQ(max_new_contracts_per_tx(prefix), kDefaultMaxNewContractsPerTx);
+  EXPECT_EQ(prefix_params.max_new_contracts_per_tx,
+            kDefaultMaxNewContractsPerTx);
 
   NetworkConfig full = prefix;
-  full.v0().params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxNewContractsPerTx, 9));
-  ASSERT_TRUE(config_params_canonical(full.v0()));
-  EXPECT_EQ(max_new_contracts_per_tx(full), 9U);
+  full.v0().params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxNewContractsPerTx, 9));
+  ASSERT_TRUE(NetworkConfigParams::is_canonical(full.v0()));
+  EXPECT_EQ(NetworkConfigParams(full.v0()).max_new_contracts_per_tx, 9U);
 }
 
 // A configuration stating fewer parameters than this build knows runs under
@@ -185,23 +200,27 @@ TEST(ConfigHashTest, ShortListTakesDefaults)
 {
   NetworkConfig config;
   config.v(0);
-  config.v0().params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 16));
-  config.v0().params.push_back(
-      detail::make_param(ConfigParamID::kConfigParamMaxCrossInvokeDepth, 64));
+  config.v0().params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxSHA256Buffers, 16));
+  config.v0().params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxCrossInvokeDepth, 64));
 
-  EXPECT_EQ(max_sha256_buffers(config), 16U);
-  EXPECT_EQ(max_cross_invoke_depth(config), 64U);
-  EXPECT_EQ(max_new_contracts_per_tx(config), kDefaultMaxNewContractsPerTx);
+  const NetworkConfigParams stated(config.v0());
+  EXPECT_EQ(stated.max_sha256_buffers, 16U);
+  EXPECT_EQ(stated.max_cross_invoke_depth, 64U);
+  EXPECT_EQ(stated.max_new_contracts_per_tx, kDefaultMaxNewContractsPerTx);
 
   // Setting one carries the others' stated values rather than defaulting them.
-  set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 2);
-  EXPECT_TRUE(config_params_canonical(config.v0()));
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 2);
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
   EXPECT_EQ(config.v0().params.size(), 2U);
-  EXPECT_EQ(max_sha256_buffers(config), 2U);
-  EXPECT_EQ(max_cross_invoke_depth(config), 64U);
-  EXPECT_NE(max_cross_invoke_depth(config), kDefaultMaxCrossInvokeDepth);
-  EXPECT_EQ(max_new_contracts_per_tx(config), kDefaultMaxNewContractsPerTx);
+  const NetworkConfigParams updated(config.v0());
+  EXPECT_EQ(updated.max_sha256_buffers, 2U);
+  EXPECT_EQ(updated.max_cross_invoke_depth, 64U);
+  EXPECT_NE(updated.max_cross_invoke_depth, kDefaultMaxCrossInvokeDepth);
+  EXPECT_EQ(updated.max_new_contracts_per_tx, kDefaultMaxNewContractsPerTx);
 }
 
 } // namespace hogd

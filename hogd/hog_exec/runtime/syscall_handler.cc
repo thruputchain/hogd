@@ -170,7 +170,7 @@ SystemCallHandler::pin_db_tip() const
   // Owned by the snapshot cache and stable until the cache is recycled for a
   // new block, which cannot happen while this transaction is executing.
   db_tip_ = *tip;
-  config_params_ = resolve_config_params(db_tip_->network_config);
+  config_params_ = NetworkConfigParams(db_tip_->network_config.v0());
   co_return SystemStatus<void>{};
 }
 

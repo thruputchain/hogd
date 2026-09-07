@@ -184,10 +184,12 @@ TEST(BlockManagerTest, GenesisInstallsItsOwnNetworkConfig)
 {
   constexpr uint32_t kConfiguredDepth = 64;
   NetworkConfig configured = stock_network_config();
-  set_config_param(configured, ConfigParamID::kConfigParamMaxCrossInvokeDepth,
-                   kConfiguredDepth);
-  ASSERT_NE(max_cross_invoke_depth(configured),
-            max_cross_invoke_depth(stock_network_config()));
+  NetworkConfigParams::set_param(configured,
+                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                                 kConfiguredDepth);
+  ASSERT_NE(
+      NetworkConfigParams(configured.v0()).max_cross_invoke_depth,
+      NetworkConfigParams(stock_network_config().v0()).max_cross_invoke_depth);
 
   InMemoryDatabase db;
   BlockManager m(0, &db);

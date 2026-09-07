@@ -227,8 +227,9 @@ NetworkConfig
 bench_network_config()
 {
   NetworkConfig config = stock_network_config();
-  set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen,
-                   kMaxBytestringBytes);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 kMaxBytestringBytes);
   return config;
 }
 
@@ -1785,7 +1786,8 @@ register_benchmarks()
   // chain runs at. The parent walk on a first touch is linear in the stack,
   // and the schedule has to hold at whatever depth the chain allows.
   const uint32_t stock_max_depth =
-      max_cross_invoke_depth(stock_network_config()) - 2;
+      NetworkConfigParams(stock_network_config().v0()).max_cross_invoke_depth -
+      2;
   std::vector<uint32_t> depths = {1, 8, 16};
   if (std::ranges::find(depths, stock_max_depth) == depths.end()) {
     depths.push_back(stock_max_depth);
