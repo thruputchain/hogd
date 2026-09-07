@@ -1,7 +1,6 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
 #include <cassert>
-#include <cstdint>
 #include <optional>
 #include <utility>
 
@@ -29,7 +28,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
 {
   // Bracket the call: any load it does adds to the transaction's running
   // total, and the difference is what this call is charged for.
-  const uint64_t db_gas_before = syscall_handler.db_read_gas();
+  const auto db_gas_before = syscall_handler.db_read_gas();
   auto status =
       co_await syscall_handler.get_nnint(input_key,
                                          input_force_load_from_snapshot);

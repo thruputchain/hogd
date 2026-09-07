@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <span>
 
@@ -28,7 +27,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             std::span<std::byte> output_bytestring,
                             RuntimeMemoryLength &output_written_len)
 {
-  const uint64_t db_gas_before = syscall_handler.db_read_gas();
+  const auto db_gas_before = syscall_handler.db_read_gas();
   auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status.has_value()) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
@@ -66,7 +65,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                const StorageKeyContractData &input_key,
                                RuntimeMemoryLength &output_length)
 {
-  const uint64_t db_gas_before = syscall_handler.db_read_gas();
+  const auto db_gas_before = syscall_handler.db_read_gas();
   auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
