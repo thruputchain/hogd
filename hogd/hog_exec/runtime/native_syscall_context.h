@@ -64,14 +64,12 @@ public:
   // database load it does. The native token precompile is the one caller that
   // reaches the handler directly instead of going through syscall(), so this
   // is where that load gets billed; call it rather than the handler's method.
+  //
+  // Out of line: an inline coroutine here would emit a body referencing the
+  // handler into every translation unit that includes this header, including
+  // ones whose libraries do not link the runtime.
   x23::Async<SystemStatus<SyscallStatus<int128_t>>>
-  native_token_balance(ContractAddress const &address)
-  {
-    const auto db_gas_before = handler_.db_read_gas();
-    auto result = co_await handler_.get_native_token_balance(address);
-    consume_gas(handler_.db_read_gas() - db_gas_before);
-    co_return result;
-  }
+  native_token_balance(ContractAddress const &address);
 
   GasAmount gas_remaining() const
   {
