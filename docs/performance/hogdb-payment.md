@@ -1,5 +1,13 @@
 # Hogdb payment performance
 
+The scheduler wakeup change improved the three-run median CI payment rate
+from **423,351.58 to 439,286.38 tx/s (+3.76%)**. Median unprofiled hogdb CPU
+cost was **23.87 us per successful proposal**, **7.00% lower** than the
+baseline sample taken at a comparable process age. A separate matched
+merged-head pair improved **7.22%** in throughput and **8.38%** in database
+CPU cost. These are observed results from a small sample; two optimized
+runs encountered the workload capacity limitation documented below.
+
 ## Experiment
 
 Use the `E2E Payment (hog_sched)` workflow on `perf/hogdb-e2e-payment`.
@@ -92,25 +100,30 @@ alone do not establish whether disk I/O is a bottleneck.
 
 ## Validation and final comparison
 
-The first unprofiled optimized run,
-[34105692812](https://github.com/groundhogchain/hogd/actions/runs/34105692812),
-passed at **433,492.45 tx/s**, **2.40% above the baseline median**. A second,
-[34106016026](https://github.com/groundhogchain/hogd/actions/runs/34106016026),
-passed at **453,453.94 tx/s**, **7.11% above the baseline median**. One more
-optimized run is queued; the final three-run comparison is pending.
-The baseline range is 422,401.12–428,188.05 tx/s. All runs, including the
-capacity-limited second optimized run described below, remain in the comparison.
+All three unprofiled optimized runs passed:
 
-Its unprofiled process sample, starting at process age 30 seconds, measured
-666.49 CPU seconds over 60.786 seconds for 28,000,000 successful proposals:
-**23.80 hogdb CPU us/proposal**, **7.25% below** the baseline repeat sampled
-at a comparable process age. Hogdb served more work while using roughly
-the same number of CPU cores. The second optimized sample, starting at
-process age 35 seconds, measured 789.97 CPU seconds over 60.622 seconds for
-32,426,016 successful proposals: **24.36 CPU us/proposal**, **5.07% below**
-the matched baseline sample. The last unprofiled repeat is pending.
-The coordinator's reported overall throughput
-is the headline metric; the CPU sample's proposal rate is a separate metric.
+| CI run | Final overall tx/s | Hogdb CPU us/proposal |
+| --- | ---: | ---: |
+| [34105692812](https://github.com/groundhogchain/hogd/actions/runs/34105692812) | 433,492.45 | 23.80 |
+| [34106016026](https://github.com/groundhogchain/hogd/actions/runs/34106016026) | 453,453.94 | 24.36 |
+| [34106007905](https://github.com/groundhogchain/hogd/actions/runs/34106007905) | 439,286.38 | 23.87 |
+| **Median** | **439,286.38** | **23.87** |
+
+The baseline median is **423,351.58 tx/s**, range 422,401.12–428,188.05;
+the optimized range is 433,492.45–453,453.94. The median improvement is
+**3.76%**. All runs, including both late failure regimes described below,
+remain in the comparison. Three runs per version establish an observed
+improvement, not a precise confidence interval or a sustained-load guarantee.
+
+The unprofiled CPU samples started at process ages 30, 35 and 31 seconds.
+They measured, respectively, 666.49, 789.97 and 643.23 CPU seconds over
+60.786, 60.622 and 60.686 seconds, for 28,000,000, 32,426,016 and 26,950,345
+successful proposals. Their median **23.87 CPU us/proposal** is **7.00% below**
+the matched baseline sample of **25.66** at process age 32 seconds. The
+earlier baseline sample measured 25.32 at a later process age; this is not
+a comparison of three CPU samples on each side. CPU samples precede the
+observed late failure regimes. The coordinator's final overall throughput
+is the headline metric; proposal rate is a separate metric.
 
 [Optimized diagnostic run 34106024231](https://github.com/groundhogchain/hogd/actions/runs/34106024231)
 passed and provides the `hogdb-profile-34106024231` artifact. Over its
@@ -131,7 +144,7 @@ to start in parallel, for both individual submissions and batches. All six
 scheduler tests and all five RPC stress scenarios passed in Release and
 Debug/O0, with 128 workers for RPC stress. Against the merged `main`, 261
 database, 41 executor-interface, and 26 item tests passed. All nine
-PR-specific CI checks passed on `d316b848` (Linux GCC Release/Debug, LLVM
+PR-specific CI checks passed (Linux GCC Release/Debug, LLVM
 Debug, macOS Debug, formatting, bindings, and all three tidy jobs).
 
 ## Integration and local cross-check
@@ -144,13 +157,19 @@ to the optimization.
 
 The merged-head integration run
 [34108735706](https://github.com/groundhogchain/hogd/actions/runs/34108735706)
-at `c926181c` passed at **418,974.74 tx/s**, below the original baseline.
-Its unprofiled sample measured **23.07 CPU us/proposal** (599.78 CPU seconds
-for 26 million proposals over 60.652 seconds). Lower database CPU cost does
-not by itself establish higher system throughput. A matched merged-head
-control, [34118747257](https://github.com/groundhogchain/hogd/actions/runs/34118747257),
-is queued at `9d791472` on `perf/hogdb-merged-control`; this restores only
-the original scheduler implementation and removes its new regression test.
+at `c926181c` passed at **418,974.74 tx/s**. The matched merged-head control,
+[34118747257](https://github.com/groundhogchain/hogd/actions/runs/34118747257),
+at `9d791472` on `perf/hogdb-merged-control` passed at **390,774.88 tx/s**.
+The control restores only the original scheduler implementation and removes
+its new regression test. This matched pair improved **7.22%**; it is a
+single pair and is reported separately from the three-run isolated comparison.
+Both merged-head rates are lower than their respective pre-merge medians,
+so neither absolute difference is attributed solely to the scheduler.
+
+The merged optimized sample measured **23.07 CPU us/proposal** (599.78 CPU
+seconds for 26 million proposals over 60.652 seconds), versus **25.18** for
+the control (585.32 CPU seconds for 23,246,334 proposals over 60.676 seconds):
+an **8.38% reduction**. Samples started at process ages 35 and 32 seconds.
 
 A three-pair localhost RPC cross-check (128 workers per pool, 16 connections,
 128 outstanding calls per connection, 256-byte echo, 10 seconds per run)
@@ -166,9 +185,13 @@ age 160 seconds, executors had recorded 79,049,241 successful and 3,489,414
 failed proposals. Over the next 15.766 seconds, successful proposals rose
 by only 101,176 while failures rose by 8,370,795. The coordinator still
 reported its normal final cumulative rate, with 79,150,334 committed
-transactions over 174.55 seconds. The merged-head integration run, by
-comparison, recorded only six failures during its late seven-million-attempt
-sample.
+transactions over 174.55 seconds. The third optimized run also had a late
+failure surge: from process age 162 seconds, failures rose from 328,329 to
+7,720,453 over 15.854 seconds while successes rose by 1,390,583. Its final
+coordinator total was 77,310,971 transactions over 175.99 seconds. The
+merged-head integration run, by comparison, recorded only six failures
+during its late seven-million-attempt sample, and the matched control
+recorded none during its late 5.4-million-attempt sample.
 
 This is consistent with the workload's finite replay-cache capacity:
 `groundhog-go/chuckd/sub/loadgen/loadgen.go` gives all work transactions
