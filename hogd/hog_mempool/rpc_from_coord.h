@@ -56,7 +56,6 @@
 #include "x23/dag.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
-#include "x23/xdr_shared_ptr.h"
 
 namespace hogd {
 
