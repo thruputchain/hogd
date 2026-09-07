@@ -67,7 +67,11 @@ private:
                                        BlockHeight block_height) const;
   HogDbStatus<ReplayCacheMetadata *> get_meta(const LockContext *ctx) const;
 
-  mutable std::map<BlockHeight, ActiveHeight> bases_;
+  using Bases = std::map<BlockHeight, ActiveHeight>;
+  mutable Bases bases_;
+  // Map nodes and snapshot data live for the whole lock lifetime. Cache the
+  // first height so repeated reservations need no shared-lock traffic.
+  mutable std::atomic<Bases::value_type *> first_base_{nullptr};
   mutable x23::SharedLock bases_lock_;
 
   mutable std::atomic<ReplayCacheMetadata *> meta_;

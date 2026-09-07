@@ -344,8 +344,7 @@ private:
     cp_->awrite(fd_, make_record(msg, x...));
   }
 
-  Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_DECL0);
-  Async<Errno> read_record(Buf *b SLOC_DECL);
+  Async<Errno> read_record(Buf *b, Buf *header SLOC_DECL);
 
   friend class RefCount;
 };

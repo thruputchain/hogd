@@ -7,6 +7,7 @@
 #include <semaphore>
 #include <string_view>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <thread>
 #include <unistd.h>
 
@@ -202,6 +203,111 @@ TEST(SrpcRegression, OversizedBoundedVecReplyIsDecodeError)
   EXPECT_TRUE(got_xdr_error.load())
       << "oversized bounded-vector reply should surface as a client-side "
          "XdrException without terminating the process";
+}
+
+TEST(RpcRegression, FragmentedRepliesAcrossRecords)
+{
+  ThreadPool pool(8);
+  CoroPoll poll(pool);
+  int fds[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  UniqueFd peer_fd{fds[1]};
+  timeval timeout{5, 0};
+  ASSERT_EQ(setsockopt(peer_fd.get(), SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                       sizeof(timeout)),
+            0);
+  auto stream = rpc_stream(poll, fds[0]);
+  auto client = stream->client(blank_rpc_v1{});
+  std::jthread peer([fd = std::move(peer_fd)] {
+    for (unsigned i = 0; i < 4; ++i) {
+      std::uint32_t marker;
+      ASSERT_TRUE(read_exact(fd.get(), &marker, sizeof(marker)));
+      Buf request;
+      request.resize_uninitialized(getbe<std::uint32_t>(&marker) & 0x7fffffff);
+      ASSERT_TRUE(read_exact(fd.get(), request.data(), request.size()));
+      rpc_msg reply{};
+      reply.xid = getbe<std::uint32_t>(request.data());
+      msg_set_reply_stat(&reply, accept_stat::SUCCESS);
+      Buf record = make_record(reply);
+      BufView payload = record.subspan(4);
+      // Empty fragments and a split inside the RPC header exercise both
+      // marker reuse within a record and scratch reuse across records.
+      for (size_t len : {size_t{0}, size_t{1}, payload.size() - 1, size_t{0}}) {
+        Buf header;
+        header.resize_uninitialized(4);
+        bool last = payload.empty();
+        putbe<std::uint32_t>(header.data(), len | (last ? 0x80000000U : 0));
+        for (auto byte : header) {
+          ASSERT_TRUE(write_all(fd.get(), BufView(&byte, 1)));
+        }
+        ASSERT_TRUE(write_all(fd.get(), payload.first(len)));
+        payload = payload.subspan(len);
+      }
+    }
+  });
+  for (unsigned i = 0; i < 4; ++i) {
+    EXPECT_NO_THROW(client.null()());
+  }
+}
+
+TEST(RpcRegression, TruncatedFragmentIsTransportException)
+{
+  for (bool truncate_header : {false, true}) {
+    ThreadPool pool(2);
+    CoroPoll poll(pool);
+    int fds[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    auto stream = rpc_stream(poll, fds[0]);
+    auto client = stream->client(blank_rpc_v1{});
+    std::jthread peer([fd = UniqueFd{fds[1]}, truncate_header] {
+      std::uint32_t marker;
+      ASSERT_TRUE(read_exact(fd.get(), &marker, sizeof(marker)));
+      Buf request;
+      request.resize_uninitialized(getbe<std::uint32_t>(&marker) & 0x7fffffff);
+      ASSERT_TRUE(read_exact(fd.get(), request.data(), request.size()));
+      Buf header;
+      header.resize_uninitialized(4);
+      putbe<std::uint32_t>(header.data(), 0x80000018U);
+      ASSERT_TRUE(
+          write_all(fd.get(), header.subspan(0, truncate_header ? 3 : 4)));
+    });
+    EXPECT_THROW(client.null()(), XdrException);
+  }
+}
+
+TEST(RpcRegression, FragmentLimitAppliesToWholeRecord)
+{
+  ThreadPool pool(2);
+  CoroPoll poll(pool);
+  int fds[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  auto stream = rpc_stream(poll, fds[0]);
+  stream->max_message_size = 100;
+  auto client = stream->client(blank_rpc_v1{});
+  std::jthread peer([fd = UniqueFd{fds[1]}] {
+    std::uint32_t marker;
+    ASSERT_TRUE(read_exact(fd.get(), &marker, sizeof(marker)));
+    Buf request;
+    request.resize_uninitialized(getbe<std::uint32_t>(&marker) & 0x7fffffff);
+    ASSERT_TRUE(read_exact(fd.get(), request.data(), request.size()));
+    rpc_msg reply{};
+    reply.xid = getbe<std::uint32_t>(request.data());
+    msg_set_reply_stat(&reply, accept_stat::SUCCESS);
+    Buf record = make_record(reply, Data(80, 0xaa));
+    BufView payload = record.subspan(4);
+    ASSERT_GT(payload.size(), 100U);
+    // Each fragment fits, but accepting both would exceed the record cap.
+    for (size_t len : {size_t{64}, payload.size() - 64}) {
+      Buf header;
+      header.resize_uninitialized(4);
+      putbe<std::uint32_t>(header.data(),
+                           len | (len == payload.size() ? 0x80000000U : 0));
+      ASSERT_TRUE(write_all(fd.get(), header));
+      ASSERT_TRUE(write_all(fd.get(), payload.first(len)));
+      payload = payload.subspan(len);
+    }
+  });
+  EXPECT_THROW(client.echo(Data{})(), XdrException);
 }
 
 TEST(RpcRegression, InFlightDisconnectIsTransportException)

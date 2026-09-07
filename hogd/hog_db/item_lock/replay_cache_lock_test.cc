@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
+#include <barrier>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -891,6 +894,58 @@ TEST_F(ReplayCacheLockTest, BuildResultRangeSelectionFiltersByHeight)
 // low (nonce) limb the way std::hash<uint128_t> does on libstdc++. Same-nonce
 // keys that differ only in expiry must land in different buckets so an
 // attacker cannot pack the probe table.
+TEST(ReplayCacheLockConcurrency, ReservationsAcrossExpiryHeights)
+{
+  auto dir = Directory::open_temporary();
+  ASSERT_TRUE(dir);
+  auto db =
+      Database::open(dir->get_path(), Database::estimate_heap_size(10_MiB), 0);
+  ASSERT_TRUE(db);
+  HogDbDAO dao(RAMDB(std::move(*db)));
+  Address addr = make_address(123);
+  ASSERT_TRUE(
+      dao.write_address_replay_cache_data(addr, 9,
+                                          ReplayCacheData{.nonces = {100}}));
+  ASSERT_TRUE(dao.write_address_replay_cache_meta(
+      addr, ReplayCacheMetadata{.size = 1, .heights = {{9, 1}}}));
+
+  ItemKey key = make_replay_cache_item_key(addr);
+  LockContext ctx(&dao, 8, key, &kTestCostModel);
+  ReplayCacheLock lock;
+  std::atomic<unsigned> failures{0};
+  std::barrier start(16);
+  std::vector<std::jthread> threads;
+  for (unsigned worker = 0; worker < 16; ++worker) {
+    threads.emplace_back([&, worker] {
+      start.arrive_and_wait();
+      for (unsigned i = worker; i < 1600; i += 16) {
+        PointerItem<ReplayCacheIt> item(u(9 + i % 2, 1000 + i));
+        if (!lock.try_atomic_change_lock(nullptr, &item, ctx)) {
+          ++failures;
+        }
+      }
+    });
+  }
+  threads.clear();
+  ASSERT_EQ(failures.load(), 0U);
+
+  for (BlockHeight height : {9, 10}) {
+    auto result = ReplayCacheLockTestHelper::build_result(lock, ctx, height);
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->nonces.size(), height == 9 ? 801U : 800U);
+    for (unsigned i = 0; i < 1600; ++i) {
+      EXPECT_EQ(std::ranges::binary_search(result->nonces, 1000 + i),
+                height == 9 + i % 2);
+    }
+    PointerItem<ReplayCacheIt> item(u(height, 1000 + height - 9));
+    EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &item, ctx));
+    EXPECT_TRUE(lock.try_atomic_change_lock(&item, nullptr, ctx));
+    EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, ctx));
+  }
+  PointerItem<ReplayCacheIt> snapshot_item(u(9, 100));
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &snapshot_item, ctx));
+}
+
 TEST(ReplayConflictSetTraitsTest, HashMixesExpiryLimb)
 {
   constexpr uint64_t kNonce = 0xDEADBEEFCAFEBABEULL;

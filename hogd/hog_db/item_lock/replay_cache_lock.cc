@@ -129,6 +129,10 @@ HogDbStatus<ReplayCacheLock::ActiveHeight *>
 ReplayCacheLock::get_base(const LockContext &ctx,
                           BlockHeight block_height) const
 {
+  if (auto *base = first_base_.load(std::memory_order_acquire);
+      base != nullptr && base->first == block_height) {
+    return &base->second;
+  }
   {
     // Fast path; shared lock only.
     auto sl = bases_lock_.hold_shared();
@@ -175,11 +179,17 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     }
     auto [res, inserted] = bases_.try_emplace(block_height);
     CHECK(inserted);
+    if (bases_.size() == 1) {
+      first_base_.store(&*res, std::memory_order_release);
+    }
     return &res->second;
   }
 
   auto [res, inserted] = bases_.try_emplace(block_height, std::move(*base));
   CHECK(inserted);
+  if (bases_.size() == 1) {
+    first_base_.store(&*res, std::memory_order_release);
+  }
   return &res->second;
 }
 

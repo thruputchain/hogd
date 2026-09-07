@@ -48,34 +48,24 @@ RpcStreamImpl::fail()
   cp_->poison(fd_);
 }
 
-Async<std::expected<std::uint32_t, Errno>>
-RpcStreamImpl::read_uint(SLOC_ARG0)
-{
-  Buf b;
-  auto r = co_await cp_->read(fd_, &b, 4, true, true);
-  if (!r) {
-    debug("read_uint(fd {}): {}", get_fd(), r.error());
-    co_return r.error();
-  }
-  if (*r != 4) {
-    if (*r)
-      debug("read_uint(fd {}): received only {} bytes", get_fd(), *r);
-    co_return Errno{ENOMSG};
-  }
-  co_return getbe<std::uint32_t>(b.data());
-}
-
 Async<Errno>
-RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
+RpcStreamImpl::read_record(Buf *bp, Buf *header SLOC_ARG)
 {
   bp->clear();
   bool done = false;
   while (!done) {
-    std::uint32_t len;
-    if (auto res = co_await read_uint(); !res)
+    header->clear();
+    if (auto res = co_await cp_->read(fd_, header, 4, true, true); !res) {
+      debug("read_record header(fd {}): {}", get_fd(), res.error());
       co_return res.error();
-    else
-      len = *res;
+    }
+    else if (*res != 4) {
+      if (*res)
+        debug("read_record header(fd {}): received only {} bytes", get_fd(),
+              *res);
+      co_return Errno{ENOMSG};
+    }
+    std::uint32_t len = getbe<std::uint32_t>(header->data());
     done = ((len & 0x80000000) != 0U);
     len &= 0x7fffffff;
     if (bp->size() + len > max_message_size) {
@@ -121,10 +111,13 @@ RpcStreamImpl::reader(SLOC_ARG0)
   constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
   Buf b;
+  // One reader owns this scratch buffer across records, including replies
+  // that move b to the caller. Avoid allocating a buffer per record marker.
+  Buf header;
   if constexpr (kMinBuf != 0U)
     b.reserve(kMinBuf);
   while (!ss_.stop_requested()) {
-    if (Errno err = co_await read_record(&b)) {
+    if (Errno err = co_await read_record(&b, &header)) {
       fail();
       co_return;
     }
