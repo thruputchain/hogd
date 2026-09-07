@@ -124,6 +124,7 @@ add_x23_gtest(detached)
 add_x23_gtest(dag)
 add_x23_gtest(uiobuf)
 add_x23_gtest(xdr)
+add_x23_gtest(xdr_shared_ptr)
 add_x23_gtest(refcnt)
 
 if(GOOGLETEST_PATH)

@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <random>
 #include <span>
 #include <type_traits>
@@ -310,91 +309,6 @@ TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)
 
   x23::XdrVec<BoundedUint32Vec> parsed;
   EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
-}
-
-namespace {
-
-SignedTransaction
-make_shared_ptr_test_tx(std::uint64_t nonce, size_t calldata_bytes)
-{
-  SignedTransaction tx{};
-  tx.tx.uniquifier.nonce = nonce;
-  tx.tx.invocation.gas_limit = 1234;
-  tx.tx.invocation.calldata.resize(calldata_bytes);
-  for (size_t i = 0; i < calldata_bytes; i++) {
-    tx.tx.invocation.calldata[i] = static_cast<std::uint8_t>(i + nonce);
-  }
-  return tx;
-}
-
-} // namespace
-
-// [XdrSharedPtr] exists to change who owns the bytes, not what the bytes are,
-// so pin the encoding against [x23::Ptr] rather than trusting the type system
-// to have meant it.
-TEST(XdrSharedPtrTest, SerializesByteForByteLikeXdrPtr)
-{
-  const SignedTransaction tx =
-      make_shared_ptr_test_tx(/*nonce=*/7, /*calldata_bytes=*/37);
-
-  const x23::Ptr<SignedTransaction> owned(tx);
-  const XdrSharedPtr<SignedTransaction> shared(
-      std::make_shared<const SignedTransaction>(tx));
-
-  EXPECT_EQ(xdr_size(shared), x23::xdr_size(owned));
-  EXPECT_EQ(x23::serialize(shared), x23::serialize(owned));
-}
-
-TEST(XdrSharedPtrTest, NullSerializesLikeNullXdrPtr)
-{
-  const x23::Ptr<SignedTransaction> owned(nullptr);
-  const XdrSharedPtr<SignedTransaction> shared;
-
-  EXPECT_EQ(xdr_size(shared), 4UL);
-  EXPECT_EQ(xdr_size(shared), x23::xdr_size(owned));
-  EXPECT_EQ(x23::serialize(shared), x23::serialize(owned));
-}
-
-TEST(XdrSharedPtrTest, VectorMatchesVectorOfXdrPtrs)
-{
-  const SignedTransaction first =
-      make_shared_ptr_test_tx(/*nonce=*/1, /*calldata_bytes=*/0);
-  const SignedTransaction second =
-      make_shared_ptr_test_tx(/*nonce=*/2, /*calldata_bytes=*/64);
-
-  // Present/absent/present, the shape a lookup reply actually produces.
-  x23::XdrVec<x23::Ptr<SignedTransaction>> owned;
-  owned.push_back(x23::Ptr<SignedTransaction>(first));
-  owned.push_back(nullptr);
-  owned.push_back(x23::Ptr<SignedTransaction>(second));
-
-  x23::XdrVec<XdrSharedPtr<SignedTransaction>> shared;
-  shared.push_back(XdrSharedPtr<SignedTransaction>(
-      std::make_shared<const SignedTransaction>(first)));
-  shared.push_back({});
-  shared.push_back(XdrSharedPtr<SignedTransaction>(
-      std::make_shared<const SignedTransaction>(second)));
-
-  EXPECT_EQ(x23::xdr_size(shared), x23::xdr_size(owned));
-  EXPECT_EQ(x23::serialize(shared), x23::serialize(owned));
-}
-
-// A vector of these must be usable where the wire type is a vector of
-// optionals -- that is what lets an RPC handler return one.
-static_assert(
-    x23::serializes_like<x23::XdrVec<XdrSharedPtr<SignedTransaction>>,
-                         x23::Vec<x23::Ptr<SignedTransaction>, 0xffffffff>>);
-
-TEST(XdrSharedPtrTest, SharesTheOriginalObjectRatherThanCopyingIt)
-{
-  const std::shared_ptr<const SignedTransaction> tx =
-      std::make_shared<const SignedTransaction>(
-          make_shared_ptr_test_tx(/*nonce=*/3, /*calldata_bytes=*/16));
-
-  const XdrSharedPtr<SignedTransaction> shared(tx);
-
-  EXPECT_EQ(shared.get(), tx.get());
-  EXPECT_EQ(tx.use_count(), 2L);
 }
 
 } // namespace hogd

@@ -25,6 +25,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
+#include "x23/xdr_shared_ptr.h"
 
 namespace hogd {
 
@@ -85,7 +86,7 @@ public:
                     MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize,
                 "the unauthenticated surface must not be the looser one");
 
-  x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   schedgateway_lookup_tx(TransactionHashBatch tx_hashes)
   {
     if (tx_hashes.size() > kMaxGatewayLookupTxBatchSize) {

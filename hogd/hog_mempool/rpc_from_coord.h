@@ -56,6 +56,7 @@
 #include "x23/dag.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
+#include "x23/xdr_shared_ptr.h"
 
 namespace hogd {
 
@@ -328,7 +329,7 @@ public:
     co_return ret;
   }
 
-  x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
     // Checked before [ready()], whose reply is also sized to the request.
@@ -343,7 +344,7 @@ public:
           tx_hashes.size(), kMaxLookupTransactionsBatchSize));
     }
 
-    x23::XdrVec<XdrSharedPtr<SignedTransaction>> ret;
+    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
       ret.resize(tx_hashes.size());
       co_return ret;
@@ -360,7 +361,7 @@ public:
       // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
       // is an ownership change, not a wire change.
       ret.push_back(
-          XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
+          x23::XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
 
     co_return ret;

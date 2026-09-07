@@ -53,6 +53,7 @@ add_library(x23
   utility.h
   vec.h
   x23.h
+  xdr_shared_ptr.h
 )
 # Mark the implementation files as headers so they're included in IDE projects
 # and distribution but not compiled separately
