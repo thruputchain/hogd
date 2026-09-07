@@ -37,11 +37,24 @@ if [ '{{ .executor_profile }}' = true ]; then
         hog5|hog6)
             bash scripts/ci/profile_executor.sh "$PWD/release/hogd/hog_exec/hog-exec" &
             executor_profiler=$!
-            trap 'kill "$executor_profiler" 2>/dev/null || true' EXIT
+            trap 'kill "$executor_profiler" 2>/dev/null || true; wait "$executor_profiler" 2>/dev/null || true' EXIT
             ;;
     esac
 fi
-./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w work_dir/
+control_server_status=0
+./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w work_dir/ || control_server_status=$?
+if [ "$control_server_status" -ne 0 ]; then
+    exit "$control_server_status"
+fi
+if [ -n "${executor_profiler:-}" ]; then
+    profiler_status=0
+    wait "$executor_profiler" || profiler_status=$?
+    trap - EXIT
+    if [ "$profiler_status" -ne 0 ]; then
+        echo "EXECUTOR_PROFILE_FAILED: profiler exited with status $profiler_status" >&2
+        exit "$profiler_status"
+    fi
+fi
 
 """
 
