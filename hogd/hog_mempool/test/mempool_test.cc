@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <future>
@@ -31,6 +32,7 @@
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -67,6 +69,7 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
+#include "x23/rpc_common.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -964,6 +967,48 @@ TEST(Mempool, SubmitVettedMalformedBatchDoesNotCrash)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
+TEST(Mempool, LookupBorrowsTheScheduledTransactionInsteadOfCopyingIt)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  const TransactionHash present = sha256(txs[0].tx);
+  const TransactionHash absent = sha256(txs[1].tx);
+  ASSERT_NE(present, absent);
+
+  // A repeated hash and a miss, so both the sharing and the absent-slot paths
+  // are covered and the reply is checked to stay positional.
+  TransactionHashBatch hashes;
+  hashes.push_back(present);
+  hashes.push_back(absent);
+  hashes.push_back(present);
+
+  auto result =
+      server.mempool_coord_rpc().schedcoord_lookup_transactions(hashes)();
+
+  ASSERT_EQ(result.size(), hashes.size());
+  EXPECT_FALSE(result[1]);
+  ASSERT_TRUE(result[0]);
+  ASSERT_TRUE(result[2]);
+  EXPECT_EQ(*result[0], txs[0]);
+  EXPECT_EQ(*result[2], txs[0]);
+
+  // Both slots point at the transaction the scheduler holds rather than at
+  // copies of it.  This is the regression guard: reintroducing the deep copy
+  // makes these addresses differ.
+  const SignedTransaction *scheduled =
+      server.mempool_coord_rpc().scheduler()->find_tx(present).get();
+  ASSERT_NE(scheduled, nullptr);
+  EXPECT_EQ(result[0].get(), scheduled);
+  EXPECT_EQ(result[2].get(), scheduled);
+}
+
 TEST(Mempool, Propose)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1193,6 +1238,56 @@ TEST(Mempool, NominateTxWithError)
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
             kNumBlocks + 1);
+}
+
+// This test does the following to exercise a failed CHECK that was later fixed:
+//   1. Submit an affordable tx (txs[0]) and one whose gas_limit exceeds the
+//      account's balance (txs[1]).
+//   2. Nominate: txs[0] is included in the block; txs[1] is over budget, so the
+//      account is removed from [ready_accounts_] while the nomination is
+//      pending.
+//   3. The client resubmits txs[0]. It is added back to the scheduler runqueue;
+//      the account is *not* added back to [ready_accounts_].
+//   4. Commit the nominated block. [remove_from_scheduler()] removes the
+//      account's txs from the runqueue. In that function, [account_is_ready()]
+//      returns false and [ready_accounts_.erase()] returns 0. Before the fix,
+//      [ready_accounts_.erase()] would trigger a CHECK.
+TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+  txs[0].tx.uniquifier.block_expiry_height = 10; // affordable, scheduled first
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  // Over budget: 20x the default tx gas is 2x the account's funded balance.
+  txs[1].tx.invocation.gas_limit = txs[0].tx.invocation.gas_limit * 20;
+
+  MempoolTestInfra server;
+
+  // 1. Submit both txs through the coordinator's honest ingress.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[1]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 2UL);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+
+  // 2. Nominate: txs[0] is included; txs[1] excludes the account from the
+  // block.
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // 3. Submit txs[0] (the affordable tx) again.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  // 4. Commit the nominated block. [remove_from_scheduler()] removes txs[0]
+  // from the runqueue and attempts to remove the account from
+  // [ready_accounts_].
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
 TEST(Mempool, BlockHeightsIncrement)
@@ -3050,6 +3145,54 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
+// A stack restarted over a database that another network produced must fail
+// at startup, the way a shard given the wrong --network-hash would, instead of
+// publishing that network's tip to every downstream and then failing every
+// propose and validate on the parent-id gate.
+TEST(Mempool, RestartRejectsDatabaseFromAnotherNetwork)
+{
+  TmpDir db_dir;
+  NetworkHash other_network = MempoolTestInfra::kNetworkHash;
+  other_network[0] ^= 0x01;
+
+  // Bring the stack up as one network and let it commit genesis, so the
+  // database carries a tip stamped with that network's hash.
+  {
+    MempoolTestInfra server(
+        MempoolTestInfra::Options{.network_hash =
+                                      MempoolTestInfra::kNetworkHash,
+                                  .db_directory = db_dir.directory()});
+    const SchedulerGetTipResult tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.network_hash,
+              MempoolTestInfra::kNetworkHash);
+  }
+
+  // Restart over the same database as another network. The mempool rejects
+  // the coordinator intro that recovers the tip, which fails startup.
+  const MempoolTestInfra::Options other_network_options{
+      .skip_genesis_block = true,
+      .network_hash = other_network,
+      .db_directory = db_dir.directory()};
+  EXPECT_THROW(
+      { MempoolTestInfra rejected(other_network_options); },
+      x23::XdrCallFailed);
+
+  // Restarting as the network that produced the database recovers its tip.
+  MempoolTestInfra restarted(
+      MempoolTestInfra::Options{.skip_genesis_block = true,
+                                .network_hash = MempoolTestInfra::kNetworkHash,
+                                .db_directory = db_dir.directory()});
+  const SchedulerGetTipResult tip =
+      restarted.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.network_hash,
+            MempoolTestInfra::kNetworkHash);
+}
+
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
 {
   MempoolTestInfra server(/*skip_genesis_block=*/true);
@@ -3473,4 +3616,79 @@ main(int argc, char *argv[])
     return ret;
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+// A nomination that repeats a transaction hash decodes cleanly and keeps the
+// hash and nondeterministic-data counts equal, so it reaches txset hashing.
+// Building the txset is a set insertion, and the repeat is the one input that
+// fails it -- which used to abort the validator instead of voting the block
+// down. See https://github.com/groundhogchain/hogd/issues/2661.
+TEST(Mempool, TxsetHashRejectsDuplicateHashes)
+{
+  TransactionHashBatch tx_hashes{sha256(uint64_t{1}), sha256(uint64_t{1})};
+
+  EXPECT_FALSE(
+      MempoolCoordinatorRpc::try_get_txset_hash(tx_hashes).has_value());
+}
+
+TEST(Mempool, TxsetHashAcceptsDistinctHashes)
+{
+  TransactionHashBatch tx_hashes{sha256(uint64_t{1}), sha256(uint64_t{2})};
+
+  std::optional<SHA256Hash> txset_hash =
+      MempoolCoordinatorRpc::try_get_txset_hash(tx_hashes);
+  ASSERT_TRUE(txset_hash.has_value());
+  EXPECT_EQ(txset_hash, MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
+}
+
+TEST(Mempool, ValidateDuplicateProposalHashesIsRejected)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  SchedulerProposalResult res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // We reuse the proposed [Proposal] so the nomination names a transaction
+  // this node actually holds -- a nomination of unknown hashes is rejected as
+  // [SchedulerValidationMissingTxs] before the txset hash is ever compared.
+  Proposal proposal = res_nominate.proposed_block().proposal;
+  TransactionHashBatch tx_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
+                                  kNoBatchSizeLimit)());
+  ASSERT_EQ(tx_hashes.size(), 1UL);
+  x23::XdrVec<NondeterministicProposalData> tx_nominations;
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
+                                  tx_nominations, kNoBatchSizeLimit)());
+  ASSERT_EQ(tx_nominations.size(), 1UL);
+
+  // Repeating the sole transaction keeps both batches decodable and keeps
+  // their element counts equal, which is every structural property validation
+  // checks before it builds the txset.
+  proposal.transactions.hash = repeated_parallel_batch(tx_hashes, 2);
+  proposal.transactions.nondeterministic_data =
+      repeated_parallel_batch(tx_nominations, 2);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerValidationResult res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
 }

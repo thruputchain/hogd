@@ -37,8 +37,8 @@ namespace hogd {
 
 // End-to-end tests for the threaded RV32 runtime: load a real compiled contract
 // artifact (.rv32a) as a kRv32 contract, resolve + translate it through
-// Rv32Context, and invoke it through Rv32Runtime. Mirrors the wasm-side
-// fibonacci tests (fibonacci_test.cc), but exercises the RV32 path.
+// Rv32Context, and invoke it through Rv32Runtime. Mirrors the fibonacci
+// tests (fibonacci_test.cc), but drives the runtime directly.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class Rv32FibonacciTest : public ::testing::TestWithParam<TestDB>,
                           public NativeContractTestFramework {
@@ -86,9 +86,9 @@ TEST_P(Rv32FibonacciTest, FibonacciCalls)
                                 kSufficientGas, 5U),
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -99,14 +99,14 @@ TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
 
   auto cache = get_storage_snapshot_cache();
-  auto deployed = cache->try_get_deployed_contract(contract_addr);
+  auto deployed = cache->try_get_deployed_contract(contract_addr)();
   ASSERT_TRUE(deployed.has_value());
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);
   EXPECT_EQ(deployed.value()->hash.contract_type, ContractType::kRv32);
   EXPECT_TRUE(deployed.value()->entry->prepared.rv32.has_value());
   // Back-pointer aliases the contract-cache entry the hash lookup returns.
-  auto by_hash = cache->try_get_contract_entry(deployed.value()->hash.hash);
+  auto by_hash = cache->try_get_contract_entry(deployed.value()->hash.hash)();
   ASSERT_TRUE(by_hash.has_value());
   EXPECT_EQ(deployed.value()->entry, by_hash.value());
 }
@@ -124,7 +124,7 @@ TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
                                 kSufficientGas, 10U),
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   auto output = handler.get_most_recent_frame_output();
   auto decoded = Serializer<SerializationFormat::kCxs>::deserialize<uint32_t>(
@@ -132,7 +132,7 @@ TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(*decoded, 55U);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // slow_fibonacci is exponential recursion; with a small gas limit it traps
@@ -150,7 +150,7 @@ TEST_P(Rv32FibonacciTest, SlowFibonacciOutOfGas)
                                     kGasLimit, 20U),
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
   ASSERT_EQ(res.gas_consumed_, kGasLimit);
 }
@@ -172,8 +172,8 @@ TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
                                       UINT64_MAX, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     advance_block();
   }
 
@@ -185,7 +185,7 @@ TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
                                       UINT64_MAX, uint32_t{20}, uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_FALSE(handler.root_invoke().is_root_success());
+    ASSERT_FALSE(handler.root_invoke()().is_root_success());
   }
 }
 
@@ -205,8 +205,8 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
                                       UINT64_MAX, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     advance_block();
   }
 
@@ -218,9 +218,9 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
                                   UINT64_MAX, uint32_t{20}, uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_GE(res.gas_consumed_, 1000U);
   }
 }
@@ -245,8 +245,8 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
                                       UINT64_MAX, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     advance_block();
   }
 
@@ -259,8 +259,8 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
                                       UINT64_MAX, uint32_t{5}, UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
@@ -329,7 +329,7 @@ protected:
                                 },
                             .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    return handler.root_invoke();
+    return handler.root_invoke()();
   }
 };
 
@@ -405,7 +405,7 @@ TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
 
 TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)
 {
-  // SHA256HashCost(64) far exceeds the limit, so the syscall host charge
+  // GasCost::sha256_hash(64) far exceeds the limit, so the syscall host charge
   // exhausts the budget after the setup instructions execute. Out-of-gas is
   // consensus-distinguishable from other faults only by the gas signature:
   // the whole limit is consumed.
@@ -445,7 +445,7 @@ TEST_F(Rv32ProductionMappingTest, SyscallAfterBlockCancelMapsToAbandon)
 
   auto storage_snapshot_cache = get_storage_snapshot_cache();
   advance_block();
-  auto result = handler.root_invoke();
+  auto result = handler.root_invoke()();
 
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Abandon);
@@ -495,10 +495,10 @@ TEST_F(Rv32ProductionMappingTest,
       make_new_system_call_handler_validation(tx, runtime_context_,
                                               NondeterministicProposalData{});
 
-  auto result = handler.root_invoke();
+  auto result = handler.root_invoke()();
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::ValidationFailure);
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure);
 }
 
@@ -551,7 +551,7 @@ TEST_F(Rv32ProductionMappingTest, SelfInvokeIsRejectedAsReentrance)
                                 },
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
   const auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.return_buffer().size(), 4U);
   const std::vector<uint8_t> expected = {
@@ -562,8 +562,8 @@ TEST_F(Rv32ProductionMappingTest, SelfInvokeIsRejectedAsReentrance)
 
 TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
 {
-  // The rv32 twin of wasm's FollowBadWithGood: two try-invokes of a child
-  // that faults deterministically, then a clean Return from the caller. Both
+  // Two try-invokes of a child that faults deterministically, then a clean
+  // Return from the caller. Both
   // child outputs report Fault and the transaction still succeeds.
   auto trap_addr = deploy_words({kEbreak}, 1);
 
@@ -599,7 +599,7 @@ TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
                                 },
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.return_buffer().size(), 24U);
@@ -637,7 +637,8 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   write_contract(contract);
   write_deployment(addr, contract);
 
-  auto deployed = get_storage_snapshot_cache()->try_get_deployed_contract(addr);
+  auto deployed =
+      get_storage_snapshot_cache()->try_get_deployed_contract(addr)();
   ASSERT_TRUE(deployed.has_value());
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);

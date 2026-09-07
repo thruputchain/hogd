@@ -1,13 +1,15 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <span>
-#include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -19,18 +21,19 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<std::byte> output_bytestring,
                             RuntimeMemoryLength &output_written_len)
 {
-  auto status = syscall_handler.get_bytestring(input_key);
+  auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status.has_value()) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    return {status->error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status->error().code(), WrappedGasAmount{0}};
   }
 
   auto const *bs = (*(*status));
@@ -39,27 +42,36 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
       copy_to_guest_buffer(output_bytestring,
                            std::as_bytes(std::span(bs->data(), bs->size())));
 
+  // The bytes copied, not the buffer offered: the SDK's zero-alloc read path
+  // hands the syscall its whole scratch buffer, so pricing the buffer would
+  // charge a 32-byte read out of a 4 KiB scratch for eight blocks.
+  const WrappedGasAmount gas{
+      GasCost::bytestring_get(std::min(output_bytestring.size(), bs->size()))};
+
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
-    CHECK(bs->size() <= kBytestringMaxLen);
+    // The ceiling, not the limit in force: items outlive a lowered limit.
+    CHECK(bs->size() <= static_cast<size_t>(kBytestringCeilingLen));
     trace_data->outputs.emplace(SyscallBytestringGetOutputs{.bytestring = *bs});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, gas};
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                const StorageKeyContractData &input_key,
                                RuntimeMemoryLength &output_length)
 {
-  auto status = syscall_handler.get_bytestring(input_key);
+  auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   auto &get_status = *status;
   if (!get_status) {
-    return {get_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{get_status.error().code(),
+                                 WrappedGasAmount{0}};
   }
 
   output_length = (*get_status)->size();
@@ -71,30 +83,35 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
         SyscallBytestringGetLenOutputs{.length = output_length});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  // A length read copies nothing and is flat in the item's size -- measured
+  // flat to within 0.6 ns across three decades -- so it pays the storage
+  // access and no block term.
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{kStorageAccessCost}};
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<const std::byte> input_bytestring,
                             StorageDeltaFlagSet input_flags)
 {
-  if (input_bytestring.size() > kBytestringMaxLen) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
-  }
   auto status =
-      syscall_handler.set_bytestring(input_key, input_bytestring, input_flags);
+      co_await syscall_handler.set_bytestring(input_key, input_bytestring,
+                                              input_flags);
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   auto &set_status = *status;
   if (!set_status) {
-    return {set_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{set_status.error().code(),
+                                 WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{GasCost::bytestring_set(
+                                   input_bytestring.size())}};
 }
 
 } // namespace hogd

@@ -1461,6 +1461,30 @@ TEST(HogDevnode, ContractArtifactDirectoryPrependsAndFallsBackToDefaults)
   expect_clean_exit(process);
 }
 
+TEST(HogDevnode, UnusableTmpdirPrintsDiagnosticInsteadOfAborting)
+{
+  // A missing or unwritable $TMPDIR is an operator environment problem, not a
+  // bug: it used to trip a CHECK and abort the process with a stack trace.
+  const std::filesystem::path missing_tmpdir =
+      std::filesystem::temp_directory_path() /
+      std::format("hog-devnode-missing-tmpdir-{}-{}", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({}, {{"TMPDIR", missing_tmpdir.string() + "/"}});
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = *status;
+  std::string stderr_output = process.read_remaining_stderr();
+  ASSERT_TRUE(WIFEXITED(exit_status)) << stderr_output;
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("could not create a hog-devnode temp dir"))
+      << stderr_output;
+}
+
 TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
 {
   for (std::string_view host : {"0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0",

@@ -27,6 +27,7 @@
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_genesis_root_contract.h"
 #include "invoke_flag.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -91,7 +92,28 @@ open_frame(void *syscall_handler, Invocation const &invocation,
       .data = serialized.data(),
       .len = static_cast<uint32_t>(serialized.size()),
   };
-  return open_mock_invocation_frame(syscall_handler, ffi, flags);
+  auto res = open_mock_invocation_frame(syscall_handler, ffi, flags);
+  // Refusals read as successful opens otherwise; see expect_frame_refused().
+  EXPECT_EQ(res.syscall_error_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
+  return res.ffi_error_code;
+}
+
+// Expect production to refuse the frame, naming the rule; returns the result
+// so a caller can tell whether a regression admitted one after all.
+inline OpenMockInvocationFrameResult
+expect_frame_refused(void *syscall_handler, Invocation const &invocation,
+                     SyscallErrorCode code, int32_t flags = 0)
+{
+  auto serialized = x23::serialize(invocation);
+  FFISerializedInvocation ffi = {
+      .data = serialized.data(),
+      .len = static_cast<uint32_t>(serialized.size()),
+  };
+  auto res = open_mock_invocation_frame(syscall_handler, ffi, flags);
+  EXPECT_EQ(res.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(res.syscall_error_code, std::to_underlying(code));
+  return res;
 }
 
 // Register, create, and deploy a kMockTest contract at the given address.

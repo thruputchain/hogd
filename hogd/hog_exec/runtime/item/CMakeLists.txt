@@ -2,6 +2,7 @@ add_library(item_objects OBJECT
   item_view.cc
   snapshot_storage_item.cc
   database_proxy.cc
+  db_connection_map.cc
   storage_snapshot_cache.cc
 )
 target_link_libraries(item_objects hogd_interface)
@@ -9,8 +10,10 @@ target_include_directories(item_objects PRIVATE ${CMAKE_BINARY_DIR})
 
 # Standalone item tests — no syscall handlers, WASM runtimes, or precompiles
 add_library(item_test_objects OBJECT
+  frame_item_key_test.cc
   item_view_test.cc
   snapshot_storage_item_test.cc
+  storage_snapshot_cache_test.cc
 )
 target_link_libraries(item_test_objects GTest::gtest hogd_interface)
 target_include_directories(item_test_objects PRIVATE ${CMAKE_BINARY_DIR})

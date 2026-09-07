@@ -35,6 +35,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -671,6 +672,15 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
 
   auto [syscall_result, gas_consumed] = std::move(body_result);
 
+  // The crossing, charged here rather than in each body: a syscall added later
+  // cannot forget it, and a call that faulted or errored still used the entry
+  // path. Saturating, so a body that already billed the maximum cannot wrap to
+  // something cheap; the out-of-gas check below then sees the total.
+  gas_consumed =
+      WrappedGasAmount{gas_consumed.get() > UINT64_MAX - kSyscallBaseCost
+                           ? UINT64_MAX
+                           : gas_consumed.get() + kSyscallBaseCost};
+
   if (runtime_log_level(LogLevel::kTrace)) {
     // The inner syscall has already run and written its outputs; formatting
     // them for the trace log allocates. Keep it best-effort so an allocation
@@ -744,7 +754,7 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
     // override syscall_result (by returning Exit) in a subset
     // of the cases covered by the is_handleable_error guard.
     if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
-      // If the syscall cannot return to the wasm environment but the syscall
+      // If the syscall cannot return to the guest environment but the syscall
       // tried to return an error code, abort the entire call frame.
       if (runtime_log_level(LogLevel::kTrace)) {
         try {

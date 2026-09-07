@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -157,9 +158,34 @@ HogDbDAO::read_address_average_hog_age(const Address &addr)
   if (!raw)
     return raw.error();
 
+  // The key already identifies the address, so the value persists only the
+  // trailing fields (num_hogs || average_ages) and the address is
+  // reconstructed from the key -- see write_address_average_hog_age. Storing
+  // the address in the value too was redundant and could drift from the key on
+  // untrusted on-disk state (the RAMDB log CRC is unkeyed and kHogAge rows are
+  // excluded from the consensus db_hash), which crashed the scheduler's
+  // CHECK_EQ(age.address, account) (issue #3812).
+  //
+  // Only this address-less layout is accepted; a value of any other size is
+  // corruption. address is HogAge's first XDR field, so splicing the stored
+  // fields after the key address reproduces the full struct encoding, which
+  // decodes with the key as the authoritative address.
+  constexpr size_t kFullSize = x23::detail::size_of_fixed<HogAge>();
+  constexpr size_t kValueSize = kFullSize - kAddressSize;
+
+  std::span<const std::byte> stored = *raw;
+  if (stored.size() != kValueSize) {
+    return HogDbError(HogDbCode::kCorruption);
+  }
+
+  std::array<std::byte, kFullSize> full{};
+  auto out = std::as_writable_bytes(std::span(full));
+  std::ranges::copy(addr.as_bytes(), std::begin(out));
+  std::ranges::copy(stored, std::begin(out) + kAddressSize);
+
   HogAge age;
   try {
-    x23::deserialize(&age, x23::BufViewEnd(*raw));
+    x23::deserialize(&age, x23::BufViewEnd(std::span(full)));
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
   }
@@ -244,9 +270,9 @@ HogDbDAO::read_address_metadata(const Address &addr)
 }
 
 HogDbStatus<OwningSpan<const std::byte>>
-HogDbDAO::read_wasm_code(const SHA256Hash &hash)
+HogDbDAO::read_contract_code(const SHA256Hash &hash)
 {
-  auto key = make_wasm_code_key(hash);
+  auto key = make_contract_code_key(hash);
 
   // One lookup covers both layouts: get() returns the type byte and the
   // value together, so the inline path (every pre-chunking row, and the
@@ -254,9 +280,9 @@ HogDbDAO::read_wasm_code(const SHA256Hash &hash)
   auto item = db_.get(std::as_bytes(std::span(key)));
   if (!item)
     return item.error(); // kNotFound passes through unchanged
-  if (item->type == kWasmCodeInline)
+  if (item->type == kContractCodeInline)
     return std::move(item->value);
-  if (item->type != kWasmCodeChunkedHead)
+  if (item->type != kContractCodeChunkedHead)
     return HogDbError(HogDbCode::kCorruption);
 
   // The chunked head's value is the XDR uint32 total serialized length.
@@ -275,8 +301,8 @@ HogDbDAO::read_wasm_code(const SHA256Hash &hash)
   if (Database::item_fits(key.size(), total))
     return HogDbError(HogDbCode::kCorruption);
   const size_t chunk_count =
-      (static_cast<size_t>(total) + kWasmCodeChunkPayloadSize - 1) /
-      kWasmCodeChunkPayloadSize;
+      (static_cast<size_t>(total) + kContractCodeChunkPayloadSize - 1) /
+      kContractCodeChunkPayloadSize;
   if (chunk_count > 255)
     return HogDbError(HogDbCode::kCorruption);
 
@@ -284,13 +310,14 @@ HogDbDAO::read_wasm_code(const SHA256Hash &hash)
   OwningSpan<const std::byte> out(std::span<const std::byte>(data, total),
                                   [data] { delete[] data; });
   for (size_t i = 0; i < chunk_count; ++i) {
-    auto chunk_key = make_wasm_code_chunk_key(hash, static_cast<uint8_t>(i));
-    const size_t off = i * kWasmCodeChunkPayloadSize;
-    const size_t len = std::min(kWasmCodeChunkPayloadSize, total - off);
+    auto chunk_key =
+        make_contract_code_chunk_key(hash, static_cast<uint8_t>(i));
+    const size_t off = i * kContractCodeChunkPayloadSize;
+    const size_t len = std::min(kContractCodeChunkPayloadSize, total - off);
     // The exact-size get_if_type overload also rejects a wrong-sized chunk.
-    if (auto chunk =
-            db_.get_if_type(std::as_bytes(std::span(chunk_key)), kWasmCodeChunk,
-                            std::span<std::byte>(data + off, len));
+    if (auto chunk = db_.get_if_type(std::as_bytes(std::span(chunk_key)),
+                                     kContractCodeChunk,
+                                     std::span<std::byte>(data + off, len));
         !chunk)
       return HogDbError(HogDbCode::kCorruption);
   }
@@ -329,14 +356,30 @@ HogDbDAO::write_address_balance(const Address &addr, int128_t val)
   return ret;
 }
 
+// read/write_address_average_hog_age slice the address off the front of the
+// HogAge XDR encoding and splice the key address back on. That is valid only
+// while address is HogAge's first field and occupies kAddressSize bytes; guard
+// the layout so a later reordering or resize fails to compile instead of
+// silently corrupting kHogAge rows (issue #3812).
+static_assert(std::is_standard_layout_v<HogAge>,
+              "HogAge must be standard-layout for the offsetof check below");
+static_assert(offsetof(HogAge, address) == 0,
+              "address must be HogAge's first field");
+static_assert(sizeof(HogAge::address) == kAddressSize,
+              "HogAge::address must be kAddressSize bytes");
+
 HogDbStatus<void>
 HogDbDAO::write_address_average_hog_age(const HogAge &age)
 {
   auto key = make_address_key(age.address, Prefix::kHogAge);
   auto before_item = get_before_item(key);
+  // The key already encodes the address, so persist only the trailing fields
+  // (num_hogs || average_ages) and drop the redundant embedded copy that could
+  // otherwise drift from the key (issue #3812). address is HogAge's first XDR
+  // field; read_address_average_hog_age reconstructs it from the key.
   auto buf = x23::serialize(age);
-  auto ret =
-      db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
+  auto value = std::span(buf).subspan(kAddressSize);
+  auto ret = db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(value));
   update_invariants_post(key, before_item);
   return ret;
 }
@@ -514,17 +557,17 @@ HogDbDAO::write_address_metadata(Address const &addr,
 }
 
 HogDbStatus<void>
-HogDbDAO::write_wasm_code(const SHA256Hash &hash,
-                          std::span<const std::byte> buf)
+HogDbDAO::write_contract_code(const SHA256Hash &hash,
+                              std::span<const std::byte> buf)
 {
   HogDbStatus<void> ret;
-  for_each_wasm_code_item(hash, buf,
-                          [this, &ret](std::span<const std::byte> key,
-                                       uint8_t type,
-                                       std::span<const std::byte> value) {
-                            if (ret)
-                              ret = db_.put(key, type, value);
-                          });
+  for_each_contract_code_item(hash, buf,
+                              [this, &ret](std::span<const std::byte> key,
+                                           uint8_t type,
+                                           std::span<const std::byte> value) {
+                                if (ret)
+                                  ret = db_.put(key, type, value);
+                              });
   return ret;
 }
 

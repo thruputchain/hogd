@@ -5,6 +5,7 @@
 
 #include "contract.hh"
 #include "genesis.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -183,9 +184,10 @@ TEST(BlockManagerTest, GenesisInstallsItsOwnNetworkConfig)
 {
   constexpr uint32_t kConfiguredDepth = 64;
   NetworkConfig configured = stock_network_config();
-  configured.max_cross_invoke_depth = kConfiguredDepth;
-  ASSERT_NE(configured.max_cross_invoke_depth,
-            stock_network_config().max_cross_invoke_depth);
+  set_config_param(configured, ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                   kConfiguredDepth);
+  ASSERT_NE(max_cross_invoke_depth(configured),
+            max_cross_invoke_depth(stock_network_config()));
 
   InMemoryDatabase db;
   BlockManager m(0, &db);

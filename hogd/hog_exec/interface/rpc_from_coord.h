@@ -34,7 +34,7 @@ public:
 
   ExecutorMempoolRpc() = default;
 
-  void init(IntroExecResult &&exec_result, size_t n_exec_threads)
+  void init(IntroExecResult &&exec_result)
   {
     if (exec_result.exec_id >= std::numeric_limits<uint16_t>::max())
         [[unlikely]] {
@@ -49,9 +49,7 @@ public:
         EventServerProxy::make_from_exec_result(exec_result.event));
     executor_states_ =
         std::make_unique<ExecutorStateManager>(std::move(db_proxy),
-                                               std::move(event_server_proxy),
-                                               n_exec_threads);
-    info("ExecutorMempoolRpc: initialized with {} threads", n_exec_threads);
+                                               std::move(event_server_proxy));
     ready_flag_ = true;
   }
 

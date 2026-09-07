@@ -51,7 +51,7 @@ InvokeResult::to_frame_status() const
     case Unrecoverable:
       return {SystemError{SystemErrorCode::Unrecoverable}, gas_consumed_};
     case Deterministic:
-      // i.e. trap within Wasmi
+      // i.e. trap within the guest runtime
     case OutOfGas:
       // child frame ran out of the gas that was allocated to it
       // Note that that does not mean that the entire transaction is out of gas.

@@ -57,14 +57,15 @@ TEST(TestBindingsTest, TracedMockedHandlerOpenCloseLeavesDbUsable)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   // While the handler is open the DB is borrowed and must reject advance/free.
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(advance_new_block(db, nullptr),
+            kTestFFIErrorCodeUnrecoverableError);
 
   // Closing the handler releases the borrow.
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
             kTestFFIErrorCodeNone);
 
   // The DB is no longer pinned: it can advance and then be freed.
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
   EXPECT_EQ(close_runtime_context(rc), kTestFFIErrorCodeNone);
   EXPECT_EQ(free_db(db), kTestFFIErrorCodeNone);
 }

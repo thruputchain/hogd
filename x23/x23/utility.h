@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <initializer_list>
 #include <new>
@@ -286,7 +287,7 @@ constexpr size_t variant_index =
 template<typename... T>
 using merged_return_t = decltype([] {
   if constexpr (requires { typename std::common_type_t<T...>; })
-    return [] -> std::common_type_t<T...> { throw; }();
+    return [] -> std::common_type_t<T...> { std::unreachable(); }();
   else
     return;
 }());
@@ -294,12 +295,53 @@ using merged_return_t = decltype([] {
 // Tag type to request that the return type of with_n be inferred.
 struct auto_t {};
 
+namespace detail {
+// Comparison-chain dispatch for with_n.  A chain of n == I tests keeps
+// every arm a direct call the optimizer can inline and constant-fold
+// (and can still turn into a jump table for large ranges), unlike a
+// table of function pointers, which is an opaque indirect call.
+// always_inline guarantees the chain flattens at every optimization
+// level: each level is a distinct instantiation (not true recursion),
+// so without it an uninlined chain would cost Max - Min nested calls
+// per dispatch.
+template<typename R, size_t Min, size_t Max, typename F>
+[[gnu::always_inline]] constexpr R
+with_n_impl(size_t n, F &&f)
+{
+  if constexpr (Min < Max) {
+    if (n == Min) {
+      if constexpr (std::is_void_v<R>) {
+        std::forward<F>(f)(std::integral_constant<size_t, Min>{});
+        return;
+      }
+      else
+        return std::forward<F>(f)(std::integral_constant<size_t, Min>{});
+    }
+    return with_n_impl<R, Min + 1, Max>(n, std::forward<F>(f));
+  }
+  else {
+    // Callers must guarantee n is in [Min, Max), so this is
+    // unreachable in correct code.  (x23::panic would be the natural
+    // spelling, but debug.h includes this header.)  In constant
+    // evaluation an out-of-range n is a compile-time error on either
+    // branch.
+#if NDEBUG
+    std::unreachable();
+#else
+    std::abort();
+#endif
+  }
+}
+} // namespace detail
+
 // Convert a run-time size_t n into a compile-time
 // std::integral_constant, and invoke a function object on that
 // constant.  You must supply a Max value of N (one greater than the
 // maximum n you could ask for at runtime), and may supply a Min value
 // (the lowest you would ask for).  You can optionally supply a return
-// type R, or if R is auto_t, it will infer the return type.
+// type R, or if R is auto_t, it will infer the return type.  n outside
+// [Min, Max) is a precondition violation: it aborts in debug builds
+// and is undefined behavior under NDEBUG.
 //
 // Make sure f takes the std::integral_constant argument by value and
 // not by reference so that it can convert to a compile-time constant.
@@ -314,11 +356,7 @@ with_n(size_t n, F &&f)
                            merged_return_t<decltype(std::forward<F>(f)(
                                std::integral_constant<size_t, I + Min>{}))...>,
                            R>;
-    constexpr std::array<return_type (*)(F &&), Max - Min> invokers{
-        +[](F &&f) -> return_type {
-          return std::forward<F>(f)(std::integral_constant<size_t, I + Min>{});
-        }...};
-    return invokers.at(n - Min)(std::forward<F>(f));
+    return detail::with_n_impl<return_type, Min, Max>(n, std::forward<F>(f));
   }(std::make_index_sequence<Max - Min>{});
 }
 

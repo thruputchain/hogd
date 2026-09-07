@@ -43,7 +43,7 @@ public:
     StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
     delta.deployed_contract_hash() = hash;
     tx.add_delta(addrkey, std::move(delta), flags);
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     CHECK(r.has_value());
     return r.value();
   }
@@ -80,8 +80,8 @@ TEST_P(DirectDeployTest, ExclusiveLockConcurrentDeploy)
                            std::to_underlying(StorageDeltaFlags::None)))
       << "TX2 should be blocked by TX1's exclusive lock on the metadata key";
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
   advance_block();
 
   auto deployed = lookup_deployment_from_db(contract_addr);
@@ -108,8 +108,8 @@ TEST_P(DirectDeployTest, NoExclusiveLockConcurrentDeployIsAdmitted)
   EXPECT_TRUE(push_deploy(tx2, addrkey, deployment_hash,
                           std::to_underlying(StorageDeltaFlags::None)));
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
   advance_block();
 }
 
@@ -131,8 +131,8 @@ TEST_P(DirectDeployTest, ExclusiveLockDeployBlockedByExistingHolder)
                   std::to_underlying(StorageDeltaFlags::ExclusiveLock)))
       << "TX2 cannot take an exclusive lock while TX1 holds a reservation";
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
   advance_block();
 }
 
@@ -148,13 +148,13 @@ TEST_P(DirectDeployTest, ExclusiveLockDeployStaysLockedAfterCommit)
   ASSERT_TRUE(
       push_deploy(tx1, addrkey, deployment_hash,
                   std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   EXPECT_FALSE(push_deploy(tx2, addrkey, deployment_hash,
                            std::to_underlying(StorageDeltaFlags::None)))
       << "the exclusive lock must outlive TX1's commit";
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
   advance_block();
 
   auto deployed = lookup_deployment_from_db(contract_addr);
@@ -181,8 +181,8 @@ TEST_P(DirectDeployTest, ExclusiveLockDeployDoesNotBlockOtherAddresses)
   EXPECT_TRUE(push_deploy(tx2, metadata_key(other_addr), deployment_hash,
                           std::to_underlying(StorageDeltaFlags::None)));
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   advance_block();
 
   auto locked_deployment = lookup_deployment_from_db(locked_addr);

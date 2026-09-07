@@ -1,5 +1,6 @@
 #include <sys/wait.h>
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -144,12 +145,31 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   // consumer that rebuilds the configuration without them would compute a
   // different config hash and fail genesis load.
   const json::Value &network_config = require_field(*genesis, "network_config");
-  EXPECT_FALSE(
-      require_string(require_field(network_config, "max_sha256_buffers"))
-          .empty());
-  EXPECT_FALSE(
-      require_string(require_field(network_config, "max_cross_invoke_depth"))
-          .empty());
+  const auto &params =
+      require_field(require_field(require_field(network_config, "0"), "v0"),
+                    "params");
+  ASSERT_EQ(params.type(), json::Value::Type::kArray);
+  const auto encoded_params = params.as_array();
+  const auto &stated_params =
+      artifact.genesis_configuration.network_config.v0().params;
+  ASSERT_EQ(encoded_params.size(), stated_params.size());
+  const std::array<std::string_view, 4> fields{"max_sha256_buffers",
+                                               "max_cross_invoke_depth",
+                                               "max_new_contracts_per_tx",
+                                               "max_bytestring_len"};
+  ASSERT_EQ(stated_params.size(), fields.size());
+  const std::array<std::int64_t, 4> values{
+      stated_params[0].max_sha256_buffers(),
+      stated_params[1].max_cross_invoke_depth(),
+      stated_params[2].max_new_contracts_per_tx(),
+      stated_params[3].max_bytestring_len()};
+  for (std::size_t i = 0; i < fields.size(); ++i) {
+    const auto &body =
+        require_field(encoded_params[i],
+                      std::format("{}", stated_params[i].param()));
+    EXPECT_EQ(require_field(body, fields[i]).as_integer(), values[i]);
+  }
+  EXPECT_EQ(network_config.find("max_sha256_buffers"), nullptr);
 
   const json::Value &default_wallet = require_field(*genesis, "default_wallet");
   // Genesis-JSON hashes are unprefixed hex (see contract_hash above);

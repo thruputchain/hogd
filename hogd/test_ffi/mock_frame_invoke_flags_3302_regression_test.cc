@@ -7,9 +7,10 @@
 // production frame -- inert today, since only the TryInvoke and ReadOnly bits
 // are ever read back, but a trap for whenever DelegateCall or a new flag lands.
 // Both pathways now run the same check, via
-// SystemCallHandler::validate_new_invocation(); the FFI boundary reports
-// kTestFFIErrorCodeInvalidArgument, since the point of the FFI error codes is
-// to hand an honest caller a structured failure.
+// SystemCallHandler::validate_new_invocation(); the FFI boundary hands the
+// caller production's own refusal, kSyscallErrorCodeInvalidSyscallInput, with
+// no FFI error -- asking for a frame production would not admit is not a
+// misuse of the test API.
 
 #include <array>
 #include <cstdint>
@@ -24,6 +25,7 @@
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
 #include "invoke_flag.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -87,9 +89,14 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
   };
 
   for (int32_t flags : kRejectedFlags) {
-    auto res = open_frame(handler.syscall_handler, invocation, flags);
-    EXPECT_EQ(res, kTestFFIErrorCodeInvalidArgument) << "flags = " << flags;
-    if (res == kTestFFIErrorCodeNone) {
+    SCOPED_TRACE(flags);
+    auto res = expect_frame_refused(
+        handler.syscall_handler, invocation,
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, flags);
+    // A refusal is reported in syscall_error_code, so that -- not the FFI
+    // code, which is None either way -- is what says a frame was admitted.
+    if (res.syscall_error_code ==
+        std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone)) {
       // A regression admitted the frame. Finish it so the rest of this test and
       // the handler teardown still run: an unfinished mock frame blocks close,
       // which would turn a clear assertion failure into a hung test binary.

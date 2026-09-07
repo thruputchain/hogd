@@ -15,6 +15,16 @@ B=build-release-ccache-tmp   # your Release build tree
 scripts/rv32_gas_calibrate.sh $B --out /tmp/gas.json      # full run, a few minutes
 scripts/rv32_gas_calibrate.sh $B -- --quick               # smoke run, ~40s
 scripts/rv32_gas_calibrate.sh $B -- --op=DIV --repeats=25 # one opcode, hard
+scripts/rv32_gas_calibrate.sh $B -- --syscalls-only       # just the ecall seam
+```
+
+Syscalls proper are a separate binary, for the dependency reason above -- see
+`scripts/rv32_syscall_bench.sh` and `scripts/rv32_syscall_report.py`. It takes
+this harness's JSON as its gas unit:
+
+```sh
+scripts/rv32_syscall_bench.sh $B --out /tmp/sys.json
+scripts/rv32_syscall_report.py /tmp/sys.json --gas /tmp/gas.json --schedule
 ```
 
 The build directory is required. It is not searched for and there is no
@@ -46,6 +56,7 @@ Read the output with:
 ```sh
 scripts/rv32_gas_report.py /tmp/gas.json              # per-opcode costs
 scripts/rv32_gas_report.py /tmp/gas.json --schedule   # proposed integer costs
+scripts/rv32_gas_report.py /tmp/gas.json --syscalls   # the ecall seam
 scripts/rv32_gas_report.py /tmp/gas.json --workloads  # pricing quality
 scripts/rv32_gas_report.py /tmp/gas.json --predict    # do the costs add up?
 scripts/rv32_gas_report.py before.json after.json     # what moved
@@ -166,6 +177,85 @@ consensus constant.
 **Interleave the measurements.** All points in a sweep are run round-robin and
 reduced by median, so slow drift on a shared or throttled machine spreads
 across every point instead of aliasing into the slope.
+
+## Syscall dispatch: the ecall seam
+
+The opcode sweeps stop at the guest boundary. Everything past it -- the ecall
+that suspends the run, the host call, the resume -- is charged one instruction's
+gas and has never been measured. `--syscalls` measures it.
+
+**What it is.** A body saturated with `ecall`s under a host that returns
+instead of halting, timed and divided by the call count. Same estimator as the
+opcode cells, same interleaving, same fit as a cross-check: a level, not a
+contrast, so it cannot come out negative and does not depend on what a filler
+costs.
+
+**What is in the number.** `op_ecall`'s suspend (spill the register-carried
+gas, stash a0-a7, yield `kEcall`), the unwind back to `drive()`, the virtual
+dispatch through `Host::ecall`, `apply_ecall`'s gas debit and register commit,
+and the fresh `enter_run` the resumed guest re-enters through. Every syscall the
+node makes pays all of it.
+
+**What is not.** The production syscall path: `syscall_entry`'s ABI parse,
+the guest-pointer bounds checks, the coroutine frame every call allocates
+(`runtime_exports.h`: *"Always the Async arm today: `wrap_after_parse_async()`
+is a coroutine unconditionally, so every syscall allocates a frame"*), and
+`SystemCallHandler` itself. None of it can be here: it needs the protocol XDR,
+the DB proxy and the snapshot cache, and this harness links only
+`rv32_isa_core` so a calibration can run on a candidate validator without
+configuring the node build. **These numbers are a lower bound on a syscall's
+fixed cost, not the cost.** Producing the rest needs a second, runtime-linked
+harness; measuring the seam first means its share is already accounted for when
+that lands.
+
+**The shapes.** Five, chosen so the guest side is identical across four of them
+and only the host's work differs -- what separates them is therefore host work
+and nothing else.
+
+| shape | guest side | host side | models |
+|---|---|---|---|
+| `seam` | `ecall` | echo a0 | the crossing alone |
+| `selector_reload` | `addi a0, sel` + `ecall` | return status 0 | the bridge ABI's minimum |
+| `out_pointer_8` | same | + write 8 bytes | `GetBlockHeight` |
+| `out_pointer_32` | same | + write 32 bytes | `GetCurrentAddress`, `GetMsgSender` |
+| `two_out_pointers` | same | + two 4-byte writes | `GetCalldataLen` |
+
+`seam` is the one shape that is not a legal guest sequence, and it is worth
+knowing why. `apply_ecall` writes the host's return value into a0
+(`regs_[10] = result.continue_value()`), which is where the bridge ABI puts a
+syscall's status -- so a conforming guest cannot reuse a0 and must reload the
+selector before every call. `seam` suppresses that by having the host hand the
+selector back. It isolates the crossing at the cost of describing a caller that
+cannot exist; `selector_reload` is the same crossing with the ABI's own cost
+put back, and is the row to quote.
+
+**How it is checked.** A wrong call count is the failure mode here, and it
+produces a confident number rather than an error: a body that placed fewer
+ecalls than it was asked for still runs, still halts, and still divides by the
+count it was asked for. Three independent checks, all before any timing is
+quoted:
+
+- The lowering audit, reused unchanged from the opcode path, must report the
+  body clean *and* must count exactly `calls + 1` straight-line runs. An ecall
+  is a run barrier, so one run per call is the structural statement behind a
+  per-call cost -- and a slot that did not lower to an ecall cannot produce it.
+- An untimed verification run under a fresh host must make exactly
+  `expected_host_calls` calls, and no bounds-checked write may fault. A faulted
+  write does less work than a real one and would report as a fast call.
+- The measured gas must equal the gas the harness credits the kernel with, the
+  same equality the opcode kernels are held to.
+
+**Why there is no context axis.** Dependence is the dominant cost axis for
+opcodes, and pricing has to assume the arrangement an adversary can force. A
+syscall has no equivalent knob: the guest controls the argument sizes and
+nothing else, and argument size is already an explicit term in the cost
+function. So the sweep is two-dimensional -- calls, and bytes per call -- with
+no worst-case-context search behind it. That is why stateless syscalls are the
+tractable half of syscall pricing. The stateful ones have exactly such an axis
+-- whether the transaction has touched the key, how deep the stack is, whether
+the snapshot cache holds it -- and `rv32_syscall_entry_bench`'s `frame/` and
+`cold/` rows sweep it regime by regime; see "Storage: the NNInt rows" in
+`docs/rv32/rv32-gas-calibration.md`.
 
 ## Comparing runs
 
@@ -438,14 +528,23 @@ get right, is where the estimator is at its strongest.
 - Independent divides sit under the engine's own dispatch cost, so their
   marginal cost is small. That is a real property of this interpreter, not a
   measurement artifact, and it is why the dependent form is measured separately.
-- `JAL`, `JALR`, `FENCE`, `ECALL`, `EBREAK`, and `UNIMP` are not measured. The
-  first two need a per-slot rewritten target and the rest end the run, so
-  neither fits the substitution design. They need their own kernel shapes.
-- Syscalls are not measured yet. The sweep machinery generalizes to them
-  directly -- the independent variable becomes the number of calls at a fixed
-  argument size (giving a base cost) and then the argument size at a fixed call
-  count (giving a per-byte cost), which is the `base + per-byte` shape
-  `gas_cost_table.h` already uses for SHA256.
+- `JAL`, `FENCE`, `EBREAK`, and `UNIMP` are not measured by the opcode sweeps.
+  `JAL` needs a per-slot rewritten target and the rest end the run, so neither
+  fits the substitution design. `ECALL` no longer belongs on this list: it ends
+  the run too, which is why it needed a kernel shape of its own rather than a
+  substitution, and it has one.
+- What `--syscalls` reports is the crossing plus a modelled host-side write,
+  with the production syscall path absent -- see the section above for exactly
+  what that excludes. The other half now exists:
+  `hogd/hog_exec/runtime/rv32/rv32_syscall_entry_bench.cc` measures
+  `syscall_entry` under Google Benchmark, and its `vm` minus `entry` difference
+  agrees with the seam measured here to within a few nanoseconds. Two methods,
+  one number, which is what makes the decomposition a finding rather than an
+  assumption.
+- `SHA256`'s per-byte cost belongs there too, and is measured there: it is
+  native C++ with no interpreter dispatch in it and no arrangement the guest can
+  force, so the apparatus this harness spends on holding a *guest* arrangement
+  constant buys nothing for it.
 
 ## Changing the schedule
 
@@ -463,6 +562,7 @@ every deployed artifact stops validating.
 | `lowering_audit.h/.cc` | Checks the production lowering matches the kernel's source |
 | `measure.h/.cc` | Interleaved timing, median/MAD, OLS + Theil-Sen fit with standard error |
 | `provenance.h/.cc` | Host/build metadata and the behavioural engine fingerprint |
+| `syscall_kernel.h/.cc` | Ecall-seam kernels, the shapes, and the host that serves them |
 | `workloads.h/.cc` | Realistic loop bodies for the end-to-end ns/gas check |
 | `rv32_gas_calibrate.cc` | CLI, sweep plan, JSON output |
 | `rv32_gas_calibration_test.cc` | Correctness net for all of the above |

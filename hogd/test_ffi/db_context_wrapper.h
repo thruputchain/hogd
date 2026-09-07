@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 #include "auth_rpc.hh"
 #include "contract.hh"
@@ -23,11 +24,20 @@
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
+#include "x23/async.h"
 #include "x23/mvar.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
 namespace hogd {
+
+// A block was advanced with a timepoint earlier than the block it follows.
+// Its own type so the FFI layer can report a caller's bad argument as one,
+// rather than folding it in with the internal failures advancing can hit.
+class BackwardsTimepointError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 // Database-related context for the test environment.
 // Provides appropriate methods for manipulating the evolution
@@ -48,10 +58,27 @@ public:
             NetworkConfig const &network_config);
 
   // Height is the tip's plus one, read off the tip rather than a block id.
+  // The timepoint is whatever the advance that opened this block was given;
+  // unlike the height it is not derivable from the chain.
   BlockExecutionContext block_execution_context() const;
 
-  void advance_new_block(BlockExecutionMode mode =
-                             BlockExecutionMode::kBlockExecutionModeProposal);
+  // Opens the next block. `block_timepoint` is that block's timepoint in Unix
+  // nanoseconds; nullopt takes the current wall clock, which is what a caller
+  // with no opinion wants -- a contract reading GetBlockTimepoint then sees a
+  // plausible present-day value rather than a fixed one. Pass a value to pin
+  // it, which is how a test drives contract logic keyed on time: deadlines,
+  // expiry, vesting, rate limits.
+  //
+  // A block may not be older than the one it follows: a timepoint earlier
+  // than the open block's throws BackwardsTimepointError and advances
+  // nothing, so a refused advance leaves the DB exactly as it was. Equal is
+  // allowed -- two blocks sharing a nanosecond is implausible rather than
+  // incoherent. The wall clock is checked the same way as a pinned value; it
+  // is not normally capable of going backwards, and quietly clamping it would
+  // hide the clock stepping under a running test.
+  void advance_new_block(
+      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
+      std::optional<TimePoint> block_timepoint = std::nullopt);
 
   struct EphemeralTxIdentifier {
     BlockID block_id;
@@ -251,6 +278,12 @@ private:
 
   using db_sched_client_t =
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
+
+  // Unix nanoseconds, as a real chain's header carries. Set by each
+  // advance_new_block() and read back by block_execution_context(): for an
+  // open block the timepoint is not on the tip (that one is the parent's), so
+  // unlike the height there is nothing to recompute it from.
+  TimePoint block_timepoint_ = 0;
 
   BlockID current_block_id_ = 0;
   // The network this chain belongs to. Every committed value carries it, not

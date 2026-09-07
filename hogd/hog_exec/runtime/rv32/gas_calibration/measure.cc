@@ -50,7 +50,7 @@ MeasurementPoint::relative_mad() const
 }
 
 RunOutcome
-run_once(ThreadedMachine &machine, HaltHost &host)
+run_once(ThreadedMachine &machine, Host &host)
 {
   machine.reset(kGasLimit);
   const auto start = std::chrono::steady_clock::now();
@@ -64,11 +64,10 @@ run_once(ThreadedMachine &machine, HaltHost &host)
 }
 
 uint32_t
-tune_trip_count(const ThreadedMachinePreInstantiation &program,
+tune_trip_count(const ThreadedMachinePreInstantiation &program, Host &host,
                 uint32_t seed_trip_count, double target_ns)
 {
   ThreadedMachine machine(program, kGasLimit);
-  HaltHost host;
   // Two runs: the first pays for cold slot array and memory image, the second
   // is the number worth extrapolating from.
   (void)run_once(machine, host);
@@ -82,7 +81,7 @@ tune_trip_count(const ThreadedMachinePreInstantiation &program,
 }
 
 void
-measure_interleaved(std::span<MeasurementPoint> points,
+measure_interleaved(std::span<MeasurementPoint> points, Host &host,
                     const MeasureConfig &config)
 {
   std::vector<ThreadedMachine> machines;
@@ -90,7 +89,6 @@ measure_interleaved(std::span<MeasurementPoint> points,
   for (const MeasurementPoint &point : points) {
     machines.emplace_back(*point.program, kGasLimit);
   }
-  HaltHost host;
 
   for (uint32_t warmup = 0; warmup < config.warmup_runs; ++warmup) {
     for (size_t i = 0; i < points.size(); ++i) {

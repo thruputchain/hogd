@@ -10,6 +10,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
+#include "x23/async.h"
 
 namespace hogd::rv32 {
 
@@ -36,7 +37,7 @@ public:
                                   hogd::PreparedContract &out) const override;
   using hogd::RuntimeContext::verify_contract;
 
-  SystemStatus<std::unique_ptr<hogd::Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 

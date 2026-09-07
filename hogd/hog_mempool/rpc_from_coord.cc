@@ -633,8 +633,8 @@ MempoolCoordinatorRpc::add_finish_all_executors_nodes(
   return nodes;
 }
 
-SHA256Hash
-MempoolCoordinatorRpc::get_txset_hash(
+std::optional<SHA256Hash>
+MempoolCoordinatorRpc::try_get_txset_hash(
     const x23::XdrVec<TransactionHash> &hashes)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
@@ -643,6 +643,7 @@ MempoolCoordinatorRpc::get_txset_hash(
   const std::vector<ChunkRange> chunks =
       make_chunks(hashes.size(), num_threads);
 
+  std::atomic<bool> duplicate_hash{false};
   // JobScope joins every submitted insertion job before `trie` and `hashes`
   // can leave scope, even if a later submit() throws mid-loop. Without it, an
   // allocation failure while queuing a chunk would let this frame unwind while
@@ -651,18 +652,41 @@ MempoolCoordinatorRpc::get_txset_hash(
     WorkerPool::JobScope scope(worker_pool);
     scope.reserve(chunks.size());
     for (const ChunkRange &chunk : chunks) {
-      scope.submit([chunk, &trie, &hashes] {
+      scope.submit([chunk, &trie, &hashes, &duplicate_hash] {
         for (size_t j = chunk.start; j < chunk.end; j++) {
           // We add each tx hash to the Merkle trie as a key with an empty
           // value. So in essence, we are using the Merkle trie as a set.
-          CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
+          //
+          // The set insertion is itself the uniqueness check: a repeated hash
+          // is the one input the trie rejects, so we report it to the caller
+          // instead of running a separate dedup pass over [hashes].
+          if (!trie.insert(HexArray(hashes[j]), std::span<const std::byte>())) {
+            duplicate_hash.store(true, std::memory_order_relaxed);
+            return;
+          }
         }
       });
     }
     scope.wait();
   }
+  if (duplicate_hash.load(std::memory_order_relaxed)) {
+    return std::nullopt;
+  }
   trie.generate_all_hashes(num_threads);
   return trie.get_root_hash();
+}
+
+SHA256Hash
+MempoolCoordinatorRpc::get_txset_hash(
+    const x23::XdrVec<TransactionHash> &hashes)
+{
+  const std::optional<SHA256Hash> txset_hash = try_get_txset_hash(hashes);
+  // Callers of this overload hash a txset this node built itself, which the
+  // mempool has already deduplicated. Use [try_get_txset_hash()] for hashes
+  // that came off the wire.
+  CHECK(txset_hash.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return *txset_hash;
 }
 
 x23::Async<void>
@@ -2346,11 +2370,12 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         co_return;
       });
 
-  auto txset_hash_node =
-      validation_dag.cpu<SHA256Hash>("compute txset hash",
-                                     validation_dag.after(decode_node), [&]() {
-                                       return get_txset_hash(cache.tx_hashes);
-                                     });
+  // A nomination is free to repeat a transaction hash: the batches still
+  // decode and still have equal element counts, so nothing upstream rejects
+  // one. [try_get_txset_hash()] reports the repeat rather than asserting on it.
+  auto txset_hash_node = validation_dag.cpu<std::optional<SHA256Hash>>(
+      "compute txset hash", validation_dag.after(decode_node),
+      [&]() { return try_get_txset_hash(cache.tx_hashes); });
 
   auto check_validation_node = validation_dag.async<void>(
       "check validation chunks", validation_dag.after(prepare_validate_node),
@@ -2438,7 +2463,12 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
               compute_config_hash(db_result.block().config_hash_preimage);
         }
 
-        if (txset_hash_node.get() != proposal.header.txs_hash ||
+        // A duplicated transaction hash leaves the txset hash uncomputable,
+        // so the nomination cannot match [proposal.header.txs_hash] and is
+        // rejected here alongside every other header mismatch.
+        const std::optional<SHA256Hash> &txset_hash = txset_hash_node.get();
+        if (!txset_hash.has_value() ||
+            *txset_hash != proposal.header.txs_hash ||
             cache.db_tip.value.proposal_header.storage_hash !=
                 proposal.header.storage_hash ||
             cache.db_tip.value.proposal_header.config_hash !=

@@ -64,6 +64,10 @@ jobs:
                   # `inputs` is empty on a scheduled run.
                   MODE="${{ inputs.mode || 'check' }}"
                   echo "Branch name: $BRANCH_NAME, mode: $MODE"
+                  # 60 minutes rather than 40: the syscall half of the
+                  # measurement links the runtime, and through genesis that
+                  # puts the guest contract build on this job's critical path.
+                  # The opcode calibration alone never needed it.
                   hog_sched \
                     --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                     --key=github_repo --value=${{ github.repository }} \
@@ -72,7 +76,7 @@ jobs:
                     --key=mode --value=$MODE \
                     --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                     --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
-                    --timeout-sec=2400 \
+                    --timeout-sec=3600 \
                     ./scripts/schedules/rv32_gas_calibration.toml
             - name: Print Log Download Instructions
               if: always()

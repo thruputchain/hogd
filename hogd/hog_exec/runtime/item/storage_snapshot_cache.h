@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -16,10 +15,12 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -63,19 +64,36 @@ public:
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
+  // Each lookup answers from cache without allocating a coroutine frame --
+  // MaybeAsync's value arm -- and falls back to an Async that suspends on the
+  // database read only on a miss.  The lock guarding each cache is always
+  // released before that read, so no cache lock is ever held across a
+  // suspension.
+  //
   // The cached contract for `hash`: its code and the image this cache built
   // when it loaded it, so callers reuse that image rather than preparing the
   // same bytes again. Borrowed -- node-stable and valid for the block, so it
   // outlives any transaction's runtimes. Returns nullptr (wrapped) for a
   // negative lookup.
-  SystemStatus<const ContractCacheEntry *>
+  x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
   try_get_contract_entry(SHA256Hash const &hash);
-  SystemStatus<const DeployedContract *>
+  x23::MaybeAsync<SystemStatus<const DeployedContract *>>
   try_get_deployed_contract(ContractAddress const &addr);
-  SystemStatus<const SnapshotStorageItem *>
-  try_get_snapshot_item(AddressAndKey const &addrkey);
+  // The snapshot item under `key`, probed with the hash the key already
+  // carries. The syscall path hands over the FrameItemKey it built for its
+  // frame probe, so a first touch lays out and hashes the key once for the
+  // frames and this cache together.
+  x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
+  try_get_snapshot_item(FrameItemKey const &key);
+  // The XDR-keyed form, for a caller holding no frame key. Lays out and
+  // hashes the key here; nothing on the syscall path should take this.
+  x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
+  try_get_snapshot_item(AddressAndKey const &addrkey)
+  {
+    return try_get_snapshot_item(FrameItemKey::from(addrkey));
+  }
 
-  SystemStatus<const DbTip *> try_get_db_tip();
+  x23::MaybeAsync<SystemStatus<const DbTip *>> try_get_db_tip();
 
   // The executing block's own facts. Unlike everything above these do not
   // come from the db tip, which for an open block is the *parent*: the height
@@ -118,6 +136,17 @@ public:
 private:
   void release_db_tip();
 
+  // Miss paths for the lookups above.  Each takes its key BY VALUE so the key
+  // is copied into the coroutine frame and stays valid across the database
+  // read.
+  x23::Async<SystemStatus<const ContractCacheEntry *>>
+  load_contract_entry(SHA256Hash hash);
+  x23::Async<SystemStatus<const DeployedContract *>>
+  load_deployed_contract(ContractAddress addr);
+  x23::Async<SystemStatus<const SnapshotStorageItem *>>
+  load_snapshot_item(FrameItemKey key);
+  x23::Async<SystemStatus<const DbTip *>> load_db_tip();
+
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
   SynchronizedMap<SHA256Hash, std::optional<ContractCacheEntry>,
@@ -134,10 +163,16 @@ private:
                   std::shared_mutex>
       deployment_cache_;
 
+  // Keyed by the frame key rather than the XDR AddressAndKey: the hasher
+  // returns the hash cached in the key, so a probe costs one shard index and
+  // one bucket index off a value already in hand, and a rehash as the cache
+  // grows moves keys instead of re-serializing and re-hashing every one.
+  // Same process-keyed SipHash24 as before; the key is contract-chosen and
+  // the map has to stay flood-resistant. The XDR form is rebuilt once, on a
+  // miss, for the database read and the item.
   SynchronizedMap<
-      AddressAndKey, SnapshotStorageItem, std::hash<AddressAndKey>,
-      std::equal_to<>,
-      std::allocator<std::pair<const AddressAndKey, SnapshotStorageItem>>,
+      FrameItemKey, SnapshotStorageItem, FrameItemKeyHash, std::equal_to<>,
+      std::allocator<std::pair<const FrameItemKey, SnapshotStorageItem>>,
       std::shared_mutex>
       snapshot_item_cache_;
 

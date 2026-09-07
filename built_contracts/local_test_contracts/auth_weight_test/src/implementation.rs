@@ -61,6 +61,7 @@ impl AuthWeightTest for AuthWeightTestContract {
                 entrypoint_id: entrypoint,
                 gas_limit: u64::MAX,
                 flags: 0x2,
+                reserved: 0,
             },
             &mut outputs,
         );

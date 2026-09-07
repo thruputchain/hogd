@@ -3,10 +3,12 @@
 #include "auth_claim.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
@@ -114,7 +116,7 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
   // consumed early in SystemCallHandler::root_invoke(), so even a pre-frame
   // throw must block a later retry (issue #2643).
   root_invoke_attempted_ = true;
-  auto res = to_handler().root_invoke();
+  auto res = to_handler().root_invoke()();
 
   if (res.result_.has_value() ||
       res.result_.error().code() == InvokeErrorCode::Deterministic ||
@@ -229,14 +231,14 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
   return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
 }
 
-TestFFIErrorCode
+OpenMockInvocationFrameResult
 SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
                                                    InvokeFlagSet invoke_flags)
 {
   if (!is_mocked_handler_) {
     error("unrecoverable: start_mock_invocation_frame called on non-mocked "
           "handler");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   // Reject opening a mock frame after the transaction was committed or aborted.
@@ -248,13 +250,13 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   if (is_committed_or_aborted()) {
     error("unrecoverable: start_mock_invocation_frame called on an already "
           "committed/aborted transaction");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   if (to_handler().last_frame_finished()) {
     error("unrecoverable: start_mock_invocation_frame called after last frame "
           "finished");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
@@ -272,7 +274,22 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   auto finish_pending_trace = [&](HostFnStatus<SyscallErrorCode> status) {
     if (syscall_trace_pending) {
       syscall_trace_pending = false;
-      to_handler().finish_syscall_trace(status, current_gas);
+      // No child frame ran, but production still charges the crossing: a
+      // refused Invoke reached the handler through syscall_entry() like any
+      // other. A caller left short by that charge goes out of gas, which
+      // outranks the refusal it was about to be told about -- the same
+      // rewrite wrap_after_parse()'s gas epilogue makes, and with the same
+      // exclusion for a SystemError, which ends the transaction outright.
+      GasAmount gas_remaining = current_gas;
+      if (auto *runtime = get_mock_runtime()) {
+        auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+        CHECK(gas_runtime != nullptr);
+        if (!gas_runtime->consume_gas(kSyscallBaseCost) && status.has_value()) {
+          status = HostFnError{HostFnErrorCode::OutOfGas};
+        }
+        gas_remaining = gas_runtime->gas_remaining();
+      }
+      to_handler().finish_syscall_trace(status, gas_remaining);
     }
   };
   // try/catch: this runs during unwinding, where an escaping throw terminates.
@@ -305,7 +322,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   // Clamp the child's budget to what the parent still has, mirroring
-  // production kInvoke: syscall_Invoke_inner() hands
+  // production kInvoke: syscall_Invoke_inner()() hands
   // SystemCallHandler::invoke() min(requested gas_limit, remaining_gas), so a
   // child frame can never be admitted with a larger budget than its caller can
   // pay for. Without the clamp a mock child could spend past the parent's
@@ -344,9 +361,17 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // flag bits (#3302) and reentrance (#3301). Auth-token ownership is vacuous
   // until the API below can pass tokens. Only locals have been computed by this
   // point, so a refusal pushes no frame and the caller owes no finish; the
-  // caller's synthetic kInvoke is traced with production's syscall error and no
-  // gas charged, matching a refused kInvoke. Closed before the error() log,
-  // which can throw.
+  // caller's synthetic kInvoke is traced with production's syscall error and
+  // charged only the crossing, matching a refused kInvoke. Closed before the
+  // error() log, which can throw.
+  // The depth bound below is a plain load off the pinned tip, so pin it first.
+  // Completing it here is legal for the same reason the rest of this path
+  // blocks: the FFI entrypoint is not an x23 ThreadPool worker, which
+  // Async::operator() asserts.
+  if (auto pinned = to_handler().init_db_tip()(); !pinned.has_value()) {
+    error("mock invocation frame admission failed: {}", pinned.error());
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
+  }
   auto admitted =
       to_handler().validate_new_invocation(invocation.invoked_address,
                                            frame_flags,
@@ -355,13 +380,15 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // one of the caller's admission refusals.
   if (!admitted.has_value()) {
     error("mock invocation frame admission failed: {}", admitted.error());
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
   if (!admitted->has_value()) {
     finish_pending_trace(admitted->error().code());
-    error("invalid argument: mock invocation frame not admitted: {}",
-          admitted->error().code());
-    return kTestFFIErrorCodeInvalidArgument;
+    error("mock invocation frame refused: {}", admitted->error().code());
+    // Not a test-API misuse: the caller asked for something production
+    // refuses, and gets production's answer with no FFI error.
+    return {.syscall_error_code = std::to_underlying(admitted->error().code()),
+            .ffi_error_code = kTestFFIErrorCodeNone};
   }
 
   // TODO(geoff): current API does not support passing auth tokens via the mock
@@ -384,7 +411,8 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // closed above.
   auto stashed_parent_trace =
       to_handler().start_frame(std::move(frame_invocation), frame_flags,
-                               std::span<uint32_t const>{});
+                               std::span<uint32_t const>{},
+                               to_handler().config_params().max_sha256_buffers);
   if (!stashed_parent_trace.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back, so the handler has no new frame; skip publishing the mock-runtime
@@ -397,7 +425,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     finish_pending_trace(stashed_parent_trace.error().to_host_fn_error());
     error("unrecoverable: frame admission allocation failed in "
           "start_mock_invocation_frame");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   // finish_mock_invocation_frame() owns the record now. Must disarm: the
@@ -422,7 +450,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
 
   // Capacity was reserved above, so this push_back cannot reallocate or throw.
   push_mock_runtime(mock_runtime.release());
-  return kTestFFIErrorCodeNone;
+  return kMakeFrameOpenError(kTestFFIErrorCodeNone);
 }
 
 ForeignTracedInvokeResult
@@ -527,7 +555,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // finish the frame
   auto res = to_handler().finish_frame(result.result_,
-                                       std::move(stashed_parent_trace));
+                                       std::move(stashed_parent_trace))();
   if (!res.has_value()) {
     error("unrecoverable: finish_mock_invocation_frame failed: {}",
           res.error());
@@ -536,6 +564,17 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   auto [frame_result, manually_reverted] = res.value();
   result += frame_result;
   GasAmount total_gas_consumed = result.gas_consumed_;
+
+  // What the parent pays: everything the child spent, plus the crossing its own
+  // Invoke made to get there. Reported separately from total_gas_consumed,
+  // which is the child frame's own spend and is what the caller is handed back.
+  // Saturating, so a child that already spent the maximum cannot wrap the
+  // parent's charge down to something it can afford.
+  const GasAmount parent_charge =
+      total_gas_consumed >
+              std::numeric_limits<GasAmount>::max() - kSyscallBaseCost
+          ? std::numeric_limits<GasAmount>::max()
+          : total_gas_consumed + kSyscallBaseCost;
 
   // Debit the parent for the child frame. MockGasRuntime::consume_gas() reports
   // false exactly when the charge meets or exceeds what the parent had left,
@@ -553,7 +592,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     // guest execution would (see the override at the top of this function).
     // parent_out_of_gas is the local copy used for the synthetic kInvoke status
     // just below.
-    parent_out_of_gas = !gas_runtime->consume_gas(total_gas_consumed);
+    parent_out_of_gas = !gas_runtime->consume_gas(parent_charge);
     gas_remaining = gas_runtime->gas_remaining();
   }
 
