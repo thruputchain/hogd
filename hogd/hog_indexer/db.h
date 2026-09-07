@@ -56,20 +56,27 @@ public:
        rocksdb::CompressionType compression_algorithm =
            rocksdb::CompressionType::kLZ4Compression);
 
-  // Opens the database at [path] if one is there, and creates one if not.
-  // The choice is made by asking RocksDB whether a database lives at [path],
-  // not by whether the path exists: callers are routinely pointed at a
-  // directory some other component already created and left empty (a
-  // benchmark work directory, a deploy-time mkdir), and an empty directory
-  // holds no database to open.
+  // Creates a database at [path] when nothing is stored there, and opens the
+  // one that is stored there otherwise.
+  //
+  // "Nothing is stored there" means an absent path or an empty directory, not
+  // merely an absent path: callers are routinely pointed at a directory some
+  // other component created and left empty (a benchmark work directory, a
+  // deploy-time mkdir), and an empty directory holds no database to open.
+  //
+  // A path holding anything else is [open]'s to report, including when what
+  // it holds is a database too damaged to identify. Creating over those
+  // remains would serve an empty index in place of the real one, so this
+  // fails closed and leaves them for recovery.
   static IndexerStatus<IndexDB>
   open_or_make_new(const std::filesystem::path &path,
                    rocksdb::CompressionType compression_algorithm =
                        rocksdb::CompressionType::kLZ4Compression);
 
-  // True when a RocksDB database can be found at [path]. An existing but
-  // empty directory, or a path that does not exist at all, is false.
-  static bool database_exists_at(const std::filesystem::path &path);
+  // True when [path] is known to hold nothing: it does not exist, or it is a
+  // directory with no entries. A path the filesystem will not answer for is
+  // false, so uncertainty never reads as "safe to create here".
+  static bool path_is_empty_or_absent(const std::filesystem::path &path);
 
   ~IndexDB();
 

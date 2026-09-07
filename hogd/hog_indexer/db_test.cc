@@ -4,6 +4,7 @@
 #include <cstddef> // NOLINT(misc-include-cleaner)
 #include <cstdint> // NOLINT(misc-include-cleaner)
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <span>
 #include <utility>
@@ -98,12 +99,16 @@ TEST_F(IndexDBTest, OpenNonExistent)
 TEST_F(IndexDBTest, OpenOrMakeNewCreatesInExistingEmptyDirectory)
 {
   ASSERT_TRUE(std::filesystem::exists(tmp_dir_.directory()));
-  ASSERT_FALSE(IndexDB::database_exists_at(tmp_dir_.directory()));
+  ASSERT_TRUE(IndexDB::path_is_empty_or_absent(tmp_dir_.directory()));
 
-  auto db = IndexDB::open_or_make_new(tmp_dir_.directory());
-  ASSERT_TRUE(db.has_value());
-  EXPECT_TRUE(db->is_open());
-  EXPECT_TRUE(IndexDB::database_exists_at(tmp_dir_.directory()));
+  {
+    auto db = IndexDB::open_or_make_new(tmp_dir_.directory());
+    ASSERT_TRUE(db.has_value());
+    EXPECT_TRUE(db->is_open());
+  }
+
+  // A database is really there now, not just an open handle.
+  EXPECT_TRUE(IndexDB::open(tmp_dir_.directory()).has_value());
 }
 
 // A path that does not exist at all is still created, as before.
@@ -125,11 +130,34 @@ TEST_F(IndexDBTest, OpenOrMakeNewReopensExistingDatabase)
     auto created = IndexDB::make_new(tmp_dir_.directory());
     ASSERT_TRUE(created.has_value());
   }
-  ASSERT_TRUE(IndexDB::database_exists_at(tmp_dir_.directory()));
+  ASSERT_FALSE(IndexDB::path_is_empty_or_absent(tmp_dir_.directory()));
 
   auto db = IndexDB::open_or_make_new(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
   EXPECT_TRUE(db->is_open());
+}
+
+// A directory holding something other than a database RocksDB can identify
+// must fail closed. Creating there would put a fresh manifest beside whatever
+// is on disk and serve an empty index in place of it, so a damaged database
+// would be reported as a healthy empty one and its files left orphaned.
+TEST_F(IndexDBTest, OpenOrMakeNewRefusesUnidentifiableDirectory)
+{
+  const std::filesystem::path stray =
+      std::filesystem::path(tmp_dir_.directory()) / "000042.sst";
+  {
+    std::ofstream out(stray);
+    ASSERT_TRUE(out.good());
+    out << "not a manifest";
+  }
+  ASSERT_FALSE(IndexDB::path_is_empty_or_absent(tmp_dir_.directory()));
+
+  auto db = IndexDB::open_or_make_new(tmp_dir_.directory());
+  EXPECT_FALSE(db.has_value());
+  EXPECT_EQ(db.error(), IndexerErrorCode::kDBNotFound);
+
+  // Left for recovery rather than written over.
+  EXPECT_TRUE(std::filesystem::exists(stray));
 }
 
 // Test consuming events and looking them up by transaction

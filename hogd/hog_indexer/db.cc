@@ -385,24 +385,37 @@ RocksDBDeleter::operator()(rocksdb::DB *db) const
 }
 
 bool
-IndexDB::database_exists_at(const std::filesystem::path &path)
+IndexDB::path_is_empty_or_absent(const std::filesystem::path &path)
 {
-  // Listing the column families is the cheapest question RocksDB answers
-  // about a path, and it is the one that matters: it succeeds only when a
-  // database's manifest is there to read.
-  rocksdb::Options check_options;
-  check_options.create_if_missing = false;
-  std::vector<std::string> existing_column_families;
-  return rocksdb::DB::ListColumnFamilies(check_options, path.string(),
-                                         &existing_column_families)
-      .ok();
+  // Positive knowledge only. A path we cannot get a straight answer about is
+  // reported as non-empty, because the caller's response to non-empty is to
+  // open and report rather than to write.
+  std::error_code ec;
+  const bool present = std::filesystem::exists(path, ec);
+  if (ec) {
+    return false;
+  }
+  if (!present) {
+    return true;
+  }
+  const bool directory = std::filesystem::is_directory(path, ec);
+  if (ec || !directory) {
+    return false;
+  }
+  const bool empty = std::filesystem::is_empty(path, ec);
+  return !ec && empty;
 }
 
 IndexerStatus<IndexDB>
 IndexDB::open_or_make_new(const std::filesystem::path &path,
                           rocksdb::CompressionType compression_algorithm)
 {
-  if (database_exists_at(path)) {
+  if (!path_is_empty_or_absent(path)) {
+    // Something is here. Whether it is a database or the wreckage of one is
+    // [open]'s to determine and report; creating is not an option either
+    // way. [make_new] opens with create_if_missing, so on a database whose
+    // manifest has gone missing it would lay down a fresh one beside the
+    // surviving files and serve an empty index in place of the real one.
     return open(path, compression_algorithm);
   }
   return make_new(path, compression_algorithm);
@@ -416,7 +429,16 @@ IndexDB::make_new(const std::filesystem::path &path,
     return IndexerError(IndexerErrorCode::kUnsupportedCompressionAlgorithm);
   }
 
-  if (database_exists_at(path)) {
+  // Check if database already exists by trying to list column families
+  rocksdb::Options check_options;
+  check_options.create_if_missing = false;
+  std::vector<std::string> existing_column_families;
+  rocksdb::Status list_status =
+      rocksdb::DB::ListColumnFamilies(check_options, path.string(),
+                                      &existing_column_families);
+
+  if (list_status.ok()) {
+    // Database already exists
     error("Database already exists at: {}", path.string());
     return IndexerError(IndexerErrorCode::kDBAlreadyExists);
   }
