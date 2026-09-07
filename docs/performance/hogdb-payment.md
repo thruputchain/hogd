@@ -20,11 +20,15 @@ hardware, compiler and database configuration unchanged between versions.
   **422,401.12 transactions/second**, 73,996,780 committed transactions.
 - [Unprofiled run 34097600690](https://github.com/groundhogchain/hogd/actions/runs/34097600690)
   at the original production revision `48d33566`: **423,351.58 transactions/second**.
-- During a 53.609-second interval in that run, hogdb consumed 584.33 CPU
+- [Unprofiled run 34099186393](https://github.com/groundhogchain/hogd/actions/runs/34099186393):
+  **428,188.05 transactions/second**. The three-run median is **423,351.58 tx/s**.
+- During a 53.609-second interval in run 34099183278, hogdb consumed 584.33 CPU
   seconds (10.90 cores) while executors reported 23,073,859 successful
   proposals: **25.32 database CPU microseconds per successful proposal**.
   This denominator differs from committed transactions and is explicitly
-  aligned with the process sampling interval.
+  aligned with the process sampling interval. A second unprofiled sample,
+  run 34099186393 at process age 32 seconds, measured 654.41 CPU seconds
+  over 60.800 seconds for 25,498,509 proposals: **25.66 CPU us/proposal**.
 - [Diagnostic run 34098275165](https://github.com/groundhogchain/hogd/actions/runs/34098275165)
   has the downloadable `hogdb-profile-34098275165` artifact. In its
   123.223-second snapshot interval, hogdb used 1,483.45 CPU seconds
@@ -34,8 +38,7 @@ hardware, compiler and database configuration unchanged between versions.
 
 The diagnostic machine is an AMD EPYC 9554, 64 cores / 128 hardware threads.
 Each executor opens 32 database RPC connections through `db_connection_map`;
-the older one-connection-per-LLC comment was stale. Hogdb had 391 threads
-across its pools and services. Perf recorded 19,918,125
+hogdb had 391 threads across its pools and services. Perf recorded 19,918,125
 context switches over 120 seconds (166,000/second). Kernel call chains
 attribute 19.90% of CPU samples to futex handling and 37.36% to system calls
 in total. These are nested categories, not additive costs. Futex samples
@@ -69,9 +72,12 @@ also occur, at much lower volume.
    needs separate work on per-transaction errors, ordering and cancellation.
 3. **Hashing and transaction bookkeeping.** Userspace self samples include
    SipHash (3.93%), replay-cache lock updates (1.73%), block commit changes
-   (1.69%), and allocation/free/map cleanup. Consider inline storage for
-   the common single-version transaction history after verifying the
-   scheduling change. Preserve nested savepoint and rollback semantics.
+   (1.69%), and allocation/free/map cleanup. An inline first-version
+   experiment passed all 261 database tests, but five alternating local
+   database benchmark pairs showed only a 0.7% median runtime reduction
+   (1.8668 to 1.8532 seconds), with mixed pairwise results. The experiment
+   was discarded: that evidence did not justify adding a new history
+   container to the savepoint and rollback paths.
 
 Userspace stack unwinding is incomplete in this perf capture, so leaf
 samples do not establish complete subsystem totals. There were 1,150 lost
@@ -80,10 +86,27 @@ alone do not establish whether disk I/O is a bottleneck.
 
 ## Validation and final comparison
 
-Pending optimized CI measurements. The wakeup regression test holds early
-jobs busy and requires later jobs to start in parallel, for both individual
-submissions and batches. Also run RPC stress with 128 workers, database
-tests, Debug scheduler/RPC stress, and all PR-specific CI checks.
+The first unprofiled optimized run,
+[34105692812](https://github.com/groundhogchain/hogd/actions/runs/34105692812),
+passed at **433,492.45 tx/s**, **2.40% above the baseline median**. Two more
+optimized runs are queued; this is a preliminary single-run comparison.
+The baseline range is 422,401.12–428,188.05 tx/s.
+
+Its unprofiled process sample, starting at process age 30 seconds, measured
+666.49 CPU seconds over 60.786 seconds for 28,000,000 successful proposals:
+**23.80 hogdb CPU us/proposal**, **7.25% below** the baseline repeat sampled
+at a comparable process age. Hogdb served more work while using roughly
+the same number of CPU cores. Additional unprofiled samples and an optimized
+perf diagnostic are pending. The coordinator's reported overall throughput
+is the headline metric; the CPU sample's proposal rate is a separate metric.
+
+The wakeup regression test holds early jobs busy and requires later jobs
+to start in parallel, for both individual submissions and batches. All six
+scheduler tests and all five RPC stress scenarios passed in Release and
+Debug/O0, with 128 workers for RPC stress. Against the merged `main`, 261
+database, 41 executor-interface, and 26 item tests passed. All nine
+PR-specific CI checks passed on `c926181c` (Linux GCC Release/Debug, LLVM
+Debug, macOS Debug, formatting, bindings, and all three tidy jobs).
 
 ## Integration and local cross-check
 
