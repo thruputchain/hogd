@@ -220,7 +220,7 @@ HogDbSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
-  auto res = ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
+  auto res = co_await ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
   if (!res && res.error() == HogDbCode::kStaleBlock) {
     error("parent_id {} is not the last committed block", parent_id);
     co_return DbSchedResult::DbSchedResultInvalidParentId;

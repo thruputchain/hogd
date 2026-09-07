@@ -34,6 +34,8 @@
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/mvar.h"
 #include "x23/rpc.h"
 
@@ -143,16 +145,19 @@ public:
                                                      BlockExecutionMode mode);
 
   // Opens a new block transaction only if parent_id is still the committed
-  // tip. If a commit is currently being published, waits until the tip and
-  // committed data are consistent before checking parent_id.
-  HogDbStatus<PerThreadARC<BlockTX> *>
+  // tip. If a commit is currently being published, suspends until the tip
+  // and committed data are consistent before checking parent_id (a
+  // coroutine, never a parked worker -- see
+  // co_wait_for_no_commit_publishing()).
+  x23::Async<HogDbStatus<PerThreadARC<BlockTX> *>>
   open_block_tx_at_parent(BlockTXID parent_id, BlockTXID bid,
                           BlockExecutionMode mode);
 
-  // Opens a viewing block transaction and returns the tip it views. If a commit
-  // is currently being published, waits until the tip and committed data are
-  // consistent before opening.
-  HogDbStatus<ViewingSnapshot> open_viewing_snapshot(BlockTXID bid);
+  // Opens a viewing block transaction and returns the tip it views. If a
+  // commit is currently being published, suspends until the tip and
+  // committed data are consistent before opening (a coroutine, never a
+  // parked worker -- see co_wait_for_no_commit_publishing()).
+  x23::Async<HogDbStatus<ViewingSnapshot>> open_viewing_snapshot(BlockTXID bid);
 
   // retrieves an open block transaction.
   // If the returned value is not null, then
@@ -232,14 +237,15 @@ public:
            committed_height != snapshot.value.proposal_header.block_height;
   }
 
-  // Block until no commit is mid-publication, so a committed-tip reader can
-  // start from a point where the tip and ramdb data are consistent. Returns
-  // immediately if nothing is publishing. Used to keep committed-tip read
-  // retries from spinning through a publication window.
-  void wait_for_no_commit_publishing()
-  {
-    commit_publishing_.wait(true, std::memory_order_acquire);
-  }
+  // Suspend until no commit is mid-publication, so a committed-tip reader
+  // can start from a point where the tip and ramdb data are consistent.
+  // Returns immediately if nothing is publishing. Used to keep committed-tip
+  // read retries from spinning through a publication window.
+  //
+  // A coroutine, never a parked thread: the rpc handlers that wait here run
+  // on x23 ThreadPool workers, which a mid-publication committer may itself
+  // need to resume on.
+  x23::Async<void> co_wait_for_no_commit_publishing();
 
   class CommitPublicationGuard {
   public:
@@ -285,6 +291,12 @@ private:
   // protects block_txes_.
   std::mutex lock_;
   std::atomic<bool> commit_publishing_{false};
+
+  // Bumped and broadcast by finish_commit_publication() so
+  // co_wait_for_no_commit_publishing() waiters wake without a parked thread.
+  // Waiters re-check commit_publishing_ in a loop, so a spurious wake is
+  // harmless and the only invariant is bump-after-clear.
+  x23::CoroFutex<uint64_t> publication_generation_{0};
   // pending block transactions.
   // The block txs are refcounted.
   // Each InvokeTX acquires a reference;  when the InvokeTX is closed, it

@@ -195,7 +195,9 @@ StorageSnapshotCache::load_snapshot_item(FrameItemKey key)
 x23::Async<SystemStatus<void>>
 StorageSnapshotCache::load_db_tip()
 {
-  auto db_res = co_await db_proxy_.get_db_tip(block_id_);
+  auto db_res =
+      co_await db_proxy_.get_db_tip(block_id_,
+                                    block_execution_context_.block_height);
   if (!db_res) {
     co_return db_res.error();
   }

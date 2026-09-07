@@ -84,9 +84,14 @@ public:
   ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  ExpectedDBTip get_db_tip(BlockID block) const
+  ExpectedDBTip get_db_tip(BlockID /*block*/, BlockHeight block_height) const
   {
-    if (block != block_id_) {
+    // Height-keyed like the real server (executor_to_db_rpc.x): the caller
+    // states the height it opened its block with, this server holds exactly
+    // one tip, and no per-block state is consulted -- any block opened at
+    // the served height reads the same tip, matching the one-committed-tip
+    // production shape.
+    if (block_height != tip_block_height_ + 1) {
       return ExpectedDBTip(RPCError::kRPCBadBlockID);
     }
 

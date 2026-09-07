@@ -133,18 +133,12 @@ public:
   // rejected at commit).
   BlockID block_height() const { return block_number_; }
 
-  // Height read off the tip the executor itself pins, never from a block id.
-  // Nothing cross-checks the timepoint.
+  // Height tracked alongside the commits this harness itself issues, never
+  // derived from a block id. Nothing cross-checks the timepoint.
   BlockExecutionContext get_block_execution_context() const
   {
-    // Completed here rather than awaited: bench setup runs on its own thread,
-    // never an x23 ThreadPool worker, which is what operator() asserts.
-    auto tip = db_proxy_->get_db_tip(block_number_)();
-    if (!tip.has_value()) {
-      panic("Failed to read db tip for block {}", block_number_);
-    }
     return BlockExecutionContext{
-        .block_height = tip->value.proposal_header.block_height + 1,
+        .block_height = committed_height_ + 1,
         .block_timepoint = 1'700'000'000,
     };
   }
@@ -290,6 +284,8 @@ private:
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
+  // The height of the last committed block; genesis commits at 0.
+  BlockHeight committed_height_ = 0;
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
@@ -321,12 +317,13 @@ CommonBenchState::advance_block()
   close_event_block(block_number_);
 
   ConsensusValue value{};
-  value.proposal_header.block_height = block_number_;
+  value.proposal_header.block_height = committed_height_ + 1;
   auto r2 = coord_client_->dbsched_commit_snapshot(block_number_, value);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
     panic("Failed to commit snapshot for block {}: {}", block_number_,
           r2.result());
   }
+  committed_height_++;
   auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal);

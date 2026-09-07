@@ -151,7 +151,7 @@ HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
   return DbGatewayIntroOutcome::DbGatewayIntroSuccess;
 }
 
-DbGatewayResult
+x23::Async<DbGatewayResult>
 HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 {
   HogDbDAO &db = ctx_.get_db();
@@ -175,7 +175,8 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
   for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
     // If a commit is mid-publication, wait it out so the tip and ramdb data
     // are consistent before reading (rather than burning a retry attempt).
-    ctx_.wait_for_no_commit_publishing();
+    // Suspends rather than parks: this handler runs on a ThreadPool worker.
+    co_await ctx_.co_wait_for_no_commit_publishing();
 
     DbTip tip = ctx_.get_tip();
 
@@ -192,13 +193,13 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
     DbGatewayResult ret;
     ret.error(RPCError::kRPCNone);
     ret.payload() = std::move(payload);
-    return ret;
+    co_return ret;
   }
 
   error("dbgateway_get_items: committed snapshot kept moving across {} "
         "attempts; giving up",
         kMaxAttempts);
-  return DbGatewayResult(RPCError::kRPCUnrecoverable);
+  co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
 }
 
 } // namespace hogd

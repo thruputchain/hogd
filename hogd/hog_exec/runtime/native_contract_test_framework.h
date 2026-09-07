@@ -615,7 +615,7 @@ public:
 
   DbTip get_db_tip() const
   {
-    auto r = db_proxy_->get_db_tip(block_number_)();
+    auto r = db_proxy_->get_db_tip(block_number_, committed_height_ + 1)();
     CHECK(r.has_value());
     return *r;
   }

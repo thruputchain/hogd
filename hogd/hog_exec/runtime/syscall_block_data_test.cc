@@ -328,9 +328,12 @@ TEST_F(SyscallBlockDataTest, MismatchedContextHeightRefusesTipLoad)
   get_storage_snapshot_cache()->set_block_execution_context(
       BlockExecutionContext{.block_height = 99, .block_timepoint = 1});
 
+  // Abandon, not Unrecoverable: the server keys serving on the stated height
+  // and cannot tell a disagreeing caller from one whose block the chain
+  // moved past, so both refuse the same way (executor_to_db_rpc.x).
   auto res = get_storage_snapshot_cache()->load_db_tip()();
   ASSERT_FALSE(res.has_value());
-  EXPECT_EQ(res.error().code(), SystemErrorCode::Unrecoverable);
+  EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
   EXPECT_FALSE(get_storage_snapshot_cache()->has_db_tip());
 }
 
