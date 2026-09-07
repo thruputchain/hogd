@@ -62,6 +62,23 @@ namespace hogd {
 
 namespace {
 
+// True when there is nothing at [path] to open: no such path, or an empty
+// directory. A filesystem error reads as false, so an unreadable path is
+// left to [IndexDB::open] to refuse rather than treated as absent.
+bool
+path_holds_nothing(const std::filesystem::path &path)
+{
+  std::error_code ec;
+  if (!std::filesystem::exists(path, ec)) {
+    return !ec;
+  }
+  if (!std::filesystem::is_directory(path, ec) || ec) {
+    return false;
+  }
+  const bool empty = std::filesystem::is_empty(path, ec);
+  return empty && !ec;
+}
+
 // Helper function to create a tx_index SST file chunk
 IndexerStatus<bool>
 create_tx_index_sst_chunk(
@@ -384,37 +401,27 @@ RocksDBDeleter::operator()(rocksdb::DB *db) const
   delete db;
 }
 
-bool
-IndexDB::database_exists(const std::filesystem::path &path)
-{
-  if (!std::filesystem::exists(path)) {
-    return false;
-  }
-  // Listing the column families is the cheapest question RocksDB answers
-  // about a path it may not own: it reads CURRENT and the manifest, so it
-  // succeeds only where a database really lives.
-  rocksdb::Options check_options;
-  check_options.create_if_missing = false;
-  std::vector<std::string> existing_column_families;
-  return rocksdb::DB::ListColumnFamilies(check_options, path.string(),
-                                         &existing_column_families)
-      .ok();
-}
-
 IndexerStatus<IndexDB>
 IndexDB::open_or_make_new(const std::filesystem::path &path,
                           rocksdb::CompressionType compression_algorithm)
 {
-  // Dispatching on whether the directory exists would send an existing but
-  // empty data directory down [open], which does not create and so fails
-  // with kDBNotFound -- fatal to every caller, all of which panic on it.
-  // The daemons are started against directories their launcher has already
-  // created often enough that "the directory is there" says nothing about
-  // whether a database is (#3890).
-  if (database_exists(path)) {
-    return open(path, compression_algorithm);
+  // Only a path with nothing at it is created. Dispatching on whether the
+  // path exists sent an existing but empty data directory down [open],
+  // which does not create and so fails with kDBNotFound -- fatal, since
+  // every caller panics on it. Launchers make a daemon's data directory
+  // before the daemon runs often enough (a deployment script, the CI
+  // control server clearing its work directory, a plain [mkdir -p]) that
+  // an empty directory says nothing about whether a database is there
+  // (#3890).
+  //
+  // Anything else is [open]'s to make sense of, including a directory
+  // holding files this cannot identify: a database whose CURRENT file is
+  // gone still fails closed rather than having a fresh manifest written
+  // over the top of its data.
+  if (path_holds_nothing(path)) {
+    return make_new(path, compression_algorithm);
   }
-  return make_new(path, compression_algorithm);
+  return open(path, compression_algorithm);
 }
 
 IndexerStatus<IndexDB>
@@ -425,7 +432,16 @@ IndexDB::make_new(const std::filesystem::path &path,
     return IndexerError(IndexerErrorCode::kUnsupportedCompressionAlgorithm);
   }
 
-  if (database_exists(path)) {
+  // Check if database already exists by trying to list column families
+  rocksdb::Options check_options;
+  check_options.create_if_missing = false;
+  std::vector<std::string> existing_column_families;
+  rocksdb::Status list_status =
+      rocksdb::DB::ListColumnFamilies(check_options, path.string(),
+                                      &existing_column_families);
+
+  if (list_status.ok()) {
+    // Database already exists
     error("Database already exists at: {}", path.string());
     return IndexerError(IndexerErrorCode::kDBAlreadyExists);
   }
