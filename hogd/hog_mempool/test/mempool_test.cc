@@ -2020,6 +2020,92 @@ TEST(Mempool, ProposalUsesTransactionRoot)
             MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
 }
 
+TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent_tip = get_tip.db_tip();
+
+  // Commit a block carrying a timepoint, so the tip has one to be behind.
+  constexpr TimePoint kTipTimepoint = 1'000'000;
+  SchedulerProposalResult res_propose =
+      propose_block(server, parent_tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(res_propose.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const Proposal committed = res_propose.proposed_block().proposal;
+  ASSERT_EQ(committed.header.block_timepoint, kTipTimepoint);
+  ASSERT_EQ(commit_block(server, parent_tip, res_propose.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip tip = get_tip.db_tip();
+  ASSERT_EQ(tip.value.proposal_header.block_timepoint, kTipTimepoint);
+
+  // Nominating behind the tip is refused.
+  EXPECT_EQ(propose_block(server, tip,
+                          ProposalContext{.block_timepoint = kTipTimepoint - 1})
+                .outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+
+  // Equal is allowed: two blocks sharing a timepoint is implausible, not
+  // incoherent. This also leaves the mempool able to nominate afterwards,
+  // showing the refusal above did not wedge it.
+  SchedulerProposalResult equal_timepoint =
+      propose_block(server, tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(equal_timepoint.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  // Commit the nomination.
+  ASSERT_EQ(commit_block(server, tip, equal_timepoint.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  tip = get_tip.db_tip();
+  ASSERT_EQ(tip.value.proposal_header.block_timepoint, kTipTimepoint);
+
+  // Greater than is allowed.
+  SchedulerProposalResult greater =
+      propose_block(server, tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint + 1});
+  ASSERT_EQ(greater.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // Proposing and validating do not advance the committed tip.
+  // A peer's proposal behind the tip is invalid.
+  Proposal backwards = greater.proposed_block().proposal;
+  backwards.header.block_timepoint = kTipTimepoint - 1;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(backwards))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+
+  // A peer's proposal equal to the tip is allowed.
+  Proposal equal = greater.proposed_block().proposal;
+  equal.header.block_timepoint = kTipTimepoint;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(equal))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationOK);
+
+  // A peer's proposal greater than the tip is allowed.
+  Proposal greater2 = greater.proposed_block().proposal;
+  greater2.header.block_timepoint = kTipTimepoint + 2;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(greater2))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationOK);
+}
+
 TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
