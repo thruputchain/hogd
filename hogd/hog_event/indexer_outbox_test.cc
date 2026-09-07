@@ -1486,34 +1486,39 @@ TEST_F(IndexerOutboxTest, EpochOriginPayloadSizeMustMatchFixedShape)
 TEST_F(IndexerOutboxTest,
        CandidateCardinalityAndCommittedBodyMismatchAreRejected)
 {
-  IndexerOutboxStore store = open_store(dir_);
   ProposedTransaction body = make_body(5);
-  auto candidate = make_candidate(48, 15, {body}, {make_event(body, 0x55)});
-  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
-  const std::string candidate_filename =
-      IndexerOutboxStore::candidate_filename(48);
-  mutate_payload<IndexerOutboxCandidatePayload>(dir_, candidate_filename,
-                                                [](auto &payload) {
-                                                  payload.tx_bodies.clear();
-                                                });
-  auto batch_mismatch = store.load_candidate(48)();
-  ASSERT_FALSE(batch_mismatch.has_value());
-  EXPECT_NE(batch_mismatch.error().find("cardinalities differ"),
-            std::string::npos);
-
   auto committed =
       make_committed(16, {body}, {make_event(body, /*marker=*/0x66)});
-  initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed)().has_value());
-  // The pairs live in the events file the record references, so a substituted
-  // body is a mutation of that file.
-  IndexerOutboxCommittedPayload mutated = committed;
-  mutated.tx_bodies[0] = make_body(6);
-  rewrite_events_file(dir_,
-                      committed.consensus_value.proposal_header.events_hash,
-                      mutated.event_logs, mutated.tx_bodies);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    auto candidate = make_candidate(48, 15, {body}, {make_event(body, 0x55)});
+    ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
+    const std::string candidate_filename =
+        IndexerOutboxStore::candidate_filename(48);
+    mutate_payload<IndexerOutboxCandidatePayload>(dir_, candidate_filename,
+                                                  [](auto &payload) {
+                                                    payload.tx_bodies.clear();
+                                                  });
+    auto batch_mismatch = store.load_candidate(48)();
+    ASSERT_FALSE(batch_mismatch.has_value());
+    EXPECT_NE(batch_mismatch.error().find("cardinalities differ"),
+              std::string::npos);
 
-  auto body_mismatch = store.load_committed(16)();
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+    // The pairs live in the events file the record references, so a
+    // substituted body is a mutation of that file.
+    IndexerOutboxCommittedPayload mutated = committed;
+    mutated.tx_bodies[0] = make_body(6);
+    rewrite_events_file(dir_,
+                        committed.consensus_value.proposal_header.events_hash,
+                        mutated.event_logs, mutated.tx_bodies);
+  }
+
+  // The store that published the file trusts it; the mutation is caught by
+  // the first load in a store that did not, which recomputes the roots.
+  IndexerOutboxStore reopened = open_store(dir_);
+  auto body_mismatch = reopened.load_committed(16)();
   ASSERT_FALSE(body_mismatch.has_value());
   EXPECT_NE(body_mismatch.error().find("body hash"), std::string::npos);
 }
@@ -1521,20 +1526,24 @@ TEST_F(IndexerOutboxTest,
 TEST_F(IndexerOutboxTest,
        CommittedNondeterministicDataMutationIsRejectedByEventRoot)
 {
-  IndexerOutboxStore store = open_store(dir_);
   ProposedTransaction body = make_body(7);
   auto committed =
       make_committed(161, {body}, {make_event(body, /*marker=*/0x77)});
-  initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed)().has_value());
-  IndexerOutboxCommittedPayload mutated = committed;
-  mutated.tx_bodies[0]
-      .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
-  rewrite_events_file(dir_,
-                      committed.consensus_value.proposal_header.events_hash,
-                      mutated.event_logs, mutated.tx_bodies);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+    IndexerOutboxCommittedPayload mutated = committed;
+    mutated.tx_bodies[0]
+        .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
+    rewrite_events_file(dir_,
+                        committed.consensus_value.proposal_header.events_hash,
+                        mutated.event_logs, mutated.tx_bodies);
+  }
 
-  auto result = store.load_committed(161)();
+  // Caught on the first load by a store that did not publish the file.
+  IndexerOutboxStore reopened = open_store(dir_);
+  auto result = reopened.load_committed(161)();
 
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("event root"), std::string::npos);
