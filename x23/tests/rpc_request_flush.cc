@@ -52,9 +52,9 @@ check_flush(int cancel)
   unsigned char byte = 0;
   auto n = ::read(peer.get(), &byte, 1);
   if (cancel ? (n != -1 || errno != EAGAIN) : (n != 1 || byte != 0xc7))
-    throw std::runtime_error(std::format(
-        "queued RPC flush failed: cancel={}, read={}, errno={}", cancel, n,
-        errno));
+    throw std::runtime_error(
+        std::format("queued RPC flush failed: cancel={}, read={}, errno={}",
+                    cancel, n, errno));
 }
 } // namespace
 
