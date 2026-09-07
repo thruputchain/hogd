@@ -263,20 +263,18 @@ public:
     // it, yet make_callback() below touches pool state: go() enqueues on a
     // runqueue and signals that queue's condition variable.  The coroutine
     // that callback resumes can run to completion -- and destroy the pool --
-    // while this thread is still inside go(), so count the thread here and
-    // have ~ThreadPool wait the count out.  Incremented in the caller rather
-    // than in the thread so the count is already non-zero when async()
-    // returns.
-    nasync_.fetch_add(1, std::memory_order_relaxed);
+    // while this thread is still inside go().  The AsyncRef captured below
+    // counts the thread so ~ThreadPool waits it out; it is constructed here
+    // rather than inside the thread so the count is already non-zero when
+    // async() returns, and released by its destructor so the count is still
+    // balanced if the jthread constructor throws and no thread ever runs.
+    //
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
     // be destroyed before they are used.  That incurs a second move
     // into the new thread, but that's unavoidable for safety.
-    std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
-                  ... args = std::forward<Args>(args)] {
-      // Runs after make_callback() below, so the pool stays alive for as
-      // long as this thread can still touch it.
-      Defer _done{[this] { async_done(); }};
+    std::jthread([this, _async = AsyncRef(nasync_), cb = CpuHinted(cb, cpuid()),
+                  f = std::forward<F>(f), ... args = std::forward<Args>(args)] {
       if constexpr (std::is_void_v<R>) {
         std::invoke(f, args...);
         make_callback(cb);
@@ -497,23 +495,67 @@ private:
   // Number of detached async() helper threads that may still touch this
   // pool.  Nothing joins those threads, so this count is what keeps the
   // pool alive for them; see async() and await_async_threads().
-  std::atomic_size_t nasync_{0};
+  //
+  // It has to outlive the pool.  wait_empty() returns as soon as it reads
+  // zero, without waiting at all, so ~ThreadPool can run to completion in
+  // the window between a helper's decrement and its notify_all() -- and
+  // then the helper would be signalling on a destroyed atomic, which is
+  // the very lifetime bug this is here to prevent.  Hence the shared_ptr:
+  // one reference per outstanding helper plus the pool's own, so whatever
+  // a helper is still about to touch is still there.
+  struct AsyncCount {
+    std::atomic_size_t n_{0};
 
-  void async_done() noexcept
-  {
-    nasync_.fetch_sub(1, std::memory_order_acq_rel);
-    nasync_.notify_all();
-  }
+    void acquire() noexcept { n_.fetch_add(1, std::memory_order_relaxed); }
+    void release() noexcept
+    {
+      n_.fetch_sub(1, std::memory_order_acq_rel);
+      n_.notify_all();
+    }
+    // Block until every helper has released.  The caller keeps a reference
+    // of its own, so the wait itself is always on live state.
+    void wait_empty() noexcept
+    {
+      for (size_t n; (n = n_.load(std::memory_order_acquire)) != 0;)
+        n_.wait(n, std::memory_order_relaxed);
+    }
+  };
+
+  // Counted handle on the AsyncCount, moved into a helper thread's
+  // closure.  Keeping the bookkeeping in a destructor is what makes the
+  // count exception-safe: if constructing the jthread throws, the closure
+  // is destroyed and the count comes back down, instead of stranding a
+  // later ~ThreadPool in wait_empty() forever.
+  //
+  // The closure's captures are destroyed in an unspecified order, but the
+  // only thing in the helper that touches the pool is make_callback() in
+  // the body, which is sequenced before all of them; a captured argument's
+  // destructor has no business reaching back into the pool.
+  class AsyncRef {
+    std::shared_ptr<AsyncCount> count_;
+
+  public:
+    explicit AsyncRef(std::shared_ptr<AsyncCount> count) noexcept
+      : count_(std::move(count))
+    {
+      count_->acquire();
+    }
+    AsyncRef(const AsyncRef &other) noexcept : AsyncRef(other.count_) {}
+    AsyncRef(AsyncRef &&other) noexcept : count_(std::move(other.count_)) {}
+    ~AsyncRef()
+    {
+      if (count_)
+        count_->release();
+    }
+  };
+
+  std::shared_ptr<AsyncCount> nasync_{std::make_shared<AsyncCount>()};
 
   // Block until no detached async() helper thread can touch the pool any
   // more.  Only ~ThreadPool needs this; the wait lasts as long as the
   // longest outstanding blocking task, which is the price of destroying a
   // pool with async() work still in flight.
-  void await_async_threads() noexcept
-  {
-    for (size_t n; (n = nasync_.load(std::memory_order_acquire)) != 0;)
-      nasync_.wait(n, std::memory_order_relaxed);
-  }
+  void await_async_threads() noexcept { nasync_->wait_empty(); }
 
   // https://en.wikipedia.org/wiki/Xorshift
   static uint64_t rnd(uint64_t &seed) noexcept
