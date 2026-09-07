@@ -3285,54 +3285,6 @@ TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
   EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
 }
 
-TEST_F(EventRpcTest, LivePullServesTheBlockWithoutReadingItsFileBack)
-{
-  EventRPCContext ctx(temp_dir());
-  EventExecRpc exec_rpc(ctx);
-  EventMempoolRpc mempool_rpc(ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-
-  ProposedTransaction body = make_body(7);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(7)(), RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_open_block(7)(), RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_emit_event(7, 1, make_event(body, 0x07),
-                                              body)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_close_block(7)(), RPCError::kRPCNone);
-  EventBlockResult closed = mempool_rpc.eventsched_close_block(7, 1)();
-  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-  ConsensusValue value =
-      make_consensus_value(1, closed.root_hash(), proposal_txs);
-  value.prev_hash = sha256(genesis);
-  ASSERT_EQ(mempool_rpc.eventsched_commit_block(7, value)(),
-            RPCError::kRPCNone);
-
-  // The pairs the block streamed are what the live pull serves. The events
-  // file is the durable copy for a restart, not the read path: remove it and
-  // the block still comes back whole, with no roots recomputed on the way.
-  ASSERT_TRUE(std::filesystem::remove(
-      EventBlockContext::final_events_filename(temp_dir(),
-                                               closed.root_hash())));
-  EventIndexerPullResult pulled = ctx.pull_indexer_next(pull_request())();
-  ASSERT_EQ(pulled.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
-  const IndexerCommittedBlockPayload &payload =
-      pulled.pulled_block().block.payload;
-  expect_xdr_equal(payload.consensus_value, value);
-  ASSERT_EQ(payload.event_logs.size(), 1U);
-  ASSERT_EQ(payload.tx_bodies.size(), 1U);
-  expect_xdr_equal(payload.tx_bodies[0], body);
-  EXPECT_EQ(pulled.pulled_block().block.identity.consensus_hash, sha256(value));
-
-  // That pull released the retained copy. A repeat of the height is served
-  // off the file, and the file is the only other copy: it is gone.
-  EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(1)().has_value());
-  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
-            EventIndexerPullOutcome::EventIndexerPullInternalFailure);
-}
-
 TEST_F(EventRpcTest, CorruptEventsFileFailsClosedWhereItIsRead)
 {
   EventRPCContext ctx(temp_dir());

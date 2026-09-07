@@ -1,11 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <cstddef>
-#include <cstdint>
 #include <functional>
-#include <map>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -147,22 +143,6 @@ private:
   // In-memory only.  Files that survive a crash have no claims, and reclaiming
   // those is startup reconciliation's job.
   std::unordered_map<SHA256Hash, size_t, SipHash24Hasher> events_file_refs_;
-  // A committed block's pairs as this process streamed them at close, kept so
-  // the live pull serves the block from memory: no file read, no root
-  // recomputation. The events file is the durable copy, for a restart and
-  // for any pull that does not find its block here. An entry is released by
-  // the pull that serves it -- the indexer pulls each block once -- and the
-  // window is capped at kRetainedCommittedBlocks heights besides, each at
-  // most EventBlockContext::kRetainedPairsBudget bytes; a block that outgrew
-  // the budget was never retained and is served off its file. Guarded by
-  // outbox_commit_lock_.
-  struct RetainedCommittedBlock {
-    ConsensusValue consensus_value;
-    std::vector<std::vector<uint8_t>> chunks;
-  };
-  constexpr static size_t kRetainedCommittedBlocks = 2;
-  std::map<BlockHeight, std::shared_ptr<const RetainedCommittedBlock>>
-      retained_committed_;
   // Guarded by outbox_commit_lock_. Every record through this finalized
   // height is pullable, including a crash-window record one ahead of HogDB.
   std::optional<BlockHeight> finalized_indexer_tail_;

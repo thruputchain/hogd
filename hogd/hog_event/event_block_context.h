@@ -3,13 +3,10 @@
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <fcntl.h>
 #include <memory>
-#include <mutex>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -140,20 +137,6 @@ public:
   x23::Async<bool> add_event(TxEventLog event, ProposedTransaction body);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
-
-  // The most a block keeps of its own pair stream in memory. A block past this
-  // drops what it retained and is served off its events file instead, which a
-  // file this process wrote costs a read and a parse, no root recomputation.
-  static constexpr size_t kRetainedPairsBudget = size_t{1} << 30;
-
-  // The pair bytes this block streamed to its events file, kept in memory so
-  // the live pull path can serve the block without reading the file back:
-  // the same [TxEventLog][ProposedTransaction] stream the file holds, one
-  // chunk per flush, each holding whole pairs. The events file stays the
-  // durable copy. Nullopt when the block outgrew kRetainedPairsBudget. Valid
-  // once the file is finished; moves the chunks out, so it is called once, by
-  // commit.
-  std::optional<std::vector<std::vector<uint8_t>>> take_retained_chunks();
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
   x23::Async<void> wait_file_done();
@@ -269,17 +252,6 @@ private:
   x23::CoroLock lock_;
   BlockState state_ = BlockState::kActive;
   uint32_t pending_write_count_ = 0;
-
-  // Every chunk written to the events file, until commit takes them. Pushed
-  // by the detached flush writers and by finish_file_write's drain, taken by
-  // commit after the file is finished; the mutex covers the hand-off. Once
-  // the block outgrows kRetainedPairsBudget the chunks are dropped and
-  // nothing more is kept.
-  void retain_chunk(std::vector<uint8_t> chunk);
-  std::mutex retained_mutex_;
-  std::vector<std::vector<uint8_t>> retained_chunks_;
-  size_t retained_bytes_ = 0;
-  bool retention_dropped_ = false;
 
   x23::CoroFutex<bool> all_writes_done_ = false;
 
