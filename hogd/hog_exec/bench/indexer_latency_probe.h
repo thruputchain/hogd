@@ -52,6 +52,20 @@ public:
   // gives up on it.
   static constexpr auto kConnectTimeout = std::chrono::seconds(120);
 
+  // How long the indexer gets to make *some* progress on the backlog before
+  // [drain] gives up on it. A deadline on the whole drain cannot work here:
+  // the runner commits its blocks far faster than the indexer ingests them,
+  // so the backlog standing at the end of a run takes as long to clear as
+  // the indexer needs for every block still in it -- which scales with the
+  // block size, the host, and the trial count, not with any number written
+  // here. Bounding the stall instead keeps a wedged indexer from hanging the
+  // benchmark while letting a merely slow one be measured in full.
+  static constexpr auto kDrainStallTimeout = std::chrono::seconds(60);
+
+  // Backstop on the whole drain, so an indexer that advances one height per
+  // stall window still cannot hold the benchmark for an unbounded time.
+  static constexpr auto kDrainTotalTimeout = std::chrono::minutes(5);
+
   // Fails loudly: a probe that silently measured nothing would publish an
   // empty metric that reads exactly like "latency is fine".
   explicit IndexerLatencyProbe(const std::string &indexer_addr)
@@ -82,15 +96,30 @@ public:
     pending_.emplace(height, commit_ns);
   }
 
-  // Blocks until the indexer's watermark covers every recorded height, or
-  // until [timeout] elapses. Returns false on timeout, leaving the
-  // unobserved heights out of the report rather than guessing at them.
-  bool drain(std::chrono::milliseconds timeout)
+  // Blocks until the indexer's watermark covers every recorded height.
+  // Returns false once the indexer has gone [kDrainStallTimeout] without
+  // covering another one, or once the whole drain has run for
+  // [kDrainTotalTimeout], leaving the still-unobserved heights out of the
+  // report rather than guessing at them.
+  bool drain()
   {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    const auto total_deadline =
+        std::chrono::steady_clock::now() + kDrainTotalTimeout;
     std::unique_lock lock(mtx_);
-    return drained_.wait_until(lock, deadline,
-                               [this] { return pending_.empty(); });
+    while (!pending_.empty()) {
+      // Progress, not emptiness: each wait only has to see the backlog
+      // shrink, so a drain that keeps advancing is never cut short.
+      const size_t remaining = pending_.size();
+      const auto stall_deadline =
+          std::min(std::chrono::steady_clock::now() + kDrainStallTimeout,
+                   total_deadline);
+      if (!drained_.wait_until(lock, stall_deadline, [this, remaining] {
+            return pending_.size() < remaining;
+          })) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void stop()
@@ -205,14 +234,19 @@ private:
         const std::lock_guard g(mtx_);
         // [pending_] is ordered, so this walks exactly the heights this
         // sample newly covered and stops at the first one it did not.
+        bool observed_any = false;
         for (auto it = pending_.begin();
              it != pending_.end() && it->first <= watermark;) {
           const uint64_t latency_ns = now - it->second;
           observed_.push_back(latency_ns);
           per_height_.emplace(it->first, latency_ns);
           it = pending_.erase(it);
+          observed_any = true;
         }
-        if (pending_.empty()) {
+        // Every observation is announced, not just the one that empties the
+        // backlog: [drain] waits on the backlog shrinking so that it can
+        // tell a slow indexer from a stopped one.
+        if (observed_any) {
           drained_.notify_all();
         }
       }
