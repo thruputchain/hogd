@@ -497,6 +497,13 @@ private:
   // no trace there.
   const bool has_duplicate_attachment_ = false;
 
+  // Set when perform_initial_validation() refuses the transaction as
+  // malformed (HogexecAdmission::is_contract_attachable said no). The
+  // resulting ExecResult depends on execution mode and InvokeErrorCode has no
+  // code for "malformed", so the reason is recorded here and read once, in
+  // try_commit_transaction().
+  bool tx_malformed_ = false;
+
   // Images for this transaction's attachments, keyed by contract hash.
   // perform_initial_validation keeps what it built to verify each one rather
   // than building it again at first invocation (#3536); an already-committed

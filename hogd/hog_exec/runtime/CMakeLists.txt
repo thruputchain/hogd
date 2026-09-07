@@ -35,6 +35,7 @@ add_library(runtime_objects OBJECT
   syscall_rcq.cc
   syscall_stats.cc
   transaction_stats.cc
+  well_formed.cc
 )
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -132,6 +133,7 @@ add_library(runtime_test_objects OBJECT
   tracing_tests.cc
   try_invoke_test.cc
   tx_context_tests.cc
+  well_formed_test.cc
 )
 
 target_link_libraries(

@@ -1560,9 +1560,9 @@ TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
 // A native contract attached to a transaction is rejected during initial
 // validation, even when the body never deploys or invokes it: every native id
 // is refused by deploy_contract's banned-redeploy check, so an attachment
-// could never be deployed. The scheduler is meant to drop such a transaction
-// before it reaches the executor, so the classification is Unrecoverable
-// rather than a contract fault. The contract here is registered in the
+// could never be deployed. In proposal mode that is a transaction to drop,
+// not an internal error, so it reports ExecResultMalformedTransaction and the
+// scheduler declines to nominate it. The contract here is registered in the
 // NativeContext, so it is rejected for being native, not for being unknown.
 TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
 {
@@ -1616,9 +1616,10 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
 
   auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
   EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultUnrecoverable);
+            ExecResult::ExecResultMalformedTransaction);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(attached_hash).has_value());
 }

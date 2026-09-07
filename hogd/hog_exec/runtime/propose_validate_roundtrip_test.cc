@@ -1491,9 +1491,11 @@ TEST_P(ProposeValidateRoundtripTest,
 
 // An attached native contract is refused during initial validation. In
 // validation mode the transaction came from another proposer, so it is a
-// proposer-attributable ValidationFailure rather than the Unrecoverable that
-// proposal mode reports -- a peer must not be able to induce an internal
-// error on every validating node.
+// proposer-attributable ValidationFailure rather than the
+// ExecResultMalformedTransaction proposal mode reports -- the verdict on a
+// peer's block is not the same as the decision to drop our own candidate,
+// and a peer must not be able to induce an internal error on every
+// validating node.
 TEST_P(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
 {
   auto native_context = make_noop_context();

@@ -41,10 +41,10 @@
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
+#include "hogd/hog_exec/runtime/well_formed.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
-#include "hogd/hog_mempool/well_formed.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -297,7 +297,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         // auth round-trip.
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < txs->size(); i++) {
-          if (!MempoolAdmission::is_tx_well_formed((*txs)[i])) {
+          if (!HogexecAdmission::is_tx_well_formed((*txs)[i].tx)) {
             to_remove_indices.push_back(i);
           }
         }
@@ -458,6 +458,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   // No well-formedness check here, unlike submit_unvetted: dropping a vetted
   // tx leaves the peer block it belongs to permanently unvalidatable by this
   // mempool, the same wedge the capacity check above is skipped to avoid.
+  // Nothing is lost by admitting a malformed one -- the executor re-runs the
+  // same predicate and, in validation mode, rejects it as a
+  // proposer-attributable ValidationFailure.
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(lock_commit_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {

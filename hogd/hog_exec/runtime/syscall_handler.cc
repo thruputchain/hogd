@@ -47,6 +47,7 @@
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/well_formed.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -268,9 +269,10 @@ SystemCallHandler::perform_initial_validation()
       // An expired uniquifier is a deterministic, proposer-attributable
       // rejection: map it to ValidationFailure uniformly in proposal and
       // validation mode. In proposal mode this is only reachable when the
-      // scheduler tried to propose a transaction it should have already dropped
-      // -- try_commit_transaction() asserts (debug only) that any proposal-mode
-      // ValidationFailure is in fact a bad expiry height.
+      // scheduler tried to propose a transaction it should have already
+      // dropped -- try_commit_transaction() asserts (debug only) that any
+      // proposal-mode ValidationFailure is either this or a malformed
+      // transaction.
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::ValidationFailure};
       co_return SystemStatus<void>{};
@@ -289,19 +291,14 @@ SystemCallHandler::perform_initial_validation()
     }
   }
 
-  // TODO(geoff): Adjust if some assumption on the rest of the system changes
-  //
-  // At this point, we do not know the provenance of signed_tx_.  As such,
-  // an attached contract may or may not have been validated by this point.
-  //
-  // We should validate contracts as they are sent to us from clients (before
-  // broadcasting to other nodes) and we may wish to validate them as they are
-  // broadcast to us from other nodes. But until we have a concrete design of
-  // the coordinator and know what is is and is not doing, we conservatively
-  // validate contracts here.
-  //
-  // If we make the assumption that all contracts are validated by the time they
-  // get to the executor, this check could be removed.
+  // The checks below stay here whatever the scheduler does, because the
+  // executor never knows this transaction's provenance. The mempool runs
+  // HogexecAdmission on transactions clients submit to us, so most malformed
+  // ones are gone before they cost an auth round-trip; it deliberately does
+  // not run it on transactions the coordinator hands back for validating a
+  // peer's block, since dropping one of those would leave that block
+  // permanently unvalidatable here. So an attached contract may or may not
+  // have been screened, and these checks are what makes that safe either way.
 
   // Rejected rather than deduplicated: two different transaction encodings
   // would otherwise have identical effect.
@@ -337,27 +334,25 @@ SystemCallHandler::perform_initial_validation()
           InvokeError{InvokeErrorCode::Deterministic};
       co_return SystemStatus<void>{};
     }
-    // Native contracts are registered at genesis, never deployed by a
-    // transaction: is_banned_redeploy_native_contract() rejects every id, so
-    // an attached one could never reach deploy_contract successfully.
+    // A malformed attachment -- currently a native contract, which
+    // is_banned_redeploy_native_contract() refuses for every id, so an
+    // attached one could never reach deploy_contract successfully.
     //
-    // TODO(geoff): filter these out in the scheduler, which is what should
-    // stop one being proposed in the first place. Until then the
-    // classification depends on where the transaction came from: in proposal
-    // mode it is ours and the scheduler should already have dropped it, so
-    // reaching here is an internal inconsistency; in validation mode it came
-    // from another proposer and is attacker-controlled, so it is a
-    // proposer-attributable rejection and must never be reportable as an
-    // internal error a peer can induce.
+    // The mempool runs the same predicate on unvetted submissions, so in
+    // proposal mode this is a transaction it should already have dropped.
+    // Reaching here anyway is not an internal error, just one more to drop:
+    // try_commit_transaction() reports ExecResultMalformedTransaction and the
+    // scheduler declines to nominate it. In validation mode the transaction
+    // came from another proposer and is attacker-controlled, so it stays a
+    // proposer-attributable ValidationFailure.
     //
     // Genesis is unaffected: it installs the native token and wallet through
     // the deployment prerequisites, not through contracts_to_deploy.
-    if (contract->contract_type() == ContractType::kNative) {
+    if (!HogexecAdmission::is_contract_attachable(*contract)) {
       error("Attached contract is native; native contracts are not deployable");
-      cumulative_invoke_result_.result_ = InvokeError{
-          std::holds_alternative<ValidationModeData>(execution_mode_data_)
-              ? InvokeErrorCode::ValidationFailure
-              : InvokeErrorCode::Unrecoverable};
+      tx_malformed_ = true;
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::ValidationFailure};
       co_return SystemStatus<void>{};
     }
     PreparedContract prepared;
@@ -575,10 +570,10 @@ SystemCallHandler::try_commit_transaction()
     }
 
     // Proposal mode should never reject a transaction with a ValidationFailure
-    // except when its replay uniquifier was already expired: the scheduler must
-    // not have tried to propose such a transaction in the first place. Assert
-    // that (debug only) so a future proposal-mode validation failure can't slip
-    // through silently -- generalize this once proposal mode gains other ones.
+    // except when its replay uniquifier was already expired or the transaction
+    // is malformed: the scheduler must not have tried to propose such a
+    // transaction in the first place. Assert that (debug only) so a future
+    // proposal-mode validation failure can't slip through silently.
     //
     // The tip re-read here cannot fail: reaching a proposal-mode
     // ValidationFailure means perform_initial_validation() already read the tip
@@ -589,7 +584,7 @@ SystemCallHandler::try_commit_transaction()
     if constexpr (is_debug_build()) {
       if (error_code == InvokeErrorCode::ValidationFailure &&
           std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
-        CHECK(replay_uniquifier_expired());
+        CHECK(tx_malformed_ || replay_uniquifier_expired());
       }
     }
 
@@ -598,6 +593,17 @@ SystemCallHandler::try_commit_transaction()
     auto res = co_await abort_transaction();
     if (!res.has_value()) {
       co_return to_exec_result(res.error().code());
+    }
+
+    // A malformed transaction has no InvokeErrorCode of its own -- it is not
+    // an invocation result at all, being refused before any frame runs -- so
+    // the reason is carried on the handler and mapped here, where the mode is
+    // known. Proposing is ours to get right, so the scheduler is told to drop
+    // it; validating is judging a peer, so the verdict stays attributable to
+    // the proposer.
+    if (tx_malformed_ &&
+        std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+      co_return ExecResult::ExecResultMalformedTransaction;
     }
 
     co_return to_exec_result(error_code);
