@@ -29,6 +29,12 @@ public:
   static std::pair<InvokeStatus<NewContractSet>, GasAmount>
   make(NewContractBatch const &contracts, RuntimeContext &runtime_context);
 
+  // A temporary batch would leave the returned set holding dangling element
+  // pointers before its first use. Deleted to make that a compile error at
+  // the call site (same guard as SystemCallHandler's Transaction&& ctor).
+  static std::pair<InvokeStatus<NewContractSet>, GasAmount>
+  make(NewContractBatch &&contracts, RuntimeContext &runtime_context) = delete;
+
   BorrowedContractBatch borrow_contracts(
       std::unordered_set<SHA256Hash, SipHash24Hasher> const &hashes) const
   {

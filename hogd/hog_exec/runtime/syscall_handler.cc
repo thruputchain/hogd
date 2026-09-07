@@ -10,6 +10,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <utility>
@@ -248,14 +249,25 @@ SystemCallHandler::perform_initial_validation()
     }
   }
 
-  auto [res, gas_consumed] =
-      NewContractSet::make(contracts_to_deploy_, runtime_context_);
-  if (!res.has_value()) {
-    return {res.error(), gas_consumed};
-  }
-  newly_created_contracts_ = std::move(*res);
+  // make() allocates proportional to attacker-influenced input (the maps and
+  // each rv32 translation), and this runs inside an x23 coroutine where an
+  // escaping throw is fatal. The old attachment deep copy ran in the ctor
+  // under executor_context's bad_alloc containment; that containment moves
+  // here with the work. Contain bad_alloc only -- allocation-free, so the
+  // handler itself cannot rethrow -- and keep anything else terminating,
+  // since it is a genuine bug.
+  try {
+    auto [res, gas_consumed] =
+        NewContractSet::make(contracts_to_deploy_, runtime_context_);
+    if (!res.has_value()) {
+      return {res.error(), gas_consumed};
+    }
+    newly_created_contracts_ = std::move(*res);
 
-  return {InvokeStatus<void>{}, gas_consumed};
+    return {InvokeStatus<void>{}, gas_consumed};
+  } catch (std::bad_alloc const &) {
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+  }
 }
 
 void
