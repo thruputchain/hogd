@@ -231,7 +231,7 @@ private:
 
     {
       const std::lock_guard g(attempt->mtx);
-      if (client) {
+      if (client.has_value()) {
         attempt->client.emplace(std::move(*client));
       }
       attempt->error = std::move(error);
@@ -263,11 +263,11 @@ private:
             "indexer is not serving queries",
             addr, kConnectTimeout.count());
     }
-    if (!attempt->client) {
-      panic("indexer latency probe: {} did not accept the probe: {}", addr,
-            attempt->error);
+    if (attempt->client.has_value()) {
+      return std::move(*attempt->client);
     }
-    return std::move(*attempt->client);
+    panic("indexer latency probe: {} did not accept the probe: {}", addr,
+          attempt->error);
   }
 
   // Nearest-rank: the ceil(q * N)th smallest sample, 1-indexed, so every
@@ -298,8 +298,7 @@ private:
       // A copy, so the RPC runs without [client_mtx_] held and [stop] can
       // still reach the stream to unstick a call that is not coming back.
       std::optional<indexer_block_explorer_client_t> client = copy_client();
-      const bool connected = client.has_value();
-      if (connected) {
+      if (client.has_value()) {
         const BlockHeight watermark = read_watermark(*client);
         const uint64_t now = x23::fastclock::get_ns();
         const std::lock_guard g(mtx_);
@@ -321,9 +320,12 @@ private:
       }
 
       std::unique_lock lock(wait_mtx_);
-      // Pacing follows what the loop is doing: measuring at [kPollInterval],
-      // waiting for a connection at [kReconnectInterval].
-      wake_.wait_for(lock, stop, connected ? kPollInterval : kReconnectInterval,
+      // Pacing follows what the loop just did: measuring at [kPollInterval],
+      // waiting for a connection at [kReconnectInterval]. [client] is this
+      // tick's copy, so a read that dropped the shared one does not change
+      // the pace until the next tick reads it as gone.
+      wake_.wait_for(lock, stop,
+                     client.has_value() ? kPollInterval : kReconnectInterval,
                      [] { return false; });
     }
   }
@@ -392,7 +394,7 @@ private:
   void fail_client()
   {
     std::optional<indexer_block_explorer_client_t> client = copy_client();
-    if (client) {
+    if (client.has_value()) {
       client->__send_call.get()->fail();
     }
   }
@@ -420,7 +422,7 @@ private:
     }
     // Finished, so this thread is now the only one that touches it.
     const std::shared_ptr<ConnectAttempt> attempt = std::move(attempt_);
-    if (!attempt->client) {
+    if (!attempt->client.has_value()) {
       note_failure(
           std::format("reconnect to {}: {}", indexer_addr_, attempt->error));
       return;
