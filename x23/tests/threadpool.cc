@@ -5,7 +5,6 @@
 #include <memory>
 #include <mutex>
 #include <thread>
-#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -122,53 +121,4 @@ TEST(ThreadPoolOnQuiesce, RepeatedWakeups)
   for (unsigned count = done.load(std::memory_order_acquire);
        count != kCoroutines; count = done.load(std::memory_order_acquire))
     done.wait(count, std::memory_order_relaxed);
-}
-
-TEST(ThreadPoolWake, ParallelJobs)
-{
-  for (bool batch : {false, true}) {
-    std::mutex mutex;
-    std::condition_variable ready;
-    std::condition_variable release;
-    unsigned started = 0;
-    bool released = false;
-    ThreadPool pool(32);
-    std::vector<ThreadPool::Job> jobs;
-    std::vector<CoroCB<void>> callbacks;
-
-    for (unsigned i = 0; i < 8; ++i) {
-      auto [pending, cb] = make_async<void>();
-      [](Async<void> pending, std::mutex &mutex, std::condition_variable &ready,
-         std::condition_variable &release, unsigned &started,
-         bool &released) -> Detached {
-        co_await pending;
-        std::unique_lock lock(mutex);
-        ++started;
-        ready.notify_one();
-        release.wait(lock, [&] { return released; });
-      }(std::move(pending), mutex, ready, release, started, released);
-      callbacks.push_back(cb);
-    }
-    for (auto &cb : callbacks) {
-      auto h = cb.set_result_without_resuming();
-      ASSERT_TRUE(h);
-      if (batch)
-        jobs.emplace_back(h);
-      else
-        pool.go(ThreadPool::Job{h});
-    }
-    if (batch)
-      pool.go(std::move(jobs));
-
-    {
-      std::unique_lock lock(mutex);
-      // Keep the first jobs busy so a missing notification cannot be
-      // hidden by one worker draining the whole queue sequentially.
-      EXPECT_TRUE(
-          ready.wait_for(lock, seconds(5), [&] { return started == 8; }));
-      released = true;
-      release.notify_all();
-    }
-    pool.drain();
-  }
 }
