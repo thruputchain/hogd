@@ -222,8 +222,9 @@ NetworkConfig
 bench_network_config()
 {
   NetworkConfig config = stock_network_config();
-  NetworkConfigParams::set_param(
-      config, ConfigParamID::kConfigParamMaxBytestringLen, kMaxBytestringBytes);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 kMaxBytestringBytes);
   return config;
 }
 

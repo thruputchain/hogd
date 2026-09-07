@@ -2,14 +2,17 @@
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
+#include <expected>
 #include <format>
 #include <memory>
 #include <optional>
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"

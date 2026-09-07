@@ -149,8 +149,7 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
     max_bytestring_len(
         stated_param(config, ConfigParamID::kConfigParamMaxBytestringLen)
             .value_or(static_cast<uint32_t>(kDefaultMaxBytestringLen)))
-{
-}
+{}
 
 inline void
 NetworkConfigParams::set_param(NetworkConfig &config, ConfigParamID id,
@@ -168,8 +167,9 @@ NetworkConfigParams::set_param(NetworkConfig &config, ConfigParamID id,
   rebuilt.v(0);
   for (int32_t i = 0; i <= highest; ++i) {
     const auto param_id = static_cast<ConfigParamID>(i);
-    rebuilt.v0().params.push_back(make_param(
-        param_id, param_id == id ? value : params.in_force(param_id)));
+    rebuilt.v0().params.push_back(
+        make_param(param_id,
+                   param_id == id ? value : params.in_force(param_id)));
   }
   config = std::move(rebuilt);
 }

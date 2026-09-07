@@ -5,6 +5,7 @@
 #include <optional>
 #include <string_view>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
@@ -75,7 +76,8 @@ protected:
         *db_proxy_);
     auto res = cache_->load_db_tip()();
     if (!res.has_value()) [[unlikely]] {
-      panic("StorageSnapshotCacheTest::SetUp: failed to load db tip: {}", res.error());
+      panic("StorageSnapshotCacheTest::SetUp: failed to load db tip: {}",
+            res.error());
     }
   }
 
