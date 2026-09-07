@@ -136,12 +136,12 @@ public:
     std::vector<uint64_t> samples;
     size_t missed = 0;
     std::string diagnosis;
-    size_t failures = 0;
+    bool failed = false;
     {
       const std::lock_guard g(mtx_);
       samples = observed_;
       missed = pending_.size();
-      failures = failures_;
+      failed = any_failure();
       diagnosis = describe_failures();
       for (const auto &[height, latency_ns] : per_height_) {
         std::println("indexer_latency_block: label={} height={} latency_ns={}",
@@ -162,7 +162,7 @@ public:
     // Kept off the metric lines, whose format the history tooling parses, but
     // still said out loud: a run that lost the connection and got it back
     // measured a gap it cannot see in its own percentiles.
-    if (failures != 0) {
+    if (failed) {
       warn("indexer latency probe: label={} measured {} blocks despite {}",
            label, samples.size(), diagnosis);
     }
@@ -345,12 +345,21 @@ private:
     try {
       const TransactionRefPageResult result =
           client.get_transactions_by_block(query)();
-      if (result.outcome() != IndexerQueryOutcome::IndexerQueryOk) {
-        // Expected while the indexer is still opening its database. The
+      const IndexerQueryOutcome outcome = result.outcome();
+      if (outcome == IndexerQueryOutcome::IndexerQueryOk) {
+        return result.page().latest_block;
+      }
+      if (outcome == IndexerQueryOutcome::IndexerQueryNotReady) {
+        // Expected while the indexer is still opening its database, and the
         // connection is fine, so this is not a failure to record.
         return -1;
       }
-      return result.page().latest_block;
+      // The indexer answered and refused. A broken index reads nothing like
+      // one that has not opened yet, so it must not land in the report as
+      // "served every watermark read" -- that would be a worse diagnosis
+      // than the bare "no samples" this change set out to replace.
+      note_query_failure(outcome);
+      return -1;
     } catch (const std::exception &e) {
       // [stop] fails the stream deliberately to unstick a call that is not
       // coming back, so a failure seen while stopping is this shutdown
@@ -359,7 +368,7 @@ private:
         warn_every_n_sec(1.0,
                          "indexer latency probe: watermark read failed: {}",
                          e.what());
-        note_failure(std::format("watermark read failed: {}", e.what()));
+        note_read_failure(std::format("watermark read failed: {}", e.what()));
       }
       // Fail the stream before dropping it, the way the indexer's own pull
       // loop retires a broken event client: the socket is closed here rather
@@ -423,7 +432,7 @@ private:
     // Finished, so this thread is now the only one that touches it.
     const std::shared_ptr<ConnectAttempt> attempt = std::move(attempt_);
     if (!attempt->client.has_value()) {
-      note_failure(
+      note_reconnect_failure(
           std::format("reconnect to {}: {}", indexer_addr_, attempt->error));
       return;
     }
@@ -436,13 +445,50 @@ private:
     info("indexer latency probe: reconnected to {}", indexer_addr_);
   }
 
-  // Records why the probe could not read a watermark. Kept to one line so it
-  // can ride on the summary line CI replays.
-  void note_failure(std::string what)
+  // The three ways a watermark can fail to arrive are counted apart from
+  // each other, because they mean different things about the indexer and a
+  // combined count hides which one happened: a dropped read says it went
+  // away mid-run, a refused query says it is up but its index is not
+  // serving, and a failed reconnect says it has not come back.
+
+  // Transport failure on the watermark read: the connection is gone.
+  void note_read_failure(std::string what)
+  {
+    const std::lock_guard g(mtx_);
+    ++read_failures_;
+    note_error(std::move(what));
+  }
+
+  // A reconnect attempt that did not produce a usable connection.
+  void note_reconnect_failure(std::string what)
+  {
+    const std::lock_guard g(mtx_);
+    ++reconnect_failures_;
+    note_error(std::move(what));
+  }
+
+  // The indexer answered the query and refused it. Counted rather than
+  // re-rendered on every poll: a persistently broken index would otherwise
+  // format ~1k messages a second for the rest of the run, so only the first
+  // outcome is kept -- it is the outcome, not the repetition, that diagnoses
+  // anything.
+  void note_query_failure(IndexerQueryOutcome outcome)
+  {
+    warn_every_n_sec(1.0, "indexer latency probe: watermark query refused: {}",
+                     outcome);
+    const std::lock_guard g(mtx_);
+    if (query_failures_ == 0) {
+      query_outcome_ = std::format("{}", outcome);
+    }
+    ++query_failures_;
+  }
+
+  // Keeps the first and last transport error text, whichever side saw it, on
+  // one line so it can ride on the summary line CI replays. Caller holds
+  // [mtx_].
+  void note_error(std::string what)
   {
     std::ranges::replace(what, '\n', ' ');
-    const std::lock_guard g(mtx_);
-    ++failures_;
     if (first_error_.empty()) {
       first_error_ = what;
     }
@@ -450,19 +496,50 @@ private:
   }
 
   // Caller holds [mtx_].
+  bool any_failure() const
+  {
+    return read_failures_ != 0 || query_failures_ != 0 ||
+           reconnect_failures_ != 0;
+  }
+
+  // Caller holds [mtx_].
   std::string describe_failures() const
   {
-    if (failures_ == 0) {
+    if (!any_failure()) {
       return "the indexer served every watermark read but never reported one "
              "covering a committed height";
     }
-    if (first_error_ == last_error_) {
-      return std::format("{} failed watermark reads, {} reconnects: {}",
-                         failures_, reconnects_, first_error_);
+
+    std::vector<std::string> parts;
+    if (query_failures_ != 0) {
+      parts.push_back(std::format("{} watermark queries refused ({})",
+                                  query_failures_, query_outcome_));
     }
-    return std::format("{} failed watermark reads, {} reconnects; first: {}; "
-                       "last: {}",
-                       failures_, reconnects_, first_error_, last_error_);
+    if (read_failures_ != 0) {
+      parts.push_back(
+          std::format("{} dropped watermark reads", read_failures_));
+    }
+    if (reconnect_failures_ != 0) {
+      parts.push_back(std::format("{} failed reconnects", reconnect_failures_));
+    }
+    if (reconnects_ != 0) {
+      parts.push_back(std::format("{} reconnects succeeded", reconnects_));
+    }
+    if (!first_error_.empty()) {
+      parts.push_back(
+          first_error_ == last_error_
+              ? first_error_
+              : std::format("first: {}; last: {}", first_error_, last_error_));
+    }
+
+    std::string reason;
+    for (const std::string &part : parts) {
+      if (!reason.empty()) {
+        reason += "; ";
+      }
+      reason += part;
+    }
+    return reason;
   }
 
   const std::string indexer_addr_;
@@ -484,8 +561,12 @@ private:
   std::map<BlockHeight, uint64_t> per_height_;
   std::vector<uint64_t> observed_;
   // Why the probe stopped being able to ask, for the report to carry.
-  size_t failures_ = 0;
+  size_t read_failures_ = 0;
+  size_t query_failures_ = 0;
+  size_t reconnect_failures_ = 0;
   size_t reconnects_ = 0;
+  // The first non-OK query outcome, rendered once.
+  std::string query_outcome_;
   std::string first_error_;
   std::string last_error_;
 
