@@ -1,6 +1,7 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
 #include <cassert>
+#include <cstdint>
 #include <optional>
 #include <utility>
 
@@ -26,6 +27,9 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 bool &output_current_set_opt,
                                 int128_t &output_current_add)
 {
+  // Bracket the call: any load it does adds to the transaction's running
+  // total, and the difference is what this call is charged for.
+  const uint64_t db_gas_before = syscall_handler.db_read_gas();
   auto status =
       co_await syscall_handler.get_nnint(input_key,
                                          input_force_load_from_snapshot);
@@ -58,7 +62,9 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs->current_add = to_xdr(output_current_add);
   }
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost}};
+                               WrappedGasAmount{kStorageAccessCost +
+                                                syscall_handler.db_read_gas() -
+                                                db_gas_before}};
 }
 
 MaybeAsyncSyscallInnerResult

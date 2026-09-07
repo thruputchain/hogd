@@ -1,4 +1,5 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
@@ -1745,6 +1746,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
+      note_item_load(item_key);
       auto load_status =
           co_await unmodified_item->load(snapshot_cache_, item_key);
       if (!load_status.has_value()) {
@@ -1802,6 +1804,14 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   co_return item_view->set(BytestringItem(std::move(new_string)), input_flags);
 }
 
+void
+SystemCallHandler::note_item_load(FrameItemKey const &key)
+{
+  if (loaded_keys_.insert(key).second) {
+    db_read_gas_ += kDBRPCCost;
+  }
+}
+
 x23::Async<
     SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
@@ -1856,6 +1866,7 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     }
 
     if (!unmodified_item->is_loaded()) {
+      note_item_load(item_key);
       auto load_status =
           co_await unmodified_item->load(snapshot_cache_, item_key);
       if (!load_status.has_value()) {
@@ -2225,6 +2236,7 @@ SystemCallHandler::get_native_token_balance(
 
   if (auto *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
+      note_item_load(item_key);
       auto load_status =
           co_await unmodified_item->load(snapshot_cache_, item_key);
       if (!load_status.has_value()) {

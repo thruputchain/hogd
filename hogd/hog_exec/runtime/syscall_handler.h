@@ -8,6 +8,7 @@
 #include <span>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -470,6 +471,23 @@ public:
     return x23::Defer([]() { debug_force_commit_abort_ = false; });
   }
 
+  // Gas this transaction has accrued for database reads, running total.
+  //
+  // A syscall that may load reads this before and after its work and charges
+  // the difference; every load site adds to it, so a site added later cannot
+  // quietly go unbilled.
+  uint64_t db_read_gas() const { return db_read_gas_; }
+
+  // Account for a load of [key]. Charges kDBRPCCost the first time this
+  // transaction loads it and nothing after.
+  //
+  // A load is the transaction's first touch: the view is created by the frame
+  // walk and populated once, and every later touch finds it. A frame that
+  // rolls back drops its views, so a touch after that loads again -- but the
+  // block's snapshot cache is not rolled back and serves it, so that is not a
+  // second database read and must not be charged as one.
+  void note_item_load(FrameItemKey const &key);
+
 private:
   RuntimeContext &runtime_context_;
   PerTransactionDatabaseProxy db_proxy_;
@@ -522,6 +540,11 @@ private:
   bool two_phase_commit_failed_{false};
 
   StorageSnapshotCache &snapshot_cache_;
+
+  // Keys this transaction has loaded, rolled-back frames included. See
+  // note_item_load().
+  std::unordered_set<FrameItemKey, FrameItemKeyHash> loaded_keys_;
+  uint64_t db_read_gas_ = 0;
 
   // The block's db tip, pinned on this handler at the transaction's first
   // admission check (see init_db_tip()). Owned by snapshot_cache_ and stable
