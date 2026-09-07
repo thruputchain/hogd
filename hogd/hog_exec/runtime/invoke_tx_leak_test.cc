@@ -158,11 +158,15 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   // BlockTX stays alive.
   fw.discard_block();
 
-  // Probe the old block ID with a read. If the BlockTX was garbage
-  // collected (InvokeTX properly closed), this returns Abandon. If the
-  // leaked InvokeTX kept the BlockTX alive, this succeeds.
-  auto tip_res = fw.get_db_proxy().get_db_tip(old_block)();
-  EXPECT_FALSE(tip_res.has_value())
+  // Probe the old block ID with a per-block read; get_db_tip no longer
+  // consults per-block state, so it cannot probe BlockTX liveness. If the
+  // BlockTX was garbage collected (InvokeTX properly closed), this returns
+  // Abandon. If the leaked InvokeTX kept the BlockTX alive, this succeeds.
+  auto probe = fw.get_db_proxy().get_snapshot_item(
+      old_block,
+      NativeContractTestFramework::make_contract_data_addrkey(kDeployerAddr,
+                                                              "leak_probe"))();
+  EXPECT_FALSE(probe.has_value())
       << "BlockTX should be gone after discard — leaked InvokeTX kept it alive";
 }
 

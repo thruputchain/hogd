@@ -371,12 +371,12 @@ Benchmark::run()
 
   // Close the block: stage changes and optionally compute the hash.
   if (compute_db_hash_) {
-    auto hash_result = block.get().close(StorageLongHash{});
+    auto hash_result = block.get().close(StorageLongHash{}, workers_);
     CHECK(hash_result.has_value());
     asm volatile("" : : "m"(*hash_result) : "memory");
   }
   else {
-    CHECK(block.get().close_skip_hash_for_testing().has_value());
+    CHECK(block.get().close_skip_hash_for_testing(workers_).has_value());
   }
 
   // commit changes to the ramdb.
@@ -437,13 +437,15 @@ private:
   void run_sequential();
   void run_concurrent();
 
-  void close_block(BlockTX &btx) const
+  // Not const: close() stages the lock maps on workers_, the same pool the
+  // block was executed and is committed on, so -w N sizes the whole block.
+  void close_block(BlockTX &btx)
   {
     if (compute_db_hash_) {
-      CHECK(btx.close(StorageLongHash{}).has_value());
+      CHECK(btx.close(StorageLongHash{}, workers_).has_value());
     }
     else {
-      CHECK(btx.close_skip_hash_for_testing().has_value());
+      CHECK(btx.close_skip_hash_for_testing(workers_).has_value());
     }
   }
 

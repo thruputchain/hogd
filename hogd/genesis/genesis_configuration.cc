@@ -134,12 +134,19 @@ stock_network_config()
   // node's default, so changing either is visible in the config hash.
   NetworkConfig config;
   config.v(0);
-  set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 8);
-  set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256);
-  set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx,
-                   kStockMaxNewContractsPerTx);
-  set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen,
-                   static_cast<uint32_t>(kDefaultMaxBytestringLen));
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 8);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                                 256);
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxNewContractsPerTx,
+      kStockMaxNewContractsPerTx);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 static_cast<uint32_t>(
+                                     kDefaultMaxBytestringLen));
   return config;
 }
 

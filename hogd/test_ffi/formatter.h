@@ -131,6 +131,16 @@ template<> struct formatter<VerifyAuthResultFromDBResult> {
   }
 };
 
+template<> struct formatter<OpenMockInvocationFrameResult> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  static auto format(const OpenMockInvocationFrameResult &result, auto &ctx)
+  {
+    return format_to(ctx.out(), "syscall_error_code={}, ffi_error_code={}",
+                     result.syscall_error_code,
+                     std::to_underlying(result.ffi_error_code));
+  }
+};
+
 template<> struct formatter<OpenSyscallHandlerResult> {
   static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
   static auto format(const OpenSyscallHandlerResult &result, auto &ctx)

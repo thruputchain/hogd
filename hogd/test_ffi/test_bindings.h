@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 30
+#define TEST_FFI_VERSION_MINOR 32
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -78,7 +78,7 @@ enum TestFFIErrorCode {
   // be translated)
   kTestFFIErrorCodeContractVerificationFailed = 6,
   // An argument violated a documented precondition (e.g. a negative
-  // storage-token grant, or a mock invocation frame production would not admit)
+  // storage-token grant)
   kTestFFIErrorCodeInvalidArgument = 7,
 };
 
@@ -305,13 +305,22 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     void *db, void *rc, struct FFISerializedAuthClaimData auth_claim_data,
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
-// Frames are admitted on production's terms, so two rules bind the caller:
+struct OpenMockInvocationFrameResult {
+  // SyscallErrorCode: why production refused the frame, none if it opened.
+  // Never set together with ffi_error_code.
+  int32_t syscall_error_code;
+  // FFI-level error code
+  enum TestFFIErrorCode ffi_error_code;
+};
+
+// Frames are admitted on production's terms, so three rules bind the caller:
 // invoke_flags may contain only defined, implemented bits (TryInvoke |
-// ReadOnly), and an address that already has a frame on the stack cannot be
-// invoked again -- nested frames need distinct invoked_addresses. Either
-// violation returns kTestFFIErrorCodeInvalidArgument and opens no frame, so the
-// handler stays usable and no finish_mock_invocation_frame() is owed.
-enum TestFFIErrorCode
+// ReadOnly); an address that already has a frame on the stack cannot be invoked
+// again -- nested frames need distinct invoked_addresses; and
+// max_cross_invoke_depth caps how many frames a transaction may hold open.
+// Breaking one is a refusal, not misuse: syscall_error_code names the rule, no
+// frame opens, and no finish_mock_invocation_frame() is owed.
+struct OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
                            int32_t invoke_flags);

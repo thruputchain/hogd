@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
@@ -15,6 +16,7 @@
 #include "hogd/hog_db/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -43,7 +45,7 @@ RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
   return &it->second;
 }
 
-HogDbStatus<PerThreadARC<BlockTX> *>
+x23::Async<HogDbStatus<PerThreadARC<BlockTX> *>>
 RPCContext::open_block_tx_at_parent(BlockTXID parent_id, BlockTXID bid,
                                     BlockExecutionMode mode)
 {
@@ -52,16 +54,16 @@ RPCContext::open_block_tx_at_parent(BlockTXID parent_id, BlockTXID bid,
       std::scoped_lock g(lock_);
       if (!commit_publishing_.load(std::memory_order_acquire)) {
         if (parent_id != get_tip().id) {
-          return HogDbError(HogDbCode::kStaleBlock);
+          co_return HogDbError(HogDbCode::kStaleBlock);
         }
-        return open_block_tx_locked(bid, mode);
+        co_return open_block_tx_locked(bid, mode);
       }
     }
-    commit_publishing_.wait(true, std::memory_order_acquire);
+    co_await co_wait_for_no_commit_publishing();
   }
 }
 
-HogDbStatus<ViewingSnapshot>
+x23::Async<HogDbStatus<ViewingSnapshot>>
 RPCContext::open_viewing_snapshot(BlockTXID bid)
 {
   while (true) {
@@ -70,21 +72,21 @@ RPCContext::open_viewing_snapshot(BlockTXID bid)
       if (!commit_publishing_.load(std::memory_order_acquire)) {
         DbTip tip = get_tip();
         if (tip.value.proposal_header.block_height < 0) {
-          return HogDbError(HogDbCode::kNotFound);
+          co_return HogDbError(HogDbCode::kNotFound);
         }
         auto res = open_block_tx_locked(
             bid, BlockExecutionMode::kBlockExecutionModeViewing);
         if (!res) {
-          return res.error();
+          co_return res.error();
         }
 
         ViewingSnapshot snapshot;
         snapshot.viewing_block_id = bid;
         snapshot.tip = std::move(tip);
-        return snapshot;
+        co_return snapshot;
       }
     }
-    commit_publishing_.wait(true, std::memory_order_acquire);
+    co_await co_wait_for_no_commit_publishing();
   }
 }
 
@@ -205,6 +207,27 @@ RPCContext::finish_commit_publication() noexcept
 {
   commit_publishing_.store(false, std::memory_order_release);
   commit_publishing_.notify_all();
+  // After the clear, so a woken coroutine's re-check observes it. The pool is
+  // named explicitly: the committer usually runs on a worker of that very
+  // pool, but tests finish publications from plain threads, where the
+  // thread-local pool lookup broadcast() defaults to has nothing.
+  publication_generation_.rmw([](auto &v) { ++v; });
+  publication_generation_.broadcast(&default_threadpool());
+}
+
+x23::Async<void>
+RPCContext::co_wait_for_no_commit_publishing()
+{
+  for (;;) {
+    // The generation is read before the flag: a publication finishing
+    // between the two bumps the generation, so the wait below returns
+    // immediately rather than missing the wake.
+    const auto generation = publication_generation_.load();
+    if (!commit_publishing_.load(std::memory_order_acquire)) {
+      co_return;
+    }
+    co_await publication_generation_.wait(generation);
+  }
 }
 
 RPCContext::CommitPublicationGuard::CommitPublicationGuard(RPCContext &ctx,

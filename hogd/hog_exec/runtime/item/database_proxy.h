@@ -118,7 +118,11 @@ public:
   x23::Async<SystemStatus<void>>
   pop_subtransactions(BlockID block_id, TransactionID tx_id, uint32_t count);
 
-  x23::Async<SystemStatus<DbTip>> get_db_tip(BlockID block_id);
+  // `block_height` is the height the block was opened with; the server
+  // serves the committed tip at that height minus one, or refuses once the
+  // chain has moved to or past `block_height` (see executor_to_db_rpc.x).
+  x23::Async<SystemStatus<DbTip>> get_db_tip(BlockID block_id,
+                                             BlockHeight block_height);
 
   x23::Async<SystemStatus<ViewingSnapshot>> open_viewing_snapshot();
   x23::Async<SystemStatus<void>> close_viewing_snapshot(BlockID block_id);

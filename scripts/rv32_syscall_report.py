@@ -94,11 +94,26 @@ RATE_DENOMINATORS = (1, 2, 4, 8, 16, 32, 64)
 RATE_OVERCHARGE_TARGET = 1.10
 
 SHA256_ROW = re.compile(r"^(entry|vm)/SHA256/(\d+)$")
+# The bytestring family, swept on value length. Kept out of the syscall table
+# for the reason the SHA256 rows are: a length sweep is one syscall measured
+# many times, and listing every point beside the one-shot rows would both bury
+# them and pull the gating baseline -- which is the median of the cheapest
+# crossing rows -- toward whichever end of the sweep happened to be cheap.
+BYTESTRING_ROW = re.compile(
+    r"^(entry|vm)/(BytestringSet|BytestringGet|BytestringGetLen)/(\d+)$")
+BYTESTRING_FAMILIES = ("BytestringSet", "BytestringGet", "BytestringGetLen")
+
+# The block a bytestring copy is proposed in, mirroring gas_cost_table.h's
+# kBytestringBlockBytes. Unlike a hash's compression block this is chosen, not
+# forced: large enough that rounding a fractional per-byte rate up to a whole
+# gas wastes little, small enough that a short write does not pay for a long
+# one.
+BYTESTRING_BLOCK_BYTES = 512
 
 # The storage rows. frame/ rows time one iteration of "open D frames, issue
 # the call on K distinct keys in the innermost, close them all", so they are
 # read as a line in K per depth; frame/Push/D is the K=0 point measured
-# directly. cold/ rows are one call each, against the mock db, and are kept
+# directly. cold/ rows are one call each, against a real hog_db, and are kept
 # out of every schedule number on purpose -- see STORAGE_COLD_NOTE.
 FRAME_PUSH_ROW = re.compile(r"^frame/Push/(\d+)$")
 FRAME_SWEEP_ROW = re.compile(r"^frame/([A-Za-z0-9]+)/(\d+)/(\d+)$")
@@ -147,11 +162,12 @@ GUARD_BASE_SPREAD = 1.5
 GUARD_MIN_SIGNAL_SHARE = 0.10
 
 STORAGE_COLD_NOTE = (
-    "cold/ rows miss the snapshot cache on every call and go to the db proxy. "
-    "The server answering is the benchmark's in-process mock, whose lookup is "
-    "a hash-map find, so this is the executor-side cost of going to the db -- "
-    "the proxy, the RPC, the cache insert -- and not the cost of hog_db. It is "
-    "a floor under a cold read and is excluded from --schedule.")
+    "cold/ rows miss the snapshot cache on every call and read through the "
+    "database named above: the proxy, the RPC, its own lookup, the cache "
+    "insert. Against hog_db this is still a floor in one respect -- it is "
+    "in-process over a local socket, so a chain whose executor and database "
+    "sit on different hosts pays a hop this does not. Excluded from "
+    "--schedule until there is a rule for what a cold read is charged to.")
 
 
 def load(path):
@@ -219,6 +235,15 @@ def context(data):
     return data.get("context", {})
 
 
+def item_backend(data):
+    """What answered the cold rows' misses, or None for a run that did not say.
+
+    cold/ row names did not change when the backend did, so a JSON recorded
+    before that carries no claim either way and must not be given this one.
+    """
+    return context(data).get("syscall_bench_item_backend")
+
+
 def calls_per_vm_run(row):
     """Calls one vm/ iteration made, from the benchmark's own item count.
 
@@ -244,7 +269,9 @@ def vm_ns_per_call(row):
 def syscall_names(measured):
     names = []
     for name in measured:
-        if not name.startswith("entry/") or SHA256_ROW.match(name):
+        if not name.startswith("entry/"):
+            continue
+        if SHA256_ROW.match(name) or BYTESTRING_ROW.match(name):
             continue
         names.append(name[len("entry/"):])
     return sorted(names)
@@ -259,13 +286,18 @@ def sha256_points(measured, prefix="entry"):
     return sorted(points)
 
 
-def fit_sha256(points):
-    """Least squares over the size sweep: (base_ns, ns_per_byte, r_squared).
+def fit_line(points, min_points=MIN_SWEEP_POINTS):
+    """Least squares over a size sweep: (base_ns, ns_per_byte, r_squared).
 
     A fit rather than the endpoints, because the endpoints are the two points
     most exposed to a single bad sample and the whole sweep is cheap to use.
+
+    `min_points` is lowered by callers fitting a sub-range that is short by
+    construction -- the settled tail of a bytestring sweep is often three
+    points. Note that r_squared is not a goodness-of-fit statement when the
+    x-values span decades; see top_leverage.
     """
-    if len(points) < MIN_SWEEP_POINTS:
+    if len(points) < min_points:
         return None
     xs = [float(p[0]) for p in points]
     ys = [float(p[1]) for p in points]
@@ -280,6 +312,283 @@ def fit_sha256(points):
     total = sum((y - mean_y) ** 2 for y in ys)
     r_squared = 1.0 if total == 0.0 else 1.0 - residual / total
     return intercept, slope, r_squared
+
+
+def bytestring_points(measured, family, prefix="entry"):
+    """(bytes, ns) for one bytestring family's sweep, ascending."""
+    points = []
+    for name, row in measured.items():
+        match = BYTESTRING_ROW.match(name)
+        if match and match.group(1) == prefix and match.group(2) == family:
+            points.append((int(match.group(3)), row["real_time"]))
+    return sorted(points)
+
+
+def top_leverage(points):
+    """The share of a sweep's x-variance carried by its longest point.
+
+    Why R2 is not a goodness-of-fit statement on a sweep like this one. The
+    lengths span three decades, so the top point sits enormously far from the
+    mean and the fit is very nearly a line through it: R2 then reports whether
+    that one point landed near the line, which it does by construction, and
+    says nothing about the six points that carry the pricing.
+    """
+    xs = [float(x) for x, _ in points]
+    if len(xs) < 2:
+        return None
+    mean_x = statistics.fmean(xs)
+    var_x = sum((x - mean_x) ** 2 for x in xs)
+    if var_x == 0.0:
+        return None
+    return (max(xs) - mean_x) ** 2 / var_x
+
+
+def interval_slopes(points):
+    """[(lo, hi, ns per byte)] between successive lengths in a sweep.
+
+    The per-byte cost read in each band rather than fitted once across all of
+    them -- the same reason the storage sweeps read their per-key cost at
+    every K. A bytestring's per-byte cost is not constant: it roughly doubles
+    between the short lengths and the long ones as the item stops fitting in
+    cache, and one slope through that describes none of the bands. The first
+    band, from zero, is not a per-byte cost at all; it is the fixed cost of
+    the call having a length, divided by a short length.
+    """
+    return [(lo, hi, (hi_ns - lo_ns) / (hi - lo))
+            for (lo, lo_ns), (hi, hi_ns) in zip(points, points[1:])
+            if hi > lo]
+
+
+def bytestring_summary(measured, sd=None):
+    """Per family: the measured base, and the per-byte cost band by band.
+
+    Built from directly measured quantities. A least squares line over the
+    whole sweep is carried alongside as a cross-check -- `fit`, and the
+    `intercept_error` by which it disagrees with the measured base -- but
+    nothing here is derived from it, because on a sweep spanning three decades
+    a line describes neither end well while still scoring R2 near 1.
+
+    Only families this run measured; a run from before these rows existed has
+    none, and the section is skipped rather than printed empty.
+    """
+    sd = sd or {}
+    summary = {}
+    for family in BYTESTRING_FAMILIES:
+        points = bytestring_points(measured, family)
+        if not points:
+            continue
+        base = dict(points).get(0)
+        intervals = interval_slopes(points)
+        fit = fit_line(points)
+        entry = {
+            "points": points,
+            "base_ns": base,
+            **bytestring_seam(measured, family),
+            "intervals": intervals,
+            "flat": bytestring_is_flat(family, points, sd),
+            "fit": fit,
+            "leverage": top_leverage(points),
+        }
+        # The first band is the fixed cost of a nonzero length, not a rate.
+        if base is not None and points[0][0] == 0 and len(points) > 1:
+            entry["first_jump_bytes"] = points[1][0]
+            entry["first_jump_ns"] = points[1][1] - base
+            rates = [r for lo, _, r in intervals if lo > 0]
+        else:
+            rates = [r for _, _, r in intervals]
+        if rates and min(rates) > 0:
+            entry["per_byte_lo"] = min(rates)
+            # What a price has to cover. The dearest band, not the average of
+            # them -- the same rule the storage schedule builds under.
+            entry["per_byte_hi"] = max(rates)
+            entry["growth"] = max(rates) / min(rates)
+        if fit and base is not None:
+            entry["intercept_error"] = fit[0] - base
+        summary[family] = entry
+    return summary
+
+
+def bytestring_seam(measured, family):
+    """What this family's ecall crossing costs, from its own vm row.
+
+    The bench drives one length end to end per family, so the gap between that
+    vm row and the entry row at the same length is this family's crossing --
+    measured rather than taken from the table's median, which is a different
+    mix of syscalls with a different amount of argument setup ahead of the
+    ecall. Empty when the run has no vm row for the family.
+    """
+    for name, row in measured.items():
+        match = BYTESTRING_ROW.match(name)
+        if not match or match.group(1) != "vm" or match.group(2) != family:
+            continue
+        size = int(match.group(3))
+        entry_row = measured.get(f"entry/{family}/{size}")
+        vm_ns = vm_ns_per_call(row)
+        if not entry_row or not vm_ns:
+            continue
+        return {"seam_ns": vm_ns - entry_row["real_time"],
+                "seam_bytes": size,
+                "vm_ns": vm_ns,
+                "seam_entry_ns": entry_row["real_time"]}
+    return {}
+
+
+def bytestring_is_flat(family, points, sd):
+    """Whether a family's cost does not move with length at all.
+
+    Measured, not assumed: `BytestringGetLen` reads an item's length and
+    copies none of it, so it should be flat, and a run where it is not is a
+    finding rather than a fit to widen. Judged against the row's own stddev
+    where the run has repetitions, and against 1% of the base otherwise --
+    a single-repetition run reports no deviation and would call everything
+    flat on a zero error bar.
+    """
+    base = dict(points).get(0)
+    if base is None or len(points) < 2:
+        return False
+    top_x, top_ns = points[-1]
+    gap = abs(top_ns - base)
+    top_sd = sd.get(f"entry/{family}/{top_x}", {}).get("real_time", 0.0)
+    base_sd = sd.get(f"entry/{family}/0", {}).get("real_time", 0.0)
+    noise = 2.0 * math.hypot(top_sd, base_sd)
+    return gap <= max(noise, 0.01 * base)
+
+
+def print_bytestring(summary, measured, sd):
+    """The length sweep, per family, and what can honestly be read off it."""
+    print()
+    header = (f"{'bytestring bytes':<28}{'entry ns':>11}{'±':>9}"
+              f"{'ns/B since prev':>17}{'gas':>8}")
+    print(header)
+    print("-" * len(header))
+    for family, entry in summary.items():
+        # The rate since the previous length, not the whole call divided by
+        # its length: the base is most of a short call, and dividing it in
+        # reports a per-byte cost an order of magnitude off. Reading it band
+        # by band is also what makes a rate that grows with length visible in
+        # the table rather than buried in one fitted slope.
+        rates = {hi: rate for _, hi, rate in entry["intervals"]}
+        for size, ns in entry["points"]:
+            row_name = f"entry/{family}/{size}"
+            error = sd.get(row_name, {}).get("real_time", 0.0)
+            gas = int(measured[row_name].get("gas", 0))
+            rate = f"{rates[size]:>17.4f}" if size in rates else f"{'-':>17}"
+            label = f"{family}/{size}"
+            print(f"{label:<28}{ns:>11.1f}{error:>9.2f}{rate}{gas:>8}")
+
+    for family, entry in summary.items():
+        print()
+        if entry["base_ns"] is None:
+            print(f"{family}: no zero-length row, so nothing to read the "
+                  "per-byte cost against")
+            continue
+        print(f"{family}: base {entry['base_ns']:.1f} ns, measured at zero "
+              "length")
+        if entry.get("seam_ns") is not None:
+            # The crossing this family actually pays, from its own vm row
+            # rather than from the table's median. A call with more arguments
+            # spends longer materialising them before the ecall, so the seam
+            # is not one number shared across the surface.
+            print(f"  the ecall crossing adds {entry['seam_ns']:.1f} ns at "
+                  f"{entry['seam_bytes']} bytes "
+                  f"({entry['vm_ns']:.1f} ns/call through the VM against "
+                  f"{entry['seam_entry_ns']:.1f} at the entry)")
+        if entry["flat"]:
+            print("  flat: the longest row is within noise of the base, so "
+                  "there is no per-byte cost to price")
+        else:
+            if "first_jump_ns" in entry:
+                jump = entry["first_jump_ns"]
+                width = entry["first_jump_bytes"]
+                print(f"  the first {width} bytes cost {jump:.1f} ns "
+                      f"({jump / width:.4f} ns/byte) -- a fixed cost of the "
+                      "call having a length, not a rate")
+            if "per_byte_hi" in entry:
+                trend = bytestring_trend(entry)
+                print(f"  per byte {entry['per_byte_lo']:.4f} .. "
+                      f"{entry['per_byte_hi']:.4f} ns across the rest of the "
+                      f"sweep ({entry['growth']:.1f}x, {trend})")
+                print(f"  a price has to cover the dearest band: "
+                      f"{entry['per_byte_hi']:.4f} ns/byte")
+            else:
+                print("  the per-byte cost does not resolve in this sweep")
+        # No cross-check to print for a flat family: there is no slope to
+        # check, and an R2 near zero is what a flat line correctly produces.
+        fit = None if entry["flat"] else entry["fit"]
+        if fit:
+            fit_base, per_byte, r_squared = fit
+            leverage = entry.get("leverage")
+            # Printed as a cross-check; nothing above is derived from it. Two
+            # numbers say why not. The intercept has a directly measured
+            # counterpart, so where it lands is a real check -- and it is the
+            # one that bites, since the fixed first-band cost is folded into
+            # it. R2 has no such counterpart on a sweep this wide, and the
+            # leverage figure is what that costs.
+            detail = f"R2={r_squared:.4f}"
+            if leverage is not None:
+                detail += (f", but the {entry['points'][-1][0]}-byte point "
+                           f"carries {100 * leverage:.0f}% of the x-variance")
+            print(f"  one line over the whole sweep would be {fit_base:.1f} "
+                  f"ns + {per_byte:.4f} ns/byte ({detail})")
+            error = entry.get("intercept_error")
+            if error is not None:
+                share = 100 * error / entry["base_ns"]
+                print(f"  its intercept is {error:+.1f} ns ({share:+.1f}%) "
+                      "against the measured base, which is the check R2 "
+                      "cannot make")
+
+    # What the pair says. A Get copies the item into guest memory and a GetLen
+    # reads the same item without copying it, so the difference is the copy.
+    get = summary.get("BytestringGet")
+    get_len = summary.get("BytestringGetLen")
+    if get and get.get("per_byte_hi") and get_len and get_len["flat"]:
+        print()
+        print(f"the copy: BytestringGet reaches {get['per_byte_hi']:.4f} "
+              "ns/byte, and BytestringGetLen, which reads the same item and "
+              "copies none of it, is flat at every length -- so the whole "
+              "per-byte cost is the copy")
+
+    # What the schedule charges, against what the sweep measured. None of the
+    # three appears in kSyscallGasCostSchedule, so each is billed
+    # kSyscallBaseCost and nothing per byte -- and ns/gas across the sweep is
+    # how far apart a flat charge and a growing cost end up, in the same terms
+    # the SHA256 section reports its own spread.
+    print()
+    for family, entry in summary.items():
+        rates = []
+        charged = set()
+        for size, ns in entry["points"]:
+            gas = int(measured[f"entry/{family}/{size}"].get("gas", 0))
+            charged.add(gas)
+            if gas:
+                rates.append(ns / gas)
+        if not rates:
+            print(f"{family}: charged nothing at any length")
+        elif len(charged) == 1:
+            print(f"{family}: charged {charged.pop()} gas at every length; "
+                  f"ns/gas runs {min(rates):.4f} .. {max(rates):.4f} "
+                  f"({max(rates) / min(rates):.0f}x spread within one "
+                  "syscall)")
+        else:
+            print(f"{family}: ns/gas runs {min(rates):.4f} .. "
+                  f"{max(rates):.4f}")
+
+
+def bytestring_trend(entry):
+    """How the per-byte cost moves across the sweep, as a phrase.
+
+    Which direction it moves is the finding, not a detail: a cost that grows
+    with length cannot be priced from its cheap end, and one that shrinks
+    cannot be priced from its dear end without overcharging every small write.
+    """
+    if entry["growth"] <= STORAGE_FLATNESS_TOLERANCE:
+        return "flat within tolerance"
+    rates = [rate for lo, _, rate in entry["intervals"] if lo > 0]
+    if len(rates) >= 2 and rates[-1] > rates[0]:
+        return "RISING with length"
+    if len(rates) >= 2 and rates[-1] < rates[0]:
+        return "FALLING with length"
+    return "NOT FLAT"
 
 
 def warm_syscall_for(family):
@@ -444,7 +753,7 @@ def parent_walk_ns(summary, family="NNIntGetFirstTouch"):
             shallow, deep, keys)
 
 
-def print_storage(summary, unit_ns=None):
+def print_storage(summary, unit_ns=None, backend=None):
     """The storage tables. With a unit, costs are also shown in gas."""
     def gas(ns):
         return f"{ns / unit_ns:>8.1f}" if unit_ns else f"{'-':>8}"
@@ -540,7 +849,11 @@ def print_storage(summary, unit_ns=None):
 
     if summary["cold"]:
         print()
-        header = f"{'cold (mock db)':<28}{'ns/call':>10}{'±':>9}"
+        # Named by the run rather than by the row: cold/ row names did not
+        # change when the backend did, so a JSON recorded before that carries
+        # no claim either way and must not be given this one.
+        label = f"cold ({backend or 'backend unrecorded'})"
+        header = f"{label:<28}{'ns/call':>10}{'±':>9}"
         print(header)
         print("-" * len(header))
         for name, (ns, err) in sorted(summary["cold"].items()):
@@ -723,7 +1036,7 @@ def print_crosscheck(data, openssl):
 
     lines = []
     sha_rates = speed["sha256"]
-    fit = fit_sha256(sha256_points(measured))
+    fit = fit_line(sha256_points(measured))
     if sha_rates and fit:
         # openssl's own per-call overhead is amortised away at its largest
         # block, which is where its number is closest to pure compression --
@@ -850,7 +1163,7 @@ def print_table(data):
             gas = int(measured[f"entry/SHA256/{size}"].get("gas", 0))
             rate = ns / gas if gas else float("inf")
             print(f"{size:<28}{ns:>11.1f}{error:>9.2f}{gas:>12}{rate:>10.4f}")
-        fit = fit_sha256(points)
+        fit = fit_line(points)
         if fit:
             base, per_byte, r_squared = fit
             print()
@@ -867,9 +1180,13 @@ def print_table(data):
                       f"{max(rates):.4f} ({max(rates) / min(rates):.0f}x "
                       "spread within one syscall)")
 
+    bytestrings = bytestring_summary(measured, sd)
+    if bytestrings:
+        print_bytestring(bytestrings, measured, sd)
+
     storage = storage_summary(measured, sd)
     if storage:
-        print_storage(storage)
+        print_storage(storage, backend=item_backend(data))
 
     skipped = failed_rows(data)
     if skipped:
@@ -1030,7 +1347,7 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
     proposal["base_ns"] = worst_ns
     proposal["base_from"] = worst_name
 
-    fit = fit_sha256(sha256_points(measured))
+    fit = fit_line(sha256_points(measured))
     if fit:
         base_ns, per_byte_ns, r_squared = fit
         # SHA256's own cost is what it adds on top of a crossing every syscall
@@ -1109,6 +1426,32 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         if commits:
             proposal["storage_commit_item_gas"] = to_gas(
                 max(per_item for _, _, _, per_item in commits))
+
+    bytestrings = bytestring_summary(measured, stddevs(bench))
+    if bytestrings:
+        proposal["bytestrings"] = bytestrings
+        # A block rather than a per-byte rate: the measured rate is a fraction
+        # of a gas unit, and a fraction needs a divisor, which is one more
+        # billing-relevant constant in the digest. Sized to the dearest band,
+        # because the per-byte cost is not constant across the sweep and there
+        # is no single rate to be right about -- the same rule the storage
+        # numbers above are proposed under.
+        blocks = {}
+        for family, entry in bytestrings.items():
+            if entry["flat"] or not entry.get("per_byte_hi"):
+                continue
+            per_block_ns = entry["per_byte_hi"] * BYTESTRING_BLOCK_BYTES
+            blocks[family] = {
+                "block_bytes": BYTESTRING_BLOCK_BYTES,
+                "per_byte_ns": entry["per_byte_hi"],
+                "block_gas": to_gas(per_block_ns),
+                # What the rounding to a whole gas costs. A block small enough
+                # that this is large is a block that overcharges by rounding
+                # alone, which is the reason not to pick the hash's 64.
+                "rounding": (to_gas(per_block_ns) * unit) / per_block_ns,
+            }
+        if blocks:
+            proposal["bytestring_blocks"] = blocks
     return proposal
 
 
@@ -1247,7 +1590,8 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     if storage:
         print()
         print("Storage (NNInt), in this run's gas unit:")
-        print_storage(storage, unit_ns=proposal["unit_ns"])
+        print_storage(storage, unit_ns=proposal["unit_ns"],
+                      backend=item_backend(bench))
 
     print()
     print("=" * 68)
@@ -1283,6 +1627,27 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         print("  kSyscallGasCostSchedule's names and costs, not the formula,")
         print("  so any constant the formula reads has to be an")
         print("  entry in kSyscallGasCostSchedule to be hashed.")
+    blocks = proposal.get("bytestring_blocks")
+    if blocks:
+        print()
+        print("  Bytestrings, priced per block rather than per byte: the")
+        print(f"  measured rate is a fraction of the {unit:.4f} ns gas unit,")
+        print("  and a fraction needs a divisor, which is one more constant")
+        print("  in the digest.")
+        print(f"    kBytestringBlockBytes = {BYTESTRING_BLOCK_BYTES};")
+        for family, block in sorted(blocks.items()):
+            name = ("kBytestringWriteBlockCost" if family == "BytestringSet"
+                    else "kBytestringReadBlockCost")
+            print(f"    {name} = {block['block_gas']};"
+                  f"   // {family}, {block['per_byte_ns']:.4f} ns/byte at its "
+                  "dearest band")
+            print(f"      rounding a whole gas onto that block costs "
+                  f"{block['rounding']:.2f}x.")
+        flat = [f for f, e in proposal["bytestrings"].items() if e["flat"]]
+        if flat:
+            print(f"    {', '.join(sorted(flat))}: no block term -- flat in "
+                  "length, so the storage access is the whole cost.")
+
     if storage:
         print()
         print("  Storage, measured and not yet priced. These are charges on")
@@ -1368,13 +1733,23 @@ def guard_cv(name, measured, sd):
 def guardable(measured, sd):
     """Every quantity worth gating, as {key: ratio-to-baseline}.
 
-    Two families. `syscall/<name>` is an entry row: the production path for one
-    call, which is what a contract pays. `storage/<family>/<depth>/<keys>` is a
-    per-key cost from a sweep, which is what it pays per key it has not touched
-    -- the term the syscall rows cannot see.
+    Three families. `syscall/<name>` is an entry row: the production path for
+    one call, which is what a contract pays. `storage/<family>/<depth>/<keys>`
+    is a per-key cost from a sweep, which is what it pays per key it has not
+    touched -- the term the syscall rows cannot see.
+    `bytestring/<family>/<bytes>` is one point of a length sweep, gated at
+    every length because the per-byte cost is not constant across it: a
+    regression confined to the long end is invisible in the short rows, and it
+    is the long end the block term is priced from.
 
-    cold/ rows are deliberately absent. They are bounded by the benchmark's own
-    mock rather than by hogd, so gating them would gate the harness.
+    The bytestring rows are gated here rather than through syscall_names, which
+    they stay out of -- that set also drives the syscall table's layout and
+    --schedule, and a per-length "syscall" is neither. Their presence does not
+    disturb the baseline: it is the median of the rows within GUARD_BASE_SPREAD
+    of the cheapest, and the cheapest bytestring row sits well above that.
+
+    cold/ rows are deliberately absent: nothing charges for a cold read yet,
+    and a guard on an unpriced row gates noise.
     """
     baseline = guard_baseline(measured, sd)
     if not baseline:
@@ -1401,6 +1776,13 @@ def guardable(measured, sd):
                 if (per_key * keys) / iteration < GUARD_MIN_SIGNAL_SHARE:
                     continue
                 guards[f"storage/{family}/{depth}/{keys}"] = per_key / baseline
+    for family, entry in sorted(bytestring_summary(measured, sd).items()):
+        for size, ns in entry["points"]:
+            row_name = f"entry/{family}/{size}"
+            cv = guard_cv(row_name, measured, sd)
+            if cv is None or cv > GUARD_MAX_CV:
+                continue
+            guards[f"bytestring/{family}/{size}"] = ns / baseline
     return baseline, guards
 
 

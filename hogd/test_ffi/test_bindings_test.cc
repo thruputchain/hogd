@@ -876,11 +876,13 @@ TEST(TestBindingsTest, CostModelRoundtrip)
 TEST(TestBindingsTest, NetworkConfigRoundtrip)
 {
   NetworkConfig custom_config = stock_network_config();
-  set_config_param(custom_config, ConfigParamID::kConfigParamMaxSHA256Buffers,
-                   max_sha256_buffers(custom_config) + 1);
-  set_config_param(custom_config,
-                   ConfigParamID::kConfigParamMaxCrossInvokeDepth,
-                   max_cross_invoke_depth(custom_config) + 1);
+  const NetworkConfigParams stock_params(custom_config.v0());
+  NetworkConfigParams::set_param(custom_config,
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 stock_params.max_sha256_buffers + 1);
+  NetworkConfigParams::set_param(custom_config,
+                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                                 stock_params.max_cross_invoke_depth + 1);
   ASSERT_NE(custom_config, stock_network_config());
 
   auto serialized_config = x23::serialize(custom_config);
@@ -1330,7 +1332,9 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
   };
   auto open_res =
       open_mock_invocation_frame(handler.syscall_handler, ffi_invocation, 0);
-  EXPECT_EQ(open_res, kTestFFIErrorCodeNone);
+  EXPECT_EQ(open_res.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(open_res.syscall_error_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
@@ -1505,7 +1509,7 @@ open_frame(void *syscall_handler, Invocation const &invocation,
       .data = serialized.data(),
       .len = static_cast<uint32_t>(serialized.size()),
   };
-  return open_mock_invocation_frame(syscall_handler, ffi, flags);
+  return open_mock_invocation_frame(syscall_handler, ffi, flags).ffi_error_code;
 }
 
 // Helper: deploy a mock contract at a specific address and return it

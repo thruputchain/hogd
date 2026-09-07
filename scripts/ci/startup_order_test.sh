@@ -248,10 +248,11 @@ launch() {
   esac
 }
 
-# Do NOT pre-create the daemons' own data directories. The indexer's
-# IndexDB::open_or_make_new() only creates a fresh DB when its path does NOT
-# exist; a pre-existing empty dir sends it down the open() path, which aborts
-# with "DB Not Found". Each daemon creates its own dir (matches launch-multi.sh).
+# Each daemon creates its own data directory, which is how launch-multi.sh
+# starts them. Pre-creating one is no longer fatal to the indexer -- its
+# IndexDB::open_or_make_new() asks whether a database is there rather than
+# whether the directory is -- but leaving them out keeps this test starting
+# the daemons the way production does.
 mkdir -p "$WORK_DIR/event" "$WORK_DIR/chuckd-storage"
 
 echo "=== scenario $SCENARIO: launching in order: ${ORDER[*]} ==="

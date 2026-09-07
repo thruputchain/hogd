@@ -66,7 +66,7 @@ public:
     // TODO(jhumphri): Implement.
   }
 
-  ExpectedDBTip get_db_tip(BlockID block_id);
+  ExpectedDBTip get_db_tip(BlockID block_id, BlockHeight block_height);
 
   static ExpectedViewingSnapshot open_viewing_snapshot()
   {
