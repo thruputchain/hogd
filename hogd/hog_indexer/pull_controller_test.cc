@@ -404,6 +404,9 @@ TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
       event_server.impl()->requests();
   ASSERT_GE(requests.size(), 3UL);
   EXPECT_EQ(requests[0].protocol, version::kHogdProtocol());
+  // A connection's first pull never asks to wait: its caught-up reply is the
+  // readiness signal, so it needs an answer now.
+  EXPECT_FALSE(requests[0].wait);
   EXPECT_EQ(requests[0].progress.state(),
             IndexerProgressState::IndexerProgressUninitialized);
   EXPECT_EQ(requests[1].progress.state(),

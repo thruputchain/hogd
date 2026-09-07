@@ -455,6 +455,53 @@ TEST_F(EventRpcTest, ExactProgressReturnsNextAndUnchangedProgressRepeatsIt)
             x23::serialize(repeated.pulled_block()));
 }
 
+// A pull that does not ask to wait is answered at once, every time: it is
+// the client asking whether it is caught up, and a client that reconnected or
+// restarted with persisted progress asks exactly that. Only a pull that asks
+// to wait parks, and it is served the next commit.
+TEST_F(EventRpcTest, CaughtUpPullWithoutWaitIsAnsweredEveryTime)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.indexer_outbox_store()
+                  .initialize_current_epoch_origin(1, sha256(genesis))()
+                  .has_value());
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  ConsensusValue one = commit_empty_block(ctx, 84, 1, sha256(genesis));
+
+  EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  auto record = ctx.indexer_outbox_store().load_committed_record_info_raw(1);
+  ASSERT_TRUE(record.has_value()) << record.error();
+  IndexerProgress progress(IndexerProgressState::IndexerProgressInitialized);
+  progress.initialized() = {
+      .origin = first.pulled_block().origin,
+      .contiguous_height = 1,
+      .last_consensus_hash = record->consensus_hash,
+  };
+
+  // The same progress, three times, none asking to wait: each is a fresh
+  // connection's first question and each is answered.
+  for (int i = 0; i < 3; ++i) {
+    EventIndexerPullResult caught_up =
+        ctx.pull_indexer_next(pull_request(progress))();
+    ASSERT_EQ(caught_up.outcome(),
+              EventIndexerPullOutcome::EventIndexerPullCaughtUp)
+        << std::string_view(caught_up.diagnostic());
+  }
+
+  // Asking to wait parks the pull; the next commit is what answers it.
+  EventIndexerPullRequest waiting = pull_request(progress);
+  waiting.wait = true;
+  auto parked = ctx.pull_indexer_next(waiting);
+  ConsensusValue two = commit_empty_block(ctx, 85, 2, sha256(one));
+  EventIndexerPullResult next = parked();
+  ASSERT_EQ(next.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock)
+      << std::string_view(next.diagnostic());
+  EXPECT_EQ(next.pulled_block().block.payload.consensus_value, two);
+}
+
 TEST_F(EventRpcTest, ForgedAndUnknownProgressConflict)
 {
   EventRPCContext ctx(temp_dir());

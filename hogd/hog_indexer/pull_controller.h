@@ -50,6 +50,9 @@ private:
   void fail_event_client();
   void mark_caught_up();
   void mark_not_ready();
+  // True once this connection has been answered caught up and nothing has
+  // since marked it not ready. Such a pull may park on the server.
+  bool caught_up_now();
   void reset_event_client();
 
   std::string event_server_addr_;

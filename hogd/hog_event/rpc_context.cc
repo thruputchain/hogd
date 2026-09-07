@@ -43,7 +43,6 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
-#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -124,7 +123,6 @@ EventRPCContext::release_indexer_pulls()
     co_await default_threadpool().bg();
     x23::CoroGuard guard;
     co_await guard(self.outbox_commit_lock_);
-    self.last_caught_up_progress_.reset();
     self.publish_indexer_wake();
   } (*this)();
 }
@@ -940,20 +938,15 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
       // a live client simply asks again.
       co_return pull_caught_up(response_origin);
     }
-    // The first caught-up answer at a given progress is immediate: the client
-    // marks itself caught up only on that reply (IndexerPullController gates
-    // health and startup on it), and on a busy chain a pull that always parked
-    // would never produce one. A bootstrap pull is never parked either. Only
-    // a repeat of the same initialized progress is the client asking to wait.
-    // XDR unions carry no operator==, so compare encodings -- the same test
-    // the pull controller applies to this type.
-    const bool repeat = request.progress.state() ==
-                            IndexerProgressState::IndexerProgressInitialized &&
-                        last_caught_up_progress_ &&
-                        x23::serialize(*last_caught_up_progress_) ==
-                            x23::serialize(request.progress);
-    if (!repeat) {
-      last_caught_up_progress_ = request.progress;
+    // The client says which question this is. Without [wait] it is asking
+    // whether it is caught up and needs the answer now: IndexerPullController
+    // sends that on the first pull of every connection and marks itself
+    // caught up only on the reply, which gates its health and startup. A
+    // client that reconnected or restarted with persisted progress is asking
+    // exactly that, and must not be mistaken for one that wants to wait.
+    // With [wait] it has been answered on this connection already and is
+    // asking to be told about the next block, so it parks here.
+    if (!request.wait) {
       co_return pull_caught_up(response_origin);
     }
     // Sampled under the publication lock, which is also where commit bumps

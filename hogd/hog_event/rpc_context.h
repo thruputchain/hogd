@@ -167,12 +167,6 @@ private:
   // once more on release. A parked handler re-reads the tail on wake: a moved
   // tail is served, an unmoved one is answered rather than re-parked.
   x23::CoroFutex<std::uint64_t> indexer_publications_{0};
-  // The progress most recently answered "caught up". Repeating it is the
-  // client asking to wait, so that pull parks. The first caught-up answer at
-  // any progress stays immediate: IndexerPullController marks itself caught
-  // up only on that reply, and on a busy chain it would otherwise never see
-  // one. Cleared on release so a reconnecting client is answered, not parked.
-  std::optional<IndexerProgress> last_caught_up_progress_;
 
   std::mutex tx_failure_mutex_;
   std::vector<IndexerTxFailureNotice> tx_failure_mailbox_;

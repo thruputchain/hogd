@@ -201,9 +201,14 @@ IndexerPullController::run(const std::stop_token &stop)
     bool caught_up_delay = false;
     try {
       const IndexerProgress requested_progress = db_.durable_progress();
+      // Only a pull on a connection already answered caught up asks the
+      // server to hold it until the next publication. The first pull of a
+      // connection is answered at once, so a restart or reconnect with
+      // persisted progress on an idle chain still learns it is caught up.
       EventIndexerPullRequest request{
           .protocol = version::kHogdProtocol(),
           .progress = requested_progress,
+          .wait = caught_up_now(),
       };
       EventIndexerPullResult result =
           client->event_indexer_pull_next(request)();
@@ -346,6 +351,13 @@ IndexerPullController::mark_caught_up()
   }
   Health::instance().set_status(Health::Status::kOk)();
   wake_.notify_all();
+}
+
+bool
+IndexerPullController::caught_up_now()
+{
+  std::lock_guard lock(wait_mutex_);
+  return caught_up_;
 }
 
 void
