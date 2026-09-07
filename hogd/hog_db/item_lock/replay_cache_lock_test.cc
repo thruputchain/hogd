@@ -936,7 +936,7 @@ TEST(ReplayCacheLockConcurrency, ReservationsAcrossExpiryHeights)
     EXPECT_EQ(result->nonces.size(), height == 9 ? 801U : 800U);
     for (unsigned i = 0; i < 1600; ++i) {
       EXPECT_EQ(std::ranges::binary_search(result->nonces, 1000 + i),
-                height == BlockHeight(9 + (i % 2)));
+                std::cmp_equal(height, 9 + (i % 2)));
     }
     PointerItem<ReplayCacheIt> item(u(height, 1000 + height - 9));
     EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &item, ctx));
