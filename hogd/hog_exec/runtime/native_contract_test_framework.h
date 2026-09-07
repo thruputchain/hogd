@@ -353,12 +353,28 @@ public:
   {
     return make_new_system_call_handler(tx.tx, runtime_context, identifier);
   }
+  // Loads the current block's db tip into the snapshot cache if it is not
+  // loaded yet. Handler and view paths read tip-derived values, so they load
+  // here rather than at block open, which must cost no rpc (see
+  // get_block_execution_context()). Off-pool, so completing it here is legal.
+  void ensure_db_tip_loaded()
+  {
+    assert(storage_snapshot_cache_);
+    if (storage_snapshot_cache_->has_db_tip()) {
+      return;
+    }
+    auto res = storage_snapshot_cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("ensure_db_tip_loaded: failed to load db tip: {}", res.error());
+    }
+  }
+
   SystemCallHandler
   make_new_system_call_handler(Transaction const &tx,
                                RuntimeContext &runtime_context,
                                EphemeralTxIdentifier *identifier = nullptr)
   {
-    assert(storage_snapshot_cache_);
+    ensure_db_tip_loaded();
     auto txid = allocate_txid();
     if (identifier) {
       identifier->block_id = block_number_;
@@ -374,6 +390,7 @@ public:
       Transaction const &tx, RuntimeContext &runtime_context,
       NondeterministicProposalData proposal_data)
   {
+    ensure_db_tip_loaded();
     auto txid = allocate_txid();
     return SystemCallHandler(tx, *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
@@ -722,10 +739,6 @@ private:
         std::make_unique<StorageSnapshotCache>(block_number_,
                                                get_block_execution_context(),
                                                *db_proxy_);
-    auto res = storage_snapshot_cache_->load_db_tip()();
-    if (!res.has_value()) [[unlikely]] {
-      panic("open_block: failed to load db tip: {}", res.error());
-    }
   }
 
   void open_event_block(BlockID block_id);

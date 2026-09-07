@@ -93,14 +93,27 @@ public:
     return try_get_snapshot_item(FrameItemKey::from(addrkey));
   }
 
-  // Must be performed by one thread, before any other thread starts accessing this object.
+  // Fetches and pins the block's db tip. Must be performed by one thread,
+  // before any other thread starts accessing this object. Fails with
+  // Unrecoverable if the tip disagrees with the height the block was opened
+  // with; every later height read is then a plain load.
   x23::Async<SystemStatus<void>> load_db_tip();
 
-  const DbTip& get_db_tip() const { 
+  // Pins a tip the caller already holds (the view gateway fetches one when it
+  // opens its snapshot), under load_db_tip()'s threading contract. The
+  // opened-height agreement is a CHECK here: the caller derived the execution
+  // context from this very tip, so a mismatch is its bug, not a db race.
+  void set_db_tip(DbTip tip);
+
+  bool has_db_tip() const { return db_tip_ != nullptr; }
+
+  const DbTip &get_db_tip() const
+  {
     CHECK(db_tip_ != nullptr);
     return *db_tip_;
   }
-  const NetworkConfigParams& get_network_config_params() const { 
+  const NetworkConfigParams &get_network_config_params() const
+  {
     CHECK(network_config_params_ != nullptr);
     return *network_config_params_;
   }

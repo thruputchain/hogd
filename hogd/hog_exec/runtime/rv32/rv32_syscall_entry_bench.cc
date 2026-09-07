@@ -355,28 +355,25 @@ public:
     snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(0, kBenchBlockExecution,
                                                *db_proxy_);
-    handler_ = std::make_unique<SystemCallHandler>(
-        Transaction{}, *snapshot_cache_,
-        PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-        PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
-        ProposalModeCtor{}, *runtime_context_);
 
-    // Pin the db tip. Production entry paths (invoke(), root_invoke()) await
-    // init_db_tip() before dispatching anything, because the pin is the
-    // transaction's one fallible tip read and every later height read is then
-    // a plain load. This harness calls syscall_entry() directly, so it has to
-    // do the pinning those entry paths do -- without it GetBlockHeight reads
-    // through a null tip and db_tip()'s CHECK aborts the process.
+    // Load the db tip; without it GetBlockHeight reads through a null tip and
+    // get_db_tip()'s CHECK aborts the process.
     //
     // Held rather than checked here: this fixture is a lazily constructed
     // static, so its constructor runs inside whichever benchmark row runs
     // first, and panicking there truncates the JSON mid-write and costs every
     // row in the run.
-    if (auto pinned = handler_->init_db_tip()(); !pinned.has_value()) {
-      setup_error_ = std::format("could not pin the db tip: system error {}",
-                                 pinned.error().raw_code());
+    if (auto loaded = snapshot_cache_->load_db_tip()(); !loaded.has_value()) {
+      setup_error_ = std::format("could not load the db tip: system error {}",
+                                 loaded.error().raw_code());
       return;
     }
+
+    handler_ = std::make_unique<SystemCallHandler>(
+        Transaction{}, *snapshot_cache_,
+        PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
+        PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
+        ProposalModeCtor{}, *runtime_context_);
 
     // A syscall runs inside an invocation frame; without one the handler has no
     // current address, no calldata and no gas budget, and every call under

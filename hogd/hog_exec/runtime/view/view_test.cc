@@ -84,6 +84,7 @@ protected:
                               RuntimeContext &context,
                               NondeterministicProposalData ndet = {})
   {
+    framework_.ensure_db_tip_loaded();
     return View::run_view_transaction(
         *framework_.get_storage_snapshot_cache(),
         framework_.make_new_per_tx_db_proxy(
@@ -1489,6 +1490,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
+  ASSERT_TRUE(snapshot_cache.load_db_tip()().has_value());
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
@@ -1559,6 +1561,7 @@ TEST_F(ViewTest, SelfTipBlockIdAbandonedBeforeBodyRuns)
   StorageSnapshotCache snapshot_cache(tip.id,
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
+  snapshot_cache.set_db_tip(tip);
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
@@ -1622,11 +1625,14 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
   ASSERT_TRUE(snapshot_res.has_value());
   auto &snapshot = snapshot_res.value();
 
-  framework_.advance_block();
-
+  // Built and loaded while the snapshot is fresh, as the view gateway does
+  // when it opens one; the advance below is what makes it stale.
   StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
+  ASSERT_TRUE(snapshot_cache.load_db_tip()().has_value());
+
+  framework_.advance_block();
 
   Invocation invocation{
       .invoked_address = kNativeAddr,

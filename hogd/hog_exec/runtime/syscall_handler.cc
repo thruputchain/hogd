@@ -217,13 +217,6 @@ SystemCallHandler::SystemCallHandler(
 x23::Async<SystemStatus<void>>
 SystemCallHandler::perform_initial_validation()
 {
-  // Pin the block's db tip before anything reads a value derived from it. This
-  // is the transaction's one fallible tip read: a failure here is a system
-  // error and is propagated to the caller, not dropped.
-  if (auto res = co_await init_db_tip(); !res.has_value()) {
-    co_return std::unexpected(res.error());
-  }
-
   // Reject a transaction whose replay uniquifier has already expired before any
   // attached-contract verification or body execution runs (#2568). Without this
   // the body would run to completion and the transaction would only be rejected
@@ -836,11 +829,9 @@ SystemCallHandler::validate_new_invocation(
   // once. Every open frame holds a live contract runtime, so without this a
   // recursive call chain grows until the executor cannot hold it.
   //
-  // The bound is a plain load off the pinned tip. Pinning it is the caller's
-  // job -- it is the one awaitable tip read and this stays a synchronous query
-  // -- so every path that reaches here awaits init_db_tip() first: invoke(),
-  // syscall_Invoke_inner(), and the test FFI wrapper, which are the only ways
-  // in from below root_invoke(). db_tip() fails loudly on a missed pin.
+  // The bound is a plain load off the tip the snapshot cache loaded when the
+  // block was opened; get_network_config_params() fails loudly on a cache
+  // whose tip was never loaded.
   if (invocation_frame_stack_.size() >=
       config_params().max_cross_invoke_depth) {
     return SyscallStatus<void>{std::unexpected(
@@ -883,12 +874,6 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // indistinguishable from a callee that ran and trapped. (The TryInvoke cap
   // does report Fault, but it fires in InvocationFrameStack::finish_frame,
   // after its child frame has actually run.)
-  //
-  // The depth bound reads the pinned tip, so pin it here: this is a coroutine
-  // and validate_new_invocation() is not.
-  if (auto res = co_await init_db_tip(); !res.has_value()) {
-    co_return invoke_result_t{res.error(), 0};
-  }
   auto admitted = validate_new_invocation(address, flags, owned_auth_token_ids);
   if (!admitted.has_value()) {
     co_return invoke_result_t{admitted.error(), 0};

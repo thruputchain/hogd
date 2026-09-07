@@ -481,16 +481,14 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
   StorageSnapshotCache cache1(snap1->viewing_block_id,
                               get_block_execution_context(), get_db_proxy());
 
-  auto warm_tip = cache1.try_get_db_tip()();
-  ASSERT_TRUE(warm_tip.has_value());
-  BlockHeight old_height = warm_tip.value()->value.proposal_header.block_height;
+  ASSERT_TRUE(cache1.load_db_tip()().has_value());
+  BlockHeight old_height =
+      cache1.get_db_tip().value.proposal_header.block_height;
 
   advance_block();
 
-  // Stale cache still returns old height.
-  auto stale_tip = cache1.try_get_db_tip()();
-  ASSERT_TRUE(stale_tip.has_value());
-  EXPECT_EQ(stale_tip.value()->value.proposal_header.block_height, old_height);
+  // The loaded tip is pinned for the cache's lifetime: still the old height.
+  EXPECT_EQ(cache1.get_db_tip().value.proposal_header.block_height, old_height);
 
   // Fresh viewing snapshot sees incremented height.
   auto snap2 = get_db_proxy().open_viewing_snapshot()();
@@ -498,9 +496,8 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
   StorageSnapshotCache cache2(snap2->viewing_block_id,
                               get_block_execution_context(), get_db_proxy());
 
-  auto fresh_tip = cache2.try_get_db_tip()();
-  ASSERT_TRUE(fresh_tip.has_value());
-  EXPECT_GT(fresh_tip.value()->value.proposal_header.block_height, old_height);
+  ASSERT_TRUE(cache2.load_db_tip()().has_value());
+  EXPECT_GT(cache2.get_db_tip().value.proposal_header.block_height, old_height);
 
   EXPECT_TRUE(get_db_proxy()
                   .close_viewing_snapshot(snap2->viewing_block_id)()

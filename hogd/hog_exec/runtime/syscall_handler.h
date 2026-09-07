@@ -145,19 +145,6 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
-  // Pin the block's db tip on this handler, if it is not pinned already.
-  // Idempotent, and called from every path that can reach a tip-derived
-  // value: perform_initial_validation() before the transaction body runs, and
-  // validate_new_invocation()/start_frame(), which together are the only ways
-  // a frame is admitted (the view and test-FFI paths enter at one or the
-  // other rather than through root_invoke()). The fetch itself can fail as a
-  // system error; every later read is infallible.
-  //
-  // Only the block's first fetch reaches the database and suspends; once the
-  // cache holds the tip -- and on every call after this handler pinned it --
-  // this answers from MaybeAsync's value arm without allocating a frame.
-  [[nodiscard]] x23::MaybeAsync<SystemStatus<void>> init_db_tip() const;
-
   // Admission checks a new invocation frame must pass, in the order their
   // error codes take precedence, grouped by the question each answers:
   //
@@ -179,7 +166,7 @@ public:
   //
   // Failing is a no-op -- nothing here mutates the handler, so any of those
   // callers may ask more than once. The depth bound is a plain load off the
-  // tip, which the caller must have pinned with init_db_tip() first.
+  // tip the snapshot cache loaded when the block was opened.
   [[nodiscard]] SystemStatus<SyscallStatus<void>>
   validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
                           std::span<uint32_t const> owned_auth_token_ids) const;
@@ -429,8 +416,8 @@ public:
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
   // == Block statistics syscalls ==
-  // Served off the tip this handler pinned at entry (see init_db_tip()), so
-  // reading one cannot fail and cannot touch the shared snapshot cache.
+  // Served off the tip the snapshot cache loaded when the block was opened,
+  // so reading one cannot fail.
   BlockHeight get_block_height() const;
   NetworkHash const &get_network_hash() const;
 

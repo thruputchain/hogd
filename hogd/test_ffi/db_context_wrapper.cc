@@ -180,6 +180,12 @@ DBContext::advance_new_block(BlockExecutionMode mode,
       std::make_unique<StorageSnapshotCache>(current_block_id_,
                                              block_execution_context(),
                                              *db_proxy_);
+  // Blocking is legal here: the FFI entrypoint is not an x23 ThreadPool
+  // worker, which Async::operator() asserts.
+  auto load_res = snapshot_cache_->load_db_tip()();
+  if (!load_res.has_value()) {
+    throw std::runtime_error("advance_new_block: load_db_tip failed");
+  }
   event_server_.open_block(current_block_id_)();
 }
 

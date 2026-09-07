@@ -197,10 +197,30 @@ StorageSnapshotCache::load_db_tip()
     co_return db_res.error();
   }
 
-  CHECK(db_tip_ == nullptr);
-  db_tip_ = std::make_unique<DbTip>(db_res.value());
-  network_config_params_ = std::make_unique<NetworkConfigParams>(db_tip_->network_config.v0());
+  // The height the block was opened with must agree with the tip just read,
+  // or this node is executing a different block than it is building. Checked
+  // here, the block's one fallible tip read, so every later height read stays
+  // a plain load.
+  const BlockHeight derived = db_res->value.proposal_header.block_height + 1;
+  if (block_execution_context_.block_height != derived) [[unlikely]] {
+    error("Block height mismatch: opened with {}, db tip implies {}",
+          block_execution_context_.block_height, derived);
+    co_return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
+  }
+
+  set_db_tip(std::move(db_res.value()));
   co_return SystemStatus<void>{};
+}
+
+void
+StorageSnapshotCache::set_db_tip(DbTip tip)
+{
+  CHECK(db_tip_ == nullptr);
+  CHECK_EQ(block_execution_context_.block_height,
+           tip.value.proposal_header.block_height + 1);
+  db_tip_ = std::make_unique<DbTip>(std::move(tip));
+  network_config_params_ =
+      std::make_unique<NetworkConfigParams>(db_tip_->network_config.v0());
 }
 
 void

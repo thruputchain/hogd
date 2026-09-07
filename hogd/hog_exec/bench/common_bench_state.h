@@ -398,6 +398,13 @@ CommonBenchState::run_genesis_configuration(
       std::make_unique<StorageSnapshotCache>(block_number_,
                                              get_block_execution_context(),
                                              *db_proxy_);
+  {
+    auto res = snapshot_cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("Failed to load db tip for block {}: {}", block_number_,
+            res.error());
+    }
+  }
 
   open_event_block(block_number_);
 
@@ -449,6 +456,13 @@ CommonBenchState::run_genesis_configuration(
       std::make_unique<StorageSnapshotCache>(block_number_,
                                              get_block_execution_context(),
                                              *db_proxy_);
+  {
+    auto res = snapshot_cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("Failed to load db tip for block {}: {}", block_number_,
+            res.error());
+    }
+  }
   open_event_block(block_number_);
 
   auto runtime_context = make_hog_exec_context();

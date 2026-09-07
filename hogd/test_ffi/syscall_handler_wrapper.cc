@@ -364,14 +364,6 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // caller's synthetic kInvoke is traced with production's syscall error and
   // charged only the crossing, matching a refused kInvoke. Closed before the
   // error() log, which can throw.
-  // The depth bound below is a plain load off the pinned tip, so pin it first.
-  // Completing it here is legal for the same reason the rest of this path
-  // blocks: the FFI entrypoint is not an x23 ThreadPool worker, which
-  // Async::operator() asserts.
-  if (auto pinned = to_handler().init_db_tip()(); !pinned.has_value()) {
-    error("mock invocation frame admission failed: {}", pinned.error());
-    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
-  }
   auto admitted =
       to_handler().validate_new_invocation(invocation.invoked_address,
                                            frame_flags,

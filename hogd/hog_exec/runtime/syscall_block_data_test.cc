@@ -319,54 +319,19 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointReturnsOpenedContext)
 }
 
 // A supplied height disagreeing with the tip means this node is executing a
-// different block than it is building. The check lives at the pin point
-// (init_db_tip), so it fires during admission and no contract ever observes
-// the disputed height.
-TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
+// different block than it is building. The check lives in load_db_tip(), the
+// block's one fallible tip read, so a cache opened with a disputed height
+// refuses to load and no contract can ever observe it.
+TEST_F(SyscallBlockDataTest, MismatchedContextHeightRefusesTipLoad)
 {
-  auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
-
   // The tip implies executing height 1 (see GetBlockHeightSuccess above).
   get_storage_snapshot_cache()->set_block_execution_context(
       BlockExecutionContext{.block_height = 99, .block_timepoint = 1});
 
-  NativeContractBuilder builder;
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        // Never reached: admission refuses the transaction first. A tripwire.
-        BlockHeight block_height = 0;
-        auto status =
-            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
-        if (status.has_value() &&
-            status.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return InvokeStatus<void>{};
-      });
-
-  auto native_contract = builder.build();
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto context = std::make_unique<NativeContext>(std::move(contract_map));
-
-  auto contract = make_native_contract(0);
-  write_contract(contract);
-  write_deployment(contract_addr, contract);
-
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = contract_addr,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      *context);
-
-  // Surfaces as an unrecoverable system error out of initial validation.
-  ASSERT_FALSE(handler.root_invoke()().is_root_success());
+  auto res = get_storage_snapshot_cache()->load_db_tip()();
+  ASSERT_FALSE(res.has_value());
+  EXPECT_EQ(res.error().code(), SystemErrorCode::Unrecoverable);
+  EXPECT_FALSE(get_storage_snapshot_cache()->has_db_tip());
 }
 
 // Both syscalls take no inputs, so their whole contribution to a trace is the
