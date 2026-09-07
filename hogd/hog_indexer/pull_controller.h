@@ -51,7 +51,8 @@ private:
   void mark_caught_up();
   void mark_not_ready();
   // True once this connection has been answered caught up and nothing has
-  // since marked it not ready. Such a pull may park on the server.
+  // since marked it not ready. Such a pull sends its cursor in the CaughtUp
+  // state so the server holds it until the next publication.
   bool caught_up_now();
   void reset_event_client();
 

@@ -278,6 +278,7 @@ public:
       std::lock_guard lock(mutex_);
       requests_.push_back(std::move(request));
     }
+    requests_wake_.notify_all();
     const std::size_t call = calls_.fetch_add(1, std::memory_order_relaxed);
     if (call == 0) {
       co_return EventIndexerPullResult(
@@ -311,6 +312,13 @@ public:
     return requests_;
   }
 
+  bool wait_for_requests(std::size_t count, std::chrono::milliseconds timeout)
+  {
+    std::unique_lock lock(mutex_);
+    return requests_wake_.wait_for(lock, timeout,
+                                   [&] { return requests_.size() >= count; });
+  }
+
   const IndexerOutboxOrigin &origin() const { return origin_; }
   const TransactionHash &failure_hash() const { return notice_.tx_hash; }
 
@@ -321,6 +329,7 @@ private:
   std::atomic<std::size_t> calls_ = 0;
   std::atomic<bool> notice_returned_ = false;
   mutable std::mutex mutex_;
+  std::condition_variable requests_wake_;
   std::vector<EventIndexerPullRequest> requests_;
 };
 
@@ -404,9 +413,6 @@ TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
       event_server.impl()->requests();
   ASSERT_GE(requests.size(), 3UL);
   EXPECT_EQ(requests[0].protocol, version::kHogdProtocol());
-  // A connection's first pull never asks to wait: its caught-up reply is the
-  // readiness signal, so it needs an answer now.
-  EXPECT_FALSE(requests[0].wait);
   EXPECT_EQ(requests[0].progress.state(),
             IndexerProgressState::IndexerProgressUninitialized);
   EXPECT_EQ(requests[1].progress.state(),
@@ -416,6 +422,19 @@ TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
   EXPECT_EQ(requests[2].progress.initialized().origin,
             event_server.impl()->origin());
   EXPECT_EQ(requests[2].progress.initialized().contiguous_height, 1);
+  EXPECT_EQ(db->durable_progress(), requests[2].progress);
+
+  // Once answered caught up on this connection, the next pull sends the same
+  // cursor in the CaughtUp state, asking the server to hold it. The durable
+  // cursor stays Initialized.
+  ASSERT_TRUE(
+      event_server.impl()->wait_for_requests(4, std::chrono::seconds(5)));
+  const std::vector<EventIndexerPullRequest> after_caught_up =
+      event_server.impl()->requests();
+  ASSERT_EQ(after_caught_up[3].progress.state(),
+            IndexerProgressState::IndexerProgressCaughtUp);
+  EXPECT_EQ(after_caught_up[3].progress.initialized(),
+            requests[2].progress.initialized());
   EXPECT_EQ(db->durable_progress(), requests[2].progress);
 
   auto diagnostic = failures.lookup(event_server.impl()->failure_hash());

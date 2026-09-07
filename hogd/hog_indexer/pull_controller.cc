@@ -201,15 +201,23 @@ IndexerPullController::run(const std::stop_token &stop)
     bool caught_up_delay = false;
     try {
       const IndexerProgress requested_progress = db_.durable_progress();
-      // Only a pull on a connection already answered caught up asks the
-      // server to hold it until the next publication. The first pull of a
-      // connection is answered at once, so a restart or reconnect with
-      // persisted progress on an idle chain still learns it is caught up.
       EventIndexerPullRequest request{
           .protocol = version::kHogdProtocol(),
           .progress = requested_progress,
-          .wait = caught_up_now(),
       };
+      // Only a pull on a connection already answered caught up asks the
+      // server to hold it until the next publication, by sending its cursor
+      // in the CaughtUp state. The first pull of a connection is answered at
+      // once, so a restart or reconnect with persisted progress on an idle
+      // chain still learns it is caught up. The durable cursor itself stays
+      // Initialized; the caught-up reply is checked against it below.
+      if (requested_progress.state() ==
+              IndexerProgressState::IndexerProgressInitialized &&
+          caught_up_now()) {
+        request.progress =
+            IndexerProgress(IndexerProgressState::IndexerProgressCaughtUp);
+        request.progress.initialized() = requested_progress.initialized();
+      }
       EventIndexerPullResult result =
           client->event_indexer_pull_next(request)();
       if (stop.stop_requested()) {

@@ -104,6 +104,16 @@ pull_origin(const IndexerOutboxEpochOriginInfo &origin)
   };
 }
 
+// Initialized and CaughtUp share the cursor arm; CaughtUp is Initialized plus
+// a request to wait at the tail.
+bool
+carries_cursor(const IndexerProgress &progress)
+{
+  using enum IndexerProgressState;
+  return progress.state() == IndexerProgressInitialized ||
+         progress.state() == IndexerProgressCaughtUp;
+}
+
 } // namespace
 
 EventRPCContext::EventRPCContext(std::string_view work_directory)
@@ -768,8 +778,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     }
     current_origin = *current_indexer_origin_;
     finalized_tail = *finalized_indexer_tail_;
-    if (request.progress.state() ==
-        IndexerProgressState::IndexerProgressInitialized) {
+    if (carries_cursor(request.progress)) {
       const auto it =
           std::ranges::find_if(indexer_origins_, [&](const auto &o) {
             return o.protocol == request.progress.initialized().origin.protocol;
@@ -788,8 +797,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
   }
 
   BlockHeight next_height = response_origin.first_height;
-  if (request.progress.state() ==
-      IndexerProgressState::IndexerProgressInitialized) {
+  if (carries_cursor(request.progress)) {
     const IndexerInitializedProgress &progress = request.progress.initialized();
     if (!retained_origin) {
       co_return pull_failure(EventIndexerPullProgressConflict,
@@ -904,9 +912,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
   // exhausted height.
   const auto caught_up_at = [&](BlockHeight tail) {
     return next_height > tail ||
-           (next_height == INT64_MAX &&
-            request.progress.state() ==
-                IndexerProgressState::IndexerProgressInitialized &&
+           (next_height == INT64_MAX && carries_cursor(request.progress) &&
             request.progress.initialized().contiguous_height == INT64_MAX);
   };
 
@@ -938,15 +944,16 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
       // a live client simply asks again.
       co_return pull_caught_up(response_origin);
     }
-    // The client says which question this is. Without [wait] it is asking
+    // The progress state says which question this is. Initialized asks
     // whether it is caught up and needs the answer now: IndexerPullController
     // sends that on the first pull of every connection and marks itself
     // caught up only on the reply, which gates its health and startup. A
     // client that reconnected or restarted with persisted progress is asking
     // exactly that, and must not be mistaken for one that wants to wait.
-    // With [wait] it has been answered on this connection already and is
-    // asking to be told about the next block, so it parks here.
-    if (!request.wait) {
+    // CaughtUp has been answered on this connection already and is asking to
+    // be told about the next block, so it parks here.
+    if (request.progress.state() !=
+        IndexerProgressState::IndexerProgressCaughtUp) {
       co_return pull_caught_up(response_origin);
     }
     // Sampled under the publication lock, which is also where commit bumps

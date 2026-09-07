@@ -455,11 +455,11 @@ TEST_F(EventRpcTest, ExactProgressReturnsNextAndUnchangedProgressRepeatsIt)
             x23::serialize(repeated.pulled_block()));
 }
 
-// A pull that does not ask to wait is answered at once, every time: it is
-// the client asking whether it is caught up, and a client that reconnected or
-// restarted with persisted progress asks exactly that. Only a pull that asks
-// to wait parks, and it is served the next commit.
-TEST_F(EventRpcTest, CaughtUpPullWithoutWaitIsAnsweredEveryTime)
+// A pull in the Initialized state is answered at once, every time: it is the
+// client asking whether it is caught up, and a client that reconnected or
+// restarted with persisted progress asks exactly that. Only a pull in the
+// CaughtUp state parks, and it is served the next commit.
+TEST_F(EventRpcTest, InitializedPullIsAnsweredEveryTimeAndCaughtUpPullParks)
 {
   EventRPCContext ctx(temp_dir());
   ConsensusValue genesis{};
@@ -481,8 +481,8 @@ TEST_F(EventRpcTest, CaughtUpPullWithoutWaitIsAnsweredEveryTime)
       .last_consensus_hash = record->consensus_hash,
   };
 
-  // The same progress, three times, none asking to wait: each is a fresh
-  // connection's first question and each is answered.
+  // The same cursor, Initialized, three times: each is a fresh connection's
+  // first question and each is answered.
   for (int i = 0; i < 3; ++i) {
     EventIndexerPullResult caught_up =
         ctx.pull_indexer_next(pull_request(progress))();
@@ -491,10 +491,11 @@ TEST_F(EventRpcTest, CaughtUpPullWithoutWaitIsAnsweredEveryTime)
         << std::string_view(caught_up.diagnostic());
   }
 
-  // Asking to wait parks the pull; the next commit is what answers it.
-  EventIndexerPullRequest waiting = pull_request(progress);
-  waiting.wait = true;
-  auto parked = ctx.pull_indexer_next(waiting);
+  // The same cursor in the CaughtUp state parks; the next commit answers it.
+  IndexerProgress caught_up_progress(
+      IndexerProgressState::IndexerProgressCaughtUp);
+  caught_up_progress.initialized() = progress.initialized();
+  auto parked = ctx.pull_indexer_next(pull_request(caught_up_progress));
   ConsensusValue two = commit_empty_block(ctx, 85, 2, sha256(one));
   EventIndexerPullResult next = parked();
   ASSERT_EQ(next.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock)
