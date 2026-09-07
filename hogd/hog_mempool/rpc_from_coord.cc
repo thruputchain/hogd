@@ -1330,12 +1330,10 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
+  // The next block must have a [block_timepoint] that is >= the last committed
+  // block's timepoint.
   if (context.block_timepoint <
       last_committed_block_.value.proposal_header.block_timepoint) {
-    // Blocks only move forward in time. The coordinator fixes the timepoint
-    // before execution and it is carried in the header, so nominating one that
-    // predates the committed tip builds a block whose own history runs
-    // backwards -- and every executor would run it against that value.
     error("Refusing to nominate a block at timepoint {}: the committed tip is "
           "at {}",
           context.block_timepoint,
@@ -2070,20 +2068,11 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  // Read once, before the decrement below: that reopens the validation gate
-  // and can wake a commit waiting in close_validation_gate(), which replaces
-  // last_committed_block_ -- and the co_await is a suspension point besides.
-  // Reading it again afterwards would race a non-atomic DbTip, and would let
-  // the diagnostic name a different tip than the one actually compared.
   const TimePoint committed_timepoint =
       last_committed_block_.value.proposal_header.block_timepoint;
+  // The next block must have a [block_timepoint] that is >= the last committed
+  // block's timepoint.
   if (proposal.header.block_timepoint < committed_timepoint) {
-    // Blocks only move forward in time. This header comes from another
-    // proposer, so without the check a peer decides that time runs backwards
-    // for us: the value reaches every executor through the block execution
-    // context, and contracts keyed on time see the chain move into its own
-    // past. The height checks above already pinned this proposal to the tip's
-    // successor, so the tip is the block it claims to follow.
     co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
     error("Rejecting block at height {}: timepoint {} predates the committed "

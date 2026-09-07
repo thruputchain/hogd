@@ -1925,14 +1925,6 @@ TEST(Mempool, ProposalUsesTransactionRoot)
             MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
 }
 
-// Blocks only move forward in time. The block timepoint is fixed before
-// execution and reaches every executor through the block execution context, so
-// a block whose timepoint predates the one it follows makes the chain move into
-// its own past, and contracts keyed on time see it.
-//
-// On the nomination side that is a local coordinator handing us a bad context.
-// On the validation side it is another proposer deciding that time runs
-// backwards for us, which is why the check cannot live only in the proposer.
 TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1973,18 +1965,40 @@ TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
   // Equal is allowed: two blocks sharing a timepoint is implausible, not
   // incoherent. This also leaves the mempool able to nominate afterwards,
   // showing the refusal above did not wedge it.
-  SchedulerProposalResult equal =
-      propose_block(server, tip,
-                    ProposalContext{.block_timepoint = kTipTimepoint});
-  ASSERT_EQ(equal.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  ASSERT_EQ(propose_block(server, tip,
+                          ProposalContext{.block_timepoint = kTipTimepoint})
+                .outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
 
-  // A peer's proposal behind the tip is invalid, not merely late.
-  Proposal backwards = equal.proposed_block().proposal;
-  backwards.header.block_timepoint = kTipTimepoint - 1;
+  // Greater than is allowed.
+  SchedulerProposalResult greater =
+      propose_block(server, tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint + 1});
+  ASSERT_EQ(greater.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // A peer's proposal behind the tip is invalid.
+  Proposal backwards = greater.proposed_block().proposal;
+  backwards.header.block_timepoint = kTipTimepoint;
   EXPECT_EQ(server.mempool_coord_rpc()
                 .schedulercoord_validate_block(tip.id, std::move(backwards))()
                 .outcome(),
             SchedulerValidationOutcome::SchedulerValidationInvalid);
+
+  // A peer's proposal equal to the tip is allowed.
+  Proposal backwards = greater.proposed_block().proposal;
+  backwards.header.block_timepoint = kTipTimepoint + 1;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(backwards))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationOK);
+
+  // A peer's proposal greater than the tip is allowed.
+  Proposal backwards = greater.proposed_block().proposal;
+  backwards.header.block_timepoint = kTipTimepoint + 2;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(backwards))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationOK);
 }
 
 TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
