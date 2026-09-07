@@ -32,6 +32,15 @@ echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 echo 'run bench server'
+if [ '{{ .executor_profile }}' = true ]; then
+    case $(hostname -s) in
+        hog5|hog6)
+            bash scripts/ci/profile_executor.sh "$PWD/release/hogd/hog_exec/hog-exec" &
+            executor_profiler=$!
+            trap 'kill "$executor_profiler" 2>/dev/null || true' EXIT
+            ;;
+    esac
+fi
 ./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w work_dir/
 
 """
