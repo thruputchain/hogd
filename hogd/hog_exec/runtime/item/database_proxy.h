@@ -131,7 +131,7 @@ private:
   // The async multiclient: a DB read suspends the calling coroutine instead of
   // parking its thread, which is what lets contract execution share the x23
   // ThreadPool rather than needing a DispatchPool of its own.  Still a
-  // multiclient (one connection per LLC): a synchronous-bodied async server
+  // multiclient (sized by db_connection_map): a synchronous-bodied async server
   // serializes requests per connection, so a single connection would serialize
   // every DB read in the process.
   using base_client_t = x23::RpcMulticlient<x23::RpcLogger>::ClientRef;

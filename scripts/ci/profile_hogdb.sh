@@ -35,6 +35,9 @@ done < <(pgrep -u "$(id -u)" -x hog-db)
   printf '\n'
 } >"$output/metadata.txt"
 
+# Keep symbols available after the next schedule replaces the build directory.
+cp "$binary" "$output/hog-db"
+
 snapshot() {
   local label=$1 index=0 url
   shift
