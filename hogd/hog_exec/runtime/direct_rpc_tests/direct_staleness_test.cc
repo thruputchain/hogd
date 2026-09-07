@@ -579,6 +579,9 @@ TEST_F(DirectStalenessTest,
 
   StorageSnapshotCache block_b_cache(block_b, get_block_execution_context(),
                                      get_db_proxy());
+  // Loaded while block_b is open; the commit of block_a below is what makes
+  // the per-transaction reads stale.
+  ASSERT_TRUE(block_b_cache.load_db_tip()().has_value());
   EventServerProxy event_proxy(
       x23::HostPort{"localhost", get_event_exec_port()});
   SystemCallHandler handler(
