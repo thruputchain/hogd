@@ -344,8 +344,10 @@ private:
   };
   MVar<ClientState> cstate_;
   RefPtr<WriteBuffer> writer_;
+  std::uint64_t write_generation_{};
   std::atomic_bool flush_scheduled_{false};
   Buf read_marker_;
+  void flush_requests();
 
   void send_msg(const rpc_msg &msg, const is_xdr_type auto &...x)
   {

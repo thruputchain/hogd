@@ -27,6 +27,7 @@ RpcStreamImpl::RpcStreamImpl(CoroPoll &cp, UniqueFd fd)
   : cp_(cp), fd_(std::move(fd))
 {
   set_nonblock(fd_);
+  write_generation_ = cp_->generation(fd_, true);
   writer_ = cp_->get_writer(fd_);
 }
 
@@ -55,6 +56,18 @@ RpcStreamImpl::fail()
 }
 
 void
+RpcStreamImpl::flush_requests()
+{
+  if (ss_.stop_requested())
+    return;
+  // A cached writer must not bypass poison/reset. Check once per flush,
+  // rather than looking up/refcounting the writer for every request.
+  if (cp_->generation(fd_, false) != write_generation_ ||
+      writer_->flush(*cp_, fd_))
+    fail();
+}
+
+void
 RpcStreamImpl::send_request(Buf record)
 {
   if (!writer_ || ss_.stop_requested()) {
@@ -62,8 +75,7 @@ RpcStreamImpl::send_request(Buf record)
     return;
   }
   if (writer_->enqueue(std::move(record)) >= WriteBuffer::kFlushThreshold) {
-    if (writer_->flush(*cp_, fd_))
-      fail();
+    flush_requests();
     return;
   }
   if (!flush_scheduled_.exchange(true)) {
@@ -74,9 +86,7 @@ RpcStreamImpl::send_request(Buf record)
       co_await self->cp_->pool_.bg();
       // Clear before flushing so a concurrent append schedules more work.
       self->flush_scheduled_ = false;
-      if (!self->ss_.stop_requested() &&
-          self->writer_->flush(*self->cp_, self->fd_))
-        self->fail();
+      self->flush_requests();
     }(RefPtr<RpcStreamImpl>{*this});
   }
 }
