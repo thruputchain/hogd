@@ -79,6 +79,8 @@ export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 export BUILD_DIR=release
 export WORK_DIR=work_dir/
 
+export HOGDB_PROFILE="{{ .hogdb_profile }}"
+
 echo 'run mempool benchmarks'
 set +e
 ./scripts/ci/mempool_bench.sh

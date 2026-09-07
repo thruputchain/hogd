@@ -9,6 +9,7 @@ ci_enable_error_trace
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
 STALE_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
+HOGDB_PROFILE_PID=
 CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
@@ -22,6 +23,12 @@ cleanup() {
   local exit_code=$1
 
   ci_enter_cleanup
+  if [[ -n "$HOGDB_PROFILE_PID" ]]; then
+    if ! wait "$HOGDB_PROFILE_PID"; then
+      echo "hogdb profiling failed; inspect diagnostic artifacts" >&2
+      exit_code=1
+    fi
+  fi
   ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
   kill_stale_processes
 
@@ -142,6 +149,14 @@ $CONTROL_CLI hog8 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
+if [[ "${HOGDB_PROFILE:-false}" == true ]]; then
+  # The scheduler's unique run ID keeps artifacts available after host locks
+  # are released. The profiler only attaches to this checkout's hog-db.
+  profile_dir="/tmp/hogdb-profile-${HOG_XID:?profiling requires a scheduler run ID}"
+  ci_remote_run hog11 "bash $(printf '%q' "$PWD/scripts/ci/profile_hogdb.sh") $(printf '%q' "$PWD/$BUILD_DIR/hogd/hog_db/hog-db") $(printf '%q' "$profile_dir") $(printf '%q' "http://$(hog_ip hog11):$DB_HTTP_PORT/metrics") $(printf '%q' "http://$(hog_ip hog5):$EXECUTOR_HTTP_PORT/metrics") $(printf '%q' "http://$(hog_ip hog6):$EXECUTOR_HTTP_PORT/metrics")" &
+  HOGDB_PROFILE_PID=$!
+fi
+
 echo 'launch mempool'
 set +e
 timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
@@ -182,6 +197,11 @@ if [[ $coordinator_status -ne 0 ]]; then
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
   exit "$coordinator_status"
 fi
+
+# Preserve the coordinator's existing throughput definition in the CI log,
+# including every reported sample, even when metrics history is overwritten
+# by a repeat at the same commit.
+awk '/^Block duration \(s\),|^Block throughput \(tx\/s\),/' coordinator_output.txt
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
