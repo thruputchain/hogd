@@ -1985,18 +1985,18 @@ TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
             SchedulerValidationOutcome::SchedulerValidationInvalid);
 
   // A peer's proposal equal to the tip is allowed.
-  Proposal backwards = greater.proposed_block().proposal;
-  backwards.header.block_timepoint = kTipTimepoint + 1;
+  Proposal equal = greater.proposed_block().proposal;
+  equal.header.block_timepoint = kTipTimepoint + 1;
   EXPECT_EQ(server.mempool_coord_rpc()
-                .schedulercoord_validate_block(tip.id, std::move(backwards))()
+                .schedulercoord_validate_block(tip.id, std::move(equal))()
                 .outcome(),
             SchedulerValidationOutcome::SchedulerValidationOK);
 
   // A peer's proposal greater than the tip is allowed.
-  Proposal backwards = greater.proposed_block().proposal;
-  backwards.header.block_timepoint = kTipTimepoint + 2;
+  Proposal greater2 = greater.proposed_block().proposal;
+  greater2.header.block_timepoint = kTipTimepoint + 2;
   EXPECT_EQ(server.mempool_coord_rpc()
-                .schedulercoord_validate_block(tip.id, std::move(backwards))()
+                .schedulercoord_validate_block(tip.id, std::move(greater2))()
                 .outcome(),
             SchedulerValidationOutcome::SchedulerValidationOK);
 }
