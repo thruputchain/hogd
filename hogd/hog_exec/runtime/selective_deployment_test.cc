@@ -369,7 +369,8 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
 
   auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
 
   auto deployment_lookup = lookup_deployment_from_db(deployed_addr);
   EXPECT_FALSE(deployment_lookup.has_value());
@@ -1333,9 +1334,10 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
   EXPECT_EQ(sha256(lookup.value()), limit_hash);
 }
 
-// An attached contract blob above kMaxContractSizeBytes is rejected
-// deterministically during initial validation: the body never runs and
-// nothing is deployed (#2569).
+// An attached contract blob above kMaxContractSizeBytes is rejected as a
+// ValidationFailure during initial validation (malformed transactions are
+// dropped, not included): the body never runs and nothing is deployed
+// (#2569).
 TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 {
   Contract oversized(ContractType::kRv32);
@@ -1380,9 +1382,10 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 
   auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
   EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultTxDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(oversized_hash).has_value());
 }
@@ -1443,9 +1446,10 @@ TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 
   auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
   EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultTxDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(first_hash).has_value());
 }
@@ -1495,9 +1499,10 @@ TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
 
   auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
   EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultTxDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(contract_hash).has_value());
 }
