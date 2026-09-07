@@ -62,6 +62,23 @@ namespace hogd {
 
 namespace {
 
+// True when there is nothing at [path] to open: no such path, or an empty
+// directory. A filesystem error reads as false, so an unreadable path is
+// left to [IndexDB::open] to refuse rather than treated as absent.
+bool
+path_holds_nothing(const std::filesystem::path &path)
+{
+  std::error_code ec;
+  if (!std::filesystem::exists(path, ec)) {
+    return !ec;
+  }
+  if (!std::filesystem::is_directory(path, ec) || ec) {
+    return false;
+  }
+  const bool empty = std::filesystem::is_empty(path, ec);
+  return empty && !ec;
+}
+
 // Helper function to create a tx_index SST file chunk
 IndexerStatus<bool>
 create_tx_index_sst_chunk(
@@ -382,6 +399,29 @@ void
 RocksDBDeleter::operator()(rocksdb::DB *db) const
 {
   delete db;
+}
+
+IndexerStatus<IndexDB>
+IndexDB::open_or_make_new(const std::filesystem::path &path,
+                          rocksdb::CompressionType compression_algorithm)
+{
+  // Only a path with nothing at it is created. Dispatching on whether the
+  // path exists sent an existing but empty data directory down [open],
+  // which does not create and so fails with kDBNotFound -- fatal, since
+  // every caller panics on it. Launchers make a daemon's data directory
+  // before the daemon runs often enough (a deployment script, the CI
+  // control server clearing its work directory, a plain [mkdir -p]) that
+  // an empty directory says nothing about whether a database is there
+  // (#3890).
+  //
+  // Anything else is [open]'s to make sense of, including a directory
+  // holding files this cannot identify: a database whose CURRENT file is
+  // gone still fails closed rather than having a fresh manifest written
+  // over the top of its data.
+  if (path_holds_nothing(path)) {
+    return make_new(path, compression_algorithm);
+  }
+  return open(path, compression_algorithm);
 }
 
 IndexerStatus<IndexDB>

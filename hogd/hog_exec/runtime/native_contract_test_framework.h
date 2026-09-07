@@ -255,7 +255,8 @@ private:
 class NativeContractTestFramework {
 public:
   // [db_max_message_size] caps this framework's executor->db client; see
-  // DatabaseProxy.
+  // DatabaseProxy. [db_heap_bytes] sizes a kHogDb ramdb heap; see
+  // HogdbWrapper.
   NativeContractTestFramework(
       bool log = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
@@ -263,8 +264,9 @@ public:
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
           std::nullopt,
       std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
-      size_t db_max_message_size = kBulkRpcMaxMessageSize)
-    : db_wrapper_(make_db_wrapper(test_db))
+      size_t db_max_message_size = kBulkRpcMaxMessageSize,
+      std::optional<size_t> db_heap_bytes = std::nullopt)
+    : db_wrapper_(make_db_wrapper(test_db, db_heap_bytes))
   {
     bool logging_enabled = log || do_logging_env();
     if (logging_enabled) {
@@ -291,15 +293,18 @@ public:
   void enable_logging();
 
   static std::variant<MockDBWrapper, HogdbWrapper>
-  make_db_wrapper(TestDB test_db)
+  make_db_wrapper(TestDB test_db, std::optional<size_t> db_heap_bytes)
   {
     switch (test_db) {
     case TestDB::kMockInMemory:
       return std::variant<MockDBWrapper, HogdbWrapper>(
           std::in_place_type<MockDBWrapper>);
     case TestDB::kHogDb:
-      return std::variant<MockDBWrapper, HogdbWrapper>(
-          std::in_place_type<HogdbWrapper>);
+      return db_heap_bytes.has_value()
+                 ? std::variant<MockDBWrapper, HogdbWrapper>(
+                       std::in_place_type<HogdbWrapper>, *db_heap_bytes)
+                 : std::variant<MockDBWrapper, HogdbWrapper>(
+                       std::in_place_type<HogdbWrapper>);
     default:
       panic("make_db_wrapper: invalid test_db {}", static_cast<int>(test_db));
     }

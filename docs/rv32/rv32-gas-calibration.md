@@ -555,9 +555,9 @@ idea to understand rather than two:
 - The **engine fingerprint** is checked first, by equality. If it moved, every
   ratio below describes a different interpreter.
 
-**What is deliberately not guarded.** `cold/` rows, because they are bounded by
-the benchmark's in-process mock rather than by hogd -- gating them would gate
-the harness. Rows whose own repetitions disagree by more than 5%, which cannot
+**What is deliberately not guarded.** `cold/` rows, because nothing charges for
+a cold read yet, and a guard on an unpriced row gates noise -- theirs is ~10%
+against 0.2% for a warm row. Rows whose own repetitions disagree by more than 5%, which cannot
 tell a regression from their own noise. And sweep cells where the frames-only
 baseline dominates the subtraction: the depth-254 K=1 cell isolates one ~260 ns
 touch by subtracting a 30 microsecond baseline, so the keys are 4% of what was
@@ -837,8 +837,8 @@ The flat charge overbills a repeat touch -- which measures near the crossing
 alone -- by well under 2x, the direction the opcode schedule already rounds.
 
 The syscall-path rows could not have found this. `max_sha256_buffers` is
-network config, so the mock snapshot server the fixture talks to serves one
-value and cannot sweep it; and `entry/SHA256Copy` repeats a single
+network config, so the genesis the fixture runs fixes one value and the rows
+cannot sweep it; and `entry/SHA256Copy` repeats a single
 (source, destination) pair, so the warm pass creates the destination and every
 timed iteration after it takes the assignment branch.
 `buffers/CopyFill` and `buffers/UpdateFill` drive the component instead, and
@@ -1034,8 +1034,8 @@ the timed iteration and close them as *failed*, so whatever they touched is
 discarded and the next iteration starts from the state the last one found. Each
 regime reads and writes its own key space (the key's first byte is the regime
 tag), so one row's warm pass cannot leave a key in a frame, or in the snapshot
-cache, that another row then finds warm. The first-touch keys are seeded in the
-mock snapshot and faulted into the cache by the row's warm pass, so the timed
+cache, that another row then finds warm. The first-touch keys are seeded in
+hog_db and faulted into the cache by the row's warm pass, so the timed
 reads are cache hits by construction; the cold row's keys are used strictly
 once, from a pool sized against a fixed iteration count, and the row fails with
 a message rather than recycling one. Every call in every iteration is checked,
@@ -1067,11 +1067,11 @@ to every first touch.
 **What the cold row is, and is not.** It measures everything on the executor's
 side of a snapshot-cache miss: the miss under the shared lock, the
 `DatabaseProxy` RPC -- serialized, over a local socket -- the
-`SnapshotStorageItem` built from the reply, the cache insert. The server
-answering is the benchmark's in-process mock, whose lookup is a hash-map find.
-So it is the fixed cost of *going* to the database and not the cost of the
-database, a floor under a cold read rather than the read. The report prints it
-in its own table and keeps it out of `--schedule`.
+`SnapshotStorageItem` built from the reply, the cache insert -- and hog_db's
+own lookup over a real ramdb, which is most of it. Still a floor in one
+respect: hog_db is in-process over a local socket, so a chain whose executor
+and database sit on different hosts pays a hop this does not. The report prints
+it in its own table and keeps it out of `--schedule`.
 
 There is a more basic reason it is not proposed. Whether a key is in the
 snapshot cache depends on which transactions ran before this one in the block,
@@ -1109,7 +1109,7 @@ baseline (74.3 ns) instead.
 | first-touch write, depth 1, 4096 keys | 227.1 | 4.1 |
 | each parent frame, per first touch | 0.9 | 0.02 |
 | committing one staged item into a parent, 4096 items | 51.5 | 0.9 |
-| snapshot-cache miss, against the mock | 42174 | 764 |
+| snapshot-cache miss, against hog_db | 55249 | 5417 |
 
 Four things follow.
 
@@ -1188,10 +1188,11 @@ Committing that item from a successful child into a fresh parent costs another
 here at all. Any per-write price has to prepay both halves, because neither is
 a syscall the schedule sees.
 
-The cold row is what it says: 42.2 µs against the in-process mock, 266x a warm
-`NNIntGet`, most of it the coroutine round trip through the proxy rather than any
-lookup. It is on the record so the size of what the schedule declines to price
-is known, not as a candidate for the table.
+The cold row is what it says: 55.2 µs against a real hog_db, 352x a warm
+`NNIntGet`, and both are billed 200 gas. At this host's gas unit that is ~34000
+gas of work charged 200 -- the size of what the schedule does not yet price.
+Its spread is ~10%, against 0.2% for a warm row, so a price taken from it wants
+the dear end rather than the mean.
 
 **What was adopted.** `kStorageAccessCost = 150`, charged by
 `NonnegativeIntGet` and `NonnegativeIntSetAdd` alike on every call, which with
@@ -1342,10 +1343,10 @@ measurement settles.
 host's cache, which is why both hosts are shown rather than the pool alone:
 the container is what a small-cache validator would see. And the loaded
 columns are an upper
-bound: its keys have to exist in the benchmark's mock, and at the top of the
-sweep that map is ~90 MB resident competing for the same cache. That is
+bound: its keys have to exist in hog_db, and at the top of the sweep that
+state is ~90 MB resident competing for the same cache. That is
 scaffolding rather than a cost a contract causes, which is why the no-load
-column -- which seeds nothing and consults neither the mock nor the cache --
+column -- which seeds nothing and consults neither hog_db nor the cache --
 is the one to read for how the frame's own map scales. The rows that need no
 seeded snapshot run first for that reason, and the commit rows run before the
 seeded sweep too: they are a difference of two whole-iteration timings, and
@@ -1649,11 +1650,9 @@ the v3 entry the list already carries.
   retrocausal queue calls follow the same frame-and-snapshot pattern with their
   own item types; the auth registry calls reach a different table. What none of the rows reach is the root commit --
   `try_commit_transaction`'s delta batch and hog_db's item locks -- which is
-  where a write's cost lands last, and needs a real database rather than the
-  mock to measure.
-- The snapshot-cache miss is measured against the mock and deliberately not
-  proposed. Its worst case is a hog_db read, which is a database cost rather
-  than a syscall cost and is not reproducible the way these are. Even the
+  where a write's cost lands last.
+- The snapshot-cache miss is measured against a real hog_db and deliberately
+  not proposed: what charges for it has to be settled first. Even the
   stateless set has a cold path -- the first `GetBlockHeight` in a block
   fetches the db tip through the proxy and every later one reads an atomic. The
   numbers above are the steady state, which is what a contract making more than
