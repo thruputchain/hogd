@@ -1,0 +1,230 @@
+{
+  "benchmark_seconds": 120,
+  "profiling": false,
+  "unprofiled_runs": [
+    {
+      "conclusion": "success",
+      "headSha": "38e064c46452cac5eba1fa53be8a6c40737a765e",
+      "status": "completed",
+      "url": "https://github.com/groundhogchain/hogd/actions/runs/34151582985",
+      "overall_throughput_tx_s": 414719.64,
+      "run": 34151582985,
+      "window_seconds": 60.64964294433594,
+      "cpu_seconds": 596.9200000000001,
+      "average_cores": 9.842102459660834,
+      "successful_proposals": 25000000.0,
+      "cpu_us_per_successful_proposal": 23.876800000000006,
+      "variant": "baseline",
+      "early_failed_delta": 0.0,
+      "late_failed_delta": 0.0,
+      "sample_start": {
+        "run": 34151582985,
+        "pid": 1956575,
+        "process_age_seconds": 34
+      },
+      "late_sample": {
+        "run": 34151582985,
+        "window_seconds": 15.856191873550415,
+        "cpu_seconds": 146.94999999999993,
+        "average_cores": 9.26767291742515,
+        "successful_proposals": 5382152.0,
+        "cpu_us_per_successful_proposal": 27.30320511200723,
+        "failed_proposals_before": 0.0,
+        "failed_proposals_after": 0.0
+      }
+    },
+    {
+      "conclusion": "success",
+      "headSha": "38e064c46452cac5eba1fa53be8a6c40737a765e",
+      "status": "completed",
+      "url": "https://github.com/groundhogchain/hogd/actions/runs/34151584544",
+      "overall_throughput_tx_s": 502560.33,
+      "run": 34151584544,
+      "window_seconds": 60.68318009376526,
+      "cpu_seconds": 779.2499999999999,
+      "average_cores": 12.841284830424732,
+      "successful_proposals": 33000000.0,
+      "cpu_us_per_successful_proposal": 23.61363636363636,
+      "variant": "baseline",
+      "early_failed_delta": 0.0,
+      "late_failed_delta": 0.0,
+      "sample_start": {
+        "run": 34151584544,
+        "pid": 1993834,
+        "process_age_seconds": 33
+      },
+      "late_sample": {
+        "run": 34151584544,
+        "window_seconds": 15.889237642288208,
+        "cpu_seconds": 166.26,
+        "average_cores": 10.463686411077989,
+        "successful_proposals": 6910529.0,
+        "cpu_us_per_successful_proposal": 24.05893962676374,
+        "failed_proposals_before": 0.0,
+        "failed_proposals_after": 0.0
+      }
+    },
+    {
+      "conclusion": "success",
+      "headSha": "38e064c46452cac5eba1fa53be8a6c40737a765e",
+      "status": "completed",
+      "url": "https://github.com/groundhogchain/hogd/actions/runs/34156896258",
+      "overall_throughput_tx_s": 513646.3,
+      "run": 34156896258,
+      "window_seconds": 60.64536666870117,
+      "cpu_seconds": 759.2599999999999,
+      "average_cores": 12.519670367362968,
+      "successful_proposals": 32000000.0,
+      "cpu_us_per_successful_proposal": 23.726874999999996,
+      "variant": "baseline",
+      "early_failed_delta": 0.0,
+      "late_failed_delta": 0.0,
+      "sample_start": {
+        "run": 34156896258,
+        "pid": 2013053,
+        "process_age_seconds": 32
+      },
+      "late_sample": {
+        "run": 34156896258,
+        "window_seconds": 15.818175077438354,
+        "cpu_seconds": 216.80999999999995,
+        "average_cores": 13.706385151169464,
+        "successful_proposals": 8812398.0,
+        "cpu_us_per_successful_proposal": 24.60283795625208,
+        "failed_proposals_before": 0.0,
+        "failed_proposals_after": 0.0
+      }
+    },
+    {
+      "conclusion": "success",
+      "headSha": "039b3fcb52456b9140fed4b9b08016293f8ebc69",
+      "status": "completed",
+      "url": "https://github.com/groundhogchain/hogd/actions/runs/34153178766",
+      "overall_throughput_tx_s": 418096.95,
+      "run": 34153178766,
+      "window_seconds": 60.66100001335144,
+      "cpu_seconds": 607.96,
+      "average_cores": 10.022254823794341,
+      "successful_proposals": 25018494.0,
+      "cpu_us_per_successful_proposal": 24.30042351869781,
+      "variant": "optimized",
+      "early_failed_delta": 0.0,
+      "late_failed_delta": 0.0,
+      "sample_start": {
+        "run": 34153178766,
+        "pid": 1937615,
+        "process_age_seconds": 32
+      },
+      "late_sample": {
+        "run": 34153178766,
+        "window_seconds": 15.856828451156616,
+        "cpu_seconds": 164.34000000000003,
+        "average_cores": 10.363989274791761,
+        "successful_proposals": 6040165.0,
+        "cpu_us_per_successful_proposal": 27.207866010282835,
+        "failed_proposals_before": 0.0,
+        "failed_proposals_after": 0.0
+      }
+    },
+    {
+      "conclusion": "success",
+      "headSha": "039b3fcb52456b9140fed4b9b08016293f8ebc69",
+      "status": "completed",
+      "url": "https://github.com/groundhogchain/hogd/actions/runs/34153180535",
+      "overall_throughput_tx_s": 517916.31,
+      "run": 34153180535,
+      "window_seconds": 60.6520311832428,
+      "cpu_seconds": 767.5800000000002,
+      "average_cores": 12.655470641716455,
+      "successful_proposals": 32504327.0,
+      "cpu_us_per_successful_proposal": 23.614702128735047,
+      "variant": "optimized",
+      "early_failed_delta": 0.0,
+      "late_failed_delta": 0.0,
+      "sample_start": {
+        "run": 34153180535,
+        "pid": 1975199,
+        "process_age_seconds": 34
+      },
+      "late_sample": {
+        "run": 34153180535,
+        "window_seconds": 15.862265348434448,
+        "cpu_seconds": 212.81999999999994,
+        "average_cores": 13.416746935267007,
+        "successful_proposals": 8600000.0,
+        "cpu_us_per_successful_proposal": 24.74651162790697,
+        "failed_proposals_before": 0.0,
+        "failed_proposals_after": 0.0
+      }
+    },
+    {
+      "conclusion": "success",
+      "headSha": "f6a5cb49f0b0c2c9127d6186b42e9924a499127c",
+      "status": "completed",
+      "url": "https://github.com/groundhogchain/hogd/actions/runs/34156897956",
+      "overall_throughput_tx_s": 505312.51,
+      "run": 34156897956,
+      "window_seconds": 60.65127158164978,
+      "cpu_seconds": 800.8999999999999,
+      "average_cores": 13.204999320118368,
+      "successful_proposals": 33307995.0,
+      "cpu_us_per_successful_proposal": 24.045278018085444,
+      "variant": "optimized",
+      "early_failed_delta": 0.0,
+      "late_failed_delta": 0.0,
+      "sample_start": {
+        "run": 34156897956,
+        "pid": 2078038,
+        "process_age_seconds": 32
+      },
+      "late_sample": {
+        "run": 34156897956,
+        "window_seconds": 15.841782331466675,
+        "cpu_seconds": 198.45000000000005,
+        "average_cores": 12.526999541321624,
+        "successful_proposals": 7240000.0,
+        "cpu_us_per_successful_proposal": 27.410220994475146,
+        "failed_proposals_before": 0.0,
+        "failed_proposals_after": 0.0
+      }
+    }
+  ],
+  "diagnostic_baseline": {
+    "window_seconds": 123.285506,
+    "cpu_seconds": 1602.77,
+    "successful_proposals": 66000000.0,
+    "cpu_us_per_proposal": 24.28439393939394,
+    "failed_proposals": 0.0,
+    "try_push_new_subtransaction": {
+      "samples": 64449.0,
+      "mean_us": 702.582082002824
+    },
+    "commit_transaction": {
+      "samples": 64457.0,
+      "mean_us": 703.2412885954977
+    },
+    "get_snapshot_item": {
+      "samples": 1515.0,
+      "mean_us": 1075.7970046204618
+    }
+  },
+  "diagnostic_optimized": {
+    "window_seconds": 124.391016,
+    "cpu_seconds": 1608.1100000000001,
+    "successful_proposals": 64124958.0,
+    "cpu_us_per_proposal": 25.077755216619405,
+    "failed_proposals": 0.0,
+    "try_push_new_subtransaction": {
+      "samples": 62623.0,
+      "mean_us": 712.676759321655
+    },
+    "commit_transaction": {
+      "samples": 62625.0,
+      "mean_us": 712.4890887185628
+    },
+    "get_snapshot_item": {
+      "samples": 1504.0,
+      "mean_us": 1076.2471329787234
+    }
+  }
+}
