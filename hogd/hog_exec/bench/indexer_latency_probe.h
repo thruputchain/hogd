@@ -6,9 +6,12 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <future>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <print>
 #include <stop_token>
 #include <string>
@@ -43,6 +46,12 @@ namespace hogd {
 //
 // The poller is a plain thread making blocking RPC calls, paced by a
 // condition variable so a stop request is prompt.
+//
+// A watermark read that fails on the transport drops the connection and the
+// poller reconnects, because the alternative is what #3895 was: one dropped
+// connection left every later poll failing on the same dead file descriptor
+// for the rest of the run, and the probe reported "no samples" without ever
+// saying that it had stopped being able to ask.
 class IndexerLatencyProbe {
 public:
   // ~1k RPCs/s against the indexer under test; tighter starts to perturb it.
@@ -52,13 +61,18 @@ public:
   // gives up on it.
   static constexpr auto kConnectTimeout = std::chrono::seconds(120);
 
+  // Cadence of reconnect attempts while disconnected. Far slower than
+  // [kPollInterval]: there is nothing to measure until a connection is back,
+  // and an indexer that has gone away should not be hammered at 1 kHz.
+  static constexpr auto kReconnectInterval = std::chrono::milliseconds(500);
+
   // Fails loudly: a probe that silently measured nothing would publish an
   // empty metric that reads exactly like "latency is fine".
   explicit IndexerLatencyProbe(const std::string &indexer_addr)
-    : client_(connect(indexer_addr))
+    : indexer_addr_(indexer_addr), client_(connect(indexer_addr))
   {
     const IndexerBlockExplorerIntroOutcome intro =
-        client_.indexer_block_explorer_intro(version::kHogdProtocol())();
+        client_->indexer_block_explorer_intro(version::kHogdProtocol())();
     if (intro != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
       panic("indexer latency probe: intro rejected ({})", intro);
     }
@@ -102,6 +116,14 @@ public:
     }
   }
 
+  // True when the probe measured nothing at all, which is the shape of a
+  // broken run rather than a fast one and is worth diagnosing further.
+  bool measured_nothing()
+  {
+    const std::lock_guard g(mtx_);
+    return observed_.empty();
+  }
+
   // One line per block plus a summary, both on a stable prefix so CI can
   // grep them out of the runner's stdout into their own metric series
   // without depending on the surrounding benchmark output.
@@ -109,10 +131,14 @@ public:
   {
     std::vector<uint64_t> samples;
     size_t missed = 0;
+    std::string diagnosis;
+    size_t failures = 0;
     {
       const std::lock_guard g(mtx_);
       samples = observed_;
       missed = pending_.size();
+      failures = failures_;
+      diagnosis = describe_failures();
       for (const auto &[height, latency_ns] : per_height_) {
         std::println("indexer_latency_block: label={} height={} latency_ns={}",
                      label, height, latency_ns);
@@ -120,10 +146,21 @@ public:
     }
 
     if (samples.empty()) {
+      // The reason rides on the summary line itself because that is the line
+      // [scripts/ci/exec_scaling.sh] replays when it refuses to publish the
+      // series: a bare "blocks=0" names the symptom and nothing else.
       std::println("indexer_latency_summary: label={} blocks=0 unobserved={} "
-                   "(no samples)",
-                   label, missed);
+                   "(no samples; {})",
+                   label, missed, diagnosis);
       return;
+    }
+
+    // Kept off the metric lines, whose format the history tooling parses, but
+    // still said out loud: a run that lost the connection and got it back
+    // measured a gap it cannot see in its own percentiles.
+    if (failures != 0) {
+      warn("indexer latency probe: label={} measured {} blocks despite {}",
+           label, samples.size(), diagnosis);
     }
 
     std::ranges::sort(samples);
@@ -138,8 +175,22 @@ private:
   using indexer_block_explorer_client_t =
       IndexerBlockExplorer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  // Connects in the member init list so [client_] is never an empty optional
-  // that every later use has to re-check.
+  // One reconnect attempt, owned by nobody. The probe drops its handle on
+  // stop and the attempt finishes into the shared state and frees it, so an
+  // attempt that outlives the probe -- [tcpconnect] has no deadline of its
+  // own, so a host that black-holes SYNs rather than refusing them holds one
+  // attempt for as long as the kernel retries -- neither reaches freed
+  // memory nor holds up [stop].
+  struct ConnectAttempt {
+    std::mutex mtx;
+    bool done = false;
+    std::optional<indexer_block_explorer_client_t> client;
+    std::string error;
+  };
+
+  // Connects in the member init list so the probe is either connected or has
+  // panicked by the time the constructor returns; only [poll] ever empties
+  // [client_], and only it looks at the optional.
   //
   // Bounded, unlike [make_rpc_client]'s own retry, which loops on a refused
   // port for as long as the process lives: an indexer that died at startup
@@ -199,9 +250,10 @@ private:
   void poll(const std::stop_token &stop)
   {
     while (!stop.stop_requested()) {
-      const BlockHeight watermark = read_watermark();
-      const uint64_t now = x23::fastclock::get_ns();
-      {
+      const bool connected = client_.has_value();
+      if (connected) {
+        const BlockHeight watermark = read_watermark();
+        const uint64_t now = x23::fastclock::get_ns();
         const std::lock_guard g(mtx_);
         // [pending_] is ordered, so this walks exactly the heights this
         // sample newly covered and stops at the first one it did not.
@@ -216,15 +268,24 @@ private:
           drained_.notify_all();
         }
       }
+      else {
+        service_reconnect();
+      }
 
       std::unique_lock lock(wait_mtx_);
-      wake_.wait_for(lock, stop, kPollInterval, [] { return false; });
+      // Pacing follows what the loop is doing: measuring at [kPollInterval],
+      // waiting for a connection at [kReconnectInterval].
+      wake_.wait_for(lock, stop, connected ? kPollInterval : kReconnectInterval,
+                     [] { return false; });
     }
   }
 
   // A watermark read, not a page read: the indexer's
   // [get_transactions_by_block] reports its serving bounds and returns no
   // refs, so height and limit here only have to be valid, not meaningful.
+  //
+  // Called only with [client_] engaged, and empties it on a transport
+  // failure so the next tick reconnects rather than re-asking a dead fd.
   BlockHeight read_watermark()
   {
     BlockTransactionQuery query{};
@@ -233,20 +294,141 @@ private:
     query.limit = 1;
     try {
       const TransactionRefPageResult result =
-          client_.get_transactions_by_block(query)();
+          client_->get_transactions_by_block(query)();
       if (result.outcome() != IndexerQueryOutcome::IndexerQueryOk) {
-        // Expected while the indexer is still opening its database.
+        // Expected while the indexer is still opening its database. The
+        // connection is fine, so this is not a failure to record.
         return -1;
       }
       return result.page().latest_block;
     } catch (const std::exception &e) {
       warn_every_n_sec(1.0, "indexer latency probe: watermark read failed: {}",
                        e.what());
+      note_failure(std::format("watermark read failed: {}", e.what()));
+      // Fail the stream before dropping it, the way the indexer's own pull
+      // loop retires a broken event client: the socket is closed here rather
+      // than left to the reference count, so the next poll opens a new
+      // connection instead of re-asking a dead file descriptor.
+      client_->__send_call.get()->fail();
+      client_.reset();
       return -1;
     }
   }
 
-  indexer_block_explorer_client_t client_;
+  // Starts a reconnect attempt, or adopts the one that finished. At most one
+  // attempt is in flight, so a run against a host that never comes back
+  // spends one thread at a time rather than one per tick.
+  void service_reconnect()
+  {
+    if (!attempt_) {
+      attempt_ = std::make_shared<ConnectAttempt>();
+      std::thread(connect_into, attempt_, indexer_addr_).detach();
+      return;
+    }
+
+    {
+      const std::lock_guard g(attempt_->mtx);
+      if (!attempt_->done) {
+        return;
+      }
+    }
+    // Finished, so this thread is now the only one that touches it.
+    const std::shared_ptr<ConnectAttempt> attempt = std::move(attempt_);
+    if (!attempt->client) {
+      note_failure(std::format("reconnect to {} failed: {}", indexer_addr_,
+                               attempt->error));
+      return;
+    }
+
+    // The handshake belongs to the connection, not to the probe, so a new
+    // connection has to introduce itself again before it is trusted.
+    try {
+      const IndexerBlockExplorerIntroOutcome intro =
+          attempt->client->indexer_block_explorer_intro(
+              version::kHogdProtocol())();
+      if (intro != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
+        warn("indexer latency probe: reconnect intro rejected ({})", intro);
+        note_failure("reconnect intro was rejected");
+        return;
+      }
+    } catch (const std::exception &e) {
+      note_failure(std::format("reconnect intro failed: {}", e.what()));
+      return;
+    }
+
+    client_.emplace(std::move(*attempt->client));
+    {
+      const std::lock_guard g(mtx_);
+      ++reconnects_;
+    }
+    info("indexer latency probe: reconnected to {}", indexer_addr_);
+  }
+
+  // Runs on a detached thread and touches only its own arguments. Retry is
+  // off: one attempt that reports a refused port promptly is what lets the
+  // poller pace the retries itself.
+  static void connect_into(const std::shared_ptr<ConnectAttempt> &attempt,
+                           const std::string &addr)
+  {
+    std::optional<indexer_block_explorer_client_t> client;
+    std::string error;
+    try {
+      auto client_res =
+          make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(
+                                                     addr),
+                                                 /*retry=*/false)();
+      if (client_res) {
+        client.emplace(std::move(*client_res));
+      }
+      else {
+        error = client_res.error().error_code().message();
+      }
+    } catch (const std::exception &e) {
+      error = e.what();
+    }
+
+    const std::lock_guard g(attempt->mtx);
+    if (client) {
+      attempt->client.emplace(std::move(*client));
+    }
+    attempt->error = std::move(error);
+    attempt->done = true;
+  }
+
+  // Records why the probe could not read a watermark. Kept to one line so it
+  // can ride on the summary line CI replays.
+  void note_failure(std::string what)
+  {
+    std::ranges::replace(what, '\n', ' ');
+    const std::lock_guard g(mtx_);
+    ++failures_;
+    if (first_error_.empty()) {
+      first_error_ = what;
+    }
+    last_error_ = std::move(what);
+  }
+
+  // Caller holds [mtx_].
+  std::string describe_failures() const
+  {
+    if (failures_ == 0) {
+      return "the indexer served every watermark read but never reported one "
+             "covering a committed height";
+    }
+    if (first_error_ == last_error_) {
+      return std::format("{} failed watermark reads, {} reconnects: {}",
+                         failures_, reconnects_, first_error_);
+    }
+    return std::format("{} failed watermark reads, {} reconnects; first: {}; "
+                       "last: {}",
+                       failures_, reconnects_, first_error_, last_error_);
+  }
+
+  const std::string indexer_addr_;
+  // Poller-owned once the constructor returns; empty only while
+  // disconnected.
+  std::optional<indexer_block_explorer_client_t> client_;
+  std::shared_ptr<ConnectAttempt> attempt_;
 
   std::mutex mtx_;
   std::condition_variable drained_;
@@ -254,6 +436,11 @@ private:
   std::map<BlockHeight, uint64_t> pending_;
   std::map<BlockHeight, uint64_t> per_height_;
   std::vector<uint64_t> observed_;
+  // Why the probe stopped being able to ask, for the report to carry.
+  size_t failures_ = 0;
+  size_t reconnects_ = 0;
+  std::string first_error_;
+  std::string last_error_;
 
   std::mutex wait_mtx_;
   std::condition_variable_any wake_;

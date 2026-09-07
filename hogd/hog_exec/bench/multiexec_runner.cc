@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <format>
 #include <functional>
 #include <mutex>
@@ -433,6 +434,45 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
                end_block_time - end_coros_time, inner_tps);
 }
 
+// Says what became of the indexer, for a run where the latency probe stopped
+// getting answers. The daemon's own log is a temp file on its bench host and
+// is never shipped back, so without this a probe that measured nothing leaves
+// the job log with the symptom and no way to reach the cause (#3895). The
+// control server reports on its most recent child, which on this host is the
+// indexer.
+void
+report_indexer_process(ControlServerHandle &handle, const std::string &host,
+                       const CIStartStatus &start)
+{
+  const std::string stdout_path(start.paths().stdout_path.begin(),
+                                start.paths().stdout_path.end());
+  const std::string stderr_path(start.paths().stderr_path.begin(),
+                                start.paths().stderr_path.end());
+  try {
+    const CIProcStatus status = handle.ci_client.query_proc_status();
+    if (status.error_code() ==
+        CIServerErrorCode::kCIServerErrorCodeAlreadyRunning) {
+      warn("indexer on {} is still running but stopped answering; its log is "
+           "{} (stderr {}) on that host",
+           host, stdout_path, stderr_path);
+      return;
+    }
+    if (status.error_code() == CIServerErrorCode::kCIServerErrorCodeOK) {
+      error("indexer on {} exited with code {}; its log is {} (stderr {}) on "
+            "that host",
+            host, status.exit_code(), stdout_path, stderr_path);
+      return;
+    }
+    warn("could not query the indexer process on {}: {}; its log is {} "
+         "(stderr {}) on that host",
+         host, status.error_code(), stdout_path, stderr_path);
+  } catch (const std::exception &e) {
+    warn("could not query the indexer process on {}: {}; its log is {} "
+         "(stderr {}) on that host",
+         host, e.what(), stdout_path, stderr_path);
+  }
+}
+
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
                     unsigned int num_accounts,
@@ -504,12 +544,14 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   // the time the first block commits, which is the steady state the latency
   // number is supposed to describe.
   const std::string indexer_ip = hog_ip(server_addrs[server_idx]);
-  control_server_handles[server_idx].ci_client.start_server(
-      "hogd/hog_indexer/hog-indexer",
-      {"--bind-ip", indexer_ip, "--event-addr",
-       std::format("{}:{}", event_ip, kBenchEventIndexerPort), "--db-path",
-       work_dir_str, "--block-explorer-port",
-       std::to_string(kBenchIndexerBlockExplorerPort)});
+  const size_t indexer_idx = server_idx;
+  const CIStartStatus indexer_start =
+      control_server_handles[server_idx].ci_client.start_server(
+          "hogd/hog_indexer/hog-indexer",
+          {"--bind-ip", indexer_ip, "--event-addr",
+           std::format("{}:{}", event_ip, kBenchEventIndexerPort), "--db-path",
+           work_dir_str, "--block-explorer-port",
+           std::to_string(kBenchIndexerBlockExplorerPort)});
   server_idx++;
 
   for (; server_idx < server_addrs.size(); server_idx++) {
@@ -667,12 +709,18 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   // Every block of this run has committed; give the indexer a bounded window
   // to finish draining before reporting. A timeout is reported as
   // [unobserved] rather than silently shrinking the sample.
-  if (!indexer_probe.drain(std::chrono::seconds(30))) {
+  const bool drained = indexer_probe.drain(std::chrono::seconds(30));
+  if (!drained) {
     warn("indexer latency probe: timed out draining committed heights");
   }
   indexer_probe.stop();
+  const bool measured_nothing = indexer_probe.measured_nothing();
   indexer_probe.report(
       std::format("nexec={},batch={}", exec_cards.size(), batch_size));
+  if (!drained || measured_nothing) {
+    report_indexer_process(control_server_handles[indexer_idx],
+                           server_addrs[indexer_idx], indexer_start);
+  }
 }
 
 } // namespace
