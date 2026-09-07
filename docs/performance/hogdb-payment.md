@@ -16,6 +16,10 @@ The fixed baseline is `133089b24feb057d75ad5ce33695480abd64bf08`
 measurement harness. Compare the **last overall throughput** printed by the
 coordinator, not the fastest block. All throughput comparison runs have
 `hogdb_profile=false`; profiling runs are diagnostic only.
+The three-run baseline predates the dormant executor RPC timing hooks;
+these hooks are disabled in throughput runs but remain compiled into the
+optimized build. The separate merged-head control contains identical
+profiling hooks and differs only in scheduler behavior and its regression test.
 
 The existing schedule uses hog11 for hogdb and hog5/hog6 for executors,
 10,000 accounts, one million transactions per input block, and a 180-second
