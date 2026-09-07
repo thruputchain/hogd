@@ -119,20 +119,30 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  std::condition_variable *nonempty = nullptr;
+  size_t queued = 0;
+  auto wake = [&] {
+    if (!queued)
+      return;
+    auto *nonempty = &lq->nonempty;
+    auto workers = queue_nthreads(qno(lq));
+    lq.reset();
+    // A small batch should not wake an entire LLC's workers just to
+    // have most of them contend for the queue and go back to sleep.
+    if (queued >= workers)
+      nonempty->notify_all();
+    else
+      for (size_t i = 0; i < queued; ++i)
+        nonempty->notify_one();
+    queued = 0;
+  };
   for (auto &j : jobs) {
     int affinity_queue = llc_map->bucket(j.cpuhint);
-    if (nonempty && qno(lq) != affinity_queue) {
-      lq.reset();
-      nonempty->notify_all();
-      nonempty = nullptr;
-    }
-    if (enqueue_selected(lq, j, now))
-      nonempty = &lq->nonempty;
+    if (qno(lq) != affinity_queue)
+      wake();
+    enqueue_selected(lq, j, now);
+    ++queued;
   }
-  lq.reset();
-  if (nonempty)
-    nonempty->notify_all();
+  wake();
 }
 
 void
@@ -142,11 +152,12 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  bool wasempty = enqueue_selected(lq, job, now);
+  enqueue_selected(lq, job, now);
   auto *nonempty = &lq->nonempty;
   lq.reset();
-  if (wasempty)
-    nonempty->notify_all();
+  // Notify for every job, even if another job is already queued: its
+  // worker may still be waking up, and this job can run in parallel.
+  nonempty->notify_one();
 }
 
 void
