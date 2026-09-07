@@ -1354,6 +1354,17 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
+  // The next block must have a [block_timepoint] that is >= the last committed
+  // block's timepoint.
+  if (context.block_timepoint <
+      last_committed_block_.value.proposal_header.block_timepoint) {
+    error("Refusing to nominate a block at timepoint {}: the committed tip is "
+          "at {}",
+          context.block_timepoint,
+          last_committed_block_.value.proposal_header.block_timepoint);
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
+  }
   if (nominated_block_cache_.block_id) {
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
@@ -2078,6 +2089,20 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
     info("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
+  const TimePoint committed_timepoint =
+      last_committed_block_.value.proposal_header.block_timepoint;
+  // The next block must have a [block_timepoint] that is >= the last committed
+  // block's timepoint.
+  if (proposal.header.block_timepoint < committed_timepoint) {
+    co_await decrement_num_validations_in_progress();
+    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
+    error("Rejecting block at height {}: timepoint {} predates the committed "
+          "tip's {}",
+          proposal.header.block_height, proposal.header.block_timepoint,
+          committed_timepoint);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }

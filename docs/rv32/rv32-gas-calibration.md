@@ -555,9 +555,9 @@ idea to understand rather than two:
 - The **engine fingerprint** is checked first, by equality. If it moved, every
   ratio below describes a different interpreter.
 
-**What is deliberately not guarded.** `cold/` rows, because they are bounded by
-the benchmark's in-process mock rather than by hogd -- gating them would gate
-the harness. Rows whose own repetitions disagree by more than 5%, which cannot
+**What is deliberately not guarded.** `cold/` rows, because nothing charges for
+a cold read yet, and a guard on an unpriced row gates noise -- theirs is ~10%
+against 0.2% for a warm row. Rows whose own repetitions disagree by more than 5%, which cannot
 tell a regression from their own noise. And sweep cells where the frames-only
 baseline dominates the subtraction: the depth-254 K=1 cell isolates one ~260 ns
 touch by subtracting a 30 microsecond baseline, so the keys are 4% of what was
@@ -837,8 +837,8 @@ The flat charge overbills a repeat touch -- which measures near the crossing
 alone -- by well under 2x, the direction the opcode schedule already rounds.
 
 The syscall-path rows could not have found this. `max_sha256_buffers` is
-network config, so the mock snapshot server the fixture talks to serves one
-value and cannot sweep it; and `entry/SHA256Copy` repeats a single
+network config, so the genesis the fixture runs fixes one value and the rows
+cannot sweep it; and `entry/SHA256Copy` repeats a single
 (source, destination) pair, so the warm pass creates the destination and every
 timed iteration after it takes the assignment branch.
 `buffers/CopyFill` and `buffers/UpdateFill` drive the component instead, and
@@ -991,8 +991,8 @@ it be discovered later; picking it is yours.
 The first stateful family, measured in the same binary. NNInt is the smallest
 storage syscall -- a 16-byte value, no length axis -- so what it isolates is
 the machinery every storage syscall shares: the item view, the frame stack, the
-snapshot cache. Bytestrings add a byte term on top of this and are the next
-row set.
+snapshot cache. Bytestrings add a byte term on top of this and are measured
+below.
 
 **Why a storage syscall cannot be priced from its arguments.** The stateless
 rows above cost what they cost whatever came before them. A storage read does
@@ -1034,8 +1034,8 @@ the timed iteration and close them as *failed*, so whatever they touched is
 discarded and the next iteration starts from the state the last one found. Each
 regime reads and writes its own key space (the key's first byte is the regime
 tag), so one row's warm pass cannot leave a key in a frame, or in the snapshot
-cache, that another row then finds warm. The first-touch keys are seeded in the
-mock snapshot and faulted into the cache by the row's warm pass, so the timed
+cache, that another row then finds warm. The first-touch keys are seeded in
+hog_db and faulted into the cache by the row's warm pass, so the timed
 reads are cache hits by construction; the cold row's keys are used strictly
 once, from a pool sized against a fixed iteration count, and the row fails with
 a message rather than recycling one. Every call in every iteration is checked,
@@ -1067,11 +1067,11 @@ to every first touch.
 **What the cold row is, and is not.** It measures everything on the executor's
 side of a snapshot-cache miss: the miss under the shared lock, the
 `DatabaseProxy` RPC -- serialized, over a local socket -- the
-`SnapshotStorageItem` built from the reply, the cache insert. The server
-answering is the benchmark's in-process mock, whose lookup is a hash-map find.
-So it is the fixed cost of *going* to the database and not the cost of the
-database, a floor under a cold read rather than the read. The report prints it
-in its own table and keeps it out of `--schedule`.
+`SnapshotStorageItem` built from the reply, the cache insert -- and hog_db's
+own lookup over a real ramdb, which is most of it. Still a floor in one
+respect: hog_db is in-process over a local socket, so a chain whose executor
+and database sit on different hosts pays a hop this does not. The report prints
+it in its own table and keeps it out of `--schedule`.
 
 There is a more basic reason it is not proposed. Whether a key is in the
 snapshot cache depends on which transactions ran before this one in the block,
@@ -1109,7 +1109,7 @@ baseline (74.3 ns) instead.
 | first-touch write, depth 1, 4096 keys | 227.1 | 4.1 |
 | each parent frame, per first touch | 0.9 | 0.02 |
 | committing one staged item into a parent, 4096 items | 51.5 | 0.9 |
-| snapshot-cache miss, against the mock | 42174 | 764 |
+| snapshot-cache miss, against hog_db | 55249 | 5417 |
 
 Four things follow.
 
@@ -1188,10 +1188,11 @@ Committing that item from a successful child into a fresh parent costs another
 here at all. Any per-write price has to prepay both halves, because neither is
 a syscall the schedule sees.
 
-The cold row is what it says: 42.2 µs against the in-process mock, 266x a warm
-`NNIntGet`, most of it the coroutine round trip through the proxy rather than any
-lookup. It is on the record so the size of what the schedule declines to price
-is known, not as a candidate for the table.
+The cold row is what it says: 55.2 µs against a real hog_db, 352x a warm
+`NNIntGet`, and both are billed 200 gas. At this host's gas unit that is ~34000
+gas of work charged 200 -- the size of what the schedule does not yet price.
+Its spread is ~10%, against 0.2% for a warm row, so a price taken from it wants
+the dear end rather than the mean.
 
 **What was adopted.** `kStorageAccessCost = 150`, charged by
 `NonnegativeIntGet` and `NonnegativeIntSetAdd` alike on every call, which with
@@ -1342,10 +1343,10 @@ measurement settles.
 host's cache, which is why both hosts are shown rather than the pool alone:
 the container is what a small-cache validator would see. And the loaded
 columns are an upper
-bound: its keys have to exist in the benchmark's mock, and at the top of the
-sweep that map is ~90 MB resident competing for the same cache. That is
+bound: its keys have to exist in hog_db, and at the top of the sweep that
+state is ~90 MB resident competing for the same cache. That is
 scaffolding rather than a cost a contract causes, which is why the no-load
-column -- which seeds nothing and consults neither the mock nor the cache --
+column -- which seeds nothing and consults neither hog_db nor the cache --
 is the one to read for how the frame's own map scales. The rows that need no
 seeded snapshot run first for that reason, and the commit rows run before the
 seeded sweep too: they are a difference of two whole-iteration timings, and
@@ -1440,6 +1441,183 @@ A note on pinning: `taskset -c <one core>` crashes this binary with SIGFPE in
 itself from the affinity mask and a single-core mask leaves it dividing by
 zero. A mask of several cores does not trip it. These numbers are unpinned.
 
+### Bytestrings: the length axis
+
+The same storage machinery with a value length attached. `BytestringSet`,
+`BytestringGet` and `BytestringGetLen` are swept over
+`0, 32, 256, 1024, 4096, 16384, 32768` bytes -- the SHA256 sweep's lengths, so
+a Set can be read directly against the cost of hashing the bytes it copies.
+All three rows are warm: the key's view is already in the active frame, so what
+the sweep isolates is the length term and not the frame walk the NNInt sweeps
+above measure.
+
+`BytestringGetLen` is swept beside the other two although its cost should not
+depend on length at all. It reads the same items and copies none of them, so
+the gap between it and `BytestringGet` is the copy, and a `GetLen` whose own
+slope is not flat would mean the read path does work its signature does not
+admit to.
+
+**Two things bound the sweep, and neither is `kBytestringCeilingLen`.**
+
+The first is the chain's own configured limit. Since #3869 the write bound is
+`kConfigParamMaxBytestringLen`, checked in `SystemCallHandler::set_bytestring`;
+above it a write is refused as invalid input, which is a cheaper path than the
+one being priced, so a sweep past the limit would publish rejections as costs.
+`stock_network_config()` states 1024. The fixture therefore serves its own
+network config -- stock, with the bytestring limit raised to the top of the
+sweep -- through `BlockSnapshotRpc`, which now takes one instead of always
+serving the stock parameters. Raised rather than swept to 1024, because 1024 is
+a choice a dev chain makes rather than a bound the syscall carries: the
+parameter is settable up to 65000, and a per-byte term fit over 1 KiB and
+extrapolated 64x describes very little.
+
+The second is guest memory, which is 64 KiB in total
+(`rv32::kMaxMemoryBytes`). The argument blocks occupy everything below
+`0x1000`, and the payload buffer starts there, so the most a row can pass is
+what is left above it. 32768 is half the ceiling and leaves the extrapolation
+to a chain running the maximum at one doubling rather than six. Both bounds are
+`static_assert`ed against the constants rather than spelled out, so a later
+change to the memory map or to the ceiling fails the build instead of silently
+overrunning -- which is how an earlier sweep here put a public key on top of a
+signature.
+
+**What the sweep says.** From hog10 (run 34001119814), five repetitions at
+0.5s, run-to-run deviation 0.03-1.7% on these rows:
+
+| bytes | `BytestringSet` | `BytestringGet` | `BytestringGetLen` |
+|---:|---:|---:|---:|
+| 0 | 142.2 | 149.4 | 132.2 |
+| 32 | 166.4 | 153.4 | 132.5 |
+| 256 | 171.2 | 154.1 | 131.9 |
+| 1024 | 186.8 | 163.4 | 132.3 |
+| 4096 | 282.6 | 202.7 | 132.1 |
+| 16384 | 748.4 | 443.6 | 132.2 |
+| 32768 | 1383.9 | 757.9 | 132.2 |
+
+Three readings, in the order they matter:
+
+- **`BytestringGetLen` is flat**, to within 0.6 ns across three decades of
+  length, on error bars of 0.1-0.4 ns. It reads a length and copies nothing,
+  and the measurement says exactly that. Its whole per-byte gap against
+  `BytestringGet` is therefore the copy.
+- **Neither of the other two is linear in length.** Read band by band, a
+  `BytestringSet` costs 0.0203 ns/byte between 256 and 1024 bytes and 0.0388
+  between 16384 and 32768; a `BytestringGet` goes from 0.0031 to 0.0196, a
+  factor of six. The cost per byte grows as the item stops fitting in cache.
+  On top of that, the first 32 bytes cost 24.2 ns for a Set -- a fixed cost of
+  the call having a length at all, not a rate.
+- **All three are charged the same 50 gas at every length.** None appears in
+  `kSyscallGasCostSchedule`, so each is billed `kSyscallBaseCost` and nothing
+  per byte. That is a 10x spread in ns/gas within `BytestringSet` alone: a
+  32 KiB write costs ten times per gas what a zero-length one does, for the
+  same price. Same shape as the zero-gas reads, with a length axis making it
+  arbitrarily wide.
+
+**Why the report does not fit one line to this, and why R2 is not the check.**
+A least squares line over the whole sweep scores R2 = 0.9991 for `Set` and
+0.9985 for `Get`. Both numbers are meaningless here, for a reason that is
+arithmetic rather than judgement: the lengths span three decades, so the
+32768-byte point sits 67% of the x-variance away from the mean on its own and
+the fit is very nearly a line through it. R2 then reports whether that one
+point landed near the line, which it does by construction.
+
+What the fit is actually doing is visible in a quantity R2 cannot see. Its
+intercept is a per-call base, and the zero-length row measures that base
+directly, to a tenth of a nanosecond:
+
+| family | fitted intercept | measured 0-byte row | error bar |
+|---|---:|---:|---:|
+| `BytestringSet` | 148.5 ns | 142.2 ns | ±0.29 |
+| `BytestringGet` | 144.4 ns | 149.4 ns | ±0.11 |
+
+Both are off by 3-4%, tens of sigma, while scoring 0.999. The fixed first-band
+cost is part of why: a line has nowhere to put it except the intercept.
+
+So the report reads the sweep the way the storage sweeps above are read --
+band by band, not through one slope -- and prints, per family: the base as
+measured at zero length; the first band as a cost rather than a rate; the
+per-byte cost across every later band with its range, its growth factor and
+its direction; and the dearest band, which is what a price has to cover. The
+whole-sweep line is still printed, labelled as a cross-check, beside the two
+numbers that say how much to trust it: the leverage of the top point, and the
+intercept's disagreement with the measured base.
+
+**What was priced, and why in that shape.** Three constants, hashed into
+`kSyscallGasCostSchedule` like the rest:
+
+```
+kBytestringBlockBytes     = 512
+kBytestringWriteBlockCost = 13
+kBytestringReadBlockCost  =  7
+```
+
+A block rather than a per-byte rate, for the reason `kSHA256HashBlockCost`
+gives: the measured rate is a fraction of a gas unit (0.039 ns/byte against a
+1.62 ns unit on hog10), and a fraction needs a divisor -- one more
+billing-relevant constant in the digest. Unlike a hash's compression block,
+512 is chosen rather than forced, so it is hashed into the schedule rather
+than `static_assert`ed beside it. It is large enough that rounding the rate up
+to a whole gas wastes 6% for a write and 13% for a read; the hash's 64 would
+waste 31%.
+
+Two constants rather than one, unlike `kStorageAccessCost` covering an NNInt
+read and write alike. There the difference was in the first touch, which is a
+fact about the frame's state; here it is the copy, which is a function of the
+argument -- a write allocates a `Bytestring` and copies into it before handing
+it to the item view, so it moves the bytes twice and measures almost exactly
+twice a read's rate. One constant sized to the write bills a read at 2.29x,
+past the band the rest of the table holds to.
+
+Each is sized to the **dearest band**, not to an average, since there is no
+single rate to be right about. And each call pays `kStorageAccessCost` on top,
+because a bytestring call reaches the same item view, frame map and prepaid
+commit an NNInt call does -- the measured bases (142-149 ns) sit right beside
+`NNIntGet`'s 157 ns.
+
+Charged on the **bytes copied**: the value handed to a write, and for a read
+the bytes that actually reach the guest rather than the buffer it offered.
+
+The buffer is the more predictable rule and the one the rest of the table
+follows -- a bill that is a function of its arguments is one a contract can
+estimate before running -- and it is what this was first written to do. The
+SDK settles it the other way. `bytestring_read_into`, the zero-alloc read
+path, hands the syscall `spare_capacity_mut()`: its whole scratch buffer, not
+the item's length. Pricing the buffer would bill a 32-byte address read out of
+a 4 KiB scratch for eight blocks instead of one, making the path that
+allocates nothing the dearer one. A guest that wants the bound before it calls
+has `BytestringGetLen`, which is most of why that call earns its place.
+
+What that bills across the sweep, against the measured entry cost plus each
+family's own ecall crossing (30.9 / 28.5 / 14.9 ns, from its `vm/` row at 1024
+bytes -- a call with more arguments spends longer materialising them before the
+ecall, so the crossing is not one number shared across the surface):
+
+| bytes | `Set` | `Get` | `GetLen` |
+|---:|---:|---:|---:|
+| 0 | 1.87x | 1.82x | 2.21x |
+| 1024 | 1.68x | 1.81x | 2.20x |
+| 4096 | 1.57x | 1.80x | 2.21x |
+| 32768 | 1.18x | 1.34x | 2.21x |
+
+Nothing undercharges at any length. The wide end is not the long rows but the
+short ones, where `kStorageAccessCost`'s own deliberate margin is the whole of
+it. `BytestringGetLen` carries that margin at every length, since it takes no
+block term at all -- 2.21x for a call that costs 147 ns and is billed 324. That
+is not a new anomaly: `NNIntGetNoLoad`, the other storage call that does the
+least work for the same 200 gas, sits at essentially the same ratio. Splitting
+it out would need a fourth constant in the digest to save a contract 50 gas on
+the cheapest storage call there is, and would not change the incentive that
+matters -- a `GetLen` is still cheaper than the `Get` it lets a guest size.
+
+Both pinned digests move with this: `rv32::kGasScheduleDigest` becomes
+`0xbd9a5e2f5bf216fd` and `kArtifactFormatFingerprint`, which folds it in,
+becomes `0x002a3cb88d80b403`.
+
+`kAcceptedGasSchedules` gains nothing. A transitional entry is for a repricing
+that has to reach artifacts already stamped with the old digest, and there are
+none: no shipped lowerer stamps v4 at all, so every deployed artifact declares
+the v3 entry the list already carries.
+
 ### What follows
 
 - **The zero-gas reads are the urgent item.** On hog10 a loop of
@@ -1467,17 +1645,14 @@ zero. A mask of several cores does not trip it. These numbers are unpinned.
   `kSyscallGasCostSchedule` is already in `kGasScheduleDigest` so the input
   exists, and `HOGD_RV32_ENGINE_SOURCES` wants a syscall-path equivalent, or a
   rewrite of `syscall_entry_outer.h` moves these numbers with nothing saying so.
-- NNInt is measured (above) and not yet priced. The rest of the storage family
-  is not: bytestrings add a length axis to the same machinery and are the next
-  rows; `DeleteObject` and the retrocausal queue calls follow the same
-  frame-and-snapshot pattern with their own item types; the auth registry calls
-  reach a different table. What none of the rows reach is the root commit --
+- The bytestrings are measured and priced (above); NNInt is measured and
+  priced. The rest of the storage family is not measured at all: `DeleteObject` and the
+  retrocausal queue calls follow the same frame-and-snapshot pattern with their
+  own item types; the auth registry calls reach a different table. What none of the rows reach is the root commit --
   `try_commit_transaction`'s delta batch and hog_db's item locks -- which is
-  where a write's cost lands last, and needs a real database rather than the
-  mock to measure.
-- The snapshot-cache miss is measured against the mock and deliberately not
-  proposed. Its worst case is a hog_db read, which is a database cost rather
-  than a syscall cost and is not reproducible the way these are. Even the
+  where a write's cost lands last.
+- The snapshot-cache miss is measured against a real hog_db and deliberately
+  not proposed: what charges for it has to be settled first. Even the
   stateless set has a cold path -- the first `GetBlockHeight` in a block
   fetches the db tip through the proxy and every later one reads an atomic. The
   numbers above are the steady state, which is what a contract making more than

@@ -89,11 +89,17 @@ public:
 
   // Stage all finalized lock changes into a ChangeSet and compute the hash
   // delta. Returns the final db hash. Must be called before commit().
-  HogDbStatus<StorageLongHash> close(const StorageLongHash &base_hash);
+  // |pool| runs the lock-map scans, mirroring commit()'s pool parameter so a
+  // caller that owns a pool can drive the whole close/commit path on it
+  // instead of silently splitting the block across two pools.
+  HogDbStatus<StorageLongHash>
+  close(const StorageLongHash &base_hash,
+        WorkerPool &pool = WorkerPool::get_default_pool());
 
   // Test/benchmark only: stage changes without computing the hash.
   // Do not use in production code — the db hash is required for consensus.
-  HogDbStatus<void> close_skip_hash_for_testing();
+  HogDbStatus<void> close_skip_hash_for_testing(
+      WorkerPool &pool = WorkerPool::get_default_pool());
 
 private:
   HogDbStatus<std::pair<int128_t, ItemLockCacheData>>
@@ -130,7 +136,7 @@ private:
   std::atomic<bool> poisoned_{false};
   const BlockExecutionMode mode_;
 
-  HogDbStatus<void> stage_locks(ChangeSet &changes);
+  HogDbStatus<void> stage_locks(ChangeSet &changes, WorkerPool &pool);
 
   static inline HogDbStatus<int128_t>
   do_lock(ItemLock &lock, const ItemChange &change, const LockContext &ctx);

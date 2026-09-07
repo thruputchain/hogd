@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -38,7 +39,6 @@
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
@@ -46,6 +46,7 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -90,11 +91,6 @@ namespace hogd {
 namespace {
 
 constexpr uint64_t kPlentyOfGas = 1'000'000'000;
-// The mock serves a genesis tip at height 0, so the executing block is 1.
-constexpr BlockExecutionContext kBenchBlockExecution{
-    .block_height = 1,
-    .block_timepoint = 1'700'000'000,
-};
 constexpr uint32_t kGuestMemoryBytes = rv32::kMaxMemoryBytes;
 // Output pointers the guest hands the syscall. Two, because GetCalldataLen
 // writes through two.
@@ -169,6 +165,69 @@ static_assert(kNNIntOutAddAddress + sizeof(int128_t) <= kInputAddress,
               "NNInt arguments must not run into the hashing input");
 static_assert(sizeof(StorageKeyContractData) == 32);
 
+// Bytestring argument block, above the NNInt one. Two keys, so the Get rows and
+// the Set rows work separate items: a Get after a Set on one key reads the
+// staged write rather than the loaded view, which is a different path than the
+// one the Get rows are pricing.
+constexpr uint32_t kBytestringRegionAddress = kNNIntRegionAddress + 0xE0;
+static_assert(kBytestringRegionAddress >=
+                  kNNIntOutAddAddress + sizeof(int128_t),
+              "bytestring arguments must not overlap the NNInt block");
+constexpr uint32_t kBytestringGetKeyAddress = kBytestringRegionAddress;
+constexpr uint32_t kBytestringSetKeyAddress = kBytestringRegionAddress + 0x20;
+constexpr uint32_t kBytestringWrittenLenAddress =
+    kBytestringRegionAddress + 0x40;
+static_assert(kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength) <=
+                  kInputAddress,
+              "bytestring arguments must not run into the payload buffer");
+
+// The value a Set writes and the buffer a Get fills, both at the hashing
+// input's address: no row issues a hash and a bytestring call, and the region
+// is already seeded with a nonzero pattern.
+constexpr uint32_t kBytestringPayloadAddress = kInputAddress;
+// Lengths the bytestring rows are measured over. The same sweep as SHA256, so
+// a Set can be read directly against the cost of hashing the bytes it copies.
+//
+// The top is not kBytestringCeilingLen: guest memory is 64 KiB total and the
+// payload has to fit in what is left above the argument blocks. Half the
+// ceiling is far enough that the per-byte term is what a fit sees, and what
+// is left is one doubling of extrapolation rather than six.
+inline constexpr std::array<uint32_t, 7> kBytestringBytes = {0,    32,   256,
+                                                             1024, 4096, 16384,
+                                                             32768};
+constexpr uint32_t kMaxBytestringBytes = kBytestringBytes.back();
+// The length the ecall-crossing rows use: the stock configured limit, so the
+// one length driven end to end is the largest a chain running this repo's
+// parameters would actually admit.
+constexpr size_t kBytestringVmRow = 3;
+static_assert(kBytestringVmRow < kBytestringBytes.size());
+static_assert(kBytestringBytes[kBytestringVmRow] == kDefaultMaxBytestringLen);
+static_assert(kBytestringPayloadAddress + kMaxBytestringBytes <=
+                  kGuestMemoryBytes,
+              "the bytestring payload must fit in guest memory");
+static_assert(kMaxBytestringBytes <= kBytestringCeilingLen,
+              "the sweep must stay inside the wire format's ceiling");
+
+// The chain the fixture executes under: this repository's stock parameters,
+// with the bytestring limit raised to the top of the sweep.
+//
+// Raised, because the stock 1024 is a choice a dev chain makes rather than a
+// bound the syscall carries -- kConfigParamMaxBytestringLen is settable up to
+// kBytestringCeilingLen, and a per-byte cost fit over three decades of length
+// is what says whether a price holds for a chain that sets it higher. Above
+// the configured limit the write is refused as invalid input, which is a
+// cheaper path than the one being priced, so a sweep past it would publish
+// rejections as costs.
+NetworkConfig
+bench_network_config()
+{
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 kMaxBytestringBytes);
+  return config;
+}
+
 // Values the NNInt rows read and write. Nonzero and distinct, so a path that
 // special-cased a zero or confused set with add would be measuring the wrong
 // thing rather than silently agreeing.
@@ -194,10 +253,16 @@ enum class KeySpace : uint8_t {
   kMerge = 4,
   // Keys used exactly once each, so every read misses the snapshot cache.
   kCold = 5,
+  // Keys holding one seeded bytestring per swept length. The index is the
+  // length, so a row's key names the item it reads.
+  kBytestring = 6,
+  // Keys the bytestring write rows target. Never seeded: a write consults
+  // neither the snapshot cache nor the db.
+  kBytestringSet = 7,
 };
 
 StorageKeyContractData
-make_nnint_key(KeySpace space, uint64_t index)
+make_item_key(KeySpace space, uint64_t index)
 {
   StorageKeyContractData key{};
   key[0] = std::to_underlying(space);
@@ -212,10 +277,10 @@ make_nnint_key(KeySpace space, uint64_t index)
 // ~100, and it is what a guest does too -- its key lives in memory and it
 // writes the one it wants before calling.
 void
-write_nnint_key(std::span<uint8_t> memory, uint32_t key_address, KeySpace space,
-                uint64_t index)
+write_item_key(std::span<uint8_t> memory, uint32_t key_address, KeySpace space,
+               uint64_t index)
 {
-  const StorageKeyContractData key = make_nnint_key(space, index);
+  const StorageKeyContractData key = make_item_key(space, index);
   std::memcpy(memory.data() + key_address, key.data(), key.size());
 }
 
@@ -236,6 +301,12 @@ constexpr uint64_t kFirstTouchKeys = 262144;
 // the warm-up calls and a few extra repetitions. Exhausting it fails the row
 // with a message rather than recycling keys and quietly measuring hits.
 constexpr uint64_t kColdPoolKeys = uint64_t{1} << 18;
+// Heap for the bench's hog_db. The cold pool alone is a quarter-million NNInt
+// items, each carrying its key, and ramdb's allocator fails a write rather
+// than growing, so this is sized well past what the pool needs -- an
+// over-estimate costs address space in one benchmark process and an
+// under-estimate fails the row.
+constexpr size_t kHogDbHeapBytes = size_t{1} << 30;
 constexpr int64_t kColdIterations = 20000;
 
 // A RuntimeContext that can build nothing.
@@ -262,51 +333,21 @@ public:
   }
 };
 
-// Everything a SystemCallHandler needs, and nothing else.
+// Everything a SystemCallHandler needs.
 //
-// Deliberately not NativeContractTestFramework: that stands up genesis, the
-// contract loader and a real hog_db, none of which a stateless syscall touches,
-// and all of which would have to be linked and paid for at startup. This is the
-// same shape native_contract_test.cc uses -- an in-process snapshot server and
-// event aggregator behind the ordinary proxies -- so the handler under
-// measurement is the production class, constructed the production way.
+// Set up the way every other test sets one up: NativeContractTestFramework
+// against a real hog_db, which runs genesis and opens the block. The one row
+// that measures a snapshot-cache miss then measures a database rather than a
+// stand-in map; every other row has its key in a frame or in the cache and
+// never reaches it while timed.
 class SyscallBenchFixture {
 public:
   SyscallBenchFixture()
   {
-    snapshot_server_.start_server(/*port=*/0);
-    const auto event_exec_port = event_server_exec_server_.start_server(0);
-    db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = snapshot_server_.port()});
-    event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_exec_port});
-    event_server_.open_block(0)();
-    runtime_context_ = std::make_unique<NoChildRuntimeContext>();
-    snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(0, kBenchBlockExecution,
-                                               *db_proxy_);
-    handler_ = std::make_unique<SystemCallHandler>(
-        Transaction{}, *snapshot_cache_,
-        PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-        PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
-        ProposalModeCtor{}, *runtime_context_);
 
-    // Pin the db tip. Production entry paths (invoke(), root_invoke()) await
-    // init_db_tip() before dispatching anything, because the pin is the
-    // transaction's one fallible tip read and every later height read is then
-    // a plain load. This harness calls syscall_entry() directly, so it has to
-    // do the pinning those entry paths do -- without it GetBlockHeight reads
-    // through a null tip and db_tip()'s CHECK aborts the process.
-    //
-    // Held rather than checked here: this fixture is a lazily constructed
-    // static, so its constructor runs inside whichever benchmark row runs
-    // first, and panicking there truncates the JSON mid-write and costs every
-    // row in the run.
-    if (auto pinned = handler_->init_db_tip()(); !pinned.has_value()) {
-      setup_error_ = std::format("could not pin the db tip: system error {}",
-                                 pinned.error().raw_code());
-      return;
-    }
+    // The db tip is loaded by make_new_system_call_handler() when handler_ is
+    // initialized, so GetBlockHeight and its kin read a pinned tip with no
+    // per-fixture step here.
 
     // A syscall runs inside an invocation frame; without one the handler has no
     // current address, no calldata and no gas budget, and every call under
@@ -339,6 +380,9 @@ public:
     // which fails the row rather than timing it.
     // Two warm keys: index 0 is the Get rows', index 1 the SetAdd rows'.
     seed_nnint(inner_address(), KeySpace::kWarm, 0, 2);
+    // One item per swept length. ~54 KB in total, so every fixture can carry
+    // them rather than seeding them on demand as the key sweeps do.
+    seed_bytestrings(inner_address());
   }
 
   ~SyscallBenchFixture()
@@ -350,10 +394,10 @@ public:
     }
     // Completed, not discarded: finish_frame() returns a MaybeAsync, and
     // dropping one on its Async arm abandons the coroutine unrun.
-    (void)handler_->finish_frame(InvokeStatus<void>{},
-                                 std::move(inner_trace_))();
-    (void)handler_->finish_frame(InvokeStatus<void>{},
-                                 std::move(outer_trace_))();
+    (void)handler_.finish_frame(InvokeStatus<void>{},
+                                std::move(inner_trace_))();
+    (void)handler_.finish_frame(InvokeStatus<void>{},
+                                std::move(outer_trace_))();
   }
 
   SyscallBenchFixture(const SyscallBenchFixture &) = delete;
@@ -361,7 +405,7 @@ public:
   SyscallBenchFixture(SyscallBenchFixture &&) = delete;
   SyscallBenchFixture &operator=(SyscallBenchFixture &&) = delete;
 
-  [[nodiscard]] SystemCallHandler &handler() { return *handler_; }
+  [[nodiscard]] SystemCallHandler &handler() { return handler_; }
 
   // Why the fixture is unusable, if it is. Empty when setup completed. Every
   // row checks this before touching the handler: a fixture that could not be
@@ -419,7 +463,7 @@ public:
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   push_frame(ContractAddress address)
   {
-    return handler_->start_frame(
+    return handler_.start_frame(
         Invocation{
             .invoked_address = address,
             .entrypoint = ContractEntrypointID{},
@@ -446,7 +490,7 @@ public:
     // happens when it is invoked; dropping one on its Async arm abandons the
     // coroutine with the frame still open, and has_value() on the undriven
     // MaybeAsync answers which arm it took rather than whether it succeeded.
-    auto finished = handler_->finish_frame(result, std::move(trace))();
+    auto finished = handler_.finish_frame(result, std::move(trace))();
     if (!finished.has_value()) {
       return std::format("could not finish a frame: system error {}",
                          finished.error().raw_code());
@@ -455,16 +499,33 @@ public:
   }
 
   // Put NNInt items under `address` in the mock snapshot, at the keys
-  // make_nnint_key(space, first..last).
+  // make_item_key(space, first..last).
   void seed_nnint(ContractAddress const &address, KeySpace space,
                   uint64_t first, uint64_t last)
   {
     for (uint64_t index = first; index < last; ++index) {
       StorageKey key(StorageKeyType::ContractData);
-      key.contract_data_key() = make_nnint_key(space, index);
-      snapshot_server_.impl()->setup_create_item(
-          AddressAndKey{.address = address, .key = key},
-          StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
+      key.contract_data_key() = make_item_key(space, index);
+      seed_item(AddressAndKey{.address = address, .key = key},
+                StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
+    }
+  }
+
+  // Put one bytestring per swept length under `address`, at the key that names
+  // its length. The Get rows read these; the Set rows write keys of their own
+  // and need no seeding.
+  void seed_bytestrings(ContractAddress const &address)
+  {
+    for (const uint32_t bytes : kBytestringBytes) {
+      StorageKey key(StorageKeyType::ContractData);
+      key.contract_data_key() = make_item_key(KeySpace::kBytestring, bytes);
+      Bytestring value;
+      value.resize_uninitialized(bytes);
+      // Not zeros: a path that special-cased an empty or all-zero value would
+      // be measuring something other than the copy it is meant to.
+      std::ranges::fill(value, uint8_t{0xAB});
+      seed_item(AddressAndKey{.address = address, .key = key},
+                StorageItemWrapper(std::move(value), &cost_model()));
     }
   }
 
@@ -512,15 +573,29 @@ private:
     return model;
   }
 
-  BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
-  TestEventAggregator event_server_;
-  TestEventAggregatorExecServer event_server_exec_server_ =
-      TestEventAggregatorExecServer(event_server_);
-  std::unique_ptr<DatabaseProxy> db_proxy_;
-  std::unique_ptr<EventServerProxy> event_server_proxy_;
-  std::unique_ptr<RuntimeContext> runtime_context_;
-  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-  std::unique_ptr<SystemCallHandler> handler_;
+  void seed_item(AddressAndKey const &addrkey, StorageItemWrapper item)
+  {
+    framework_.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
+                                       std::move(item)));
+  }
+
+  NativeContractTestFramework framework_{
+      /*log=*/false,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      TestDB::kHogDb,
+      /*empty_genesis=*/true,
+      /*genesis_cost_model=*/std::nullopt,
+      bench_network_config(),
+      kBulkRpcMaxMessageSize,
+      kHogDbHeapBytes,
+  };
+  Transaction tx_{};
+  // Built in place: SystemCallHandler is neither movable nor copyable. Declared
+  // after what it borrows.
+  std::unique_ptr<RuntimeContext> runtime_context_ =
+      std::make_unique<NoChildRuntimeContext>();
+  SystemCallHandler handler_ =
+      framework_.make_new_system_call_handler(tx_, *runtime_context_);
   std::unique_ptr<InvocationFrameTrace> outer_trace_;
   std::unique_ptr<InvocationFrameTrace> inner_trace_;
   std::string setup_error_;
@@ -533,12 +608,28 @@ private:
 struct SyscallCall {
   std::string name;
   std::array<uint32_t, 8> words = {};
-  // Bytes of guest input the call reads, for the size-swept hashing rows.
-  uint32_t input_bytes = 0;
+  // Bytes of the guest buffer the call reads or fills, for the size-swept
+  // rows.
+  uint32_t payload_bytes = 0;
   // Where the call reads its storage key from, for the rows that change it
   // between calls. Zero for calls that take none.
   uint32_t key_address = 0;
+  // The key this row places at key_address before it runs, for rows whose key
+  // names the item they work. Absent for calls whose key make_guest_memory
+  // already places, and for calls that take none.
+  std::optional<std::pair<KeySpace, uint64_t>> row_key;
 };
+
+// Place a row's key where its call expects to read it. A no-op for the rows
+// whose key make_guest_memory already wrote.
+void
+apply_row_key(std::span<uint8_t> memory, const SyscallCall &call)
+{
+  if (call.row_key.has_value()) {
+    write_item_key(memory, call.key_address, call.row_key->first,
+                   call.row_key->second);
+  }
+}
 
 SyscallCall
 make_call(std::string name, SyscallNo number,
@@ -584,14 +675,14 @@ stateless_calls()
 
 // SHA256(buffer) -> hash. The one syscall family gas_cost_table.h actually
 // prices, and the only stateless one whose cost is supposed to depend on an
-// argument: SHA256HashCost is base 500 + 100/byte. A size sweep is what says
-// whether that shape is right and what the two constants should be.
+// argument: GasCost::sha256_hash is base 500 + 100/byte. A size sweep is what
+// says whether that shape is right and what the two constants should be.
 SyscallCall
 sha256_call(uint32_t bytes)
 {
   SyscallCall call = make_call("SHA256", SyscallNo::kSHA256,
                                {kInputAddress, bytes, kOutputAddressA});
-  call.input_bytes = bytes;
+  call.payload_bytes = bytes;
   return call;
 }
 
@@ -610,7 +701,7 @@ sha256_update_call(uint32_t bytes)
 {
   SyscallCall call = make_call("SHA256Update", SyscallNo::kSHA256Update,
                                {kHashSlot, kInputAddress, bytes, /*reset=*/1});
-  call.input_bytes = bytes;
+  call.payload_bytes = bytes;
   return call;
 }
 
@@ -677,7 +768,7 @@ verify_signature_call(size_t index)
                 {static_cast<uint32_t>(CryptographicScheme::Ed25519),
                  signature_address(index), kSignatureStride, kPublicKeyAddress,
                  kPublicKeyBytes, kMessageAddress, message_bytes});
-  call.input_bytes = message_bytes;
+  call.payload_bytes = message_bytes;
   return call;
 }
 
@@ -715,6 +806,58 @@ nnint_set_add_call()
                                 kNNIntAddValueAddress,
                                 std::to_underlying(StorageDeltaFlags::None)});
   call.key_address = kNNIntSetAddKeyAddress;
+  return call;
+}
+
+// BytestringSet(key, {payload, bytes}, flags). Staged in the frame's item view
+// like an NNInt write, so the syscall's own cost is the bounds check, the copy
+// out of guest memory, and the item-view store -- everything downstream of that
+// is paid at commit.
+//
+// The key is not swept: repeating on one key is the warm regime the other write
+// rows measure, and holding it fixed is what leaves length as the only thing
+// changing across these rows.
+SyscallCall
+bytestring_set_call(uint32_t bytes)
+{
+  SyscallCall call =
+      make_call("BytestringSet", SyscallNo::kBytestringSet,
+                {kBytestringSetKeyAddress, kBytestringPayloadAddress, bytes,
+                 std::to_underlying(StorageDeltaFlags::None)});
+  call.payload_bytes = bytes;
+  call.key_address = kBytestringSetKeyAddress;
+  call.row_key = {KeySpace::kBytestringSet, bytes};
+  return call;
+}
+
+// BytestringGet(key, {payload, bytes}, &written_len), reading the item seeded
+// at that length. The guest buffer is sized exactly to the item, which is what
+// a guest that called BytestringGetLen first would do; a short buffer takes the
+// truncating path instead and copies fewer bytes than it was asked for.
+SyscallCall
+bytestring_get_call(uint32_t bytes)
+{
+  SyscallCall call =
+      make_call("BytestringGet", SyscallNo::kBytestringGet,
+                {kBytestringGetKeyAddress, kBytestringPayloadAddress, bytes,
+                 kBytestringWrittenLenAddress});
+  call.payload_bytes = bytes;
+  call.key_address = kBytestringGetKeyAddress;
+  call.row_key = {KeySpace::kBytestring, bytes};
+  return call;
+}
+
+// BytestringGetLen(key, &length). Reads the same seeded items as the Get rows
+// without copying them, so the pair is what says how much of a Get is the copy.
+// Its own cost should not depend on the length at all, which is why it is swept
+// rather than measured once.
+SyscallCall
+bytestring_get_len_call(uint32_t bytes)
+{
+  SyscallCall call = make_call("BytestringGetLen", SyscallNo::kBytestringGetLen,
+                               {kBytestringGetKeyAddress, kOutputAddressA});
+  call.key_address = kBytestringGetKeyAddress;
+  call.row_key = {KeySpace::kBytestring, bytes};
   return call;
 }
 
@@ -764,8 +907,8 @@ make_guest_memory()
 
   // The NNInt block: the warm keys, and SetAdd's two operands. The sweep rows
   // overwrite the key per call; the operands stay.
-  write_nnint_key(memory, kNNIntGetKeyAddress, KeySpace::kWarm, 0);
-  write_nnint_key(memory, kNNIntSetAddKeyAddress, KeySpace::kWarm, 1);
+  write_item_key(memory, kNNIntGetKeyAddress, KeySpace::kWarm, 0);
+  write_item_key(memory, kNNIntSetAddKeyAddress, KeySpace::kWarm, 1);
   std::memcpy(memory.data() + kNNIntSetValueAddress, &kNNIntSetValue,
               sizeof(kNNIntSetValue));
   std::memcpy(memory.data() + kNNIntAddValueAddress, &kNNIntAddValue,
@@ -876,6 +1019,7 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   SyscallBenchFixture &fixture = *fixture_ptr;
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
+  apply_row_key(memory_span, call);
 
   // Warm the tip cache and any lazily built handler state before timing, so
   // the first iteration is not a different measurement from the rest -- and so
@@ -899,8 +1043,8 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   }
 
   state.SetItemsProcessed(calls);
-  if (call.input_bytes > 0) {
-    state.SetBytesProcessed(calls * static_cast<int64_t>(call.input_bytes));
+  if (call.payload_bytes > 0) {
+    state.SetBytesProcessed(calls * static_cast<int64_t>(call.payload_bytes));
   }
   // The price beside the cost. A syscall charging zero direct host gas is the
   // finding rather than an omission, so the counter is emitted either way --
@@ -959,9 +1103,9 @@ bm_syscall_entry_sequence(benchmark::State &state,
   }
 
   int64_t iterations = 0;
-  uint32_t input_bytes = 0;
+  uint32_t payload_bytes = 0;
   for (const SyscallCall &call : timed) {
-    input_bytes += call.input_bytes;
+    payload_bytes += call.payload_bytes;
   }
   for (auto _ : state) {
     for (const SyscallCall &call : timed) {
@@ -973,8 +1117,8 @@ bm_syscall_entry_sequence(benchmark::State &state,
   }
 
   state.SetItemsProcessed(iterations);
-  if (input_bytes > 0) {
-    state.SetBytesProcessed(iterations * static_cast<int64_t>(input_bytes));
+  if (payload_bytes > 0) {
+    state.SetBytesProcessed(iterations * static_cast<int64_t>(payload_bytes));
   }
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
 }
@@ -1047,7 +1191,8 @@ bm_syscall_vm(benchmark::State &state, SyscallCall call)
   // few enough that one run stays short next to the benchmark's own timing.
   constexpr uint32_t kIterationsPerRun = 512;
   const std::vector<uint8_t> code = make_ecall_program(call, kIterationsPerRun);
-  const std::vector<uint8_t> initial_memory = make_guest_memory();
+  std::vector<uint8_t> initial_memory = make_guest_memory();
+  apply_row_key(initial_memory, call);
   auto program =
       rv32::ThreadedMachinePreInstantiation::create(code, initial_memory, 0,
                                                     kGuestMemoryBytes,
@@ -1150,9 +1295,10 @@ bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
 }
 
 // The same question on the other path that creates a slot. A reset update to an
-// index with no stream emplaces exactly as copy does, and SHA256UpdateCost
-// charges whole blocks only -- so a zero-byte reset update creates a stream for
-// no body gas at all. If slot creation needs pricing, it needs it here too.
+// index with no stream emplaces exactly as copy does, and
+// GasCost::sha256_update charges whole blocks only -- so a zero-byte reset
+// update creates a stream for no body gas at all. If slot creation needs
+// pricing, it needs it here too.
 //
 // No seed here, so its /0 row is the bare table construct and destroy, and its
 // small rows are correspondingly less distorted than the copy sweep's.
@@ -1353,7 +1499,7 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
   const auto run_keys = [&](uint64_t *gas_out)
       -> std::optional<std::pair<SyscallCall, SyscallOutcome>> {
     for (uint64_t index = 0; index < keys; ++index) {
-      write_nnint_key(memory_span, call.key_address, space, index);
+      write_item_key(memory_span, call.key_address, space, index);
       const SyscallOutcome outcome =
           invoke_syscall_entry(fixture.handler(), memory_span, call);
       benchmark::DoNotOptimize(outcome.gas);
@@ -1412,15 +1558,19 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
 // What this measures: get_item_view's miss, the UnmodifiedItem load,
 // StorageSnapshotCache::try_get_snapshot_item missing under its shared lock,
 // DatabaseProxy::get_snapshot_item -- an x23 RPC, serialized, over a local
-// socket, to BlockSnapshotRpc -- the SnapshotStorageItem built from the reply,
-// and the cache insert. Everything on the executor's side of a cold read.
+// socket -- the lookup a real hog_db does over a real ramdb, the
+// SnapshotStorageItem built from the reply, and the cache insert. A cold read
+// end to end.
 //
-// What it does not measure: hog_db. The server answering is the in-process
-// mock, whose lookup is an unordered_map find, so this is the fixed cost of
-// going to the db and not the cost of the db. Read it as a floor under a
-// cold read and as the size of the thing the schedule declines to price,
-// and not as a number to put in gas_cost_table.h. The report keeps it out of
-// --schedule for that reason.
+// It answers from hog_db rather than the light server every other row uses,
+// because what a miss costs is mostly what the database does; against the
+// light server's map find this row reported the cost of *going* to a database
+// and not the cost of one.
+//
+// What it still does not measure: the shard topology. hog_db is in-process and
+// the socket is local, so a chain whose executor and database sit on different
+// hosts pays a network hop this does not. Read it as a floor in that one
+// respect.
 //
 // Keys come from a pool used strictly once: the cache is never reset within
 // the process, so a key read by any earlier call -- an earlier repetition,
@@ -1463,7 +1613,7 @@ bm_nnint_cold(benchmark::State &state)
           kColdPoolKeys));
       return std::nullopt;
     }
-    write_nnint_key(memory_span, call.key_address, KeySpace::kCold, *index);
+    write_item_key(memory_span, call.key_address, KeySpace::kCold, *index);
     return invoke_syscall_entry(fixture.handler(), memory_span, call);
   };
 
@@ -1508,7 +1658,7 @@ register_benchmarks()
                                  call);
   }
   // SHA256 over a size sweep. 0 bytes isolates the per-call base from the
-  // per-byte term, which is exactly the split SHA256HashCost claims.
+  // per-byte term, which is exactly the split GasCost::sha256_hash claims.
   for (const uint32_t bytes : {0U, 32U, 256U, 1024U, 4096U, 16384U, 32768U}) {
     const SyscallCall call = sha256_call(bytes);
     benchmark::RegisterBenchmark(
@@ -1585,6 +1735,35 @@ register_benchmarks()
   benchmark::RegisterBenchmark("vm/NNIntSetAdd", bm_syscall_vm,
                                nnint_set_add_call());
 
+  // Bytestrings over a length sweep, all three warm. None of them is priced --
+  // syscall_bytestring.cc returns WrappedGasAmount{0} from Get, GetLen and Set
+  // alike -- so what the sweep is for is the shape a price would have to take:
+  // a per-call base, from the zero-length row, and a per-byte term, from the
+  // slope across the rest. GetLen is swept beside them because it reads the
+  // same items without copying them, so the gap says how much of a Get is the
+  // copy and whether GetLen is length-independent as its signature implies.
+  for (const uint32_t bytes : kBytestringBytes) {
+    benchmark::RegisterBenchmark(std::format("entry/BytestringSet/{}", bytes),
+                                 bm_syscall_entry, bytestring_set_call(bytes));
+    benchmark::RegisterBenchmark(std::format("entry/BytestringGet/{}", bytes),
+                                 bm_syscall_entry, bytestring_get_call(bytes));
+    benchmark::RegisterBenchmark(std::format("entry/BytestringGetLen/{}",
+                                             bytes),
+                                 bm_syscall_entry,
+                                 bytestring_get_len_call(bytes));
+  }
+  // One length through the VM for each, named with that length: the report
+  // pairs vm rows to entry rows by name, and an unsuffixed name matches no
+  // entry row and is dropped from the table.
+  const uint32_t vm_bytes = kBytestringBytes[kBytestringVmRow];
+  benchmark::RegisterBenchmark(std::format("vm/BytestringSet/{}", vm_bytes),
+                               bm_syscall_vm, bytestring_set_call(vm_bytes));
+  benchmark::RegisterBenchmark(std::format("vm/BytestringGet/{}", vm_bytes),
+                               bm_syscall_vm, bytestring_get_call(vm_bytes));
+  benchmark::RegisterBenchmark(std::format("vm/BytestringGetLen/{}", vm_bytes),
+                               bm_syscall_vm,
+                               bytestring_get_len_call(vm_bytes));
+
   // The sweeps. Depth is frames on top of the fixture's two. 8 and 16 are
   // where a chain is expected to set max_cross_invoke_depth; the repo's stock
   // config admits far more, and its maximum is swept too, as the far point
@@ -1592,7 +1771,8 @@ register_benchmarks()
   // chain runs at. The parent walk on a first touch is linear in the stack,
   // and the schedule has to hold at whatever depth the chain allows.
   const uint32_t stock_max_depth =
-      max_cross_invoke_depth(stock_network_config()) - 2;
+      NetworkConfigParams(stock_network_config().v0()).max_cross_invoke_depth -
+      2;
   std::vector<uint32_t> depths = {1, 8, 16};
   if (std::ranges::find(depths, stock_max_depth) == depths.end()) {
     depths.push_back(stock_max_depth);
@@ -1703,6 +1883,10 @@ add_provenance_context()
 {
   const rv32::gas_calibration::Provenance provenance =
       rv32::gas_calibration::collect_provenance();
+  // What answered the cold row's misses. Absent in a run recorded before the
+  // bench moved off the light server, which is what lets the report decline to
+  // label those rather than claim this backend for them.
+  benchmark::AddCustomContext("syscall_bench_item_backend", "hog_db");
   benchmark::AddCustomContext("engine_fingerprint",
                               provenance.engine_fingerprint);
   benchmark::AddCustomContext("engine_source_digest",

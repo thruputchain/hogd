@@ -15,6 +15,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "storage_item.hh"
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/network_config_params.h"
@@ -219,7 +220,7 @@ HogDbSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
-  auto res = ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
+  auto res = co_await ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
   if (!res && res.error() == HogDbCode::kStaleBlock) {
     error("parent_id {} is not the last committed block", parent_id);
     co_return DbSchedResult::DbSchedResultInvalidParentId;
@@ -356,12 +357,21 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   constexpr size_t kBatchOverhead = 1_KiB;
   const size_t admissible =
       (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
-  if (const uint32_t stated =
-          max_new_contracts_per_tx(genesis_configuration.network_config);
+  const NetworkConfigParams config_params(
+      genesis_configuration.network_config.v0());
+  if (const uint32_t stated = config_params.max_new_contracts_per_tx;
       stated > admissible) {
     error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
           "commit in one message",
           stated, admissible);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // The ceiling bounds the wire type, so a genesis naming more would let a
+  // contract write a bytestring no peer could carry.
+  if (const uint32_t stated = config_params.max_bytestring_len;
+      stated > static_cast<uint32_t>(kBytestringCeilingLen)) {
+    error("genesis max_bytestring_len {} exceeds the protocol ceiling of {}",
+          stated, kBytestringCeilingLen);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);

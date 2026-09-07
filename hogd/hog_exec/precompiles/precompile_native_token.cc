@@ -296,17 +296,14 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
     co_return std::move(*supply_failure);
   }
 
-  ContractAddress zero{};
+  const NativeTokenMintEvent event{.to_address = receiver,
+                                   .amount = to_xdr(signed_amount)};
   auto event_buf =
-      make_event_from_cxs_struct(native_token_transfer_event_signature(),
-                                 TransferEvent{.from_address = zero,
-                                               .to_address = receiver,
-                                               .amount =
-                                                   to_xdr(signed_amount)});
+      make_event_from_cxs_struct(native_token_mint_event_signature(), event);
   if (!event_buf) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  if (auto emitted = co_await emit_event<3>(ctx, *event_buf); !emitted) {
+  if (auto emitted = co_await emit_event<2>(ctx, *event_buf); !emitted) {
     co_return emitted.error();
   }
   co_return Result<void, ERC20Exception>::make_ok();
@@ -363,17 +360,14 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
     co_return std::move(*supply_failure);
   }
 
-  ContractAddress zero{};
+  const NativeTokenBurnEvent event{.from_address = owner,
+                                   .amount = to_xdr(signed_amount)};
   auto event_buf =
-      make_event_from_cxs_struct(native_token_transfer_event_signature(),
-                                 TransferEvent{.from_address = owner,
-                                               .to_address = zero,
-                                               .amount =
-                                                   to_xdr(signed_amount)});
+      make_event_from_cxs_struct(native_token_burn_event_signature(), event);
   if (!event_buf) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  if (auto emitted = co_await emit_event<3>(ctx, *event_buf); !emitted) {
+  if (auto emitted = co_await emit_event<2>(ctx, *event_buf); !emitted) {
     co_return emitted.error();
   }
   co_return Result<void, ERC20Exception>::make_ok();
@@ -675,6 +669,22 @@ native_token_approval_event_signature()
 {
   static const Topic kSignature =
       compute_event_signature(u8"0.1::groundhog-erc20-if::ApprovalEvent");
+  return kSignature;
+}
+
+Topic const &
+native_token_mint_event_signature()
+{
+  static const Topic kSignature =
+      compute_event_signature(u8"0.1::groundhog-erc20-if::MintEvent");
+  return kSignature;
+}
+
+Topic const &
+native_token_burn_event_signature()
+{
+  static const Topic kSignature =
+      compute_event_signature(u8"0.1::groundhog-erc20-if::BurnEvent");
   return kSignature;
 }
 

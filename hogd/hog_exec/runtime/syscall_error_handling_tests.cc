@@ -877,10 +877,6 @@ TEST_F(SyscallErrorHandlingTest, MintAuthTokenAtZeroGasIsOutOfGas)
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  // MintAuthToken reads the executing height off the pinned tip, and
-  // start_frame() takes its buffer limit as an argument rather than pinning,
-  // so this test pins for itself. Off-pool, so completing it here is legal.
-  ASSERT_TRUE(handler.init_db_tip()().has_value());
   ASSERT_TRUE(handler
                   .start_frame(kPlaceholderInvocation,
                                std::to_underlying(InvokeFlag::None),
