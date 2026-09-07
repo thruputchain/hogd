@@ -106,8 +106,10 @@ private:
   // goes away.  Caller holds lock_.
   void release_events_file(SHA256Hash const &hash);
 
-  // Bumps indexer_publications_ and schedules its waiters. Caller holds
-  // outbox_commit_lock_.
+  // Bumps indexer_publications_ and schedules its waiters. The tail path
+  // calls it under outbox_commit_lock_ so a handler's sample and commit's bump
+  // are ordered; the notice path needs no lock, since a parked handler checks
+  // the mailbox after sampling.
   void publish_indexer_wake();
 
   x23::Async<bool> reserve_block_operation(BlockID block_id,

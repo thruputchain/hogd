@@ -961,6 +961,15 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     // was read: it simply does not suspend. The lock is released first;
     // commit needs it to publish the very record being waited for.
     const std::uint64_t seen = indexer_publications_.load();
+    // Checked after the sample: a notice enqueued before it is in the mailbox
+    // here, and one enqueued after it bumps past [seen] so wait() does not
+    // suspend. Either way the client is answered, drains, asks again, parks.
+    {
+      const std::lock_guard notices(tx_failure_mutex_);
+      if (!tx_failure_mailbox_.empty()) {
+        co_return pull_caught_up(response_origin);
+      }
+    }
     guard.reset();
     co_await indexer_publications_.wait(seen);
     woken = true;
@@ -1040,15 +1049,21 @@ void
 EventRPCContext::enqueue_tx_failure(TransactionHash tx_hash,
                                     TxFailureDiagnostic diagnostic)
 {
-  std::lock_guard guard(tx_failure_mutex_);
-  if (tx_failure_mailbox_.size() == kMaxTxFailureNotices) {
-    warn_every_n_sec(5.0F, "tx-failure notice dropped: mailbox is full");
-    return;
+  {
+    std::lock_guard guard(tx_failure_mutex_);
+    if (tx_failure_mailbox_.size() == kMaxTxFailureNotices) {
+      warn_every_n_sec(5.0F, "tx-failure notice dropped: mailbox is full");
+      return;
+    }
+    tx_failure_mailbox_.push_back(IndexerTxFailureNotice{
+        .tx_hash = std::move(tx_hash),
+        .diagnostic = std::move(diagnostic),
+    });
   }
-  tx_failure_mailbox_.push_back(IndexerTxFailureNotice{
-      .tx_hash = std::move(tx_hash),
-      .diagnostic = std::move(diagnostic),
-  });
+  // The indexer drains notices only after a block pull returns, so a pull
+  // parked at the tip would hold this one until the next commit. Wake it: it
+  // answers caught-up and the client drains.
+  publish_indexer_wake();
 }
 
 IndexerTxFailureNoticeBatch
