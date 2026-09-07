@@ -1953,7 +1953,7 @@ TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  const DbTip tip = get_tip.db_tip();
+  DbTip tip = get_tip.db_tip();
   ASSERT_EQ(tip.value.proposal_header.block_timepoint, kTipTimepoint);
 
   // Nominating behind the tip is refused.
@@ -1965,10 +1965,19 @@ TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
   // Equal is allowed: two blocks sharing a timepoint is implausible, not
   // incoherent. This also leaves the mempool able to nominate afterwards,
   // showing the refusal above did not wedge it.
-  ASSERT_EQ(propose_block(server, tip,
-                          ProposalContext{.block_timepoint = kTipTimepoint})
-                .outcome(),
+  SchedulerProposalResult equal_timepoint =
+      propose_block(server, tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(equal_timepoint.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
+  // Commit the nomination.
+  ASSERT_EQ(commit_block(server, tip, equal_timepoint.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  tip = get_tip.db_tip();
+  ASSERT_EQ(tip.value.proposal_header.block_timepoint, kTipTimepoint);
 
   // Greater than is allowed.
   SchedulerProposalResult greater =
@@ -1976,9 +1985,10 @@ TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
                     ProposalContext{.block_timepoint = kTipTimepoint + 1});
   ASSERT_EQ(greater.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
 
+  // Proposing and validating do not advance the committed tip.
   // A peer's proposal behind the tip is invalid.
   Proposal backwards = greater.proposed_block().proposal;
-  backwards.header.block_timepoint = kTipTimepoint;
+  backwards.header.block_timepoint = kTipTimepoint - 1;
   EXPECT_EQ(server.mempool_coord_rpc()
                 .schedulercoord_validate_block(tip.id, std::move(backwards))()
                 .outcome(),
@@ -1986,7 +1996,7 @@ TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
 
   // A peer's proposal equal to the tip is allowed.
   Proposal equal = greater.proposed_block().proposal;
-  equal.header.block_timepoint = kTipTimepoint + 1;
+  equal.header.block_timepoint = kTipTimepoint;
   EXPECT_EQ(server.mempool_coord_rpc()
                 .schedulercoord_validate_block(tip.id, std::move(equal))()
                 .outcome(),
