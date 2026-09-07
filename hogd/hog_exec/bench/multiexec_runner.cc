@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <mutex>
@@ -503,12 +504,21 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   // Started before the executors so it is already draining the outbox by
   // the time the first block commits, which is the steady state the latency
   // number is supposed to describe.
-  const std::string indexer_ip = hog_ip(server_addrs[server_idx]);
-  control_server_handles[server_idx].ci_client.start_server(
+  //
+  // The database gets a path that does not exist yet.
+  // [IndexDB::open_or_make_new] treats any existing path as a database to open,
+  // and the control server has just cleared and recreated the work-dir root, so
+  // handing it the root means "open the empty directory", which RocksDB refuses
+  // and the indexer panics on.
+  const auto indexer_idx = server_idx;
+  const std::string indexer_ip = hog_ip(server_addrs[indexer_idx]);
+  const std::string indexer_db_path =
+      (std::filesystem::path(work_dir_str) / "indexer").string();
+  control_server_handles[indexer_idx].ci_client.start_server(
       "hogd/hog_indexer/hog-indexer",
       {"--bind-ip", indexer_ip, "--event-addr",
        std::format("{}:{}", event_ip, kBenchEventIndexerPort), "--db-path",
-       work_dir_str, "--block-explorer-port",
+       indexer_db_path, "--block-explorer-port",
        std::to_string(kBenchIndexerBlockExplorerPort)});
   server_idx++;
 
@@ -525,7 +535,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       sched_exec_test->impl()->await_executor_cards(server_addrs.size() - 3);
 
   IndexerLatencyProbe indexer_probe(
-      std::format("{}:{}", indexer_ip, kBenchIndexerBlockExplorerPort));
+      std::format("{}:{}", indexer_ip, kBenchIndexerBlockExplorerPort),
+      control_server_handles[indexer_idx].ci_client);
 
   auto event_sched_client =
       connect_to_event_sched_server(event_card.address_for_sched);

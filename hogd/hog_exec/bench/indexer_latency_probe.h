@@ -12,14 +12,17 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "ci_server.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/bench/control_client.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "x23/fastclock.h"
@@ -48,9 +51,12 @@ public:
   static constexpr auto kPollInterval = std::chrono::milliseconds(1);
 
   // Fails loudly: a probe that silently measured nothing would publish an
-  // empty metric that reads exactly like "latency is fine".
-  explicit IndexerLatencyProbe(const std::string &indexer_addr)
-    : client_(connect(indexer_addr))
+  // empty metric that reads exactly like "latency is fine". [indexer_host] is
+  // the control server that launched the indexer; it is what tells the probe
+  // the difference between "not listening yet" and "dead".
+  IndexerLatencyProbe(const std::string &indexer_addr,
+                      ControlClientWrapper &indexer_host)
+    : client_(connect(indexer_addr, indexer_host))
   {
     const IndexerBlockExplorerIntroOutcome intro =
         client_.indexer_block_explorer_intro(version::kHogdProtocol())();
@@ -135,16 +141,39 @@ private:
 
   // Connects in the member init list so [client_] is never an empty optional
   // that every later use has to re-check.
-  static indexer_block_explorer_client_t connect(const std::string &addr)
+  //
+  // A refused connection is normal while the indexer is still opening its
+  // database and permanent once it has died, and only the control server
+  // that launched it can tell the two apart. So every refusal is followed
+  // by a status query: still running means try again, exited means the
+  // bench fails right here with the exit code, rather than waiting on a
+  // port nothing will ever open until the schedule's timeout kills it.
+  static indexer_block_explorer_client_t
+  connect(const std::string &addr, ControlClientWrapper &indexer_host)
   {
-    auto client_res =
-        make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(addr),
-                                               /*retry=*/true)();
-    if (!client_res) {
-      panic("indexer latency probe: connect to {} failed: {}", addr,
-            client_res.error().error_code().message());
+    while (true) {
+      auto client_res = make_rpc_client<IndexerBlockExplorer1>(
+          server_address_to_sockaddr(addr), /*retry=*/false)();
+      if (client_res) {
+        return std::move(*client_res);
+      }
+      if (client_res.error().error_code() != std::errc::connection_refused) {
+        panic("indexer latency probe: connect to {} failed: {}", addr,
+              client_res.error().error_code().message());
+      }
+      const CIProcStatus status = indexer_host.query_proc_status();
+      if (status.error_code() == CIServerErrorCode::kCIServerErrorCodeOK) {
+        panic("indexer latency probe: hog-indexer exited with code {} before "
+              "serving {}",
+              status.exit_code(), addr);
+      }
+      if (status.error_code() !=
+          CIServerErrorCode::kCIServerErrorCodeAlreadyRunning) {
+        panic("indexer latency probe: cannot query hog-indexer status: {}",
+              status.error_code());
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    return std::move(*client_res);
   }
 
   // Nearest-rank: the ceil(q * N)th smallest sample, 1-indexed, so every
