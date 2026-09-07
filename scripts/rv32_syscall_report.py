@@ -113,7 +113,7 @@ BYTESTRING_BLOCK_BYTES = 512
 # The storage rows. frame/ rows time one iteration of "open D frames, issue
 # the call on K distinct keys in the innermost, close them all", so they are
 # read as a line in K per depth; frame/Push/D is the K=0 point measured
-# directly. cold/ rows are one call each, against the mock db, and are kept
+# directly. cold/ rows are one call each, against a real hog_db, and are kept
 # out of every schedule number on purpose -- see STORAGE_COLD_NOTE.
 FRAME_PUSH_ROW = re.compile(r"^frame/Push/(\d+)$")
 FRAME_SWEEP_ROW = re.compile(r"^frame/([A-Za-z0-9]+)/(\d+)/(\d+)$")
@@ -162,11 +162,12 @@ GUARD_BASE_SPREAD = 1.5
 GUARD_MIN_SIGNAL_SHARE = 0.10
 
 STORAGE_COLD_NOTE = (
-    "cold/ rows miss the snapshot cache on every call and go to the db proxy. "
-    "The server answering is the benchmark's in-process mock, whose lookup is "
-    "a hash-map find, so this is the executor-side cost of going to the db -- "
-    "the proxy, the RPC, the cache insert -- and not the cost of hog_db. It is "
-    "a floor under a cold read and is excluded from --schedule.")
+    "cold/ rows miss the snapshot cache on every call and read through a real "
+    "hog_db over a real ramdb: the proxy, the RPC, the database's own lookup, "
+    "the cache insert. Still a floor in one respect -- hog_db is in-process "
+    "over a local socket, so a chain whose executor and database sit on "
+    "different hosts pays a hop this does not. Excluded from --schedule until "
+    "there is a rule for what a cold read is charged to.")
 
 
 def load(path):
@@ -839,7 +840,7 @@ def print_storage(summary, unit_ns=None):
 
     if summary["cold"]:
         print()
-        header = f"{'cold (mock db)':<28}{'ns/call':>10}{'±':>9}"
+        header = f"{'cold (hog_db)':<28}{'ns/call':>10}{'±':>9}"
         print(header)
         print("-" * len(header))
         for name, (ns, err) in sorted(summary["cold"].items()):
@@ -1733,8 +1734,8 @@ def guardable(measured, sd):
     disturb the baseline: it is the median of the rows within GUARD_BASE_SPREAD
     of the cheapest, and the cheapest bytestring row sits well above that.
 
-    cold/ rows are deliberately absent. They are bounded by the benchmark's own
-    mock rather than by hogd, so gating them would gate the harness.
+    cold/ rows are deliberately absent: nothing charges for a cold read yet,
+    and a guard on an unpriced row gates noise.
     """
     baseline = guard_baseline(measured, sd)
     if not baseline:

@@ -529,7 +529,7 @@ class StorageScheduleTest(unittest.TestCase):
         self.assertEqual(status, 0)
         text = out.getvalue()
         self.assertIn("parent walk", text)
-        self.assertIn("cold (mock db)", text)
+        self.assertIn("cold (hog_db)", text)
         self.assertNotIn("<- NOT FLAT", text)
         out = io.StringIO()
         with redirect_stdout(out):
@@ -710,7 +710,7 @@ class GateTests(unittest.TestCase):
         text = reference_text(guardable_run())
         self.assertIn("guard syscall/NNIntGet ", text)
         self.assertIn("guard storage/NNIntGetFirstTouch/1/4096 ", text)
-        # The cold row is bounded by the benchmark's own mock, so gating it
+        # Nothing charges for a cold read yet, so gating it
         # would gate the harness rather than hogd.
         self.assertNotIn("cold", text)
 
