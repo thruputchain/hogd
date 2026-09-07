@@ -41,8 +41,9 @@ SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
     DBContext &db)
   : db_(db), open_handler_guard_(db), identifier_(db.allocate_identifier()),
-    runtime_context_owner_(std::move(context)),
-    handler_(*this, stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
+    runtime_context_owner_(std::move(context)), signed_tx_(stx),
+    handler_(*this, signed_tx_.tx, db.get_snapshot(),
+             db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
              *runtime_context_owner_),
     is_mocked_handler_(false)

@@ -372,6 +372,13 @@ private:
   // it.
   std::shared_ptr<MockRuntimeContext> runtime_context_owner_;
 
+  // Owns the transaction the embedded handler executes: SystemCallHandler
+  // borrows tx.contracts_to_deploy for its whole lifetime, and the FFI
+  // caller's SignedTransaction is a stack local that dies when
+  // open_syscall_handler() returns. Declared before handler_ so it outlives
+  // it. Default-constructed (empty) for the mocked, tx-less handler.
+  SignedTransaction signed_tx_;
+
   static constexpr std::uint64_t kHandlerMagic = 0x4d41524d4f54ULL; // MARMOT
 
   // The handler, carrying a reference back to the context that owns it.

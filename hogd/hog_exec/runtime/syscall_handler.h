@@ -7,7 +7,6 @@
 #include <optional>
 #include <span>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -23,9 +22,9 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -76,6 +75,15 @@ public:
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context);
+
+  // The handler borrows tx.contracts_to_deploy for its whole lifetime (see
+  // contracts_to_deploy_ below), so a temporary Transaction would dangle
+  // before first use. Deleted to make that a compile error at the call site.
+  SystemCallHandler(Transaction &&tx, StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy db_proxy,
+                    PerTransactionEventServerProxy event_server_proxy,
+                    ExecutionModeCtor execution_mode_ctor,
+                    RuntimeContext &runtime_context) = delete;
 
   // Constructor for test harness, mock infrastructure
   SystemCallHandler(StorageSnapshotCache &snapshot_cache,
@@ -469,27 +477,24 @@ private:
   const std::optional<Uniquifier> tx_uniquifier_;
   const std::optional<ContractAddress> root_invoked_address_;
 
-  // Searchable map of contracts that are implicitly created by the current
-  // transaction.
-  const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                           SipHash24Hasher>
-      newly_created_contracts_;
-
-  // Noted at construction: the map above is keyed by hash, so a repeat leaves
-  // no trace there.
-  const bool has_duplicate_attachment_ = false;
-
-  // Images for this transaction's attachments, keyed by contract hash.
-  // perform_initial_validation keeps what it built to verify each one rather
-  // than building it again at first invocation (#3536); an already-committed
-  // contract is served from the snapshot cache instead, so nothing is added
-  // here later. Entries are node-stable and borrowed by the Runtimes built
-  // from them, so they outlive those runtimes -- they live for the whole
-  // transaction.
-  std::unordered_map<SHA256Hash, PreparedContract, SipHash24Hasher>
-      local_preparations_;
-
   ExecutionModeData execution_mode_data_;
+
+  // Borrowed, not copied (the #1538 deep copy is intentionally gone): this
+  // references the ctor tx's contracts_to_deploy (kEmptyVec for the tx-less
+  // ctor), and newly_created_contracts_ holds raw pointers into its elements.
+  // The caller must keep the element storage alive for the handler's
+  // lifetime. Moving the enclosing SignedTransaction is fine -- x23::Vec's
+  // move steals the heap buffer, so element addresses are stable, and this
+  // reference is only read in perform_initial_validation() anyway -- but
+  // destroying the elements is not. executor_context.cc relies on this: it
+  // moves signed_tx into the detached event coroutine after
+  // try_commit_transaction(), the last point the contract pointers are read.
+  NewContractBatch const &contracts_to_deploy_;
+  // Empty until perform_initial_validation() populates it; a plain value (not
+  // an optional) so pre-validation resolve_contract() calls -- e.g. a test
+  // building a runtime without running root_invoke() -- see an empty set and
+  // fall through to the snapshot cache instead of hitting UB.
+  NewContractSet newly_created_contracts_;
 
   std::unique_ptr<TransactionStats> stats_ = nullptr;
 
@@ -498,6 +503,11 @@ private:
   InvokeResult cumulative_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool root_invoke_succeeded_{false};
+  // perform_initial_validation() rejected the transaction (expired replay
+  // uniquifier or malformed attachment set). try_commit_transaction() asserts
+  // (debug only) that every proposal-mode ValidationFailure came from here --
+  // no mid-body execution path may produce one.
+  bool initial_validation_rejected_{false};
   bool finalized_{false};
   bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
@@ -525,7 +535,7 @@ private:
   // Sets cumulative_invoke_result_ to the appropriate error on a deterministic
   // validation failure; returns a system error (e.g. an unreadable db tip)
   // through the SystemStatus so the caller can surface it rather than drop it.
-  x23::Async<SystemStatus<void>> perform_initial_validation();
+  std::pair<InvokeStatus<void>, GasAmount> perform_initial_validation();
 
   // check the validation data at the end of a transaction, if in validation
   // mode
