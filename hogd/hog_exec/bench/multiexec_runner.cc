@@ -664,11 +664,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     current_block_number++;
   }
 
-  // Every block of this run has committed; give the indexer a bounded window
-  // to finish draining before reporting. A timeout is reported as
-  // [unobserved] rather than silently shrinking the sample.
-  if (!indexer_probe.drain(std::chrono::seconds(30))) {
-    warn("indexer latency probe: timed out draining committed heights");
+  // Every block of this run has committed; let the indexer finish draining
+  // before reporting. The trials commit far faster than the indexer ingests,
+  // so the backlog standing here outlives the run by many seconds and the
+  // drain bounds the indexer going quiet rather than the total wait. A stall
+  // is reported as [unobserved] rather than silently shrinking the sample.
+  if (!indexer_probe.drain()) {
+    warn("indexer latency probe: indexer stopped draining committed heights");
   }
   indexer_probe.stop();
   indexer_probe.report(

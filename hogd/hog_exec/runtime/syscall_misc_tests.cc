@@ -113,7 +113,8 @@ private:
   static NetworkConfig depth_one_config()
   {
     NetworkConfig config = stock_network_config();
-    set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 1);
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 1);
     return config;
   }
 };

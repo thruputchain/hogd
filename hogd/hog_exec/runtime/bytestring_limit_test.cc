@@ -115,8 +115,9 @@ private:
   static NetworkConfig genesis_network_config()
   {
     NetworkConfig config = stock_network_config();
-    set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen,
-                     kMaxBytestringLen);
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxBytestringLen,
+                                   kMaxBytestringLen);
     return config;
   }
 };
