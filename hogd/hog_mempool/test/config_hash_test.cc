@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <utility>
 
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -100,6 +102,37 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);
+}
+
+// Stating the same parameters lands the same list whatever order they are set
+// in, so the order a builder happens to use cannot move the hash. Every
+// permutation, because the interesting cases are where an earlier set_param
+// default-fills a slot a later one then replaces.
+TEST(ConfigHashTest, SetParamOrderIndependent)
+{
+  std::array<std::pair<ConfigParamID, uint32_t>, 4> stated{{
+      {ConfigParamID::kConfigParamMaxSHA256Buffers, 5},
+      {ConfigParamID::kConfigParamMaxCrossInvokeDepth, 33},
+      {ConfigParamID::kConfigParamMaxNewContractsPerTx, 7},
+      {ConfigParamID::kConfigParamMaxBytestringLen, 4096},
+  }};
+
+  NetworkConfig reference;
+  reference.v(0);
+  for (auto const &[id, value] : stated) {
+    NetworkConfigParams::set_param(reference, id, value);
+  }
+  ASSERT_TRUE(NetworkConfigParams::is_canonical(reference.v0()));
+
+  std::ranges::sort(stated);
+  do {
+    NetworkConfig config;
+    config.v(0);
+    for (auto const &[id, value] : stated) {
+      NetworkConfigParams::set_param(config, id, value);
+    }
+    EXPECT_EQ(config, reference);
+  } while (std::ranges::next_permutation(stated).found);
 }
 
 // A configuration predating the bytestring parameter reads as the limit every
