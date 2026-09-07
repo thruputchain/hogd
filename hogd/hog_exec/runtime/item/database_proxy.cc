@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
+#include "hogd/hog_exec/runtime/item/db_rpc_profile.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
@@ -225,7 +226,9 @@ x23::Async<SystemStatus<std::optional<WireStorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey addrkey)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kGetSnapshotItem);
     auto res = co_await client_.get_snapshot_item(block_id, addrkey);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<std::nullopt>(
         res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
@@ -241,7 +244,9 @@ x23::Async<SystemStatus<std::optional<Contract>>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kGetContract);
     auto res = co_await client_.get_contract(block_id, contract_hash);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<std::nullopt>(res, [](Contract &&x) {
       return std::make_optional<Contract>(std::move(x));
@@ -256,7 +261,9 @@ x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kGetDeployment);
     auto res = co_await client_.get_deployment(block_id, addr);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<std::nullopt>(
         res, [](DeployedContractHash &&x) {
@@ -274,9 +281,11 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 uint64_t search_start_number)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kGetNextRetrocausalQueueBlock);
     auto res =
         co_await client_.get_next_retrocausal_queue_block(block_id, addrkey,
                                                           search_start_number);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<std::nullopt>(
         res, [](RetrocausalQueueBlock &&x) {
@@ -294,9 +303,12 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(BlockID block_id,
                                                       uint32_t index)
 {
   try {
+    DbRpcProfile profile(
+        DbRpcProfile::Method::kGetConcurrentRetrocausalQueueEntry);
     auto res =
         co_await client_.get_concurrent_retrocausal_queue_entry(block_id,
                                                                 addrkey, index);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
       return std::make_optional<QueueEntry>(std::move(x));
@@ -312,8 +324,10 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kCommitTransaction);
     auto res =
         co_await client_.commit_transaction(block_id, tx_id, new_contracts);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
@@ -343,7 +357,9 @@ x23::Async<SystemStatus<void>>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kAbortTransaction);
     auto res = co_await client_.abort_transaction(block_id, tx_id);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
@@ -520,8 +536,10 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kTryPushNewSubtransaction);
     auto res = co_await client_.try_push_new_subtransaction(block_id, tx_id,
                                                             delta_batch);
+    profile.finish();
     co_await default_threadpool().bg();
     switch (res.error()) {
     case RPCError::kRPCNone:
@@ -561,7 +579,9 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kPopSubtransactions);
     auto res = co_await client_.pop_subtransactions(block_id, tx_id, count);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
@@ -574,7 +594,9 @@ x23::Async<SystemStatus<DbTip>>
 DatabaseProxy::get_db_tip(BlockID block_id)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kGetDbTip);
     auto res = co_await client_.get_db_tip(block_id);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(
         res, [block_id](DbTip &&x) -> SystemStatus<DbTip> {
@@ -597,7 +619,9 @@ x23::Async<SystemStatus<ViewingSnapshot>>
 DatabaseProxy::open_viewing_snapshot()
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kOpenViewingSnapshot);
     auto res = co_await client_.open_viewing_snapshot();
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(
         res,
@@ -612,7 +636,9 @@ x23::Async<SystemStatus<void>>
 DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 {
   try {
+    DbRpcProfile profile(DbRpcProfile::Method::kCloseViewingSnapshot);
     auto res = co_await client_.close_viewing_snapshot(block_id);
+    profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {

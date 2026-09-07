@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hogd/hog_exec/runtime/item/db_rpc_profile.h"
 #include "hogd/metrics/shared.h"
 
 namespace hogd {
@@ -11,6 +12,7 @@ inline Metrics::Counter gas_consumed_metric;
 inline void
 init_hog_exec_metrics()
 {
+  DbRpcProfile::initialize();
   successful_proposed_tx_count_metric =
       Metrics::instance().per_thread_counter(Metrics::ComponentName::kExecutor,
                                              "successful_proposed_tx_count",

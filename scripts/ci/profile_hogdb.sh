@@ -11,11 +11,17 @@ exec > >(tee "$output/profile.log") 2>&1
 pid=
 while read -r candidate; do
   if [[ "$(readlink -f "/proc/$candidate/exe")" == "$binary" ]]; then
-    [[ -z "$pid" ]] || { echo "multiple matching hog-db processes"; exit 1; }
+    [[ -z "$pid" ]] || {
+      echo "multiple matching hog-db processes"
+      exit 1
+    }
     pid=$candidate
   fi
 done < <(pgrep -u "$(id -u)" -x hog-db)
-[[ -n "$pid" ]] || { echo "no matching hog-db process"; exit 1; }
+[[ -n "$pid" ]] || {
+  echo "no matching hog-db process"
+  exit 1
+}
 
 {
   date -u --iso-8601=seconds
@@ -25,20 +31,20 @@ done < <(pgrep -u "$(id -u)" -x hog-db)
   uname -a
   lscpu
   printf 'pid=%s clock_ticks=%s\n' "$pid" "$(getconf CLK_TCK)"
-  tr '\0' ' ' < "/proc/$pid/cmdline"
+  tr '\0' ' ' <"/proc/$pid/cmdline"
   printf '\n'
-} > "$output/metadata.txt"
+} >"$output/metadata.txt"
 
 snapshot() {
   local label=$1 index=0 url
   shift
-  date -u --iso-8601=ns > "$output/$label.time"
+  date -u --iso-8601=ns >"$output/$label.time"
   for file in stat status io sched; do
-    cat "/proc/$pid/$file" > "$output/$label.$file"
+    cat "/proc/$pid/$file" >"$output/$label.$file"
   done
   for url in "$@"; do
     curl --fail --silent --show-error --max-time 5 "$url" \
-      > "$output/$label.metrics-$index" || true
+      >"$output/$label.metrics-$index" || true
     index=$((index + 1))
   done
 }
@@ -57,9 +63,9 @@ wait "$stat_pid" || status=$?
 snapshot after "$@"
 if [[ "$status" -eq 0 ]]; then
   perf report --stdio --no-children --percent-limit 0.5 \
-    -i "$output/perf.data" > "$output/perf-self.txt"
+    -i "$output/perf.data" >"$output/perf-self.txt"
   perf report --stdio --children --percent-limit 1 \
-    -i "$output/perf.data" > "$output/perf-callgraph.txt"
+    -i "$output/perf.data" >"$output/perf-callgraph.txt"
   cat "$output/perf-stat.txt"
   head -100 "$output/perf-self.txt"
 fi
