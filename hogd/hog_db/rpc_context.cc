@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstdint>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
@@ -212,7 +211,7 @@ RPCContext::finish_commit_publication() noexcept
   // named explicitly: the committer usually runs on a worker of that very
   // pool, but tests finish publications from plain threads, where the
   // thread-local pool lookup broadcast() defaults to has nothing.
-  publication_generation_.rmw([](uint64_t &v) { ++v; });
+  publication_generation_.rmw([](auto &v) { ++v; });
   publication_generation_.broadcast(&default_threadpool());
 }
 
@@ -223,7 +222,7 @@ RPCContext::co_wait_for_no_commit_publishing()
     // The generation is read before the flag: a publication finishing
     // between the two bumps the generation, so the wait below returns
     // immediately rather than missing the wake.
-    const uint64_t generation = publication_generation_.load();
+    const auto generation = publication_generation_.load();
     if (!commit_publishing_.load(std::memory_order_acquire)) {
       co_return;
     }

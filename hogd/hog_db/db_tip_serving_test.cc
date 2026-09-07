@@ -137,6 +137,37 @@ TEST_F(DbTipServingTest, WaitsOutCommitPublication)
   EXPECT_EQ(res.db_tip().value.proposal_header.block_height, 6);
 }
 
+// Adversarial pin for the wake protocol. CoroFutex::wait(old) holds the
+// waiter-list mutex from its generation compare through the coroutine's
+// registration, and every generation mutation takes the same mutex, so a
+// publication cannot finish between a reader's check and its suspension --
+// and the reader loads the generation before the publishing flag, so a
+// publication completing between the two returns the wait immediately.
+// Hammer both windows with no sleeps: a missed wake is a reader suspended
+// with no one left to wake it, which shows up here as a hang.
+TEST_F(DbTipServingTest, NoWakeIsMissedUnderPublicationChurn)
+{
+  BlockHeight height = 0;
+  commit_tip(BlockTXID{1}, height);
+
+  for (int round = 0; round < 300; ++round) {
+    const BlockTXID committer{static_cast<BlockTXID>(round) + 2};
+    auto publication_guard =
+        std::make_unique<RPCContext::CommitPublicationGuard>(ctx_, committer);
+    std::thread releaser([&] {
+      commit_tip(committer, height + 1);
+      publication_guard.reset();
+    });
+
+    // Asks for the tip the in-flight commit installs; every interleaving of
+    // the two threads must end in a served tip, never a suspended orphan.
+    auto res = exec_.get_db_tip(BlockID{99999}, height + 2)();
+    releaser.join();
+    ASSERT_EQ(res.error(), RPCError::kRPCNone) << "round " << round;
+    ++height;
+  }
+}
+
 // The other side of the wake: the commit that finishes publication fills the
 // waiter's own slot, so the woken reader must refuse rather than serve.
 TEST_F(DbTipServingTest, WokenReaderRefusesWhenItsSlotWasTaken)
