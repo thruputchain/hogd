@@ -91,6 +91,52 @@ TEST_F(IndexDBTest, OpenNonExistent)
   EXPECT_EQ(db.error(), IndexerErrorCode::kDBNotFound);
 }
 
+// A daemon's data directory usually exists before the daemon does: a
+// deployment script, or the CI control server clearing and recreating its
+// work directory, gets there first. That must still be a fresh database
+// rather than the kDBNotFound the previous [open] dispatch produced, which
+// every caller turns into a startup panic (#3890).
+TEST_F(IndexDBTest, OpenOrMakeNewCreatesInPreCreatedEmptyDirectory)
+{
+  ASSERT_TRUE(std::filesystem::exists(tmp_dir_.directory()));
+  ASSERT_FALSE(IndexDB::database_exists(tmp_dir_.directory()));
+
+  {
+    auto created = IndexDB::open_or_make_new(tmp_dir_.directory());
+    ASSERT_TRUE(created.has_value()) << created.error();
+    EXPECT_TRUE(created->is_open());
+  }
+
+  EXPECT_TRUE(IndexDB::database_exists(tmp_dir_.directory()));
+}
+
+// The same call on a path that does hold a database opens it instead of
+// refusing it as already existing.
+TEST_F(IndexDBTest, OpenOrMakeNewOpensExistingDatabase)
+{
+  {
+    auto created = IndexDB::make_new(tmp_dir_.directory());
+    ASSERT_TRUE(created.has_value());
+  }
+
+  auto reopened = IndexDB::open_or_make_new(tmp_dir_.directory());
+  ASSERT_TRUE(reopened.has_value()) << reopened.error();
+  EXPECT_TRUE(reopened->is_open());
+}
+
+// A path with nothing at it is not a database either, and is created.
+TEST_F(IndexDBTest, OpenOrMakeNewCreatesAtMissingPath)
+{
+  const std::filesystem::path path =
+      std::filesystem::path(tmp_dir_.directory()) / "indexer-db";
+  ASSERT_FALSE(std::filesystem::exists(path));
+  EXPECT_FALSE(IndexDB::database_exists(path));
+
+  auto created = IndexDB::open_or_make_new(path);
+  ASSERT_TRUE(created.has_value()) << created.error();
+  EXPECT_TRUE(created->is_open());
+}
+
 // Test consuming events and looking them up by transaction
 TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
 {

@@ -384,6 +384,39 @@ RocksDBDeleter::operator()(rocksdb::DB *db) const
   delete db;
 }
 
+bool
+IndexDB::database_exists(const std::filesystem::path &path)
+{
+  if (!std::filesystem::exists(path)) {
+    return false;
+  }
+  // Listing the column families is the cheapest question RocksDB answers
+  // about a path it may not own: it reads CURRENT and the manifest, so it
+  // succeeds only where a database really lives.
+  rocksdb::Options check_options;
+  check_options.create_if_missing = false;
+  std::vector<std::string> existing_column_families;
+  return rocksdb::DB::ListColumnFamilies(check_options, path.string(),
+                                         &existing_column_families)
+      .ok();
+}
+
+IndexerStatus<IndexDB>
+IndexDB::open_or_make_new(const std::filesystem::path &path,
+                          rocksdb::CompressionType compression_algorithm)
+{
+  // Dispatching on whether the directory exists would send an existing but
+  // empty data directory down [open], which does not create and so fails
+  // with kDBNotFound -- fatal to every caller, all of which panic on it.
+  // The daemons are started against directories their launcher has already
+  // created often enough that "the directory is there" says nothing about
+  // whether a database is (#3890).
+  if (database_exists(path)) {
+    return open(path, compression_algorithm);
+  }
+  return make_new(path, compression_algorithm);
+}
+
 IndexerStatus<IndexDB>
 IndexDB::make_new(const std::filesystem::path &path,
                   rocksdb::CompressionType compression_algorithm)
@@ -392,16 +425,7 @@ IndexDB::make_new(const std::filesystem::path &path,
     return IndexerError(IndexerErrorCode::kUnsupportedCompressionAlgorithm);
   }
 
-  // Check if database already exists by trying to list column families
-  rocksdb::Options check_options;
-  check_options.create_if_missing = false;
-  std::vector<std::string> existing_column_families;
-  rocksdb::Status list_status =
-      rocksdb::DB::ListColumnFamilies(check_options, path.string(),
-                                      &existing_column_families);
-
-  if (list_status.ok()) {
-    // Database already exists
+  if (database_exists(path)) {
     error("Database already exists at: {}", path.string());
     return IndexerError(IndexerErrorCode::kDBAlreadyExists);
   }

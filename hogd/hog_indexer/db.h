@@ -56,18 +56,17 @@ public:
        rocksdb::CompressionType compression_algorithm =
            rocksdb::CompressionType::kLZ4Compression);
 
+  // True when [path] holds a database. An existing directory is not one:
+  // a daemon's data directory is routinely created before the daemon runs,
+  // by a deployment script, by the CI control server clearing its work
+  // directory, or by a plain [mkdir -p].
+  static bool database_exists(const std::filesystem::path &path);
+
+  // Open the database at [path], creating one when [path] holds none yet.
   static IndexerStatus<IndexDB>
   open_or_make_new(const std::filesystem::path &path,
                    rocksdb::CompressionType compression_algorithm =
-                       rocksdb::CompressionType::kLZ4Compression)
-  {
-    if (std::filesystem::exists(path)) {
-      // [path] already exists, so open the existing database.
-      return open(path, compression_algorithm);
-    }
-    // Nothing exists at [path], so create a new database there.
-    return make_new(path, compression_algorithm);
-  }
+                       rocksdb::CompressionType::kLZ4Compression);
 
   ~IndexDB();
 

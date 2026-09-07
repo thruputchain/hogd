@@ -47,6 +47,11 @@ public:
   // ~1k RPCs/s against the indexer under test; tighter starts to perturb it.
   static constexpr auto kPollInterval = std::chrono::milliseconds(1);
 
+  // How long the indexer gets to start serving queries before the bench
+  // gives up on it, and how often it is retried in the meantime.
+  static constexpr auto kConnectTimeout = std::chrono::seconds(120);
+  static constexpr auto kConnectRetryInterval = std::chrono::seconds(1);
+
   // Fails loudly: a probe that silently measured nothing would publish an
   // empty metric that reads exactly like "latency is fine".
   explicit IndexerLatencyProbe(const std::string &indexer_addr)
@@ -135,16 +140,30 @@ private:
 
   // Connects in the member init list so [client_] is never an empty optional
   // that every later use has to re-check.
+  //
+  // Bounded, unlike [make_rpc_client]'s own retry, which loops on a refused
+  // port for as long as the process lives: an indexer that died at startup
+  // would otherwise hold the whole benchmark here until the CI job's own
+  // timeout kills it, an hour later, with nothing in the log but the
+  // connect retry (#3890). The window covers the indexer's startup replay,
+  // since it opens this port only once its pull has caught up.
   static indexer_block_explorer_client_t connect(const std::string &addr)
   {
-    auto client_res =
-        make_rpc_client<IndexerBlockExplorer1>(server_address_to_sockaddr(addr),
-                                               /*retry=*/true)();
-    if (!client_res) {
-      panic("indexer latency probe: connect to {} failed: {}", addr,
-            client_res.error().error_code().message());
+    const auto deadline = std::chrono::steady_clock::now() + kConnectTimeout;
+    auto server = server_address_to_sockaddr(addr);
+    while (true) {
+      auto client_res =
+          make_rpc_client<IndexerBlockExplorer1>(server, /*retry=*/false)();
+      if (client_res) {
+        return std::move(*client_res);
+      }
+      if (std::chrono::steady_clock::now() >= deadline) {
+        panic("indexer latency probe: connect to {} failed after {}s: {}", addr,
+              kConnectTimeout.count(),
+              client_res.error().error_code().message());
+      }
+      std::this_thread::sleep_for(kConnectRetryInterval);
     }
-    return std::move(*client_res);
   }
 
   // Nearest-rank: the ceil(q * N)th smallest sample, 1-indexed, so every
