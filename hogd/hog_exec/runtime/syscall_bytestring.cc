@@ -29,12 +29,18 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 {
   const auto db_gas_before = syscall_handler.db_read_gas();
   auto status = co_await syscall_handler.get_bytestring(input_key);
+  // Charged on the error returns too. A read of a missing key, or of one
+  // holding another type, loads before it can tell; the key is marked loaded
+  // either way, so nothing later recovers the charge and a caller could
+  // otherwise probe cold storage for the syscall base cost.
+  const auto db_gas = syscall_handler.db_read_gas() - db_gas_before;
   if (!status.has_value()) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{db_gas}};
   }
   if (!(*status).has_value()) {
-    co_return SyscallInnerResult{status->error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status->error().code(),
+                                 WrappedGasAmount{db_gas}};
   }
 
   auto const *bs = (*(*status));
@@ -48,7 +54,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
   // charge a 32-byte read out of a 4 KiB scratch for eight blocks.
   const WrappedGasAmount gas{
       GasCost::bytestring_get(std::min(output_bytestring.size(), bs->size())) +
-      syscall_handler.db_read_gas() - db_gas_before};
+      db_gas};
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
@@ -67,14 +73,16 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
 {
   const auto db_gas_before = syscall_handler.db_read_gas();
   auto status = co_await syscall_handler.get_bytestring(input_key);
+  // Charged on the error returns too; see syscall_BytestringGet_inner.
+  const auto db_gas = syscall_handler.db_read_gas() - db_gas_before;
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{db_gas}};
   }
   auto &get_status = *status;
   if (!get_status) {
     co_return SyscallInnerResult{get_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{db_gas}};
   }
 
   output_length = (*get_status)->size();
@@ -90,9 +98,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
   // flat to within 0.6 ns across three decades -- so it pays the storage
   // access and no block term.
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost +
-                                                syscall_handler.db_read_gas() -
-                                                db_gas_before}};
+                               WrappedGasAmount{kStorageAccessCost + db_gas}};
 };
 
 MaybeAsyncSyscallInnerResult

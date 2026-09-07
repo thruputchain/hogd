@@ -1589,7 +1589,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
   install_contract(contract);
 
   auto handler = make_new_system_call_handler(
-      make_root_transaction(kParityGas, smoke_method_id), rv32_context);
+      make_root_transaction(kStorageReadGas, smoke_method_id), rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
 

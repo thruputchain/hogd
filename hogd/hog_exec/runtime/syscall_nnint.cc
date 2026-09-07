@@ -32,12 +32,18 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
   auto status =
       co_await syscall_handler.get_nnint(input_key,
                                          input_force_load_from_snapshot);
+  // Charged on the error returns too. A read of a missing key, or of one
+  // holding another type, loads before it can tell; the key is marked loaded
+  // either way, so nothing later recovers the charge and a caller could
+  // otherwise probe cold storage for the syscall base cost.
+  const auto db_gas = syscall_handler.db_read_gas() - db_gas_before;
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{db_gas}};
   }
   if (!(*status).has_value()) {
-    co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{(*status).error().code(),
+                                 WrappedGasAmount{db_gas}};
   }
   if ((*status)->first.has_value()) {
     output_current_set = *((*status)->first);
@@ -61,9 +67,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs->current_add = to_xdr(output_current_add);
   }
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost +
-                                                syscall_handler.db_read_gas() -
-                                                db_gas_before}};
+                               WrappedGasAmount{kStorageAccessCost + db_gas}};
 }
 
 MaybeAsyncSyscallInnerResult

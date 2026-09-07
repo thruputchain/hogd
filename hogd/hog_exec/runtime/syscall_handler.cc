@@ -1789,6 +1789,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
       co_return std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_));
     }
 
+    // Reaches the database the same way UnmodifiedItem::load() does, so it
+    // is billed the same way: a staged add with no set value followed by a
+    // forced get lands here rather than in the branch below.
+    note_item_load(item_key);
     auto snapshot_value =
         co_await snapshot_cache_.try_get_snapshot_item(item_key);
     if (!snapshot_value.has_value()) {
@@ -2225,6 +2229,8 @@ SystemCallHandler::get_native_token_balance(
     base = from_xdr(*balance_item->base_value_);
   }
   else {
+    // Same database read as the branch above, so it is billed the same way.
+    note_item_load(item_key);
     auto snapshot_value =
         co_await snapshot_cache_.try_get_snapshot_item(item_key);
     if (!snapshot_value.has_value()) {
