@@ -794,10 +794,29 @@ HogDbDAO::apply(ChangeSet &changes, WorkerPool &pool)
                               });
   }
 
+  // Producer vectors can differ substantially in length and payload size.
+  // Keep their ownership, but distribute bounded ranges rather than making
+  // the longest producer vector the serial tail of apply().
+  std::vector<std::span<const MaterializedChange>> chunks;
+  constexpr size_t kMaxChunkItems = 256;
+  constexpr size_t kTargetChunkBytes = 64 * 1024;
+  for (const auto &vec : vecs) {
+    for (size_t begin = 0; begin < vec.size();) {
+      size_t end = begin, bytes = 0;
+      do {
+        bytes += vec[end].item.size();
+        ++end;
+      } while (end < vec.size() && end - begin < kMaxChunkItems &&
+               bytes < kTargetChunkBytes);
+      chunks.emplace_back(vec.data() + begin, end - begin);
+      begin = end;
+    }
+  }
+
   std::atomic<bool> had_error{false};
   pool.for_each_parallel(
-      vecs,
-      [this, &had_error](std::vector<MaterializedChange> &vec) {
+      chunks,
+      [this, &had_error](std::span<const MaterializedChange> vec) {
         if (had_error.load(std::memory_order_relaxed)) {
           return;
         }

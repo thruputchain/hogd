@@ -256,6 +256,68 @@ max_inline_contract_code_size()
 
 } // namespace
 
+TEST(VersionHistoryTest, InlineSpillRollbackAndMove)
+{
+  struct Version {
+    std::unique_ptr<int> value;
+    unsigned tx_depth;
+  };
+  VersionHistory<Version> history;
+  history.emplace_back(std::make_unique<int>(11), 1);
+  for (unsigned depth = 2; depth <= 32; ++depth)
+    history.emplace_back(std::make_unique<int>(depth), depth);
+  EXPECT_EQ(history.size(), 32);
+  history.discard_after(1);
+  ASSERT_EQ(history.size(), 1);
+  EXPECT_EQ(*history.back().value, 11);
+  VersionHistory<Version> moved(std::move(history));
+  EXPECT_TRUE(history.empty());
+  ASSERT_EQ(moved.size(), 1);
+  moved.discard_after(0);
+  EXPECT_TRUE(moved.empty());
+  moved.emplace_back(std::make_unique<int>(42), 3);
+  EXPECT_EQ(*moved.back().value, 42);
+}
+
+TEST_F(HogDbTest, ChunkedApplyAndDirectSerializationPreserveHash)
+{
+  Address addr = make_address(kAddress + 99);
+  setup_contract_address(addr);
+  constexpr size_t count = 1024;
+  constexpr std::array<size_t, 5> sizes{0, 16, 64, 65, 4096};
+  for (size_t i = 0; i < count; ++i) {
+    auto key = make_contract_data_key(make_item_key(addr, i));
+    std::vector<std::byte> old(sizes[i % sizes.size()], std::byte{0xab});
+    ASSERT_TRUE(db_.get_ramdb().put(key, kBytes, old));
+  }
+  auto hash = lthash16_from_db_hash(db_.compute_full_db_hash());
+  auto changes = db_.create_changeset(true);
+  for (size_t i = 0; i < count; ++i) {
+    auto key = make_contract_data_key(make_item_key(addr, i));
+    if (i % 3 == 0)
+      changes.remove(key);
+    else
+      changes.put_serialized(key, kBytes, x23::Vec<uint32_t>{uint32_t(i), 42});
+  }
+  hash += changes.close();
+  ASSERT_TRUE(db_.apply(changes));
+  EXPECT_EQ(db_hash_from_lthash16(hash), db_.compute_full_db_hash());
+  for (size_t i = 0; i < count; ++i) {
+    auto key = make_contract_data_key(make_item_key(addr, i));
+    auto value = db_.get_ramdb().get(key);
+    if (i % 3 == 0) {
+      ASSERT_FALSE(value);
+      EXPECT_EQ(value.error(), HogDbCode::kNotFound);
+    }
+    else {
+      ASSERT_TRUE(value);
+      auto expected = x23::serialize(x23::Vec<uint32_t>{uint32_t(i), 42});
+      EXPECT_TRUE(
+          std::ranges::equal(value->value, std::as_bytes(std::span(expected))));
+    }
+  }
+}
+
 TEST_F(HogDbTest, ContractCodeChunkedRoundtrip)
 {
   const size_t max_inline = max_inline_contract_code_size();

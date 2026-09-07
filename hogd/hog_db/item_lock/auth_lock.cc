@@ -150,8 +150,7 @@ AuthLock::stage_committed_changes(const LockContext &ctx,
   CHECK(ctx.key.is_address_auth_data());
   auto auth = build_result(ctx.block_height);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
-  auto serialized = x23::serialize(auth);
-  changes.put(key, 0, serialized);
+  changes.put_serialized(key, 0, auth);
   return {};
 }
 

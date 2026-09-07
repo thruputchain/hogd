@@ -298,7 +298,7 @@ InvokeTX::rollback_to_savepoint(int depth)
   // read_change() from dereferencing vec.back() on an empty vector.
   for (auto it = changes_.begin(); it != changes_.end();) {
     const ItemKey &key = it->first;
-    std::vector<ItemVersion> &vec = it->second;
+    auto &vec = it->second;
     // skip if no changes made after savepoint.
     if (vec.empty() || vec.back().tx_depth <= tx_depth_) {
       it = vec.empty() ? changes_.erase(it) : std::next(it);
@@ -307,9 +307,7 @@ InvokeTX::rollback_to_savepoint(int depth)
 
     // revert and erase the history of changes made after savepoint.
     ItemChange tmp{std::move(vec.back().change)};
-    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
-                                       &ItemVersion::tx_depth),
-              vec.end());
+    vec.discard_after(tx_depth_);
     if (!vec.empty()) {
       HogDbStatus<int128_t> ret =
           block_.get().modify_lock(key, tmp, vec.back().change);
@@ -339,10 +337,8 @@ InvokeTX::rollback_to_savepoint(int depth)
   }
 
   for (auto it = balance_deltas_.begin(); it != balance_deltas_.end();) {
-    std::vector<StorageBalanceVersion> &vec = it->second;
-    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
-                                       &StorageBalanceVersion::tx_depth),
-              vec.end());
+    auto &vec = it->second;
+    vec.discard_after(tx_depth_);
     it = vec.empty() ? balance_deltas_.erase(it) : std::next(it);
   }
   assert_is_valid();
@@ -361,9 +357,7 @@ InvokeTX::release_savepoint(int depth)
 
     // retain latest change but erase any history after savepoint.
     ItemVersion tmp(std::move(vec.back().change), tx_depth_);
-    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
-                                       &ItemVersion::tx_depth),
-              vec.end());
+    vec.discard_after(tx_depth_);
     if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
       vec.back().change = std::move(tmp.change);
       // TODO(geoff): abelay had left this as return; that seems incorrect.
@@ -407,7 +401,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   assert(!key.is_address_balance());
   auto it = changes_.try_emplace(key).first;
-  std::vector<ItemVersion> &v = it->second;
+  auto &v = it->second;
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
@@ -694,7 +688,8 @@ InvokeTX::assert_is_valid() const noexcept
       std::unordered_map<Address, int128_t> balance_deltas;
       for (const auto &[key, vec] : changes_) {
         [[maybe_unused]] unsigned int depth = 0;
-        for (const ItemVersion &item : vec) {
+        for (size_t i = 0; i < vec.size(); ++i) {
+          const ItemVersion &item = vec[i];
           assert(item.tx_depth >= depth);
           assert(item.tx_depth <= tx_depth_);
           depth = item.tx_depth + 1;

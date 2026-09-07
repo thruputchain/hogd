@@ -124,6 +124,22 @@ ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type)
   return DBError(DBCode::kNotFound);
 }
 
+DBStatus<std::pair<uint8_t, size_t>>
+ScalableMap::get_into(std::span<const std::byte> key, std::span<std::byte> out)
+{
+  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  for (; *bu != nullptr; bu = &(*bu)->next) {
+    if ((*bu)->get_key() == key) {
+      auto value = (*bu)->get_value();
+      if (value.size() > out.size())
+        return DBError(DBCode::kTooBig);
+      std::ranges::copy(value, out.begin());
+      return std::pair{(*bu)->type, value.size()};
+    }
+  }
+  return DBError(DBCode::kNotFound);
+}
+
 DBStatus<void>
 ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type,
                          std::span<std::byte> val_out)

@@ -11,6 +11,7 @@
 #include "hogd/crypto/lthash16.h"
 #include "hogd/hog_db/byte_arena.h"
 #include "hogd/hog_db/materialized_change.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -29,6 +30,16 @@ public:
   void put(std::span<const std::byte> key, uint8_t type,
            std::span<const std::byte> value);
   void remove(std::span<const std::byte> key);
+
+  template<typename K, x23::is_xdr_serializable V>
+  void put_serialized(const K &key, uint8_t type, const V &value)
+  {
+    auto key_bytes = std::as_bytes(std::span(key));
+    auto item = alloc_->allocate_item(key_bytes, type, x23::xdr_size(value));
+    x23::detail::Serializer{
+        reinterpret_cast<uint8_t *>(item.data() + key_bytes.size() + 1)}(value);
+    stage_item(item, key_bytes.size(), type);
+  }
 
   // Template overloads that serialize key/value via std::as_bytes(std::span).
   // Explicit std::span<const std::byte> casts avoid infinite recursion when
@@ -60,6 +71,9 @@ public:
   LtHash16 close();
 
 private:
+  void stage_item(std::span<const std::byte> item, size_t key_len,
+                  uint8_t type);
+  bool remove_old_hash(std::span<const std::byte> key);
   HogDbDAO *dao_;
   bool compute_hash_;
   PerThread<ByteArena> alloc_;

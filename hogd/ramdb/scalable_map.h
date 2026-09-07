@@ -14,6 +14,7 @@
 #include <ranges>
 #include <span>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/compiler.h"
@@ -53,6 +54,11 @@ public:
 
   // get finds an item for a given key.
   DBStatus<DBItem> get(std::span<const std::byte> key);
+
+  // Copy a complete value and its type under one bucket lock. Too-small
+  // output returns kTooBig without modifying the output buffer.
+  DBStatus<std::pair<uint8_t, size_t>> get_into(std::span<const std::byte> key,
+                                                std::span<std::byte> out);
 
   // get_if_type finds an item of a specific type for a given key. If the type
   // does not match, it will return DBCode::kTypeMismatch.

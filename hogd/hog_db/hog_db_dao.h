@@ -70,6 +70,12 @@ public:
     return db_->get(key).transform_error(to_hog_db_error);
   }
 
+  HogDbStatus<std::pair<uint8_t, size_t>>
+  get_into(std::span<const std::byte> key, std::span<std::byte> out)
+  {
+    return db_->get_into(key, out).transform_error(to_hog_db_error);
+  }
+
   HogDbStatus<void> get_if_type(std::span<const std::byte> key, uint8_t type,
                                 std::span<std::byte> val_out)
   {

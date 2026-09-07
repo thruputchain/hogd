@@ -5,6 +5,7 @@
 #include "x23/nmvec.h"
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <span>
@@ -31,15 +32,26 @@ public:
                                         uint8_t type,
                                         std::span<const std::byte> value)
   {
-    size_t total = key.size() + 1 + value.size();
+    auto dest = allocate_item(key, type, value.size());
+    if (!value.empty()) {
+      std::memcpy(dest.data() + key.size() + 1, value.data(), value.size());
+    }
+    return dest;
+  }
+
+  // The caller must completely initialize the value before publishing it.
+  std::span<std::byte> allocate_item(std::span<const std::byte> key,
+                                     uint8_t type, size_t value_size)
+  {
+    if (key.size() >= size_t(PTRDIFF_MAX) ||
+        value_size > size_t(PTRDIFF_MAX) - key.size() - 1)
+      throw std::bad_array_new_length();
+    size_t total = key.size() + 1 + value_size;
     auto dest = alloc(total);
     if (!key.empty()) {
       std::memcpy(dest.data(), key.data(), key.size());
     }
     dest[key.size()] = static_cast<std::byte>(type);
-    if (!value.empty()) {
-      std::memcpy(dest.data() + key.size() + 1, value.data(), value.size());
-    }
     return dest;
   }
 
@@ -61,7 +73,7 @@ private:
 
     Chunk() = default;
     explicit Chunk(size_t cap)
-      : data(std::make_unique<std::byte[]>(cap)), capacity(cap)
+      : data(std::make_unique_for_overwrite<std::byte[]>(cap)), capacity(cap)
     {}
 
     std::span<std::byte> try_alloc(size_t n)

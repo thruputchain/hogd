@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -289,6 +290,35 @@ DatabaseTest::wait_for_deletion(std::string_view path)
   }
 
   FAIL() << "file did not get deleted as expected: " << path;
+}
+
+TEST_F(DatabaseTest, BoundedCopyOut)
+{
+  auto key = std::as_bytes(std::span("copy-out", 8));
+  std::array<std::byte, 64> out;
+  EXPECT_EQ(db_->get_into(key, out).error(), DBCode::kNotFound);
+  for (size_t n : {0UZ, 16UZ, 64UZ, 65UZ}) {
+    std::vector<std::byte> value(n, std::byte{0xab});
+    ASSERT_TRUE(db_->put(key, 7, value));
+    out.fill(std::byte{0xcd});
+    auto got = db_->get_into(key, out);
+    if (n > out.size()) {
+      ASSERT_FALSE(got);
+      EXPECT_EQ(got.error(), DBCode::kTooBig);
+      EXPECT_TRUE(std::ranges::all_of(out, [](auto b) {
+        return b == std::byte{0xcd};
+      }));
+    }
+    else {
+      ASSERT_TRUE(got);
+      EXPECT_EQ(got->first, 7);
+      EXPECT_EQ(got->second, n);
+      EXPECT_TRUE(std::ranges::equal(std::span(out).first(n), value));
+      EXPECT_TRUE(std::ranges::all_of(std::span(out).subspan(n), [](auto b) {
+        return b == std::byte{0xcd};
+      }));
+    }
+  }
 }
 
 TEST_F(DatabaseTest, SimpleInsertions)

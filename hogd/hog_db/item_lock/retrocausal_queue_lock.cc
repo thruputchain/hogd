@@ -520,40 +520,34 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
   // This is necessary because ItemView prioritizes Self entries over Concurrent
   // entries, so the consumed entries may not be at the front of added_entries_.
   x23::Vec<QueueEntry> remaining_entries;
+  remaining_entries.reserve(added_entries_.size());
+  remaining_entries.append_range(added_entries_);
+  std::ranges::sort(remaining_entries);
   if (consume_delta_ && !consume_delta_->current_block_consumed.empty()) {
-    std::multiset<QueueEntry> consumed_set(
-        consume_delta_->current_block_consumed.begin(),
-        consume_delta_->current_block_consumed.end());
-
-    for (auto const &entry : added_entries_) {
-      auto it = consumed_set.find(entry);
-      if (it != consumed_set.end()) {
-        consumed_set.erase(it);
-      }
-      else {
-        remaining_entries.push_back(entry);
-      }
+    auto consumed = consume_delta_->current_block_consumed;
+    std::ranges::sort(consumed);
+    size_t out = 0, used = 0;
+    for (size_t i = 0; i < remaining_entries.size(); ++i) {
+      if (used < consumed.size() && remaining_entries[i] == consumed[used])
+        ++used;
+      else
+        remaining_entries[out++] = remaining_entries[i];
     }
-    // consumed_set was already validated by has_unmatched_entries() in
+    // Consumed entries were already validated by has_unmatched_entries() in
     // stage_committed_changes(). This CHECK guards against logic errors
     // in the filtering — it should never fire.
-    CHECK(consumed_set.empty());
-  }
-  else {
-    remaining_entries =
-        x23::Vec<QueueEntry>(added_entries_.begin(), added_entries_.end());
+    CHECK_EQ(used, consumed.size());
+    remaining_entries.resize(out);
   }
 
   if (!remaining_entries.empty()) {
     RetrocausalQueueBlock new_block;
     new_block.entries = std::move(remaining_entries);
-    std::ranges::sort(new_block.entries);
     new_block.block_number = base_metadata.max_live_block_num + 1;
 
     auto block_key =
         make_retrocausal_queue_block_key(ctx.key, new_block.block_number);
-    auto block_buf = x23::serialize(new_block);
-    changes.put(block_key, 0, block_buf);
+    changes.put_serialized(block_key, 0, new_block);
 
     updated_metadata.max_live_block_num = new_block.block_number;
   }
@@ -594,8 +588,7 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
     }
   }
   else {
-    auto meta_buf = x23::serialize(updated_metadata);
-    changes.put(meta_key, kRetrocausalQueue, meta_buf);
+    changes.put_serialized(meta_key, kRetrocausalQueue, updated_metadata);
   }
 
   return {};

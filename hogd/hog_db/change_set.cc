@@ -1,5 +1,6 @@
 #include "hogd/hog_db/change_set.h"
 
+#include <array>
 #include <cstddef>
 #include <span>
 #include <vector>
@@ -22,10 +23,16 @@ void // NOLINTNEXTLINE(misc-include-cleaner)
 ChangeSet::put(std::span<const std::byte> key, uint8_t type,
                std::span<const std::byte> value)
 {
-  auto &alloc = *alloc_;
-  auto &changes = *changes_;
+  auto item = alloc_->store_item(key, type, value);
+  stage_item(item, key.size(), type);
+}
 
-  auto item = alloc.store_item(key, type, value);
+void
+ChangeSet::stage_item(std::span<const std::byte> item, size_t key_len,
+                      uint8_t type)
+{
+  auto key = item.first(key_len);
+  auto value = item.subspan(key_len + 1);
 
   MaterializedChange change;
   change.op = MaterializedChange::Op::kPut;
@@ -36,13 +43,10 @@ ChangeSet::put(std::span<const std::byte> key, uint8_t type,
   if (compute_hash_ && is_state_item(key)) {
     auto &hash = *hash_delta_;
     hash.add(key, type, value);
-    auto old = dao_->get_ramdb().get(key);
-    if (old.has_value()) {
-      hash.remove(key, old->type, old->value);
-    }
+    remove_old_hash(key);
   }
 
-  changes.push_back(change);
+  changes_->push_back(change);
 }
 
 void
@@ -51,14 +55,13 @@ ChangeSet::remove(std::span<const std::byte> key)
   auto &alloc = *alloc_;
   auto &changes = *changes_;
 
-  auto old = dao_->get_ramdb().get(key);
-  if (!old.has_value()) {
-    CHECK(old.error() == DBCode::kNotFound);
-    return;
-  }
-
   if (compute_hash_ && is_state_item(key)) {
-    hash_delta_->remove(key, old->type, old->value);
+    if (!remove_old_hash(key))
+      return;
+  }
+  else if (auto type = dao_->get_ramdb().get_type(key); !type) {
+    CHECK(type.error() == HogDbCode::kNotFound);
+    return;
   }
 
   MaterializedChange change;
@@ -67,6 +70,30 @@ ChangeSet::remove(std::span<const std::byte> key)
   change.item = alloc.store(key);
 
   changes.push_back(change);
+}
+
+bool
+ChangeSet::remove_old_hash(std::span<const std::byte> key)
+{
+  // Scalar rows need no owning allocation. Hash after releasing the bucket
+  // lock; large rows retain the existing lifetime-safe owning read.
+  std::array<std::byte, 64> bytes;
+  auto &db = dao_->get_ramdb();
+  if (auto old = db.get_into(key, bytes)) {
+    hash_delta_->remove(key, old->first, std::span(bytes).first(old->second));
+    return true;
+  }
+  else if (old.error() != HogDbCode::kTooBig) {
+    CHECK(old.error() == HogDbCode::kNotFound);
+    return false;
+  }
+  auto old = db.get(key);
+  if (!old) {
+    CHECK(old.error() == HogDbCode::kNotFound);
+    return false;
+  }
+  hash_delta_->remove(key, old->type, old->value);
+  return true;
 }
 
 void // NOLINTNEXTLINE(misc-include-cleaner)

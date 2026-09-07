@@ -86,6 +86,13 @@ public:
   // Read-only: safe to call concurrently with put()/remove() and with sync().
   DBStatus<DBItem> get(std::span<const std::byte> key);
 
+  DBStatus<std::pair<uint8_t, size_t>> get_into(std::span<const std::byte> key,
+                                                std::span<std::byte> out)
+  {
+    assert(active_);
+    return map_.get_into(key, out);
+  }
+
   // get_if_type finds an item of a specific type for a given key. If the type
   // does not match, it will return DBCode::kTypeMismatch.
   DBStatus<OwningSpan<const std::byte>>

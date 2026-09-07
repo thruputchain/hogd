@@ -22,6 +22,7 @@
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_db/version_history.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -250,12 +251,12 @@ private:
   BlockTXRef block_;
   unsigned int tx_depth_{0};
   std::optional<DbConflictCode> last_conflict_reason_;
-  std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
+  std::unordered_map<ItemKey, VersionHistory<ItemVersion>> changes_;
   // Whenever you request a balance change (from a user action),
   // combine it with the latest balance delta for that address.
   // Whenever you update a balance change from a storage operation,
   // also update the balance_deltas_ for that address.
-  std::unordered_map<Address, std::vector<StorageBalanceVersion>>
+  std::unordered_map<Address, VersionHistory<StorageBalanceVersion>>
       balance_deltas_;
 
   // read_change returns the most recent version of a change, or nullptr if
@@ -292,7 +293,7 @@ InvokeTX::read_change(const ItemKey &key) const
   if (it == changes_.end())
     return nullptr;
 
-  const std::vector<ItemVersion> &v = it->second;
+  const auto &v = it->second;
   return &v.back().change;
 }
 
