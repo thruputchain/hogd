@@ -814,45 +814,55 @@ HogDbDAO::apply(ChangeSet &changes, WorkerPool &pool)
   }
 
   std::atomic<bool> had_error{false};
+  // Limit queued jobs/futures to the pool size while retaining dynamic
+  // chunk balancing within those jobs.
+  std::atomic<size_t> next_chunk{0};
+  auto workers =
+      std::views::iota(size_t{0}, std::min(pool.worker_count(), chunks.size()));
   pool.for_each_parallel(
-      chunks,
-      [this, &had_error](std::span<const MaterializedChange> vec) {
-        if (had_error.load(std::memory_order_relaxed)) {
-          return;
-        }
-        for (const auto &change : vec) {
-          auto key = change.key();
-
-          // Feed the debug invariants the before/after state for every
-          // committed item change, mirroring the typed write_* methods. The
-          // whole feed is debug-only (invariants are only enabled under
-          // is_debug_build()), so it compiles out of release and leaves the
-          // parallel apply hot path untouched. Keys are partitioned
-          // one-per-lock across the per-thread vectors, so no other worker
-          // mutates this key concurrently and the before/after reads are
-          // consistent.
-          [[maybe_unused]] std::optional<HogDbStatus<DBItem>> before;
-          if constexpr (is_debug_build()) {
-            before = get_before_item(key);
+      workers,
+      [this, &had_error, &next_chunk, &chunks](size_t) {
+        for (;;) {
+          if (had_error.load(std::memory_order_relaxed)) {
+            return;
           }
+          size_t index = next_chunk.fetch_add(1, std::memory_order_relaxed);
+          if (index >= chunks.size())
+            return;
+          for (const auto &change : chunks[index]) {
+            auto key = change.key();
 
-          switch (change.op) {
-          case MaterializedChange::Op::kPut:
-            if (auto r = db_.put(key, change.type, change.value()); !r) {
-              had_error.store(true, std::memory_order_relaxed);
-              return;
+            // Feed the debug invariants the before/after state for every
+            // committed item change, mirroring the typed write_* methods. The
+            // whole feed is debug-only (invariants are only enabled under
+            // is_debug_build()), so it compiles out of release and leaves the
+            // parallel apply hot path untouched. Keys are partitioned
+            // one-per-lock across the per-thread vectors, so no other worker
+            // mutates this key concurrently and the before/after reads are
+            // consistent.
+            [[maybe_unused]] std::optional<HogDbStatus<DBItem>> before;
+            if constexpr (is_debug_build()) {
+              before = get_before_item(key);
             }
-            break;
-          case MaterializedChange::Op::kRemove:
-            if (auto r = db_.remove(key); !r) {
-              had_error.store(true, std::memory_order_relaxed);
-              return;
-            }
-            break;
-          }
 
-          if constexpr (is_debug_build()) {
-            update_invariants_post(key, before);
+            switch (change.op) {
+            case MaterializedChange::Op::kPut:
+              if (auto r = db_.put(key, change.type, change.value()); !r) {
+                had_error.store(true, std::memory_order_relaxed);
+                return;
+              }
+              break;
+            case MaterializedChange::Op::kRemove:
+              if (auto r = db_.remove(key); !r) {
+                had_error.store(true, std::memory_order_relaxed);
+                return;
+              }
+              break;
+            }
+
+            if constexpr (is_debug_build()) {
+              update_invariants_post(key, before);
+            }
           }
         }
       },
