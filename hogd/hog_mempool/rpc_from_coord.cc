@@ -455,12 +455,14 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
                                co_return;
                              });
 
-  // No well-formedness check here, unlike submit_unvetted: dropping a vetted
-  // tx leaves the peer block it belongs to permanently unvalidatable by this
-  // mempool, the same wedge the capacity check above is skipped to avoid.
-  // Nothing is lost by admitting a malformed one -- the executor re-runs the
-  // same predicate and, in validation mode, rejects it as a
-  // proposer-attributable ValidationFailure.
+  // We assume that in the common case for [schedulercoord_submit_vetted()],
+  // honest validators will submit well-formed txs. Thus, we do not check for
+  // well-formedness here as a performance optimization. If a bad validator
+  // submits a malformed tx, the executor will detect this and fail the tx.
+  //
+  // Dropping one here would also be wrong, not merely slower: the peer block
+  // referencing it could then never be validated by this mempool, the same
+  // wedge the capacity check above is skipped to avoid.
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(lock_commit_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
