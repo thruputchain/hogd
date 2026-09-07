@@ -4,7 +4,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <format>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 #include "hogd/base/log.h"
@@ -69,9 +71,28 @@ public:
     co_return ExpectedDBTip(RPCError::kRPCNotFound);
   }
 
+  // Bound on a lookup arriving over the public gateway.
+  //
+  // [MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize] is sized for
+  // chuckd, which legitimately asks for a whole block's worth when repairing a
+  // peer's missing transactions.  Nothing on this port is authenticated --
+  // [schedgateway_intro] is a protocol compare that records no state -- so the
+  // public surface gets its own, far tighter, limit rather than inheriting
+  // that one.  Wallet-style receipt lookups are the use case here, and the
+  // known client looks transactions up one at a time.
+  static constexpr size_t kMaxGatewayLookupTxBatchSize = 1'024;
+  static_assert(kMaxGatewayLookupTxBatchSize <
+                    MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize,
+                "the unauthenticated surface must not be the looser one");
+
   x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
   schedgateway_lookup_tx(TransactionHashBatch tx_hashes)
   {
+    if (tx_hashes.size() > kMaxGatewayLookupTxBatchSize) {
+      throw std::runtime_error(std::format(
+          "schedgateway_lookup_tx: {} hashes requested, limit is {}",
+          tx_hashes.size(), kMaxGatewayLookupTxBatchSize));
+    }
     co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);
   }
 

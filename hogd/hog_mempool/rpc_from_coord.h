@@ -77,6 +77,27 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
+  // Bound on a [schedcoord_lookup_transactions] request.
+  //
+  // [TransactionHashBatch] is unbounded on the wire and this listener runs
+  // with [kBulkRpcMaxMessageSize], so without a limit a request names as many
+  // hashes as it has bytes for -- 524,288 in 16 MiB, 67 million in a maximal
+  // record.  Each one costs a reply slot reserved up front, a
+  // [Scheduler::find_tx] shard-lock acquisition, and, when it resolves,
+  // another serialized copy of that transaction in the reply, in a loop that
+  // never suspends.
+  //
+  // A block's worth is the honest ceiling.  Chuckd's repair service answers a
+  // peer that is missing transactions for a proposal by looking those hashes
+  // up here, and it forwards the peer's list without a count check of its own
+  // -- so this is the backstop for that path.  A proposal cannot carry more
+  // than [kMaxBlockSize] transactions, so a request naming more than that is
+  // malformed by construction.
+  //
+  // The public gateway is far more restrictive; see
+  // [MempoolGatewayRpc::kMaxGatewayLookupTxBatchSize].
+  static constexpr size_t kMaxLookupTransactionsBatchSize = kMaxBlockSize;
+
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
                         size_t num_exec_shards = 1)
@@ -310,6 +331,18 @@ public:
   x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
+    // Checked before [ready()], whose reply is also sized to the request.
+    //
+    // An over-limit request is refused with an RPC error rather than a short
+    // or empty reply: the reply is positional -- one (possibly null) slot per
+    // requested hash -- so any well-formed vector returned here would be
+    // indistinguishable from "none of these transactions are in the mempool".
+    if (tx_hashes.size() > kMaxLookupTransactionsBatchSize) {
+      throw std::runtime_error(std::format(
+          "schedcoord_lookup_transactions: {} hashes requested, limit is {}",
+          tx_hashes.size(), kMaxLookupTransactionsBatchSize));
+    }
+
     x23::XdrVec<XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
       ret.resize(tx_hashes.size());
