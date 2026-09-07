@@ -7,6 +7,13 @@ on:
                 description: Collect hog-db CPU profiles and service metrics (diagnostic run)
                 type: boolean
                 default: false
+            benchmark_seconds:
+                description: Payment run duration (profiling requires 180 seconds)
+                type: choice
+                options:
+                    - '180'
+                    - '120'
+                default: '180'
 env:
     CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
     CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
@@ -55,6 +62,7 @@ jobs:
                     --key=git_commit --value=${{ github.sha }} \
                     --key=git_branch --value=$BRANCH_NAME \
                     --key=hogdb_profile --value=${{ inputs.hogdb_profile }} \
+                    --key=benchmark_seconds --value=${{ inputs.benchmark_seconds }} \
                     --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                     --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                     ./scripts/schedules/e2e_payment.toml

@@ -81,6 +81,7 @@ export BUILD_DIR=release
 export WORK_DIR=work_dir/
 
 export HOGDB_PROFILE="{{ .hogdb_profile }}"
+export PAYMENT_BENCH_SECONDS="{{ or .benchmark_seconds "180" }}"
 
 echo 'run mempool benchmarks'
 set +e

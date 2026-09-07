@@ -10,6 +10,18 @@ BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
 STALE_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
 HOGDB_PROFILE_PID=
+PAYMENT_BENCH_SECONDS=${PAYMENT_BENCH_SECONDS:-180}
+case "$PAYMENT_BENCH_SECONDS" in
+120 | 180) ;;
+*)
+  echo 'PAYMENT_BENCH_SECONDS must be 120 or 180' >&2
+  exit 2
+  ;;
+esac
+if [[ "${HOGDB_PROFILE:-false}" == true && "$PAYMENT_BENCH_SECONDS" != 180 ]]; then
+  echo 'hogdb profiling requires a 180-second payment run' >&2
+  exit 2
+fi
 CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
@@ -159,7 +171,7 @@ fi
 
 echo 'launch mempool'
 set +e
-timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
+timeout "${PAYMENT_BENCH_SECONDS}s" ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --bind-ip "$(hog_ip hog10)" \
   --metrics-port "$MEMPOOL_HTTP_PORT" \
   --network-hash 0000000000000000000000000000000000000000000000000000000000000001 \
