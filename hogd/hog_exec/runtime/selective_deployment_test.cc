@@ -1391,7 +1391,8 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 // the same failure reports as unrecoverable (#2190).
 TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 {
-  const uint32_t limit = max_new_contracts_per_tx(stock_network_config());
+  const uint32_t limit =
+      NetworkConfigParams(stock_network_config().v0()).max_new_contracts_per_tx;
 
   // One more distinct contract than the chain admits. Each is tiny and
   // individually valid, so the count is the only thing being rejected.
@@ -1505,7 +1506,8 @@ TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
 // the bound is inclusive, so a transaction at the limit still runs its body.
 TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
 {
-  const uint32_t limit = max_new_contracts_per_tx(stock_network_config());
+  const uint32_t limit =
+      NetworkConfigParams(stock_network_config().v0()).max_new_contracts_per_tx;
 
   decltype(Transaction{}.contracts_to_deploy) attached;
   for (uint32_t i = 0; i < limit; ++i) {

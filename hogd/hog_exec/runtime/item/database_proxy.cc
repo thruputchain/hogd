@@ -591,11 +591,11 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
 }
 
 x23::Async<SystemStatus<DbTip>>
-DatabaseProxy::get_db_tip(BlockID block_id)
+DatabaseProxy::get_db_tip(BlockID block_id, BlockHeight block_height)
 {
   try {
     DbRpcProfile profile(DbRpcProfile::Method::kGetDbTip);
-    auto res = co_await client_.get_db_tip(block_id);
+    auto res = co_await client_.get_db_tip(block_id, block_height);
     profile.finish();
     co_await default_threadpool().bg();
     co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(

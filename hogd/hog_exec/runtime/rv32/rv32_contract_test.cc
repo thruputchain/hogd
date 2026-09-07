@@ -287,6 +287,7 @@ protected:
   constexpr static int32_t kSha256SyscallNo = 0;
   constexpr static int32_t kReturnSyscallNo = 6;
   constexpr static int32_t kExitSyscallNo = 8;
+  constexpr static int32_t kBytestringGetLenSyscallNo = 13;
   constexpr static int32_t kBytestringSetSyscallNo = 15;
 
   ContractAddress
@@ -422,13 +423,19 @@ TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)
 
 TEST_F(Rv32ProductionMappingTest, SyscallAfterBlockCancelMapsToAbandon)
 {
-  // A storage write against a no-longer-current block returns Abandon from
-  // the syscall; the production runtime must surface it as Abandon, not fold
-  // it into a deterministic fault.
+  // A storage read against a canceled block returns Abandon from the
+  // syscall; the production runtime must surface it as Abandon, not fold it
+  // into a deterministic fault.
+  //
+  // A read, not a write: BytestringSet buffers its delta client-side and
+  // touches no db at syscall time, so it succeeds even on a dead block --
+  // the db round trip this test needs happens on the first-touch snapshot
+  // load a BytestringGetLen performs. And the block is discarded, not
+  // advanced: a committed block becomes the tip, whose snapshot reads still
+  // serve; only an abandoned block refuses them with Abandon.
   std::vector<uint32_t> program;
-  append_syscall(program,
-                 {kBytestringSetSyscallNo, /*key_ptr=*/0, /*value_ptr=*/32,
-                  /*value_len=*/4, /*flags=*/0});
+  append_syscall(program, {kBytestringGetLenSyscallNo, /*key_ptr=*/0,
+                           /*out_len_ptr=*/32});
   auto addr = deploy_words(program, 0);
 
   auto handler = make_new_system_call_handler(
@@ -444,7 +451,7 @@ TEST_F(Rv32ProductionMappingTest, SyscallAfterBlockCancelMapsToAbandon)
       runtime_context_);
 
   auto storage_snapshot_cache = get_storage_snapshot_cache();
-  advance_block();
+  discard_block();
   auto result = handler.root_invoke()();
 
   ASSERT_FALSE(result.is_root_success());

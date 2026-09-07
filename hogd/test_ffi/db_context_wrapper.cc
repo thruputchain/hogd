@@ -116,14 +116,8 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
 BlockExecutionContext
 DBContext::block_execution_context() const
 {
-  // Completed rather than awaited: the FFI entrypoints run on the caller's
-  // thread, never an x23 ThreadPool worker, which is what operator() asserts.
-  auto tip = db_proxy_->get_db_tip(current_block_id_)();
-  if (!tip.has_value()) {
-    throw std::runtime_error("block_execution_context: get_db_tip failed");
-  }
   return BlockExecutionContext{
-      .block_height = tip->value.proposal_header.block_height + 1,
+      .block_height = committed_height_ + 1,
       .block_timepoint = block_timepoint_,
   };
 }
@@ -155,7 +149,7 @@ DBContext::advance_new_block(BlockExecutionMode mode,
     // while the contracts in that block executed against something else, so
     // anything reading the block back disagrees with what ran in it.
     ConsensusValue value{};
-    value.proposal_header.block_height = current_block_id_;
+    value.proposal_header.block_height = committed_height_ + 1;
     value.proposal_header.network_hash = network_hash_;
     value.proposal_header.block_timepoint = block_timepoint_;
     res = db_sched_client_.dbsched_commit_snapshot(current_block_id_, value);
@@ -163,6 +157,7 @@ DBContext::advance_new_block(BlockExecutionMode mode,
       throw std::runtime_error(
           "advance_new_block: dbsched_commit_block failed");
     }
+    committed_height_++;
 
     event_server_.close_block(current_block_id_, current_block_id_)();
   }
@@ -180,6 +175,12 @@ DBContext::advance_new_block(BlockExecutionMode mode,
       std::make_unique<StorageSnapshotCache>(current_block_id_,
                                              block_execution_context(),
                                              *db_proxy_);
+  // Blocking is legal here: the FFI entrypoint is not an x23 ThreadPool
+  // worker, which Async::operator() asserts.
+  auto load_res = snapshot_cache_->load_db_tip()();
+  if (!load_res.has_value()) {
+    throw std::runtime_error("advance_new_block: load_db_tip failed");
+  }
   event_server_.open_block(current_block_id_)();
 }
 

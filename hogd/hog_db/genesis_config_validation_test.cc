@@ -52,8 +52,9 @@ protected:
   DbSchedResult load_with_bytestring_limit(uint32_t max_bytestring_len)
   {
     NetworkConfig config = stock_network_config();
-    set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen,
-                     max_bytestring_len);
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxBytestringLen,
+                                   max_bytestring_len);
 
     const GenesisConfigurationBuilder builder;
     const StorageCostModel cost_model = StorageCostModel::default_cost_model();
