@@ -52,10 +52,19 @@ public:
     BlockID block_b;
   };
 
+  // The execution height of the most recently created sibling pair; see
+  // create_sibling().
+  BlockHeight sibling_height_ = 0;
+
   SiblingBlocks create_sibling()
   {
     BlockID block_a = get_block_number();
-    BlockID parent_id = get_db_tip().id;
+    DbTip tip = get_db_tip();
+    BlockID parent_id = tip.id;
+    // The height both siblings execute at: the parent tip's plus one,
+    // captured here rather than derived from a block id -- ids and heights
+    // are unrelated.
+    sibling_height_ = tip.value.proposal_header.block_height + 1;
 
     constexpr BlockID kSiblingOffset = 1000;
     BlockID block_b = block_a + kSiblingOffset;
@@ -71,8 +80,13 @@ public:
     auto close = get_coord_client().dbsched_close_snapshot(block);
     EXPECT_EQ(close.result(), DbSchedResult::DbSchedResultOK);
 
+    // Committed at the tip's height plus one, never at the block's id --
+    // ids and heights are unrelated. The framework's own committed-height
+    // bookkeeping does not see this commit, so a test must not run
+    // framework-driven advances after calling this.
     ConsensusValue value{};
-    value.proposal_header.block_height = block;
+    value.proposal_header.block_height =
+        get_db_tip().value.proposal_header.block_height + 1;
     auto commit = get_coord_client().dbsched_commit_snapshot(block, value);
     EXPECT_EQ(commit.result(), DbSchedResult::DbSchedResultOK);
   }
@@ -149,7 +163,7 @@ TEST_F(DirectStalenessTest, DbTipReadOnStaleBlockReturnsAbandon)
   ASSERT_FALSE(stale_snapshot_res.has_value());
   EXPECT_EQ(stale_snapshot_res.error().code(), SystemErrorCode::Abandon);
 
-  auto res = get_db_proxy().get_db_tip(block_b)();
+  auto res = get_db_proxy().get_db_tip(block_b, sibling_height_)();
   ASSERT_FALSE(res.has_value());
   EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
 }
@@ -481,16 +495,14 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
   StorageSnapshotCache cache1(snap1->viewing_block_id,
                               get_block_execution_context(), get_db_proxy());
 
-  auto warm_tip = cache1.try_get_db_tip()();
-  ASSERT_TRUE(warm_tip.has_value());
-  BlockHeight old_height = warm_tip.value()->value.proposal_header.block_height;
+  ASSERT_TRUE(cache1.load_db_tip()().has_value());
+  BlockHeight old_height =
+      cache1.get_db_tip().value.proposal_header.block_height;
 
   advance_block();
 
-  // Stale cache still returns old height.
-  auto stale_tip = cache1.try_get_db_tip()();
-  ASSERT_TRUE(stale_tip.has_value());
-  EXPECT_EQ(stale_tip.value()->value.proposal_header.block_height, old_height);
+  // The loaded tip is pinned for the cache's lifetime: still the old height.
+  EXPECT_EQ(cache1.get_db_tip().value.proposal_header.block_height, old_height);
 
   // Fresh viewing snapshot sees incremented height.
   auto snap2 = get_db_proxy().open_viewing_snapshot()();
@@ -498,9 +510,8 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
   StorageSnapshotCache cache2(snap2->viewing_block_id,
                               get_block_execution_context(), get_db_proxy());
 
-  auto fresh_tip = cache2.try_get_db_tip()();
-  ASSERT_TRUE(fresh_tip.has_value());
-  EXPECT_GT(fresh_tip.value()->value.proposal_header.block_height, old_height);
+  ASSERT_TRUE(cache2.load_db_tip()().has_value());
+  EXPECT_GT(cache2.get_db_tip().value.proposal_header.block_height, old_height);
 
   EXPECT_TRUE(get_db_proxy()
                   .close_viewing_snapshot(snap2->viewing_block_id)()
@@ -580,8 +591,12 @@ TEST_F(DirectStalenessTest,
       // is now rejected as expired during initial validation.
       .uniquifier = make_new_uniquifier()};
 
+  const BlockHeight block_b_height = get_block_execution_context().block_height;
   StorageSnapshotCache block_b_cache(block_b, get_block_execution_context(),
                                      get_db_proxy());
+  // Loaded while block_b is open; the commit of block_a below is what makes
+  // the per-transaction reads stale.
+  ASSERT_TRUE(block_b_cache.load_db_tip()().has_value());
   EventServerProxy event_proxy(
       x23::HostPort{"localhost", get_event_exec_port()});
   SystemCallHandler handler(
@@ -596,7 +611,7 @@ TEST_F(DirectStalenessTest,
 
   close_and_commit_block(block_a);
 
-  auto stale_read = get_db_proxy().get_db_tip(block_b)();
+  auto stale_read = get_db_proxy().get_db_tip(block_b, block_b_height)();
   ASSERT_FALSE(stale_read.has_value());
   ASSERT_EQ(stale_read.error().code(), SystemErrorCode::Abandon);
 
@@ -620,6 +635,26 @@ TEST_F(DirectStalenessTest,
 
   EXPECT_EQ(get_coord_client().dbsched_abandon_snapshot(block_b),
             DbSchedResult::DbSchedResultError);
+}
+
+// The scheduler opens executor blocks concurrently with
+// dbsched_create_snapshot, so a block's tip load may reach the db before the
+// db has ever heard of the block. Serving is keyed on the stated height
+// alone, so the load must succeed anyway -- this pins the property end to
+// end, through the real db, at the cache layer the executor uses.
+TEST_F(DirectStalenessTest, TipLoadsBeforeSnapshotCreation)
+{
+  advance_block();
+
+  // No dbsched_create_snapshot for this id, ever.
+  constexpr BlockID kUncreatedOffset = 5000;
+  const BlockID uncreated = get_block_number() + kUncreatedOffset;
+
+  StorageSnapshotCache cache(uncreated, get_block_execution_context(),
+                             get_db_proxy());
+  ASSERT_TRUE(cache.load_db_tip()().has_value());
+  EXPECT_EQ(cache.get_db_tip().value.proposal_header.block_height + 1,
+            get_block_execution_context().block_height);
 }
 
 } // namespace hogd
