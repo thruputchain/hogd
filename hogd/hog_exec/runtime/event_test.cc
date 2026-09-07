@@ -1493,6 +1493,7 @@ TEST(EventRpcValidationProposalData,
       x23::HostPort{"localhost", fw.get_event_exec_port()}, *x23::llc_map,
       kValidationProposalEventRpcCap);
 
+  fw.ensure_db_tip_loaded();
   SystemCallHandler consume_validation_handler(
       consume_tx, *fw.get_storage_snapshot_cache(),
       fw.make_new_per_tx_db_proxy(1001),

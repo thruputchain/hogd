@@ -222,8 +222,9 @@ NetworkConfig
 bench_network_config()
 {
   NetworkConfig config = stock_network_config();
-  set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen,
-                   kMaxBytestringBytes);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 kMaxBytestringBytes);
   return config;
 }
 
@@ -344,22 +345,9 @@ public:
   SyscallBenchFixture()
   {
 
-    // Pin the db tip. Production entry paths (invoke(), root_invoke()) await
-    // init_db_tip() before dispatching anything, because the pin is the
-    // transaction's one fallible tip read and every later height read is then
-    // a plain load. This harness calls syscall_entry() directly, so it has to
-    // do the pinning those entry paths do -- without it GetBlockHeight reads
-    // through a null tip and db_tip()'s CHECK aborts the process.
-    //
-    // Held rather than checked here: this fixture is a lazily constructed
-    // static, so its constructor runs inside whichever benchmark row runs
-    // first, and panicking there truncates the JSON mid-write and costs every
-    // row in the run.
-    if (auto pinned = handler_.init_db_tip()(); !pinned.has_value()) {
-      setup_error_ = std::format("could not pin the db tip: system error {}",
-                                 pinned.error().raw_code());
-      return;
-    }
+    // The db tip is loaded by make_new_system_call_handler() when handler_ is
+    // initialized, so GetBlockHeight and its kin read a pinned tip with no
+    // per-fixture step here.
 
     // A syscall runs inside an invocation frame; without one the handler has no
     // current address, no calldata and no gas budget, and every call under
@@ -1783,7 +1771,8 @@ register_benchmarks()
   // chain runs at. The parent walk on a first touch is linear in the stack,
   // and the schedule has to hold at whatever depth the chain allows.
   const uint32_t stock_max_depth =
-      max_cross_invoke_depth(stock_network_config()) - 2;
+      NetworkConfigParams(stock_network_config().v0()).max_cross_invoke_depth -
+      2;
   std::vector<uint32_t> depths = {1, 8, 16};
   if (std::ranges::find(depths, stock_max_depth) == depths.end()) {
     depths.push_back(stock_max_depth);

@@ -146,19 +146,6 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
-  // Pin the block's db tip on this handler, if it is not pinned already.
-  // Idempotent, and called from every path that can reach a tip-derived
-  // value: perform_initial_validation() before the transaction body runs, and
-  // validate_new_invocation()/start_frame(), which together are the only ways
-  // a frame is admitted (the view and test-FFI paths enter at one or the
-  // other rather than through root_invoke()). The fetch itself can fail as a
-  // system error; every later read is infallible.
-  //
-  // Only the block's first fetch reaches the database and suspends; once the
-  // cache holds the tip -- and on every call after this handler pinned it --
-  // this answers from MaybeAsync's value arm without allocating a frame.
-  [[nodiscard]] x23::MaybeAsync<SystemStatus<void>> init_db_tip() const;
-
   // Admission checks a new invocation frame must pass, in the order their
   // error codes take precedence, grouped by the question each answers:
   //
@@ -180,7 +167,7 @@ public:
   //
   // Failing is a no-op -- nothing here mutates the handler, so any of those
   // callers may ask more than once. The depth bound is a plain load off the
-  // tip, which the caller must have pinned with init_db_tip() first.
+  // tip the snapshot cache loaded when the block was opened.
   [[nodiscard]] SystemStatus<SyscallStatus<void>>
   validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
                           std::span<uint32_t const> owned_auth_token_ids) const;
@@ -430,8 +417,8 @@ public:
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
   // == Block statistics syscalls ==
-  // Served off the tip this handler pinned at entry (see init_db_tip()), so
-  // reading one cannot fail and cannot touch the shared snapshot cache.
+  // Served off the tip the snapshot cache loaded when the block was opened,
+  // so reading one cannot fail.
   BlockHeight get_block_height() const;
   NetworkHash const &get_network_hash() const;
 
@@ -453,13 +440,8 @@ public:
   x23::Async<SystemStatus<const PreparedContract *>>
   resolve_prepared_contract(SHA256Hash hash);
 
-  // The parameters this transaction's chain puts in force, flattened when the
-  // tip was pinned. Callers must have run init_db_tip() first.
-  NetworkConfigParams const &config_params() const
-  {
-    CHECK_PTR(db_tip_);
-    return config_params_;
-  }
+  // The parameters this transaction's chain puts in force.
+  NetworkConfigParams const &config_params() const;
 
   // == Error conversion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
@@ -546,35 +528,7 @@ private:
   std::unordered_set<FrameItemKey, FrameItemKeyHash> loaded_keys_;
   uint64_t db_read_gas_ = 0;
 
-  // The block's db tip, pinned on this handler at the transaction's first
-  // admission check (see init_db_tip()). Owned by snapshot_cache_ and stable
-  // for the whole block, so every later read of the executing block height,
-  // the network configuration, or the default wallet is a plain load off a
-  // thread-confined pointer -- no atomic, no fallible path, and no reason for
-  // a caller to reach into the shared cache while holding one of its locks.
-  //
-  // Mutable because it memoizes an immutable value: the const admission checks
-  // that run before any frame is pushed are what pin it.
-  mutable DbTip const *db_tip_ = nullptr;
-
-  // Flattened when the tip is pinned: the invoke path reads these per frame.
-  mutable NetworkConfigParams config_params_{};
-
   inline static bool debug_force_commit_abort_{false};
-
-  // The block's first tip fetch, split out so init_db_tip() can answer an
-  // already-pinned handler from MaybeAsync's value arm. Also re-checks the
-  // opened height against the tip, the one place that can fail.
-  [[nodiscard]] x23::Async<SystemStatus<void>> pin_db_tip() const;
-
-  // The pinned tip. Every caller runs after an admission check that pinned it,
-  // so a null here is a missed pin point on a new entry path, not a runtime
-  // condition -- fail loudly rather than reading through null.
-  DbTip const *db_tip() const
-  {
-    CHECK_PTR(db_tip_);
-    return db_tip_;
-  }
 
   // True if the given replay uniquifier has already expired at the executing
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.

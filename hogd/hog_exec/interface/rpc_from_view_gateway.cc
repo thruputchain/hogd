@@ -221,7 +221,11 @@ ViewGatewayRpc::probe_refresh_tip()
   }
   auto [block_id, view_height] = *pin;
 
-  auto tip_res = co_await db_proxy_.get_db_tip(block_id);
+  // view_height is the pinned tip's height, so the view executes at
+  // view_height + 1 -- which is what the read must state: served while the
+  // view is fresh, refused once the chain moves past it. Both outcomes are
+  // arms of should_refresh below.
+  auto tip_res = co_await db_proxy_.get_db_tip(block_id, view_height + 1);
   bool should_refresh =
       !tip_res.has_value() ||
       tip_res.value().value.proposal_header.block_height > view_height;

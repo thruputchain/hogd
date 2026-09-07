@@ -209,8 +209,9 @@ private:
   static NetworkConfig genesis_network_config(uint32_t max_cross_invoke_depth)
   {
     NetworkConfig config = stock_network_config();
-    set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth,
-                     max_cross_invoke_depth);
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+        max_cross_invoke_depth);
     return config;
   }
 };

@@ -83,7 +83,7 @@ TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
   batch.push_back(make_balance_query(addr));
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -108,7 +108,7 @@ TEST(HogDbGatewayRpcTest, GetItemsMissingBalanceIsNotFound)
   batch.push_back(make_balance_query(addr));
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -162,7 +162,7 @@ TEST(HogDbGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
   batch.push_back(query);
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -175,8 +175,8 @@ TEST(HogDbGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
 }
 
 // Exercises the wait-out-publication path. While a commit is mid-publication
-// (commit_publishing_ held), a committed-tip read blocks in
-// wait_for_no_commit_publishing() instead of reading a tip that is
+// (commit_publishing_ held), a committed-tip read suspends in
+// co_wait_for_no_commit_publishing() instead of reading a tip that is
 // inconsistent with the just-applied ramdb data; once the publication
 // finishes the read proceeds and returns kRPCNone.
 //
@@ -211,7 +211,7 @@ TEST(HogDbGatewayRpcTest, GetItemsWaitsOutCommitPublication)
     publication_guard.reset(); // finish_commit_publication
   });
 
-  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
   releaser.join();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);

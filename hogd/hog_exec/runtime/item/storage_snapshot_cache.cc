@@ -2,14 +2,17 @@
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
+#include <expected>
 #include <format>
 #include <memory>
 #include <optional>
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -189,38 +192,47 @@ StorageSnapshotCache::load_snapshot_item(FrameItemKey key)
   co_return obj;
 }
 
-x23::MaybeAsync<SystemStatus<const DbTip *>>
-StorageSnapshotCache::try_get_db_tip()
-{
-  auto *tip = db_tip_.load();
-  if (tip != nullptr) {
-    return SystemStatus<const DbTip *>{tip};
-  }
-  return load_db_tip();
-}
-
-x23::Async<SystemStatus<const DbTip *>>
+x23::Async<SystemStatus<void>>
 StorageSnapshotCache::load_db_tip()
 {
-  auto db_res = co_await db_proxy_.get_db_tip(block_id_);
+  auto db_res =
+      co_await db_proxy_.get_db_tip(block_id_,
+                                    block_execution_context_.block_height);
   if (!db_res) {
     co_return db_res.error();
   }
 
-  std::unique_ptr<DbTip> tip_unique = std::make_unique<DbTip>(db_res.value());
-  DbTip *expected = nullptr;
-  if (db_tip_.compare_exchange_strong(expected, tip_unique.get())) {
-    co_return tip_unique.release();
+  // The height the block was opened with must agree with the tip just read,
+  // or this node is executing a different block than it is building. Checked
+  // here, the block's one fallible tip read, so every later height read stays
+  // a plain load.
+  const BlockHeight derived = db_res->value.proposal_header.block_height + 1;
+  if (block_execution_context_.block_height != derived) [[unlikely]] {
+    error("Block height mismatch: opened with {}, db tip implies {}",
+          block_execution_context_.block_height, derived);
+    co_return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
   }
-  CHECK_PTR(expected);
-  co_return expected;
+
+  set_db_tip(std::move(db_res.value()));
+  co_return SystemStatus<void>{};
+}
+
+void
+StorageSnapshotCache::set_db_tip(DbTip tip)
+{
+  CHECK(db_tip_ == nullptr);
+  CHECK_EQ(block_execution_context_.block_height,
+           tip.value.proposal_header.block_height + 1);
+  db_tip_ = std::make_unique<DbTip>(std::move(tip));
+  network_config_params_ =
+      std::make_unique<NetworkConfigParams>(db_tip_->network_config.v0());
 }
 
 void
 StorageSnapshotCache::release_db_tip()
 {
-  auto *tip = db_tip_.exchange(nullptr);
-  delete tip;
+  db_tip_.reset();
+  network_config_params_.reset();
 }
 
 } // namespace hogd

@@ -286,6 +286,11 @@ private:
   TimePoint block_timepoint_ = 0;
 
   BlockID current_block_id_ = 0;
+  // The height of the last committed block; genesis commits at 0 before the
+  // first advance. Tracked rather than read off the tip so building the open
+  // block's execution context costs no rpc, and so nothing here assumes
+  // block ids equal heights.
+  BlockHeight committed_height_ = 0;
   // The network this chain belongs to. Every committed value carries it, not
   // just genesis: the commit path replaces the persisted tip wholesale, so a
   // value that omits it puts the chain back on network zero.

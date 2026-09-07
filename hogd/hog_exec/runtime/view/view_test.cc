@@ -84,6 +84,7 @@ protected:
                               RuntimeContext &context,
                               NondeterministicProposalData ndet = {})
   {
+    framework_.ensure_db_tip_loaded();
     return View::run_view_transaction(
         *framework_.get_storage_snapshot_cache(),
         framework_.make_new_per_tx_db_proxy(
@@ -1489,6 +1490,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
+  ASSERT_TRUE(snapshot_cache.load_db_tip()().has_value());
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
@@ -1520,39 +1522,12 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
 // snapshot that went stale gets, and the one the gateway responds to by
 // rotating to a fresh viewing snapshot (ViewGatewayRpc::run_view_with_retries).
 //
-// The executor used to read the tip lazily, so this surfaced only once the
-// body called a tip-backed syscall, and the status the caller saw was whatever
-// the body chose to return for a failed syscall -- InternalError, for this
-// test's body, which is what this test asserted while it was named
-// SelfTipBlockIdCausesInternalError. invoke() now reads the tip at admission to
-// enforce kConfigParamMaxCrossInvokeDepth, so the runtime's own classification
-// reaches the caller unlaundered and the body never runs at all. Both halves
-// are pinned below; the body still maps a failed syscall to Unrecoverable, so
-// entering it would show up as InternalError rather than as Abandoned.
-TEST_F(ViewTest, SelfTipBlockIdAbandonedBeforeBodyRuns)
+// The executor used to read the tip lazily, so this surfaced only once a
+// view actually ran against the snapshot. The tip is now loaded once, when
+// the cache is built for the block, so the refusal lands there -- before any
+// view, and with it any contract body, can exist at all.
+TEST_F(ViewTest, SelfTipBlockIdRefusesTipLoad)
 {
-  static constexpr ContractAddress kNativeAddr =
-      NativeContractTestFramework::make_contract_address(11);
-
-  bool body_entered = false;
-
-  NativeViewSetup setup(
-      0,
-      [&body_entered](
-          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        body_entered = true;
-        BlockHeight height = -1;
-        auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
-        if (!r.has_value()) {
-          co_return InvokeError{InvokeErrorCode::Unrecoverable};
-        }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return InvokeStatus<void>{};
-      });
-
-  deploy_native(kNativeAddr);
   framework_.advance_block();
 
   DbTip tip = framework_.get_db_tip();
@@ -1560,25 +1535,10 @@ TEST_F(ViewTest, SelfTipBlockIdAbandonedBeforeBodyRuns)
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
 
-  Invocation invocation{
-      .invoked_address = kNativeAddr,
-      .entrypoint = entrypoint_from_method_id(0),
-      .gas_limit = UINT64_MAX,
-      .calldata = {},
-  };
-
-  auto result = View::run_view_transaction(
-      snapshot_cache,
-      PerTransactionDatabaseProxy(framework_.get_db_proxy(), tip.id,
-                                  std::numeric_limits<TransactionID>::max()),
-      framework_.make_new_per_tx_event_server_proxy(
-          std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {})();
-
-  EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
-  EXPECT_FALSE(body_entered)
-      << "an unreadable snapshot must be refused at invoke admission, before "
-         "any contract code runs";
+  auto load = snapshot_cache.load_db_tip()();
+  ASSERT_FALSE(load.has_value());
+  EXPECT_EQ(load.error().code(), SystemErrorCode::Abandon);
+  EXPECT_FALSE(snapshot_cache.has_db_tip());
 }
 
 TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
@@ -1622,11 +1582,14 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
   ASSERT_TRUE(snapshot_res.has_value());
   auto &snapshot = snapshot_res.value();
 
-  framework_.advance_block();
-
+  // Built and loaded while the snapshot is fresh, as the view gateway does
+  // when it opens one; the advance below is what makes it stale.
   StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
+  ASSERT_TRUE(snapshot_cache.load_db_tip()().has_value());
+
+  framework_.advance_block();
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
