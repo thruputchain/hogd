@@ -3326,8 +3326,11 @@ TEST_F(EventRpcTest, LivePullServesTheBlockWithoutReadingItsFileBack)
   expect_xdr_equal(payload.tx_bodies[0], body);
   EXPECT_EQ(pulled.pulled_block().block.identity.consensus_hash, sha256(value));
 
-  // Outside the retained window the file is the only copy, and it is gone.
+  // That pull released the retained copy. A repeat of the height is served
+  // off the file, and the file is the only other copy: it is gone.
   EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(1)().has_value());
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullInternalFailure);
 }
 
 TEST_F(EventRpcTest, CorruptEventsFileFailsClosedWhereItIsRead)

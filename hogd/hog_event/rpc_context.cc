@@ -27,6 +27,7 @@
 
 #include "consensus.hh"
 #include "db_conflict.hh"
+#include "event.hh"
 #include "event_outbox_internal.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -360,15 +361,17 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     }
     // The pairs this block streamed are handed to the pull path as they are,
     // so the indexer is served from memory rather than from the file that was
-    // just written. Bounded by kRetainedCommittedBlocks; older blocks come
-    // off disk.
-    retained_committed_[block_height] =
-        std::make_shared<const RetainedCommittedBlock>(RetainedCommittedBlock{
-            .consensus_value = consensus_value,
-            .pairs = context_ptr->get().take_retained_pairs(),
-        });
-    while (retained_committed_.size() > kRetainedCommittedBlocks) {
-      retained_committed_.erase(retained_committed_.begin());
+    // just written. A block that outgrew its retention budget has nothing to
+    // hand over and is served off the file like any older block.
+    if (auto chunks = context_ptr->get().take_retained_chunks()) {
+      retained_committed_[block_height] =
+          std::make_shared<const RetainedCommittedBlock>(RetainedCommittedBlock{
+              .consensus_value = consensus_value,
+              .chunks = std::move(*chunks),
+          });
+      while (retained_committed_.size() > kRetainedCommittedBlocks) {
+        retained_committed_.erase(retained_committed_.begin());
+      }
     }
   }
   else {
@@ -944,7 +947,10 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     co_await guard(outbox_commit_lock_);
     if (auto it = retained_committed_.find(next_height);
         it != retained_committed_.end()) {
-      retained = it->second;
+      // Released here: this pull is the one consumer the copy was kept for.
+      // A repeat of the same height is served off the file.
+      retained = std::move(it->second);
+      retained_committed_.erase(it);
     }
   }
   IndexerCommittedBlock block;
@@ -953,22 +959,28 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     // Served from the pairs this process streamed at close: the bytes the
     // events file holds, without reading them back, and without recomputing
     // roots the block's own context established when it built the file.
-    auto pairs =
-        parse_events_file_pairs(retained->pairs, "retained committed block");
-    if (!pairs) {
-      error("retained committed block {} does not parse: {}", next_height,
-            pairs.error());
-      co_return pull_failure(EventIndexerPullInternalFailure,
-                             "retained committed block is invalid");
+    // Each chunk holds whole pairs, so they parse one at a time.
+    IndexerCommittedBlockPayload payload{
+        .format_version = kIndexerOutboxFormatVersion,
+        .consensus_value = retained->consensus_value,
+    };
+    for (const std::vector<uint8_t> &chunk : retained->chunks) {
+      auto pairs = parse_events_file_pairs(chunk, "retained committed block");
+      if (!pairs) {
+        error("retained committed block {} does not parse: {}", next_height,
+              pairs.error());
+        co_return pull_failure(EventIndexerPullInternalFailure,
+                               "retained committed block is invalid");
+      }
+      for (TxEventLog &event_log : pairs->event_logs) {
+        payload.event_logs.push_back(std::move(event_log));
+      }
+      for (ProposedTransaction &tx_body : pairs->tx_bodies) {
+        payload.tx_bodies.push_back(std::move(tx_body));
+      }
     }
     block = IndexerCommittedBlock{
-        .payload =
-            IndexerCommittedBlockPayload{
-                .format_version = kIndexerOutboxFormatVersion,
-                .consensus_value = retained->consensus_value,
-                .event_logs = std::move(pairs->event_logs),
-                .tx_bodies = std::move(pairs->tx_bodies),
-            },
+        .payload = std::move(payload),
         .identity =
             IndexerCommittedBlockIdentity{
                 .consensus_hash = (**record).consensus_hash,

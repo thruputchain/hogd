@@ -150,14 +150,17 @@ private:
   // A committed block's pairs as this process streamed them at close, kept so
   // the live pull serves the block from memory: no file read, no root
   // recomputation. The events file is the durable copy, for a restart and
-  // for any pull outside this window. The indexer pulls each block once,
-  // promptly, so a few blocks of slack is plenty. Guarded by
+  // for any pull that does not find its block here. An entry is released by
+  // the pull that serves it -- the indexer pulls each block once -- and the
+  // window is capped at kRetainedCommittedBlocks heights besides, each at
+  // most EventBlockContext::kRetainedPairsBudget bytes; a block that outgrew
+  // the budget was never retained and is served off its file. Guarded by
   // outbox_commit_lock_.
   struct RetainedCommittedBlock {
     ConsensusValue consensus_value;
-    std::vector<uint8_t> pairs;
+    std::vector<std::vector<uint8_t>> chunks;
   };
-  constexpr static size_t kRetainedCommittedBlocks = 4;
+  constexpr static size_t kRetainedCommittedBlocks = 2;
   std::map<BlockHeight, std::shared_ptr<const RetainedCommittedBlock>>
       retained_committed_;
   // Guarded by outbox_commit_lock_. Every record through this finalized
