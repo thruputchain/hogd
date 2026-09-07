@@ -48,10 +48,10 @@ public:
   }
 
   x23::Async<ExecProposeBatchResult>
-  propose_transaction_batch(SignedTransactionBatch const &signed_txs,
+  propose_transaction_batch(SignedTransactionBatch signed_txs,
                             TransactionID first_tx_id);
   x23::Async<ExecValidateBatchResult>
-  validate_transaction_batch(ProposedTransactionBatch const &proposed_txs,
+  validate_transaction_batch(ProposedTransactionBatch proposed_txs,
                              TransactionID first_tx_id);
 
   x23::Async<ExecProposeResult> propose_transaction(SignedTransaction signed_tx,

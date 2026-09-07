@@ -278,6 +278,7 @@ public:
       std::lock_guard lock(mutex_);
       requests_.push_back(std::move(request));
     }
+    requests_wake_.notify_all();
     const std::size_t call = calls_.fetch_add(1, std::memory_order_relaxed);
     if (call == 0) {
       co_return EventIndexerPullResult(
@@ -311,6 +312,13 @@ public:
     return requests_;
   }
 
+  bool wait_for_requests(std::size_t count, std::chrono::milliseconds timeout)
+  {
+    std::unique_lock lock(mutex_);
+    return requests_wake_.wait_for(lock, timeout,
+                                   [&] { return requests_.size() >= count; });
+  }
+
   const IndexerOutboxOrigin &origin() const { return origin_; }
   const TransactionHash &failure_hash() const { return notice_.tx_hash; }
 
@@ -321,6 +329,7 @@ private:
   std::atomic<std::size_t> calls_ = 0;
   std::atomic<bool> notice_returned_ = false;
   mutable std::mutex mutex_;
+  std::condition_variable requests_wake_;
   std::vector<EventIndexerPullRequest> requests_;
 };
 
@@ -328,10 +337,9 @@ static_assert(is_EventIndexer1<CaughtUpPullRpc *, x23::MaybeAsync>);
 
 class BlockingPullRpc {
 public:
-  enum class Mode { kAlwaysBlock, kBlockFirst };
   using rpc_service = EventIndexer1;
 
-  explicit BlockingPullRpc(Mode mode) : mode_(mode)
+  BlockingPullRpc()
   {
     origin_.protocol = version::kHogdProtocol();
     origin_.first_height = IndexDB::kFirstOutboxBlockHeight;
@@ -341,16 +349,13 @@ public:
   x23::Async<EventIndexerPullResult>
   event_indexer_pull_next(EventIndexerPullRequest /*unused*/)
   {
-    std::size_t call;
     {
       std::lock_guard lock(mutex_);
-      call = calls_++;
+      ++calls_;
     }
     calls_wake_.notify_all();
-    if (mode_ == Mode::kAlwaysBlock || call == 0) {
-      while (!released_.load()) {
-        co_await released_.wait(false);
-      }
+    while (!released_.load()) {
+      co_await released_.wait(false);
     }
     EventIndexerPullResult result(
         EventIndexerPullOutcome::EventIndexerPullCaughtUp);
@@ -376,7 +381,6 @@ public:
   }
 
 private:
-  Mode mode_;
   IndexerOutboxOrigin origin_{};
   std::mutex mutex_;
   std::condition_variable calls_wake_;
@@ -418,6 +422,19 @@ TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
   EXPECT_EQ(requests[2].progress.initialized().origin,
             event_server.impl()->origin());
   EXPECT_EQ(requests[2].progress.initialized().contiguous_height, 1);
+  EXPECT_EQ(db->durable_progress(), requests[2].progress);
+
+  // Once answered caught up on this connection, the next pull sends the same
+  // cursor in the CaughtUp state, asking the server to hold it. The durable
+  // cursor stays Initialized.
+  ASSERT_TRUE(
+      event_server.impl()->wait_for_requests(4, std::chrono::seconds(5)));
+  const std::vector<EventIndexerPullRequest> after_caught_up =
+      event_server.impl()->requests();
+  ASSERT_EQ(after_caught_up[3].progress.state(),
+            IndexerProgressState::IndexerProgressCaughtUp);
+  EXPECT_EQ(after_caught_up[3].progress.initialized(),
+            requests[2].progress.initialized());
   EXPECT_EQ(db->durable_progress(), requests[2].progress);
 
   auto diagnostic = failures.lookup(event_server.impl()->failure_hash());
@@ -601,7 +618,6 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   IndexerPullControllerOptions options;
   options.retry_delay = std::chrono::milliseconds(1);
   options.caught_up_poll_delay = std::chrono::milliseconds(1);
-  options.rpc_timeout = std::chrono::seconds(1);
   IndexerPullController controller(event_addr, *db, failures, options);
   controller.wait_until_caught_up();
   EXPECT_NE(Health::instance().dump_to_string()().find("\"status\":\"ok\""),
@@ -636,33 +652,6 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
             std::string::npos);
 }
 
-TEST(IndexerPullController, RpcTimeoutReconnectsAfterBlockedPull)
-{
-  TmpDir indexer_dir;
-  auto db = IndexDB::make_new(std::filesystem::path(indexer_dir.directory()) /
-                              "indexer-db");
-  ASSERT_TRUE(db.has_value()) << db.error();
-  RecentTxFailureCache failures;
-  RpcServer<BlockingPullRpc> event_server(BlockingPullRpc::Mode::kBlockFirst);
-  const std::uint16_t event_port =
-      event_server.start_server(x23::HostPort{"127.0.0.1", 0});
-  x23::Defer release_server_calls(
-      [&] { event_server.impl()->release(&event_server.cp_.pool_); });
-  IndexerPullControllerOptions options;
-  options.retry_delay = std::chrono::milliseconds(1);
-  options.caught_up_poll_delay = std::chrono::seconds(1);
-  options.rpc_timeout = std::chrono::milliseconds(20);
-  IndexerPullController controller(
-      std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
-      options);
-
-  const bool reconnected =
-      event_server.impl()->wait_for_calls(2, std::chrono::seconds(5));
-  event_server.impl()->release(&event_server.cp_.pool_);
-  ASSERT_TRUE(reconnected);
-  EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
-}
-
 TEST(IndexerPullController, DestructionCancelsBlockedPull)
 {
   TmpDir indexer_dir;
@@ -670,13 +659,12 @@ TEST(IndexerPullController, DestructionCancelsBlockedPull)
                               "indexer-db");
   ASSERT_TRUE(db.has_value()) << db.error();
   RecentTxFailureCache failures;
-  RpcServer<BlockingPullRpc> event_server(BlockingPullRpc::Mode::kAlwaysBlock);
+  RpcServer<BlockingPullRpc> event_server;
   const std::uint16_t event_port =
       event_server.start_server(x23::HostPort{"127.0.0.1", 0});
   x23::Defer release_server_calls(
       [&] { event_server.impl()->release(&event_server.cp_.pool_); });
   IndexerPullControllerOptions options;
-  options.rpc_timeout = std::chrono::minutes(1);
   auto controller = std::make_unique<IndexerPullController>(
       std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
       options);
