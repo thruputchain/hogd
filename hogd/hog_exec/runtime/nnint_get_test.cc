@@ -18,6 +18,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -204,6 +205,17 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
         int128_t output_set{};
         bool output_set_opt{};
         int128_t output_add{};
+        auto immediate_set = syscall_NonnegativeIntSetAdd_inner(
+            ctx.handler(), key, &set_value, 50,
+            std::to_underlying(StorageDeltaFlags::None));
+        EXPECT_TRUE(immediate_set.has_value());
+        (void)co_await immediate_set;
+        auto immediate_get =
+            syscall_NonnegativeIntGet_inner(ctx.handler(), key, false,
+                                            output_set, output_set_opt,
+                                            output_add);
+        EXPECT_TRUE(immediate_get.has_value());
+        (void)co_await immediate_get;
         auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
             key, false, output_set, output_set_opt, output_add);
         if (!res.has_value() ||
@@ -400,8 +412,8 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
   fns.emplace(0,
               [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 auto key = make_storage_key("snapshot_key");
-                // Get with force_load_snapshot=false should co_return (nullopt,
-                // 0) without loading from snapshot
+                // First preserve the cold no-load behavior: the snapshot
+                // contains a value, but this read must return (nullopt, 0).
                 int128_t output_set{};
                 bool output_set_opt{};
                 int128_t output_add{};
@@ -411,6 +423,26 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
                     *res != SyscallErrorCode::kSyscallErrorCodeNone) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
+                // Exercise the genuine cache miss, then require the loaded
+                // read to remain immediate through the syscall wrapper.
+                int128_t snapshot_set{};
+                bool snapshot_set_opt{};
+                int128_t snapshot_add{};
+                auto loaded =
+                    co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                        key, true, snapshot_set, snapshot_set_opt,
+                        snapshot_add);
+                EXPECT_TRUE(loaded.has_value());
+                EXPECT_TRUE(snapshot_set_opt);
+                EXPECT_EQ(snapshot_set, 300);
+                EXPECT_EQ(snapshot_add, 0);
+                auto cached =
+                    syscall_NonnegativeIntGet_inner(ctx.handler(), key, true,
+                                                    snapshot_set,
+                                                    snapshot_set_opt,
+                                                    snapshot_add);
+                EXPECT_TRUE(cached.has_value());
+                (void)co_await cached;
                 co_return check_nnint_get_result(output_set_opt
                                                      ? std::optional<int128_t>(
                                                            output_set)

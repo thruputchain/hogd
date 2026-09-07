@@ -18,23 +18,22 @@
 
 namespace hogd {
 
-MaybeAsyncSyscallInnerResult
-syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
-                                const StorageKeyContractData &input_key,
-                                bool input_force_load_from_snapshot,
-                                int128_t &output_current_set,
-                                bool &output_current_set_opt,
-                                int128_t &output_current_add)
+namespace {
+
+using NNIntReadResult =
+    SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>;
+
+SyscallInnerResult
+finish_get(SystemCallHandler &syscall_handler, NNIntReadResult status,
+           bool input_force_load_from_snapshot, int128_t &output_current_set,
+           bool &output_current_set_opt, int128_t &output_current_add)
 {
-  auto status =
-      co_await syscall_handler.get_nnint(input_key,
-                                         input_force_load_from_snapshot);
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+    return SyscallInnerResult{status.error().to_host_fn_error(),
+                              WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
+    return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
   }
   if ((*status)->first.has_value()) {
     output_current_set = *((*status)->first);
@@ -57,8 +56,61 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     }
     trace_data->outputs->current_add = to_xdr(output_current_add);
   }
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost}};
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            WrappedGasAmount{kStorageAccessCost}};
+}
+
+x23::Async<SyscallInnerResult>
+get_slow(SystemCallHandler &handler, x23::MaybeAsync<NNIntReadResult> pending,
+         bool force_snapshot, int128_t &output_set, bool &output_set_opt,
+         int128_t &output_add)
+{
+  co_return finish_get(handler, co_await pending, force_snapshot, output_set,
+                       output_set_opt, output_add);
+}
+
+SyscallInnerResult
+finish_set(SystemStatus<SyscallStatus<void>> status)
+{
+  if (!status.has_value()) {
+    return SyscallInnerResult{status.error().to_host_fn_error(),
+                              WrappedGasAmount{0}};
+  }
+  if (!(*status).has_value()) {
+    return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
+  }
+
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            WrappedGasAmount{kStorageAccessCost}};
+}
+
+x23::Async<SyscallInnerResult>
+set_slow(x23::MaybeAsync<SystemStatus<SyscallStatus<void>>> pending)
+{
+  co_return finish_set(co_await pending);
+}
+
+} // namespace
+
+MaybeAsyncSyscallInnerResult
+syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
+                                const StorageKeyContractData &input_key,
+                                bool input_force_load_from_snapshot,
+                                int128_t &output_current_set,
+                                bool &output_current_set_opt,
+                                int128_t &output_current_add)
+{
+  auto pending =
+      syscall_handler.get_nnint(input_key, input_force_load_from_snapshot);
+  // Keep cache hits immediate all the way through the syscall wrapper.
+  if (pending.has_value()) {
+    return finish_get(syscall_handler, pending(),
+                      input_force_load_from_snapshot, output_current_set,
+                      output_current_set_opt, output_current_add);
+  }
+  return get_slow(syscall_handler, std::move(pending),
+                  input_force_load_from_snapshot, output_current_set,
+                  output_current_set_opt, output_current_add);
 }
 
 MaybeAsyncSyscallInnerResult
@@ -72,19 +124,12 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   if (optional_input_set_value) {
     set_value = *optional_input_set_value;
   }
-  auto status =
-      co_await syscall_handler.set_nnint(input_key, set_value, input_add_value,
-                                         input_flags);
-  if (!status.has_value()) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+  auto pending = syscall_handler.set_nnint(input_key, set_value,
+                                           input_add_value, input_flags);
+  if (pending.has_value()) {
+    return finish_set(pending());
   }
-  if (!(*status).has_value()) {
-    co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
-  }
-
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost}};
+  return set_slow(std::move(pending));
 }
 
 } // namespace hogd

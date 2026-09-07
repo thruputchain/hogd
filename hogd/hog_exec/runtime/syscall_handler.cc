@@ -1802,8 +1802,62 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   co_return item_view->set(BytestringItem(std::move(new_string)), input_flags);
 }
 
-x23::Async<
-    SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>>
+namespace {
+
+using NNIntReadResult =
+    SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>;
+
+NNIntReadResult
+loaded_nnint_result(UnmodifiedItem const &item)
+{
+  auto const &base_item = item.base_item();
+  auto type = base_item.type();
+  if (!type) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+  }
+  if (*type != ItemViewType::kNNInt) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  return std::make_pair(base_item.nnint(), 0);
+}
+
+x23::Async<NNIntReadResult>
+finish_nnint_load(UnmodifiedItem const &item,
+                  x23::MaybeAsync<SystemStatus<void>> pending)
+{
+  auto status = co_await pending;
+  if (!status.has_value()) {
+    co_return status.error();
+  }
+  co_return loaded_nnint_result(item);
+}
+
+NNIntReadResult
+nnint_snapshot_result(SystemStatus<const SnapshotStorageItem *> const &value,
+                      int128_t add_value)
+{
+  if (!value.has_value()) {
+    return value.error();
+  }
+  // A prior Set(nullopt, add) defaults a non-NNInt snapshot value to zero.
+  auto type = value.value()->type();
+  return std::make_pair(type && *type == ItemViewType::kNNInt
+                            ? value.value()->nnint()
+                            : int128_t{0},
+                        add_value);
+}
+
+x23::Async<NNIntReadResult>
+finish_nnint_snapshot(
+    x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>> pending,
+    int128_t add_value)
+{
+  co_return nnint_snapshot_result(co_await pending, add_value);
+}
+
+} // namespace
+
+x23::MaybeAsync<NNIntReadResult>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
                              bool load_from_snapshot)
 {
@@ -1814,81 +1868,61 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 
   if (auto const *nnint_item = item_view->get<NNIntItem>()) {
     if (nnint_item->base_value_.has_value()) {
-      co_return std::make_pair(from_xdr(*nnint_item->base_value_),
-                               from_xdr(nnint_item->add_value_));
+      return NNIntReadResult{std::make_pair(from_xdr(*nnint_item->base_value_),
+                                            from_xdr(nnint_item->add_value_))};
     }
     // If we're not loading from the snapshot, we can return nullopt for the
     // base value.
     if (!load_from_snapshot) {
-      co_return std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_));
+      return NNIntReadResult{
+          std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_))};
     }
 
-    auto snapshot_value =
-        co_await snapshot_cache_.try_get_snapshot_item(item_key);
-    if (!snapshot_value.has_value()) {
-      co_return snapshot_value.error();
+    auto pending = snapshot_cache_.try_get_snapshot_item(item_key);
+    const auto add_value = from_xdr(nnint_item->add_value_);
+    if (pending.has_value()) {
+      return nnint_snapshot_result(pending(), add_value);
     }
-
-    // In this case, we're returning the parameters of the prior NNInt write.
-    // A bit of a weird case, because we're following an NNintSet(nullopt, add)
-    // with a Get(force_load_from_snapshot=true).  We augment the prior NNint
-    // write with what the set value will be, when the write is applied to the
-    // database. Hence we default to 0 if the snapshot value is not an NNInt.
-    auto snapshot_type = snapshot_value.value()->type();
-    if (!snapshot_type || snapshot_type.value() != ItemViewType::kNNInt) {
-      co_return std::make_pair(0, from_xdr(nnint_item->add_value_));
-    }
-    co_return std::make_pair(snapshot_value.value()->nnint(),
-                             from_xdr(nnint_item->add_value_));
+    return finish_nnint_snapshot(std::move(pending), add_value);
   }
 
   if (item_view->get<DeletedItem>()) {
     if (!load_from_snapshot) {
-      co_return std::make_pair(std::nullopt, 0);
+      return NNIntReadResult{std::make_pair(std::nullopt, 0)};
     }
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+    return NNIntReadResult{
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist}};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!load_from_snapshot) {
-      co_return std::make_pair(std::nullopt, 0);
+      return NNIntReadResult{std::make_pair(std::nullopt, 0)};
     }
 
     if (!unmodified_item->is_loaded()) {
-      auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, item_key);
+      auto pending = unmodified_item->load(snapshot_cache_, item_key);
+      if (!pending.has_value()) {
+        return finish_nnint_load(*unmodified_item, std::move(pending));
+      }
+      auto load_status = pending();
       if (!load_status.has_value()) {
-        co_return load_status.error();
+        return NNIntReadResult{load_status.error()};
       }
     }
-    auto const &base_item = unmodified_item->base_item();
-    auto type = base_item.type();
-    if (!type) {
-      assert(load_from_snapshot);
-      // We are in load_from_snapshot mode, so we return KeyNotExist instead of
-      // std::nullopt, mirroring the behavior above of the DeletedItem case.
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
-    }
-    if (*type != ItemViewType::kNNInt) {
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    }
-    co_return std::make_pair(base_item.nnint(), 0);
+    return loaded_nnint_result(*unmodified_item);
   }
 
   // the value written at this key is not an NNInt, so we return an
   // InvalidSyscallInput error. This mirrors the case above, where the snapshot
   // *type != kNNInt.
   if (!load_from_snapshot) {
-    co_return std::make_pair(std::nullopt, 0);
+    return NNIntReadResult{std::make_pair(std::nullopt, 0)};
   }
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  return NNIntReadResult{
+      SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput}};
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+x23::MaybeAsync<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
                              const int128_t &add_value,
@@ -1898,8 +1932,8 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           input_flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SystemStatus<SyscallStatus<void>>{
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput}};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
@@ -1909,13 +1943,13 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  co_return item_view->set(NNIntItem{.base_value_ =
-                                         set_value.has_value()
-                                             ? std::optional<int128_xdr>(
-                                                   to_xdr(*set_value))
-                                             : std::nullopt,
-                                     .add_value_ = to_xdr(add_value)},
-                           input_flags);
+  return SystemStatus<SyscallStatus<void>>{
+      item_view->set(NNIntItem{.base_value_ = set_value.has_value()
+                                                  ? std::optional<int128_xdr>(
+                                                        to_xdr(*set_value))
+                                                  : std::nullopt,
+                               .add_value_ = to_xdr(add_value)},
+                     input_flags)};
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>

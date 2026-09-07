@@ -387,11 +387,11 @@ public:
   // Returns the base value from the snapshot if load_from_snapshot is true.
   // Otherwise, returns a tx-local written set value, if one exists,
   // or nullopt if not.
-  x23::Async<
+  x23::MaybeAsync<
       SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>>
   get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
 
-  x23::Async<SystemStatus<SyscallStatus<void>>>
+  x23::MaybeAsync<SystemStatus<SyscallStatus<void>>>
   set_nnint(StorageKeyContractData const &storage_key,
             std::optional<int128_t> set_value, const int128_t &add_value,
             StorageDeltaFlagSet input_flags);
