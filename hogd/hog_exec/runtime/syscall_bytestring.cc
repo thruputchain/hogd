@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <span>
 
@@ -27,6 +28,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             std::span<std::byte> output_bytestring,
                             RuntimeMemoryLength &output_written_len)
 {
+  const uint64_t db_gas_before = syscall_handler.db_read_gas();
   auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status.has_value()) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
@@ -46,7 +48,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
   // hands the syscall its whole scratch buffer, so pricing the buffer would
   // charge a 32-byte read out of a 4 KiB scratch for eight blocks.
   const WrappedGasAmount gas{
-      GasCost::bytestring_get(std::min(output_bytestring.size(), bs->size()))};
+      GasCost::bytestring_get(std::min(output_bytestring.size(), bs->size())) +
+      syscall_handler.db_read_gas() - db_gas_before};
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
@@ -63,6 +66,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                const StorageKeyContractData &input_key,
                                RuntimeMemoryLength &output_length)
 {
+  const uint64_t db_gas_before = syscall_handler.db_read_gas();
   auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
@@ -87,7 +91,9 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
   // flat to within 0.6 ns across three decades -- so it pays the storage
   // access and no block term.
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost}};
+                               WrappedGasAmount{kStorageAccessCost +
+                                                syscall_handler.db_read_gas() -
+                                                db_gas_before}};
 };
 
 MaybeAsyncSyscallInnerResult
