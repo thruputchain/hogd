@@ -189,17 +189,7 @@ StorageSnapshotCache::load_snapshot_item(FrameItemKey key)
   co_return obj;
 }
 
-x23::MaybeAsync<SystemStatus<const DbTip *>>
-StorageSnapshotCache::try_get_db_tip()
-{
-  auto *tip = db_tip_.load();
-  if (tip != nullptr) {
-    return SystemStatus<const DbTip *>{tip};
-  }
-  return load_db_tip();
-}
-
-x23::Async<SystemStatus<const DbTip *>>
+x23::Async<SystemStatus<void>>
 StorageSnapshotCache::load_db_tip()
 {
   auto db_res = co_await db_proxy_.get_db_tip(block_id_);
@@ -207,20 +197,17 @@ StorageSnapshotCache::load_db_tip()
     co_return db_res.error();
   }
 
-  std::unique_ptr<DbTip> tip_unique = std::make_unique<DbTip>(db_res.value());
-  DbTip *expected = nullptr;
-  if (db_tip_.compare_exchange_strong(expected, tip_unique.get())) {
-    co_return tip_unique.release();
-  }
-  CHECK_PTR(expected);
-  co_return expected;
+  CHECK(db_tip_ == nullptr);
+  db_tip_ = std::make_unique<DbTip>(db_res.value());
+  network_config_params_ = std::make_unique<NetworkConfigParams>(db_tip_->network_config.v0());
+  co_return SystemStatus<void>{};
 }
 
 void
 StorageSnapshotCache::release_db_tip()
 {
-  auto *tip = db_tip_.exchange(nullptr);
-  delete tip;
+  db_tip_.reset();
+  network_config_params_.reset();
 }
 
 } // namespace hogd

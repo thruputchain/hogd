@@ -722,6 +722,10 @@ private:
         std::make_unique<StorageSnapshotCache>(block_number_,
                                                get_block_execution_context(),
                                                *db_proxy_);
+    auto res = storage_snapshot_cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("open_block: failed to load db tip: {}", res.error());
+    }
   }
 
   void open_event_block(BlockID block_id);

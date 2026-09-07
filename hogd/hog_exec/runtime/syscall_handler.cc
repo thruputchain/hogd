@@ -139,41 +139,6 @@ SystemCallHandler::replay_uniquifier_expired() const
   return replay_uniquifier_expired(*tx_uniquifier_, get_block_height());
 }
 
-x23::MaybeAsync<SystemStatus<void>>
-SystemCallHandler::init_db_tip() const
-{
-  if (db_tip_ != nullptr) [[likely]] {
-    return SystemStatus<void>{};
-  }
-  return pin_db_tip();
-}
-
-x23::Async<SystemStatus<void>>
-SystemCallHandler::pin_db_tip() const
-{
-  auto tip = co_await snapshot_cache_.try_get_db_tip();
-  if (!tip.has_value()) {
-    co_return std::unexpected(tip.error());
-  }
-  // The height the block was opened with must agree with the tip we are about
-  // to pin, or this node is executing a different block than it is building.
-  // Checked here, the transaction's one fallible tip read, so every later
-  // height read stays a plain load.
-  auto const &block_execution = snapshot_cache_.block_execution_context();
-  const BlockHeight derived = (*tip)->value.proposal_header.block_height + 1;
-  if (block_execution.block_height != derived) [[unlikely]] {
-    error("Block height mismatch: opened with {}, db tip implies {}",
-          block_execution.block_height, derived);
-    co_return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
-  }
-
-  // Owned by the snapshot cache and stable until the cache is recycled for a
-  // new block, which cannot happen while this transaction is executing.
-  db_tip_ = *tip;
-  config_params_ = NetworkConfigParams(db_tip_->network_config.v0());
-  co_return SystemStatus<void>{};
-}
-
 // TODO(geoff): Setup configuration parameters for alternative contract
 // runtimes and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
@@ -1470,6 +1435,12 @@ SystemCallHandler::resolve_prepared_contract(SHA256Hash hash)
   co_return entry.value() != nullptr ? &entry.value()->prepared : nullptr;
 }
 
+NetworkConfigParams const &
+SystemCallHandler::config_params() const
+{
+  return snapshot_cache_.get_network_config_params();
+}
+
 x23::Async<SystemStatus<const Contract *>>
 SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 {
@@ -1514,7 +1485,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     // auth guard rejects callers that cannot authenticate for the address.
     // If the configured hash has no contract record, resolution fails the
     // same way as any other missing contract.
-    local_hash = db_tip()->default_wallet;
+    local_hash = snapshot_cache_.get_db_tip().default_wallet;
   }
 
   if (!local_hash) {
@@ -2434,7 +2405,7 @@ SystemCallHandler::get_block_height() const
   // for an open block. Contract-facing height-gated logic (auth-token expiry,
   // timelocks) must observe the executing height, matching the replay-cache
   // expiry check.
-  return db_tip()->value.proposal_header.block_height + 1;
+  return snapshot_cache_.get_db_tip().value.proposal_header.block_height + 1;
 }
 
 NetworkHash const &
@@ -2442,7 +2413,7 @@ SystemCallHandler::get_network_hash() const
 {
   // Identical in every header, so the parent tip's copy is already this
   // block's value, no adjustment needed.
-  return db_tip()->value.proposal_header.network_hash;
+  return snapshot_cache_.get_db_tip().value.proposal_header.network_hash;
 }
 
 TimePoint

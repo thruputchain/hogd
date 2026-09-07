@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <functional>
 #include <limits>
@@ -10,6 +9,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
@@ -93,7 +93,17 @@ public:
     return try_get_snapshot_item(FrameItemKey::from(addrkey));
   }
 
-  x23::MaybeAsync<SystemStatus<const DbTip *>> try_get_db_tip();
+  // Must be performed by one thread, before any other thread starts accessing this object.
+  x23::Async<SystemStatus<void>> load_db_tip();
+
+  const DbTip& get_db_tip() const { 
+    CHECK(db_tip_ != nullptr);
+    return *db_tip_;
+  }
+  const NetworkConfigParams& get_network_config_params() const { 
+    CHECK(network_config_params_ != nullptr);
+    return *network_config_params_;
+  }
 
   // The executing block's own facts. Unlike everything above these do not
   // come from the db tip, which for an open block is the *parent*: the height
@@ -145,7 +155,6 @@ private:
   load_deployed_contract(ContractAddress addr);
   x23::Async<SystemStatus<const SnapshotStorageItem *>>
   load_snapshot_item(FrameItemKey key);
-  x23::Async<SystemStatus<const DbTip *>> load_db_tip();
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
@@ -183,7 +192,8 @@ private:
   BlockExecutionContext block_execution_context_;
   DatabaseProxy &db_proxy_;
 
-  std::atomic<DbTip *> db_tip_ = nullptr;
+  std::unique_ptr<DbTip> db_tip_ = nullptr;
+  std::unique_ptr<NetworkConfigParams> network_config_params_ = nullptr;
 };
 
 } // namespace hogd

@@ -452,13 +452,8 @@ public:
   x23::Async<SystemStatus<const PreparedContract *>>
   resolve_prepared_contract(SHA256Hash hash);
 
-  // The parameters this transaction's chain puts in force, flattened when the
-  // tip was pinned. Callers must have run init_db_tip() first.
-  NetworkConfigParams const &config_params() const
-  {
-    CHECK_PTR(db_tip_);
-    return config_params_;
-  }
+  // The parameters this transaction's chain puts in force.
+  NetworkConfigParams const &config_params() const;
 
   // == Error conversion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
@@ -523,35 +518,7 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
-  // The block's db tip, pinned on this handler at the transaction's first
-  // admission check (see init_db_tip()). Owned by snapshot_cache_ and stable
-  // for the whole block, so every later read of the executing block height,
-  // the network configuration, or the default wallet is a plain load off a
-  // thread-confined pointer -- no atomic, no fallible path, and no reason for
-  // a caller to reach into the shared cache while holding one of its locks.
-  //
-  // Mutable because it memoizes an immutable value: the const admission checks
-  // that run before any frame is pushed are what pin it.
-  mutable DbTip const *db_tip_ = nullptr;
-
-  // Flattened when the tip is pinned: the invoke path reads these per frame.
-  mutable NetworkConfigParams config_params_{};
-
   inline static bool debug_force_commit_abort_{false};
-
-  // The block's first tip fetch, split out so init_db_tip() can answer an
-  // already-pinned handler from MaybeAsync's value arm. Also re-checks the
-  // opened height against the tip, the one place that can fail.
-  [[nodiscard]] x23::Async<SystemStatus<void>> pin_db_tip() const;
-
-  // The pinned tip. Every caller runs after an admission check that pinned it,
-  // so a null here is a missed pin point on a new entry path, not a runtime
-  // condition -- fail loudly rather than reading through null.
-  DbTip const *db_tip() const
-  {
-    CHECK_PTR(db_tip_);
-    return db_tip_;
-  }
 
   // True if the given replay uniquifier has already expired at the executing
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.

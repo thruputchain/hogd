@@ -342,6 +342,10 @@ CommonBenchState::advance_block()
       std::make_unique<StorageSnapshotCache>(block_number_,
                                              get_block_execution_context(),
                                              *db_proxy_);
+  auto res = snapshot_cache_->load_db_tip()();
+  if (!res.has_value()) [[unlikely]] {
+    panic("Failed to load db tip for block {}: {}", block_number_, res.error());
+  }
 }
 
 // leaves the benchmark in a state where it's ready to execute transactions

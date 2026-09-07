@@ -97,6 +97,13 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
 
   std::unique_ptr<StorageSnapshotCache> snapshot_cache =
       get_snapshot_cache(new_block_id, block_execution, g);
+  
+  auto load_db_tip_res = co_await snapshot_cache->load_db_tip();
+  if (!load_db_tip_res.has_value()) [[unlikely]] {
+    error("Failed to load db tip for block {}: {}", new_block_id, load_db_tip_res.error());
+    co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+    panic("unreachable");
+  }
 
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
