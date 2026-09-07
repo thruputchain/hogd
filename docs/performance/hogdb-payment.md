@@ -11,8 +11,12 @@ coordinator, not the fastest block. All throughput comparison runs have
 
 The existing schedule uses hog11 for hogdb and hog5/hog6 for executors,
 10,000 accounts, one million transactions per input block, and a 180-second
-mempool run. Host locks serialize experiments. Keep the workload, seed,
-hardware, compiler and database configuration unchanged between versions.
+mempool run. Host locks serialize experiments. Workload configuration,
+coordinator seed, hardware, compiler and database configuration are held
+constant. The payment generator independently randomizes account pairs and
+nonce bases per run, so transaction inputs are not bit-identical. The
+coordinator's cumulative overall rate includes the initial blocks even
+though their individual reports are suppressed by `--skip 20`.
 
 ## Baseline measurements
 
@@ -48,9 +52,11 @@ profiling therefore inflates this category. Use the unprofiled process
 snapshot above as the primary database CPU cost measurement.
 
 Each successful payment generated approximately one push and one commit
-RPC. Sampled mean network round-trip latencies were 754.65 and 756.32 us,
+RPC. Sampled mean client-observed database RPC round-trip latencies were
+754.65 and 756.32 us,
 respectively (54,689 and 54,674 samples). Timers end before the executor
-requeues itself onto its worker pool. These concurrent RPC latencies must
+requeues itself onto its worker pool. They include serialization, queuing,
+network transport, server work and the reply. These concurrent latencies must
 not be added up as elapsed benchmark time. Snapshot and deployment RPCs
 also occur, at much lower volume.
 
@@ -96,9 +102,23 @@ Its unprofiled process sample, starting at process age 30 seconds, measured
 666.49 CPU seconds over 60.786 seconds for 28,000,000 successful proposals:
 **23.80 hogdb CPU us/proposal**, **7.25% below** the baseline repeat sampled
 at a comparable process age. Hogdb served more work while using roughly
-the same number of CPU cores. Additional unprofiled samples and an optimized
-perf diagnostic are pending. The coordinator's reported overall throughput
+the same number of CPU cores. Additional unprofiled samples are pending.
+The coordinator's reported overall throughput
 is the headline metric; the CPU sample's proposal rate is a separate metric.
+
+[Optimized diagnostic run 34106024231](https://github.com/groundhogchain/hogd/actions/runs/34106024231)
+passed and provides the `hogdb-profile-34106024231` artifact. Over its
+123.128-second snapshot interval, hogdb consumed 1,292.02 CPU seconds for
+53,170,810 successful proposals: **24.30 CPU us/proposal**, down **8.27%**
+from the baseline diagnostic. Perf counted **10,611,996 context switches**
+over 120 seconds, **46.72% fewer** than the baseline capture. The snapshot
+proposal count was also 5.1% lower, so the context-switch reduction is not
+a normalized per-transaction measurement. Futex handling fell from 19.90%
+to 13.32% of samples. Sampled push/commit RPC means fell to **720.39/718.68 us**
+(51,919/51,927 samples), reductions of **4.54%/4.98%**. The less frequent
+snapshot RPC mean increased from 1,182.20 to 1,245.82 us. There were 797 lost
+samples out of approximately 167,000. These diagnostic results support the
+wakeup mechanism; unprofiled measurements determine the throughput gain.
 
 The wakeup regression test holds early jobs busy and requires later jobs
 to start in parallel, for both individual submissions and batches. All six
@@ -122,3 +142,22 @@ reduced median context switches from 1,793,814 to 1,056,564 (41.1%). Median
 throughput changed from 1,872,303 to 1,849,628 RPC/s (-1.2%). This establishes
 a reduction in scheduling churn, not a payment throughput gain. CI payment
 measurements remain the deciding result.
+
+## Reproduction
+
+Dispatch `e2e_payment.yml` with `hogdb_profile=false` on each comparison
+revision's branch. The schedule checks out the dispatch's exact commit,
+even if the branch advances while waiting for hosts. Retain each completed
+run's coordinator output from its GitHub log: the metrics-history file for
+a revision can be overwritten by another run of that revision.
+
+For a separate diagnostic, dispatch with `hogdb_profile=true` and download
+that run's `hogdb-profile-<run-id>` artifact. It contains 120-second perf
+captures, process snapshots, executor metrics, hardware metadata and, with
+the updated harness, the matching executable for symbol lookup. RPC means
+are the deltas of sampled nanoseconds divided by completed sample counts,
+aggregated across both executors. Database CPU seconds are the delta of
+`/proc/<pid>/stat` user plus system ticks divided by `CLK_TCK`; divide that
+by the matched delta of both executors' successful-proposal counters to
+obtain CPU cost per proposal. Separate unprofiled process/metric snapshots
+use the same calculation without perf or RPC latency instrumentation.
