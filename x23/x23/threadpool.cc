@@ -45,6 +45,16 @@ ThreadPool::ThreadPool(size_t nthreads)
 
 ThreadPool::~ThreadPool()
 {
+  // A detached async() helper thread calls back into the pool once its
+  // blocking task finishes, and the coroutine it resumes can run all the
+  // way here while that thread is still inside go() -- past the point where
+  // it dropped the runqueue lock, but not yet past notify_all() on the
+  // queue's condition variable, which the RunQueue destructor below would
+  // then destroy underneath it.  Wait those threads out first.  This has to
+  // precede request_stop(), because go() asserts no stop has been
+  // requested.
+  await_async_threads();
+
   ss_.request_stop();
   for (unsigned i = 0; i < nqueues_; ++i) {
     auto ptr = runqueues_[i].take();

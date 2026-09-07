@@ -259,12 +259,24 @@ public:
   {
     using R = std::invoke_result_t<F, Args...>;
     auto [async, cb] = make_async<R>();
+    // The helper thread is detached, so ~ThreadPool has no handle to join
+    // it, yet make_callback() below touches pool state: go() enqueues on a
+    // runqueue and signals that queue's condition variable.  The coroutine
+    // that callback resumes can run to completion -- and destroy the pool --
+    // while this thread is still inside go(), so count the thread here and
+    // have ~ThreadPool wait the count out.  Incremented in the caller rather
+    // than in the thread so the count is already non-zero when async()
+    // returns.
+    nasync_.fetch_add(1, std::memory_order_relaxed);
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
     // be destroyed before they are used.  That incurs a second move
     // into the new thread, but that's unavoidable for safety.
     std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
                   ... args = std::forward<Args>(args)] {
+      // Runs after make_callback() below, so the pool stays alive for as
+      // long as this thread can still touch it.
+      Defer _done{[this] { async_done(); }};
       if constexpr (std::is_void_v<R>) {
         std::invoke(f, args...);
         make_callback(cb);
@@ -481,6 +493,27 @@ private:
 
   std::vector<std::unique_ptr<Worker>> workers_;
   std::vector<std::jthread> threads_;
+
+  // Number of detached async() helper threads that may still touch this
+  // pool.  Nothing joins those threads, so this count is what keeps the
+  // pool alive for them; see async() and await_async_threads().
+  std::atomic_size_t nasync_{0};
+
+  void async_done() noexcept
+  {
+    nasync_.fetch_sub(1, std::memory_order_acq_rel);
+    nasync_.notify_all();
+  }
+
+  // Block until no detached async() helper thread can touch the pool any
+  // more.  Only ~ThreadPool needs this; the wait lasts as long as the
+  // longest outstanding blocking task, which is the price of destroying a
+  // pool with async() work still in flight.
+  void await_async_threads() noexcept
+  {
+    for (size_t n; (n = nasync_.load(std::memory_order_acquire)) != 0;)
+      nasync_.wait(n, std::memory_order_relaxed);
+  }
 
   // https://en.wikipedia.org/wiki/Xorshift
   static uint64_t rnd(uint64_t &seed) noexcept
