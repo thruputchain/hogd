@@ -113,7 +113,7 @@ BYTESTRING_BLOCK_BYTES = 512
 # The storage rows. frame/ rows time one iteration of "open D frames, issue
 # the call on K distinct keys in the innermost, close them all", so they are
 # read as a line in K per depth; frame/Push/D is the K=0 point measured
-# directly. cold/ rows are one call each, against the mock db, and are kept
+# directly. cold/ rows are one call each, against a real hog_db, and are kept
 # out of every schedule number on purpose -- see STORAGE_COLD_NOTE.
 FRAME_PUSH_ROW = re.compile(r"^frame/Push/(\d+)$")
 FRAME_SWEEP_ROW = re.compile(r"^frame/([A-Za-z0-9]+)/(\d+)/(\d+)$")
@@ -162,11 +162,12 @@ GUARD_BASE_SPREAD = 1.5
 GUARD_MIN_SIGNAL_SHARE = 0.10
 
 STORAGE_COLD_NOTE = (
-    "cold/ rows miss the snapshot cache on every call and go to the db proxy. "
-    "The server answering is the benchmark's in-process mock, whose lookup is "
-    "a hash-map find, so this is the executor-side cost of going to the db -- "
-    "the proxy, the RPC, the cache insert -- and not the cost of hog_db. It is "
-    "a floor under a cold read and is excluded from --schedule.")
+    "cold/ rows miss the snapshot cache on every call and read through the "
+    "database named above: the proxy, the RPC, its own lookup, the cache "
+    "insert. Against hog_db this is still a floor in one respect -- it is "
+    "in-process over a local socket, so a chain whose executor and database "
+    "sit on different hosts pays a hop this does not. Excluded from "
+    "--schedule until there is a rule for what a cold read is charged to.")
 
 
 def load(path):
@@ -232,6 +233,15 @@ def stddevs(data):
 
 def context(data):
     return data.get("context", {})
+
+
+def item_backend(data):
+    """What answered the cold rows' misses, or None for a run that did not say.
+
+    cold/ row names did not change when the backend did, so a JSON recorded
+    before that carries no claim either way and must not be given this one.
+    """
+    return context(data).get("syscall_bench_item_backend")
 
 
 def calls_per_vm_run(row):
@@ -743,7 +753,7 @@ def parent_walk_ns(summary, family="NNIntGetFirstTouch"):
             shallow, deep, keys)
 
 
-def print_storage(summary, unit_ns=None):
+def print_storage(summary, unit_ns=None, backend=None):
     """The storage tables. With a unit, costs are also shown in gas."""
     def gas(ns):
         return f"{ns / unit_ns:>8.1f}" if unit_ns else f"{'-':>8}"
@@ -839,7 +849,11 @@ def print_storage(summary, unit_ns=None):
 
     if summary["cold"]:
         print()
-        header = f"{'cold (mock db)':<28}{'ns/call':>10}{'±':>9}"
+        # Named by the run rather than by the row: cold/ row names did not
+        # change when the backend did, so a JSON recorded before that carries
+        # no claim either way and must not be given this one.
+        label = f"cold ({backend or 'backend unrecorded'})"
+        header = f"{label:<28}{'ns/call':>10}{'±':>9}"
         print(header)
         print("-" * len(header))
         for name, (ns, err) in sorted(summary["cold"].items()):
@@ -1172,7 +1186,7 @@ def print_table(data):
 
     storage = storage_summary(measured, sd)
     if storage:
-        print_storage(storage)
+        print_storage(storage, backend=item_backend(data))
 
     skipped = failed_rows(data)
     if skipped:
@@ -1576,7 +1590,8 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     if storage:
         print()
         print("Storage (NNInt), in this run's gas unit:")
-        print_storage(storage, unit_ns=proposal["unit_ns"])
+        print_storage(storage, unit_ns=proposal["unit_ns"],
+                      backend=item_backend(bench))
 
     print()
     print("=" * 68)
@@ -1733,8 +1748,8 @@ def guardable(measured, sd):
     disturb the baseline: it is the median of the rows within GUARD_BASE_SPREAD
     of the cheapest, and the cheapest bytestring row sits well above that.
 
-    cold/ rows are deliberately absent. They are bounded by the benchmark's own
-    mock rather than by hogd, so gating them would gate the harness.
+    cold/ rows are deliberately absent: nothing charges for a cold read yet,
+    and a guard on an unpriced row gates noise.
     """
     baseline = guard_baseline(measured, sd)
     if not baseline:

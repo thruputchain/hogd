@@ -89,13 +89,12 @@ HogdbWrapper::write_deployment(ContractAddress const &addr,
 }
 
 HogDbDAO
-HogdbWrapper::open_db()
+HogdbWrapper::open_db(size_t heap_bytes)
 {
   Directory dir = Directory::open_temporary().value();
-  constexpr static size_t kDefaultHeapSize = 10_MiB;
-  auto db = Database::open(dir.get_path(),
-                           Database::estimate_heap_size(kDefaultHeapSize))
-                .value();
+  auto db =
+      Database::open(dir.get_path(), Database::estimate_heap_size(heap_bytes))
+          .value();
   return HogDbDAO(RAMDB(std::move(db)));
 }
 
