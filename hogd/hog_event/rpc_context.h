@@ -72,6 +72,14 @@ public:
   // rpc from the executor is in flight.
   x23::Async<void> gc_context(BlockID block_id);
 
+  // [draining] belongs to the RpcServer serving the request. Its destructor
+  // sets it and then calls release_indexer_pulls(); from then on a pull that
+  // would park is answered instead, so one arriving after the release cannot
+  // park on a count nothing will move past and pin the server's teardown.
+  x23::Async<EventIndexerPullResult>
+  pull_indexer_next(const EventIndexerPullRequest &request,
+                    const std::atomic<bool> &draining);
+  // For callers with no server to drain.
   x23::Async<EventIndexerPullResult>
   pull_indexer_next(const EventIndexerPullRequest &request);
 

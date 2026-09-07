@@ -503,6 +503,42 @@ TEST_F(EventRpcTest, InitializedPullIsAnsweredEveryTimeAndCaughtUpPullParks)
   EXPECT_EQ(next.pulled_block().block.payload.consensus_value, two);
 }
 
+// A pull that would park is answered once its server is draining.
+// ~EventIndexerServer sets the flag and then releases parked pulls; a client
+// at the tip re-asks the moment its released pull is answered, and without
+// the flag that pull would park on the post-release count and pin ~RpcServer.
+TEST_F(EventRpcTest, DrainingServerAnswersCaughtUpPullInsteadOfParking)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.indexer_outbox_store()
+                  .initialize_current_epoch_origin(1, sha256(genesis))()
+                  .has_value());
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  [[maybe_unused]] const ConsensusValue one =
+      commit_empty_block(ctx, 86, 1, sha256(genesis));
+
+  EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  auto record = ctx.indexer_outbox_store().load_committed_record_info_raw(1);
+  ASSERT_TRUE(record.has_value()) << record.error();
+  IndexerProgress caught_up(IndexerProgressState::IndexerProgressCaughtUp);
+  caught_up.initialized() = {
+      .origin = first.pulled_block().origin,
+      .contiguous_height = 1,
+      .last_consensus_hash = record->consensus_hash,
+  };
+
+  std::atomic<bool> draining = true;
+  ctx.release_indexer_pulls();
+  EventIndexerPullResult answered =
+      ctx.pull_indexer_next(pull_request(caught_up), draining)();
+  EXPECT_EQ(answered.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp)
+      << std::string_view(answered.diagnostic());
+}
+
 TEST_F(EventRpcTest, ForgedAndUnknownProgressConflict)
 {
   EventRPCContext ctx(temp_dir());

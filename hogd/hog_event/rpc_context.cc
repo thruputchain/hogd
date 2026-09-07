@@ -753,6 +753,14 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
 x23::Async<EventIndexerPullResult>
 EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
 {
+  static const std::atomic<bool> never_draining{false};
+  co_return co_await pull_indexer_next(request, never_draining);
+}
+
+x23::Async<EventIndexerPullResult>
+EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request,
+                                   const std::atomic<bool> &draining)
+{
   using enum EventIndexerPullOutcome;
   if (request.protocol != version::kHogdProtocol()) {
     co_return pull_failure(EventIndexerPullMismatchedProtocol,
@@ -961,6 +969,14 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     // was read: it simply does not suspend. The lock is released first;
     // commit needs it to publish the very record being waited for.
     const std::uint64_t seen = indexer_publications_.load();
+    // Also under the lock: ~EventIndexerServer sets [draining] before
+    // release_indexer_pulls() bumps the counter under this same lock. A pull
+    // whose sample precedes the release is woken by that bump; one whose
+    // sample follows it reads the flag here and answers instead of parking
+    // on a count nothing will move past.
+    if (draining.load(std::memory_order_acquire)) {
+      co_return pull_caught_up(response_origin);
+    }
     // Checked after the sample: a notice enqueued before it is in the mailbox
     // here, and one enqueued after it bumps past [seen] so wait() does not
     // suspend. Either way the client is answered, drains, asks again, parks.
