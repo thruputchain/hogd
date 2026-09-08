@@ -115,7 +115,8 @@ BytestringItem::validate() const
   // allocate a bytestring long enough to exhaust memory resources and/or cause
   // malloc to fail, but a contract could still adversarially waste system
   // resources.
-  CHECK_LE(bytestring_.size(), static_cast<size_t>(kBytestringMaxLen));
+  // The ceiling, not the limit in force: items outlive a lowered limit.
+  CHECK_LE(bytestring_.size(), static_cast<size_t>(kBytestringCeilingLen));
 
   return {};
 }

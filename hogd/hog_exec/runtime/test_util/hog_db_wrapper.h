@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <memory>
 
@@ -23,7 +24,10 @@ namespace hogd {
 
 class HogdbWrapper {
 public:
-  HogdbWrapper() : ctx_(HogDbDAO(open_db()), make_sched_db_client())
+  // [heap_bytes] sizes the ramdb heap. The allocator fails a write rather than
+  // growing, so a caller seeding many items has to raise it.
+  explicit HogdbWrapper(size_t heap_bytes = kDefaultHeapSize)
+    : ctx_(HogDbDAO(open_db(heap_bytes)), make_sched_db_client())
   {
     db_sched_server_.start_server(/*port=*/0);
     db_executor_server_.start_server(/*port=*/0);
@@ -59,7 +63,8 @@ public:
   }
 
 private:
-  static HogDbDAO open_db();
+  constexpr static size_t kDefaultHeapSize = 10 * 1024 * 1024;
+  static HogDbDAO open_db(size_t heap_bytes);
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
   make_sched_db_client();
 

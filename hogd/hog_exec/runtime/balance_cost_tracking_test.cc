@@ -1475,7 +1475,8 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
 // all-zero address as an ordinary balance key, so transfer(ContractAddress{},
 // amount) credits the zero address rather than burning. The zero-recipient
 // transfer leaves total_supply() unchanged and emits a standard
-// Transfer(sender, zero, amount) event. This is working
+// Transfer(sender, zero, amount) event --- a real burn goes through burn() and
+// emits its own Burn event. This is working
 // as intended: it locks in that the native HOG token does NOT special-case the
 // zero address as a supply-reducing burn.
 TEST_F(BalanceCostTrackingTest,

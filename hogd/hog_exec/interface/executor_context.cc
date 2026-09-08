@@ -59,8 +59,8 @@ ExecutorContext::propose_transaction(SignedTransaction signed_tx,
 }
 
 x23::Async<ExecProposeBatchResult>
-ExecutorContext::propose_transaction_batch(
-    SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
+ExecutorContext::propose_transaction_batch(SignedTransactionBatch signed_txs,
+                                           TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   // Get off the RPC reader before executing.  x23's reader coroutine calls
@@ -74,7 +74,8 @@ ExecutorContext::propose_transaction_batch(
   batch_res.reserve(signed_txs.size());
   for (size_t i = 0; i < signed_txs.size(); i++) {
     batch_res.push_back(
-        co_await run_propose_transaction(signed_txs[i], first_tx_id + i));
+        co_await run_propose_transaction(std::move(signed_txs[i]),
+                                         first_tx_id + i));
   }
   assert(batch_res.size() == signed_txs.size());
   co_return std::move(batch_res);
@@ -98,7 +99,7 @@ ExecutorContext::view_transaction(TransactionViewQuery const &query)
 
 x23::Async<ExecValidateBatchResult>
 ExecutorContext::validate_transaction_batch(
-    ProposedTransactionBatch const &proposed_txs, TransactionID first_tx_id)
+    ProposedTransactionBatch proposed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
   // Get off the RPC reader before executing.  x23's reader coroutine calls
@@ -112,7 +113,8 @@ ExecutorContext::validate_transaction_batch(
   batch_res.reserve(proposed_txs.size());
   for (size_t i = 0; i < proposed_txs.size(); i++) {
     batch_res.push_back(
-        co_await run_validate_transaction(proposed_txs[i], first_tx_id + i));
+        co_await run_validate_transaction(std::move(proposed_txs[i]),
+                                          first_tx_id + i));
   }
   assert(batch_res.size() == proposed_txs.size());
   co_return std::move(batch_res);
@@ -201,6 +203,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   case ExecResult::ExecResultTxNonDeterministicError:
   case ExecResult::ExecResultFailedGasSponsorship:
   case ExecResult::ExecResultTxValidationFailure:
+  case ExecResult::ExecResultMalformedTransaction:
   case ExecResult::ExecResultSystemError:
   case ExecResult::ExecResultUnrecoverable:
     // nothing to do: a rejected transaction (e.g. an expired uniquifier, #2568,

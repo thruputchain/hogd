@@ -323,6 +323,12 @@ make_contract_data_key(std::span<const std::byte> key)
 
 constexpr size_t kContractDataItemKeySize = 1 + kAddressSize + kItemKeySize;
 
+// Bytestrings are stored raw under a contract-data key, so the protocol's
+// ceiling has to fit a ramdb item. Raising it past this point would make every
+// large bytestring a kTooBig write rather than a rejected one.
+static_assert(Database::item_fits(kContractDataItemKeySize,
+                                  kBytestringCeilingLen));
+
 constexpr auto
 make_contract_data_key(const ItemKey &key)
 {

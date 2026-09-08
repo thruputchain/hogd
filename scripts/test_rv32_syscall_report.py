@@ -8,6 +8,8 @@ what went in -- and that the rows the schedule must not price stay out of it.
 """
 
 import io
+import tempfile
+import os
 import json
 import unittest
 from contextlib import redirect_stdout
@@ -65,6 +67,85 @@ def synthetic_run(push_ns=300.0, first_touch_ns=120.0, walk_ns=15.0,
             "benchmarks": benchmarks}
 
 
+BYTESTRING_SIZES = (0, 32, 256, 1024, 4096, 16384, 32768)
+
+
+def synthetic_bytestring_run(set_base=180.0, set_per_byte=0.05,
+                             get_base=150.0, get_per_byte=0.03,
+                             get_len_base=110.0):
+    """A run whose bytestring sweeps lie exactly on known lines.
+
+    GetLen is deliberately flat: it reads the item's length and copies none of
+    it, so a slope there is a finding rather than a shape to fit around.
+    """
+    benchmarks = [row("entry/GetBlockHeight", 100.0),
+                  row("entry/GetMsgSender", 105.0),
+                  row("entry/GetCurrentAddress", 110.0)]
+    for size in BYTESTRING_SIZES:
+        # gas is the flat kSyscallBaseCost every syscall pays: none of the
+        # three has a schedule entry, so the charge does not move with length
+        # even though the cost does.
+        benchmarks.append(row(f"entry/BytestringSet/{size}",
+                              set_base + size * set_per_byte, gas=50))
+        benchmarks.append(row(f"entry/BytestringGet/{size}",
+                              get_base + size * get_per_byte, gas=50))
+        benchmarks.append(row(f"entry/BytestringGetLen/{size}",
+                              get_len_base, gas=50))
+    return {"context": {"hogd_host": "test", "engine_fingerprint": "fp",
+                        "hogd_production_build": "true"},
+            "benchmarks": benchmarks}
+
+
+def stepped_bytestring_run(base=142.0, step=23.0, per_byte=0.037):
+    """A sweep with the shape the real rows have, not a clean line.
+
+    base + a fixed step for any nonzero length + a per-byte term. This is what
+    a bytestring write actually costs, and it is exactly the shape a single
+    least-squares line describes badly while reporting R2 near 1: the step
+    lands in the intercept, and the top point carries so much of the
+    x-variance that nothing about the fit says so.
+    """
+    benchmarks = [row("entry/GetBlockHeight", 70.0, gas=50),
+                  row("entry/GetCalldataLen", 72.0, gas=50),
+                  row("entry/GetMsgSender", 71.0, gas=50)]
+    for size in BYTESTRING_SIZES:
+        ns = base + (step + per_byte * size if size else 0.0)
+        benchmarks.append(row(f"entry/BytestringSet/{size}", ns, gas=50))
+    for entry in list(benchmarks):
+        benchmarks.append(row(entry["name"], entry["real_time"] * 0.002,
+                              aggregate="stddev"))
+    return {"context": {"hogd_host": "test", "engine_fingerprint": "fp"},
+            "benchmarks": benchmarks}
+
+
+def rising_bytestring_run(base=142.0, step=23.0, rates=(0.020, 0.020, 0.031,
+                                                          0.038, 0.039)):
+    """A sweep whose per-byte cost grows with length, as the real one does.
+
+    On hog10 a BytestringSet costs 0.0203 ns/byte between 256 and 1024 bytes
+    and 0.0388 between 16384 and 32768 -- it nearly doubles as the item stops
+    fitting in cache. No single slope describes that, and a least-squares line
+    through it still scores R2 above 0.999.
+    """
+    benchmarks = [row("entry/GetBlockHeight", 70.0, gas=50),
+                  row("entry/GetCalldataLen", 72.0, gas=50),
+                  row("entry/GetMsgSender", 71.0, gas=50)]
+    ns = base
+    benchmarks.append(row("entry/BytestringSet/0", ns, gas=50))
+    ns += step
+    benchmarks.append(row(f"entry/BytestringSet/{BYTESTRING_SIZES[1]}", ns,
+                          gas=50))
+    for (lo, hi), rate in zip(zip(BYTESTRING_SIZES[1:], BYTESTRING_SIZES[2:]),
+                              rates):
+        ns += rate * (hi - lo)
+        benchmarks.append(row(f"entry/BytestringSet/{hi}", ns, gas=50))
+    for entry in list(benchmarks):
+        benchmarks.append(row(entry["name"], entry["real_time"] * 0.002,
+                              aggregate="stddev"))
+    return {"context": {"hogd_host": "test", "engine_fingerprint": "fp"},
+            "benchmarks": benchmarks}
+
+
 def synthetic_calibration(baseline_ns=1.6):
     return {"provenance": {"host": "test", "engine_fingerprint": "fp",
                            "production_build": True},
@@ -94,6 +175,164 @@ class StorageParsingTest(unittest.TestCase):
         self.assertEqual(list(pairs), ["NNIntSetAdd"])
         self.assertEqual([k for k, _, _ in pairs["NNIntSetAdd"]],
                          [1, 16, 256, 4096])
+
+
+class BytestringTest(unittest.TestCase):
+    def setUp(self):
+        self.run = synthetic_bytestring_run()
+        self.measured = report.rows(self.run)
+
+    def test_sweep_rows_are_not_syscall_table_rows(self):
+        names = report.syscall_names(self.measured)
+        self.assertIn("GetBlockHeight", names)
+        self.assertFalse([n for n in names if n.startswith("Bytestring")])
+
+    def test_sweep_rows_do_not_move_the_gating_baseline(self):
+        # The baseline is the median of the cheapest crossing rows. GetLen at
+        # 110 ns is cheaper than two of the three stateless rows, so a
+        # bytestring row that leaked into syscall_names would pull it down and
+        # every committed guard ratio with it.
+        sd = report.stddevs(self.run)
+        self.assertEqual(report.guard_baseline(self.measured, sd), 105.0)
+
+    def test_points_are_grouped_by_family_and_sorted(self):
+        points = report.bytestring_points(self.measured, "BytestringSet")
+        self.assertEqual([size for size, _ in points], list(BYTESTRING_SIZES))
+        self.assertNotEqual(points,
+                            report.bytestring_points(self.measured,
+                                                     "BytestringGet"))
+
+    def test_fit_recovers_the_base_and_the_per_byte_term(self):
+        summary = report.bytestring_summary(self.measured)
+        self.assertEqual(sorted(summary), ["BytestringGet",
+                                           "BytestringGetLen",
+                                           "BytestringSet"])
+        base, per_byte, r_squared = summary["BytestringSet"]["fit"]
+        self.assertAlmostEqual(base, 180.0, places=6)
+        self.assertAlmostEqual(per_byte, 0.05, places=9)
+        self.assertAlmostEqual(r_squared, 1.0, places=9)
+
+    def test_a_flat_family_fits_a_zero_slope(self):
+        summary = report.bytestring_summary(self.measured)
+        base, per_byte, _ = summary["BytestringGetLen"]["fit"]
+        self.assertAlmostEqual(base, 110.0, places=6)
+        self.assertAlmostEqual(per_byte, 0.0, places=12)
+
+    def test_a_run_without_the_rows_has_no_section(self):
+        self.assertEqual(report.bytestring_summary(report.rows(
+            synthetic_run())), {})
+
+    def test_report_names_the_copy_and_says_the_calls_are_unpriced(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            report.print_table(self.run)
+        text = buffer.getvalue()
+        # 0.03 - 0.00: the copy is the whole of Get's slope here.
+        self.assertIn("BytestringGet reaches 0.0300 ns/byte", text)
+        self.assertIn("copies none of it, is flat", text)
+        self.assertIn("BytestringSet: base 180.0 ns", text)
+        # 180 ns at zero length against 1818.4 ns at 32768, both for 50 gas.
+        self.assertIn("BytestringSet: charged 50 gas at every length", text)
+        self.assertIn("10x spread within one syscall", text)
+        self.assertIn("BytestringGetLen: charged 50 gas at every length",
+                      text)
+
+
+class BytestringShapeTest(unittest.TestCase):
+    """The checks that bite on a sweep spanning three decades.
+
+    R2 does not. The longest length sits so far from the mean that the fit is
+    very nearly a line through it, so R2 reports whether that one point landed
+    near the line -- which it does by construction -- while saying nothing
+    about the six that carry the pricing. These pin the quantities that do say
+    something, on data whose true shape is known.
+    """
+
+    def setUp(self):
+        self.run = stepped_bytestring_run()
+        self.measured = report.rows(self.run)
+        self.summary = report.bytestring_summary(self.measured,
+                                                 report.stddevs(self.run))
+        self.entry = self.summary["BytestringSet"]
+
+    def test_the_longest_point_carries_most_of_the_variance(self):
+        self.assertGreater(report.top_leverage(self.entry["points"]), 0.6)
+
+    def test_r_squared_is_near_one_even_though_the_line_is_wrong(self):
+        # The premise of every other assertion here. A fit that misplaces the
+        # per-call base by 23 ns still scores above 0.999, which is why
+        # nothing is derived from it and why it is never printed unqualified.
+        self.assertGreater(self.entry["fit"][2], 0.999)
+
+    def test_the_base_is_the_measured_row_not_the_intercept(self):
+        self.assertAlmostEqual(self.entry["base_ns"], 142.0, places=6)
+        self.assertNotAlmostEqual(self.entry["fit"][0], 142.0, places=1)
+
+    def test_the_intercept_error_catches_what_r_squared_misses(self):
+        # The fixed step lands in the intercept, so the fit puts the base well
+        # above a directly measured number. That gap is the check R2 cannot
+        # make, and it is the one that fires here.
+        self.assertGreater(self.entry["intercept_error"], 5.0)
+
+    def test_the_first_band_is_reported_as_a_cost_not_a_rate(self):
+        # 23 ns of step plus 32 bytes of real work reads as 0.76 ns/byte,
+        # twenty times the true rate. Calling it a rate is how a step gets
+        # priced as a per-byte term.
+        self.assertEqual(self.entry["first_jump_bytes"], 32)
+        self.assertAlmostEqual(self.entry["first_jump_ns"],
+                               23.0 + 0.037 * 32, places=6)
+
+    def test_the_per_byte_cost_excludes_the_first_band(self):
+        self.assertAlmostEqual(self.entry["per_byte_hi"], 0.037, places=6)
+        self.assertAlmostEqual(self.entry["growth"], 1.0, places=6)
+
+    def test_a_run_without_repetitions_is_not_called_flat(self):
+        # Every stddev absent reads as a zero error bar, which would make any
+        # sweep "within noise of the base". The 1%-of-base fallback is what
+        # stops a single-repetition run from reporting no per-byte cost.
+        no_sd = report.bytestring_summary(self.measured, {})
+        self.assertFalse(no_sd["BytestringSet"]["flat"])
+
+    def test_the_report_shows_its_working(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            report.print_table(self.run)
+        text = buffer.getvalue()
+        self.assertIn("base 142.0 ns, measured at zero length", text)
+        self.assertIn("not a rate", text)
+        self.assertIn("% of the x-variance", text)
+        self.assertIn("against the measured base", text)
+
+
+class BytestringGrowthTest(unittest.TestCase):
+    def setUp(self):
+        self.run = rising_bytestring_run()
+        self.summary = report.bytestring_summary(report.rows(self.run),
+                                                 report.stddevs(self.run))
+        self.entry = self.summary["BytestringSet"]
+
+    def test_a_growing_per_byte_cost_is_reported_as_a_range(self):
+        self.assertAlmostEqual(self.entry["per_byte_lo"], 0.020, places=6)
+        self.assertAlmostEqual(self.entry["per_byte_hi"], 0.039, places=6)
+        self.assertAlmostEqual(self.entry["growth"], 0.039 / 0.020, places=6)
+
+    def test_the_direction_is_named(self):
+        self.assertEqual(report.bytestring_trend(self.entry),
+                         "RISING with length")
+
+    def test_the_price_covers_the_dearest_band(self):
+        # Not the average of the bands, and not the whole-sweep slope. The
+        # storage schedule builds from the dearest point for the same reason.
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            report.print_table(self.run)
+        text = buffer.getvalue()
+        self.assertIn("a price has to cover the dearest band: 0.0390", text)
+        self.assertIn("RISING with length", text)
+
+    def test_one_slope_would_still_score_well(self):
+        # The whole point: R2 near 1 on data that is visibly not a line.
+        self.assertGreater(self.entry["fit"][2], 0.99)
 
 
 class StorageFitTest(unittest.TestCase):
@@ -283,6 +522,17 @@ class StorageScheduleTest(unittest.TestCase):
         self.assertNotIn("cold/NNIntGet", proposal["syscalls"])
         self.assertTrue(all("cold" not in n for n in proposal["heavy"]))
 
+    def test_cold_table_names_the_backend_the_run_recorded(self):
+        # cold/ row names did not change when the backend did, so the label has
+        # to come from the run. A JSON recorded before the stamp existed makes
+        # no claim, and the report must not make one for it.
+        run = synthetic_run()
+        run.setdefault("context", {})["syscall_bench_item_backend"] = "hog_db"
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report.print_table(run)
+        self.assertIn("cold (hog_db)", out.getvalue())
+
     def test_printers_run(self):
         out = io.StringIO()
         with redirect_stdout(out):
@@ -290,7 +540,9 @@ class StorageScheduleTest(unittest.TestCase):
         self.assertEqual(status, 0)
         text = out.getvalue()
         self.assertIn("parent walk", text)
-        self.assertIn("cold (mock db)", text)
+        # No backend stamped in this synthetic run, so the table must not
+        # claim one.
+        self.assertIn("cold (backend unrecorded)", text)
         self.assertNotIn("<- NOT FLAT", text)
         out = io.StringIO()
         with redirect_stdout(out):
@@ -310,6 +562,254 @@ class StorageScheduleTest(unittest.TestCase):
         with redirect_stdout(out):
             report.print_table(run)
         self.assertIn("<- NOT FLAT", out.getvalue())
+
+
+def guardable_run(**kwargs):
+    """A run the gate can actually guard: several cheap syscalls, and a
+    stddev for every row.
+
+    The gate needs both. Ratios are relative to the median of the syscalls
+    that only cross the boundary, which needs at least three of them, and a
+    row with no stddev cannot be shown to reproduce well enough to guard.
+    """
+    run = synthetic_run(**kwargs)
+    # Three more crossing-only syscalls, close to GetBlockHeight's 70 ns, so a
+    # median over them means something.
+    for name, cost in (("GetCalldataLen", 72.0), ("GetCurrentAddress", 68.0),
+                       ("GetMsgSender", 71.0)):
+        run["benchmarks"].append(row(f"entry/{name}", cost, gas=51))
+    for entry in list(run["benchmarks"]):
+        if entry.get("aggregate_name") != "median":
+            continue
+        run["benchmarks"].append(
+            row(entry["name"], entry["real_time"] * 0.002,
+                aggregate="stddev"))
+    run["context"] = {"engine_fingerprint": "abc123", "hogd_host": "test"}
+    return run
+
+
+def reference_text(run):
+    out = io.StringIO()
+    with redirect_stdout(out):
+        report.emit_reference(run)
+    return out.getvalue()
+
+
+def write_reference(case, text):
+    path = os.path.join(case.tmp, "syscall_reference.txt")
+    with open(path, "w") as handle:
+        handle.write(text)
+    return path
+
+
+class BytestringScheduleTest(unittest.TestCase):
+    """The proposal a bench-pool run turns into gas_cost_table.h constants."""
+
+    def setUp(self):
+        # hog10, seven repetitions. Kept as literals so this test says what
+        # the committed constants were derived from.
+        self.run = guardable_run()
+        hog10 = {
+            "BytestringSet": [(0, 142.2), (32, 166.4), (256, 171.2),
+                              (1024, 186.8), (4096, 282.6), (16384, 748.4),
+                              (32768, 1383.9)],
+            "BytestringGet": [(0, 149.4), (32, 153.4), (256, 154.1),
+                              (1024, 163.4), (4096, 202.7), (16384, 443.6),
+                              (32768, 757.9)],
+            "BytestringGetLen": [(0, 132.2), (32, 132.5), (256, 131.9),
+                                 (1024, 132.3), (4096, 132.1), (16384, 132.2),
+                                 (32768, 132.2)],
+        }
+        for family, points in hog10.items():
+            for size, ns in points:
+                name = f"entry/{family}/{size}"
+                self.run["benchmarks"].append(row(name, ns, gas=50))
+                self.run["benchmarks"].append(
+                    row(name, ns * 0.002, aggregate="stddev"))
+        self.calibration = synthetic_calibration(1.6222)
+        self.calibration["provenance"]["engine_fingerprint"] = "abc123"
+        self.calibration["provenance"]["host"] = "test"
+
+    def proposal(self):
+        return report.build_schedule(self.run, self.calibration, 1)
+
+    def test_it_proposes_the_committed_constants(self):
+        blocks = self.proposal()["bytestring_blocks"]
+        self.assertEqual(blocks["BytestringSet"]["block_gas"], 13)
+        self.assertEqual(blocks["BytestringGet"]["block_gas"], 7)
+        self.assertEqual(blocks["BytestringSet"]["block_bytes"], 512)
+
+    def test_a_flat_family_gets_no_block_term(self):
+        self.assertNotIn("BytestringGetLen",
+                         self.proposal()["bytestring_blocks"])
+
+    def test_the_block_is_large_enough_that_rounding_is_cheap(self):
+        # The reason not to reuse the hash's 64-byte block: at 64 bytes a
+        # write's rate rounds up to 2 gas, a 31% overcharge on the rate alone.
+        for block in self.proposal()["bytestring_blocks"].values():
+            self.assertLess(block["rounding"], 1.20)
+
+    def test_the_proposal_never_undercharges_the_sweep(self):
+        # The property that matters in a gas schedule. Billed against measured
+        # at every length, with the crossing and the storage access the
+        # schedule already charges.
+        proposal = self.proposal()
+        unit = proposal["unit_ns"]
+        seam = proposal["seam_ns"]
+        blocks = proposal["bytestring_blocks"]
+        for family, block in blocks.items():
+            for size, ns in proposal["bytestrings"][family]["points"]:
+                whole = -(-size // block["block_bytes"])
+                gas = 50 + 150 + block["block_gas"] * whole
+                self.assertGreaterEqual(gas * unit, ns + seam,
+                                        msg=f"{family}/{size} undercharged")
+
+
+class GateTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.tmp = self.dir.name
+        self.addCleanup(self.dir.cleanup)
+
+    def check(self, run, path):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            status = report.check_against_reference(run, path)
+        return status, out.getvalue()
+
+    def test_a_run_passes_its_own_reference(self):
+        run = guardable_run()
+        path = write_reference(self, reference_text(run))
+        status, text = self.check(run, path)
+        self.assertEqual(status, 0)
+        self.assertIn("guard(s) hold", text)
+
+    def test_the_bytestring_sweep_is_guarded_at_every_length(self):
+        # Every length, not just the ends. The per-byte cost is not constant
+        # across the sweep, so a regression confined to the long rows is
+        # invisible in the short ones -- and the long end is where the block
+        # term is priced from.
+        run = guardable_run()
+        for entry in stepped_bytestring_run()["benchmarks"]:
+            if entry["name"].startswith("entry/Bytestring"):
+                run["benchmarks"].append(entry)
+                run["benchmarks"].append(
+                    row(entry["name"], entry["real_time"] * 0.002,
+                        aggregate="stddev"))
+        text = reference_text(run)
+        for size in BYTESTRING_SIZES:
+            self.assertIn(f"guard bytestring/BytestringSet/{size} ", text)
+
+    def test_the_sweep_does_not_disturb_the_gating_baseline(self):
+        # The reason they can be gated at all. The baseline is the median of
+        # the rows within GUARD_BASE_SPREAD of the cheapest, and a bytestring
+        # call -- which reaches storage -- sits far above that, so adding the
+        # sweep cannot drag the anchor and move every other guard with it.
+        plain = guardable_run()
+        with_sweep = guardable_run()
+        for entry in stepped_bytestring_run()["benchmarks"]:
+            if entry["name"].startswith("entry/Bytestring"):
+                with_sweep["benchmarks"].append(entry)
+                with_sweep["benchmarks"].append(
+                    row(entry["name"], entry["real_time"] * 0.002,
+                        aggregate="stddev"))
+        before = report.guard_baseline(report.rows(plain),
+                                       report.stddevs(plain))
+        after = report.guard_baseline(report.rows(with_sweep),
+                                      report.stddevs(with_sweep))
+        self.assertEqual(before, after)
+
+    def test_reference_guards_both_syscalls_and_storage(self):
+        text = reference_text(guardable_run())
+        self.assertIn("guard syscall/NNIntGet ", text)
+        self.assertIn("guard storage/NNIntGetFirstTouch/1/4096 ", text)
+        # Nothing charges for a cold read yet, so gating it
+        # would gate the harness rather than hogd.
+        self.assertNotIn("cold", text)
+
+    def test_a_doubled_syscall_fails(self):
+        path = write_reference(self, reference_text(guardable_run()))
+        run = guardable_run()
+        for entry in run["benchmarks"]:
+            if entry["name"] == "entry/NNIntGet":
+                entry["real_time"] *= 2.5
+        status, text = self.check(run, path)
+        self.assertEqual(status, 1)
+        self.assertIn("syscall/NNIntGet", text)
+
+    def test_a_small_rise_does_not_fire(self):
+        """The tolerance is an alarm, not a budget: 20% must not fail."""
+        path = write_reference(self, reference_text(guardable_run()))
+        run = guardable_run()
+        for entry in run["benchmarks"]:
+            if entry["name"] == "entry/NNIntGet":
+                entry["real_time"] *= 1.2
+        status, _ = self.check(run, path)
+        self.assertEqual(status, 0)
+
+    def test_a_missing_row_fails_rather_than_passing(self):
+        """A guard that was not measured was not checked."""
+        path = write_reference(self, reference_text(guardable_run()))
+        run = guardable_run()
+        run["benchmarks"] = [e for e in run["benchmarks"]
+                             if e["name"] != "entry/NNIntGet"]
+        status, text = self.check(run, path)
+        self.assertEqual(status, 1)
+        self.assertIn("not measured in this run", text)
+
+    def test_a_noisy_row_is_not_guarded(self):
+        run = guardable_run()
+        for entry in run["benchmarks"]:
+            if (entry["name"] == "entry/NNIntGet"
+                    and entry.get("aggregate_name") == "stddev"):
+                entry["real_time"] *= 100
+        self.assertNotIn("guard syscall/NNIntGet ", reference_text(run))
+
+    def test_an_ill_conditioned_cell_is_not_guarded(self):
+        """A cell whose frames dominate its own measurement.
+
+        At depth 254 with one key the per-key cost is the gap between two
+        numbers that are almost equal, so its error is whatever theirs is,
+        magnified. Guarding it gates on that subtraction rather than on the
+        touch.
+        """
+        text = reference_text(guardable_run())
+        self.assertNotIn("guard storage/NNIntGetFirstTouch/254/1 ", text)
+        self.assertIn("guard storage/NNIntGetFirstTouch/254/4096 ", text)
+
+    def test_a_moved_engine_fingerprint_fails(self):
+        path = write_reference(self, reference_text(guardable_run()))
+        run = guardable_run()
+        run["context"]["engine_fingerprint"] = "moved99"
+        status, text = self.check(run, path)
+        self.assertEqual(status, 1)
+        self.assertIn("engine fingerprint", text)
+
+    def test_too_few_syscalls_gives_no_baseline(self):
+        """One row carrying every ratio is one row whose noise is the gate."""
+        run = guardable_run()
+        keep = ("entry/GetBlockHeight", "entry/NNIntGet")
+        run["benchmarks"] = [e for e in run["benchmarks"]
+                             if not e["name"].startswith("entry/")
+                             or e["name"] in keep]
+        baseline, guards = report.guardable(report.rows(run),
+                                            report.stddevs(run))
+        self.assertIsNone(baseline)
+        self.assertEqual(guards, {})
+
+    def test_an_anomalously_cheap_row_does_not_move_the_baseline(self):
+        """The anchor is a median of the cheapest few, not the single
+        cheapest, so one fast outlier cannot exclude the crossing cluster."""
+        run = guardable_run()
+        with_outlier = guardable_run()
+        for entry in with_outlier["benchmarks"]:
+            if entry["name"] == "entry/NNIntGetNoLoad":
+                entry["real_time"] = 1.0
+        plain, _ = report.guardable(report.rows(run), report.stddevs(run))
+        skewed, guards = report.guardable(report.rows(with_outlier),
+                                          report.stddevs(with_outlier))
+        self.assertEqual(plain, skewed)
+        self.assertIn("syscall/NNIntGet", guards)
 
 
 if __name__ == "__main__":

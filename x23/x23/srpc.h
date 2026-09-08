@@ -149,7 +149,6 @@ private:
   std::atomic_bool write_ready_{false};
 
   UniqueFd fd_;
-  std::atomic_int refcnt_{0};
   std::stop_source ss_;
   std::thread read_thread_;
   std::thread write_thread_;

@@ -16,8 +16,8 @@ rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 
 echo "Installing groundhog-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-cli@0.11.0
+  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-cli@0.15.1
 
 echo "Installing groundhog-rv32-lower..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-rv32-lower@0.11.0
+  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-rv32-lower@0.15.1

@@ -7,6 +7,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
 #include "storage_item.hh"
@@ -57,7 +58,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs->current_add = to_xdr(output_current_add);
   }
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{kStorageAccessCost}};
 }
 
 MaybeAsyncSyscallInnerResult
@@ -83,7 +84,7 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{kStorageAccessCost}};
 }
 
 } // namespace hogd

@@ -416,6 +416,29 @@ struct serialize_equiv<std::array<X, N>, span<T, N>> : std::true_type {};
 
 static_assert(serializes_like<span<const int32_t>, Vec<int32_t>>);
 
+template<typename T>
+inline size_t
+xdr_size(const XdrSharedPtr<T> &p)
+{
+  if (p) {
+    return 4UZ + x23::xdr_size(*p);
+  }
+  return 4UZ;
+}
+
+template<typename T>
+inline void
+xdr_serialize(auto &serializer, const XdrSharedPtr<T> &p)
+{
+  if (p) {
+    serializer.put32(1);
+    serializer(*p);
+  }
+  else {
+    serializer.put32(0);
+  }
+}
+
 template<is_xdr_serializable T>
 inline size_t
 xdr_size(BorrowedPtr<T> p)

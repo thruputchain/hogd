@@ -207,21 +207,34 @@ validate_candidate(const IndexerOutboxCandidatePayload &payload)
   co_return IndexerOutboxStatus<void>{};
 }
 
-x23::Async<IndexerOutboxStatus<void>>
-validate_committed(const IndexerOutboxCommittedPayload &payload,
-                   BlockHeight expected_height)
+// The cheap, always-on checks of a committed payload: its height is the
+// record's, and it fits the replay record and file limits.
+IndexerOutboxStatus<void>
+validate_committed_shape(const IndexerOutboxCommittedPayload &payload,
+                         BlockHeight expected_height)
 {
   const BlockHeight height =
       payload.consensus_value.proposal_header.block_height;
   if (height < 0) {
-    co_return std::unexpected("committed outbox height is negative");
+    return std::unexpected("committed outbox height is negative");
   }
   if (height != expected_height) {
-    co_return std::unexpected(
+    return std::unexpected(
         "committed filename height differs from ConsensusValue");
   }
-  if (auto sizes = validate_payload_sizes(payload); !sizes) {
-    co_return sizes;
+  return validate_payload_sizes(payload);
+}
+
+// The full check, roots recomputed over the pairs included. This is what
+// promotion runs before it publishes a record for a file no live block
+// vouches for, and what a load runs once for a file first seen after a
+// restart.
+x23::Async<IndexerOutboxStatus<void>>
+validate_committed(const IndexerOutboxCommittedPayload &payload,
+                   BlockHeight expected_height)
+{
+  if (auto shape = validate_committed_shape(payload, expected_height); !shape) {
+    co_return shape;
   }
   co_return co_await validate_indexer_committed_payload(payload);
 }
@@ -870,6 +883,12 @@ IndexerOutboxStore::publish_committed_stored(
       co_return std::unexpected(rpc_size.error());
     }
   }
+  // Either way the file's roots are established: the live block computed
+  // the event root over the pairs it streamed, and promotion validated the
+  // full payload before calling here. Loads of this file skip the
+  // recomputation for the life of this process.
+  established_event_roots_.insert(
+      stored.consensus_value.proposal_header.events_hash);
   auto exists = has_committed(height);
   if (!exists) {
     co_return std::unexpected(exists.error());
@@ -1020,12 +1039,29 @@ IndexerOutboxStore::load_committed_record(
   if (!payload) {
     co_return std::unexpected(payload.error());
   }
-  // validate_committed recomputes both consensus roots over the reassembled
-  // pairs; with the record now referencing the events file rather than
-  // embedding a digested copy, this is what validates the payload at rest.
-  if (auto valid = co_await validate_committed(*payload, block_height);
-      !valid) {
-    co_return std::unexpected(valid.error());
+  if (auto shape = validate_committed_shape(*payload, block_height); !shape) {
+    co_return std::unexpected(shape.error());
+  }
+  // The roots are recomputed over the pairs only for a file this process has
+  // not established: one it neither streamed nor promoted, seen for the first
+  // time since it started. That is the restart case, where damage at rest is
+  // caught fail-closed, once. Every other load is a parse and nothing more.
+  const SHA256Hash event_root =
+      payload->consensus_value.proposal_header.events_hash;
+  bool established = false;
+  {
+    x23::CoroGuard publication_guard;
+    co_await publication_guard(*committed_publication_lock_);
+    established = established_event_roots_.contains(event_root);
+  }
+  if (!established) {
+    if (auto valid = co_await validate_indexer_committed_payload(*payload);
+        !valid) {
+      co_return std::unexpected(valid.error());
+    }
+    x23::CoroGuard publication_guard;
+    co_await publication_guard(*committed_publication_lock_);
+    established_event_roots_.insert(event_root);
   }
   if (sha256(payload->consensus_value) != header->consensus_hash ||
       payload->consensus_value.prev_hash != header->prev_hash ||

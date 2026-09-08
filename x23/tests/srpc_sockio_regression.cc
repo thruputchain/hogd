@@ -2,7 +2,9 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
+#include <semaphore>
 #include <string_view>
 #include <sys/socket.h>
 #include <thread>
@@ -242,6 +244,85 @@ TEST(RpcRegression, InFlightDisconnectIsTransportException)
 
   EXPECT_TRUE(request_read.load());
   EXPECT_TRUE(got_transport_error);
+}
+
+namespace {
+
+// Metadata for a synthetic void call, used only to build a well-formed
+// client call record.  The record is never written to the socket.  Only
+// the fields call_msg() reads are declared: the version_name/proc_name
+// strings the logging and error paths use are unreferenced here, and
+// -Wunused-const-variable rejects them at internal linkage.
+struct queued_callback_proc {
+  struct version_meta {
+    static constexpr std::uint32_t program = 0x5a23'2284;
+    static constexpr std::uint32_t version = 1;
+  };
+
+  static constexpr std::uint32_t proc = 1;
+  using return_type = void;
+};
+
+// Exposes the protected write_call() so a client callback can be parked in
+// write_queue_ without a write worker running to drain it.  This is the same
+// state a real send_call() is in for the window between write_call() queueing
+// the callback and write_worker() registering it in PendingCalls::cbmap_.
+struct QueueOnlyStream : SRpcStream<> {
+  using SRpcStream<>::SRpcStream;
+  using SRpcFd::write_call;
+};
+
+} // namespace
+
+// Regression test for issue #1987: SRpcFd::stop() must complete every
+// outstanding client callback, including one still sitting in write_queue_
+// waiting for the write worker to move it into PendingCalls::cbmap_.  stop()
+// used to drain cbmap_ only, so a callback queued in that window was never
+// invoked -- destroying the sole failure-completion path for the call.  The
+// SRpcStream::send_call() that queued it then waited forever on its stack
+// semaphore, stranding the calling thread (an executor worker, for
+// contract-originated database RPCs reaching SRPC via DatabaseProxy).
+// Expected behaviour: the callback is invoked exactly once, with a null
+// rpc_msg, so send_call() wakes and reports an RPC failure.
+TEST(SrpcRegression, StopCompletesQueuedClientCallback)
+{
+  auto bind_addr = HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(bind_addr.has_value());
+  UniqueFd listener = stcplisten(*bind_addr);
+  ASSERT_TRUE(listener);
+  uint16_t port = get_port(local_addr(listener));
+
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  ASSERT_TRUE(client_fd);
+  // Accepted but intentionally idle: nothing ever replies on this stream.
+  UniqueFd peer_fd{::accept(listener.get(), nullptr, nullptr)};
+  ASSERT_TRUE(peer_fd);
+
+  // Deliberately no go(): with no write worker running, the queued callback
+  // stays in write_queue_ and never reaches cbmap_, making the handoff window
+  // deterministic.
+  QueueOnlyStream stream(std::move(client_fd));
+
+  std::atomic<int> callback_count{0};
+  std::atomic<bool> reported_failure{false};
+  std::binary_semaphore callback_done{0};
+
+  stream.write_call(make_record(call_msg<queued_callback_proc>()),
+                    [&](rpc_msg *msg, BufView) {
+                      reported_failure = msg == nullptr;
+                      ++callback_count;
+                      callback_done.release();
+                    });
+
+  stream.stop();
+
+  EXPECT_TRUE(callback_done.try_acquire_for(std::chrono::milliseconds(50)))
+      << "stop() left a queued client callback stranded; the send_call() that "
+         "queued it would block forever";
+  // stop() is one-shot, and the stream's destructor calls it again, so the
+  // callback must run exactly once with a failure indication.
+  EXPECT_EQ(callback_count.load(), 1);
+  EXPECT_TRUE(reported_failure.load());
 }
 
 } // namespace x23

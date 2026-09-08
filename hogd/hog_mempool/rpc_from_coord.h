@@ -24,6 +24,7 @@
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -306,34 +307,27 @@ public:
     co_return ret;
   }
 
-  x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
-    x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
+    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
       ret.resize(tx_hashes.size());
       co_return ret;
     }
     ret.reserve(tx_hashes.size());
     for (const TransactionHash &tx_hash : tx_hashes) {
-      std::shared_ptr<const SignedTransaction> tx =
-          scheduler_->find_tx(tx_hash);
-      if (tx) {
-        // This is a bit awkward, but I need to copy [tx] into an [x23::Ptr]
-        // using [x23::Ptr]'s value constructor rather than just use the
-        // existing [tx] pointer. This avoids the issue where [tx] is freed from
-        // the scheduler by another thread before we can serialize and return
-        // the tx from this RPC.
-        //
-        // Even if we hold [scheduler_->global_lock_] to protect the txs rather
-        // than copy them into [tx_store], the lock is released at the end of
-        // this function, which is *before* the txs are accessed and serialized
-        // by x23. So that is still not safe.
-        ret.push_back(x23::Ptr<SignedTransaction>(*tx));
-      }
-      else {
-        ret.push_back(nullptr);
-      }
+      // [find_tx] hands back a reference into the scheduler's tx store, and
+      // the reply holds that reference until x23 has serialized the response,
+      // so the tx cannot be freed by another thread in between.  That is what
+      // the copy through [x23::Ptr]'s value constructor used to buy, and it
+      // was paying for it with a deep copy of the whole transaction --
+      // including its unbounded [Calldata] -- for every hash resolved.
+      //
+      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
+      // is an ownership change, not a wire change.
+      ret.push_back(
+          x23::XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
 
     co_return ret;
@@ -362,7 +356,14 @@ public:
     }
   }
 
+  // Hashes a txset this node built itself. Fatal if [hashes] repeats a
+  // transaction hash.
   static SHA256Hash get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
+
+  // Hashes a txset that came off the wire. Returns nullopt if [hashes] repeats
+  // a transaction hash, which no well-formed nomination does.
+  static std::optional<SHA256Hash>
+  try_get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
@@ -483,8 +484,22 @@ private:
     {
       DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
       if (db_res.result() == DbSchedResult::DbSchedResultOK) {
-        last_committed_block_ = db_res.db_tip();
-        CHECK_GE(last_committed_block_.value.proposal_header.block_height, 0);
+        const DbTip &recovered_tip = db_res.db_tip();
+        CHECK_GE(recovered_tip.value.proposal_header.block_height, 0);
+        // The recovered tip is the identity of the chain behind hog_db. No
+        // registration card carries a network hash, so this is the only place
+        // a shard holding another network's state can be caught before its tip
+        // is published, seeds the scheduler, and reaches every executor. The
+        // failure surfaces to the coordinator as a rejected intro.
+        if (recovered_tip.value.proposal_header.network_hash != network_hash_) {
+          throw std::runtime_error(std::format(
+              "recovered chain network hash {} does not match requested "
+              "network hash {}",
+              format_network_hash(
+                  recovered_tip.value.proposal_header.network_hash),
+              format_network_hash(network_hash_)));
+        }
+        last_committed_block_ = recovered_tip;
         auth_data_height_.store(
             last_committed_block_.value.proposal_header.block_height);
       }

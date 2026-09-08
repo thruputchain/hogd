@@ -104,6 +104,16 @@ pull_origin(const IndexerOutboxEpochOriginInfo &origin)
   };
 }
 
+// Initialized and CaughtUp share the cursor arm; CaughtUp is Initialized plus
+// a request to wait at the tail.
+bool
+carries_cursor(const IndexerProgress &progress)
+{
+  using enum IndexerProgressState;
+  return progress.state() == IndexerProgressInitialized ||
+         progress.state() == IndexerProgressCaughtUp;
+}
+
 } // namespace
 
 EventRPCContext::EventRPCContext(std::string_view work_directory)
@@ -111,6 +121,34 @@ EventRPCContext::EventRPCContext(std::string_view work_directory)
     indexer_outbox_store_(open_indexer_outbox_store(work_directory))
 {
   tx_failure_mailbox_.reserve(kMaxTxFailureNotices);
+}
+
+void
+EventRPCContext::release_indexer_pulls()
+{
+  // Not a coroutine -- the caller is a destructor -- so hop onto the pool and
+  // block on the result. The tail does not move, so woken handlers answer
+  // rather than re-park.
+  [](EventRPCContext &self) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    x23::CoroGuard guard;
+    co_await guard(self.outbox_commit_lock_);
+    self.publish_indexer_wake();
+  } (*this)();
+}
+
+void
+EventRPCContext::publish_indexer_wake()
+{
+  indexer_publications_.rmw([](std::uint64_t &count) { ++count; });
+  // broadcast() only schedules the waiters, so it is safe under the lock. It
+  // defaults to the calling thread's pool, which is null when a caller such
+  // as reconcile_outbox_tip runs inline on a non-pool thread.
+  auto *pool = x23::ThreadPool::get_thread_pool();
+  if (pool == nullptr) {
+    pool = &default_threadpool();
+  }
+  indexer_publications_.broadcast(pool);
 }
 
 x23::Async<EventStatus<void>>
@@ -406,6 +444,9 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   }
   if (finalized_indexer_tail_) {
     finalized_indexer_tail_ = block_height;
+    // Bumped under the publication lock: a pull that sampled the counter under
+    // this same lock either already saw the new tail or wakes on this bump.
+    publish_indexer_wake();
   }
 
   outbox_guard.reset();
@@ -704,11 +745,21 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   }
   indexer_origins_ = std::move(*origins);
   outbox_reconciled_.store(true, std::memory_order_release);
+  // A pull parked across a re-reconcile must re-read the tail it installed.
+  publish_indexer_wake();
   co_return EventStatus<void>();
 }
 
 x23::Async<EventIndexerPullResult>
 EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
+{
+  static const std::atomic<bool> never_draining{false};
+  co_return co_await pull_indexer_next(request, never_draining);
+}
+
+x23::Async<EventIndexerPullResult>
+EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request,
+                                   const std::atomic<bool> &draining)
 {
   using enum EventIndexerPullOutcome;
   if (request.protocol != version::kHogdProtocol()) {
@@ -735,8 +786,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     }
     current_origin = *current_indexer_origin_;
     finalized_tail = *finalized_indexer_tail_;
-    if (request.progress.state() ==
-        IndexerProgressState::IndexerProgressInitialized) {
+    if (carries_cursor(request.progress)) {
       const auto it =
           std::ranges::find_if(indexer_origins_, [&](const auto &o) {
             return o.protocol == request.progress.initialized().origin.protocol;
@@ -755,8 +805,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
   }
 
   BlockHeight next_height = response_origin.first_height;
-  if (request.progress.state() ==
-      IndexerProgressState::IndexerProgressInitialized) {
+  if (carries_cursor(request.progress)) {
     const IndexerInitializedProgress &progress = request.progress.initialized();
     if (!retained_origin) {
       co_return pull_failure(EventIndexerPullProgressConflict,
@@ -867,11 +916,21 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     }
   }
 
-  if (next_height > finalized_tail ||
-      (next_height == INT64_MAX &&
-       request.progress.state() ==
-           IndexerProgressState::IndexerProgressInitialized &&
-       request.progress.initialized().contiguous_height == INT64_MAX)) {
+  // True when the caller has nothing left to pull: past the tail, or at the
+  // exhausted height.
+  const auto caught_up_at = [&](BlockHeight tail) {
+    return next_height > tail ||
+           (next_height == INT64_MAX && carries_cursor(request.progress) &&
+            request.progress.initialized().contiguous_height == INT64_MAX);
+  };
+
+  // Park at the tail instead of answering "caught up" and being asked again
+  // later; at the tip that re-ask, not the ingest, was the dominant term in
+  // how long a committed block took to become queryable. Each pass re-reads
+  // the tail under the publication lock, and a pass that finds a block falls
+  // through to serve it.
+  bool woken = false;
+  while (caught_up_at(finalized_tail)) {
     x23::CoroGuard guard;
     co_await guard(outbox_commit_lock_);
     if (!outbox_reconciled_.load(std::memory_order_acquire) ||
@@ -884,13 +943,52 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
                              "event outbox origin changed");
     }
     finalized_tail = *finalized_indexer_tail_;
-    if (next_height > finalized_tail ||
-        (next_height == INT64_MAX &&
-         request.progress.state() ==
-             IndexerProgressState::IndexerProgressInitialized &&
-         request.progress.initialized().contiguous_height == INT64_MAX)) {
+    if (!caught_up_at(finalized_tail)) {
+      break;
+    }
+    if (woken) {
+      // Woken without a publication for this caller: a release at teardown,
+      // or a re-reconcile that kept the tail. Answer so the server can drain;
+      // a live client simply asks again.
       co_return pull_caught_up(response_origin);
     }
+    // The progress state says which question this is. Initialized asks
+    // whether it is caught up and needs the answer now: IndexerPullController
+    // sends that on the first pull of every connection and marks itself
+    // caught up only on the reply, which gates its health and startup. A
+    // client that reconnected or restarted with persisted progress is asking
+    // exactly that, and must not be mistaken for one that wants to wait.
+    // CaughtUp has been answered on this connection already and is asking to
+    // be told about the next block, so it parks here.
+    if (request.progress.state() !=
+        IndexerProgressState::IndexerProgressCaughtUp) {
+      co_return pull_caught_up(response_origin);
+    }
+    // Sampled under the publication lock, which is also where commit bumps
+    // it, so wait(seen) cannot miss a publication that lands after the tail
+    // was read: it simply does not suspend. The lock is released first;
+    // commit needs it to publish the very record being waited for.
+    const std::uint64_t seen = indexer_publications_.load();
+    // Also under the lock: ~EventIndexerServer sets [draining] before
+    // release_indexer_pulls() bumps the counter under this same lock. A pull
+    // whose sample precedes the release is woken by that bump; one whose
+    // sample follows it reads the flag here and answers instead of parking
+    // on a count nothing will move past.
+    if (draining.load(std::memory_order_acquire)) {
+      co_return pull_caught_up(response_origin);
+    }
+    // Checked after the sample: a notice enqueued before it is in the mailbox
+    // here, and one enqueued after it bumps past [seen] so wait() does not
+    // suspend. Either way the client is answered, drains, asks again, parks.
+    {
+      const std::lock_guard notices(tx_failure_mutex_);
+      if (!tx_failure_mailbox_.empty()) {
+        co_return pull_caught_up(response_origin);
+      }
+    }
+    guard.reset();
+    co_await indexer_publications_.wait(seen);
+    woken = true;
   }
 
   auto record =
@@ -938,9 +1036,10 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox identity is invalid");
   }
-  // The loaded record already validated both consensus roots and the header's
-  // consensus_hash, so preserve that durable identity instead of hashing the
-  // consensus value again.
+  // The loaded record validated the header's consensus_hash, and the store
+  // has established the file's roots -- when it published or promoted the
+  // record, or once on this process's first load -- so preserve that durable
+  // identity instead of hashing the consensus value again.
   IndexerCommittedBlock block{
       .payload = std::move(loaded->payload),
       .identity =
@@ -967,15 +1066,21 @@ void
 EventRPCContext::enqueue_tx_failure(TransactionHash tx_hash,
                                     TxFailureDiagnostic diagnostic)
 {
-  std::lock_guard guard(tx_failure_mutex_);
-  if (tx_failure_mailbox_.size() == kMaxTxFailureNotices) {
-    warn_every_n_sec(5.0F, "tx-failure notice dropped: mailbox is full");
-    return;
+  {
+    std::lock_guard guard(tx_failure_mutex_);
+    if (tx_failure_mailbox_.size() == kMaxTxFailureNotices) {
+      warn_every_n_sec(5.0F, "tx-failure notice dropped: mailbox is full");
+      return;
+    }
+    tx_failure_mailbox_.push_back(IndexerTxFailureNotice{
+        .tx_hash = std::move(tx_hash),
+        .diagnostic = std::move(diagnostic),
+    });
   }
-  tx_failure_mailbox_.push_back(IndexerTxFailureNotice{
-      .tx_hash = std::move(tx_hash),
-      .diagnostic = std::move(diagnostic),
-  });
+  // The indexer drains notices only after a block pull returns, so a pull
+  // parked at the tip would hold this one until the next commit. Wake it: it
+  // answers caught-up and the client drains.
+  publish_indexer_wake();
 }
 
 IndexerTxFailureNoticeBatch

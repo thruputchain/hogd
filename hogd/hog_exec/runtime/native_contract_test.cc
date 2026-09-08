@@ -102,6 +102,7 @@ protected:
 TEST_F(NativeContractTest, BasicInstantiate)
 {
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -348,6 +349,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressMiddle,
                                               kAddressEntry};
@@ -443,6 +445,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -585,6 +588,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -684,6 +688,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -822,6 +827,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   auto context = make_context();
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -879,6 +885,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 TEST_F(NativeContractTest, InvalidNativeContractIdRejectedBeforeDeploy)
 {
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract malicious_contract(ContractType::kNative);
   malicious_contract.native_contract_id() =
@@ -1004,6 +1011,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract parent_contract(ContractType::kNative);
   parent_contract.native_contract_id() =
@@ -1096,6 +1104,7 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
   ContractAddress address{};
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =

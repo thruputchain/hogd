@@ -36,7 +36,7 @@ syscall_SHA256_inner(SystemCallHandler &handler,
     trace_data->outputs.emplace(SyscallSHA256Outputs{.hash = output_hash});
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{SHA256HashCost(input_buffer.size())}};
+          WrappedGasAmount{GasCost::sha256_hash(input_buffer.size())}};
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -55,10 +55,10 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
   // Finalize's flat one does not cover. Both are one block, and the call that
   // caused them already paid the stream cost and the crossing -- more than the
   // block is worth. Splitting cannot exploit it either: the block counts here
-  // and in SHA256HashCost differ by at most two, so streaming never undercuts
-  // the one-shot (Sha256GasModelTest pins that).
+  // and in GasCost::sha256_hash differ by at most two, so streaming never
+  // undercuts the one-shot (Sha256GasModelTest pins that).
   return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{SHA256UpdateCost(input_buffer.size())}};
+          WrappedGasAmount{GasCost::sha256_update(input_buffer.size())}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -70,8 +70,9 @@ syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
     return {r.error().code(), WrappedGasAmount{0}};
   }
 
+  // Cloning a stream compresses nothing, so the stream is the whole cost.
   return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{kSHA256CopyCost}};
+          WrappedGasAmount{kSHA256StreamCost}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -88,8 +89,10 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
     trace_data->outputs.emplace(
         SyscallSHA256FinalizeOutputs{.hash = output_output});
   }
+  // The padding block the streaming path has not compressed yet. Finalize
+  // erases a stream rather than creating one, so it pays no stream cost.
   return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{kSHA256FinalizeCost}};
+          WrappedGasAmount{kSHA256HashBlockCost}};
 }
 
 // Verifies a cryptographic signature against a message using the provided
@@ -118,7 +121,7 @@ syscall_VerifySignature_inner(int32_t input_scheme,
     // when the encoded point fails to decompress, which the attacker choosing
     // the signature controls, so a free failure path sells verification for
     // the price of the crossing.
-    const WrappedGasAmount gas{VerifySignatureCost(input_message.size())};
+    const WrappedGasAmount gas{GasCost::verify_signature(input_message.size())};
     if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         input_signature.subspan<0, sizeof(Ed25519Signature)>(),
                         input_message)) {

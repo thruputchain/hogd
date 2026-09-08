@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <concepts>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -367,14 +368,19 @@ protected:
   }
 
   // Assert two events are identical except for the emitting contract address.
+  // `expected_topics` is the topic count the event's shape implies --- three
+  // for Transfer and Approval (signature + two addresses), two for Mint and
+  // Burn (signature + the one address a supply change names) --- so a backend
+  // that silently reshaped an event fails here rather than matching a
+  // like-shaped sibling.
   static void
   expect_events_match(std::optional<TxEmittedEvent> const &rv32_ev,
                       std::optional<TxEmittedEvent> const &native_ev,
-                      char const *label)
+                      uint32_t expected_topics, char const *label)
   {
     ASSERT_TRUE(rv32_ev.has_value()) << label;
     ASSERT_TRUE(native_ev.has_value()) << label;
-    EXPECT_EQ(rv32_ev->num_topics, 3U) << label;
+    EXPECT_EQ(rv32_ev->num_topics, expected_topics) << label;
     EXPECT_EQ(rv32_ev->num_topics, native_ev->num_topics) << label;
     ASSERT_EQ(rv32_ev->serialized_event.size(),
               native_ev->serialized_event.size())
@@ -411,18 +417,19 @@ TEST_F(NativeRv32TokenEventParityTest,
   EXPECT_EQ(rv32_transfer->contract_address, kRv32Token);
   EXPECT_EQ(native_transfer->contract_address, native_token);
 
-  expect_events_match(rv32_transfer, native_transfer, "transfer");
-  expect_events_match(rv32_approval, native_approval, "adjust_allowance");
-  expect_events_match(rv32_transfer_from, native_transfer_from,
+  expect_events_match(rv32_transfer, native_transfer, 3U, "transfer");
+  expect_events_match(rv32_approval, native_approval, 3U, "adjust_allowance");
+  expect_events_match(rv32_transfer_from, native_transfer_from, 3U,
                       "transfer_from");
 }
 
-// Mint and burn Transfer events: a mint emits Transfer(zero -> receiver) and
-// a burn emits Transfer(owner -> zero), byte-identically on the rv32
-// itc_erc20 and the native precompile (modulo the emitting contract address).
-// Both run from the genesis root address: the native token's mint/burn are
-// gated on it, and the rv32 token is initialized with it as owner so the same
-// caller passes both gates.
+// Mint and burn events: a supply change is its own event on
+// groundhog-erc20-if, not a Transfer from or to the zero address, so a mint
+// emits Mint(receiver) and a burn emits Burn(owner) --- two topics each ---
+// byte-identically on the rv32 itc_erc20 and the native precompile (modulo
+// the emitting contract address). Both run from the genesis root address: the
+// native token's mint/burn are gated on it, and the rv32 token is initialized
+// with it as owner so the same caller passes both gates.
 TEST_F(NativeRv32TokenEventParityTest, MintBurnEventsMatchRv32AndNative)
 {
   // --- rv32 itc_erc20: initialize with the genesis root as owner. ---
@@ -443,13 +450,30 @@ TEST_F(NativeRv32TokenEventParityTest, MintBurnEventsMatchRv32AndNative)
   EXPECT_EQ(rv32_mint->contract_address, kRv32Token);
   EXPECT_EQ(native_mint->contract_address, native_token);
 
-  expect_events_match(rv32_mint, native_mint, "mint");
-  expect_events_match(rv32_burn, native_burn, "burn");
+  expect_events_match(rv32_mint, native_mint, 2U, "mint");
+  expect_events_match(rv32_burn, native_burn, 2U, "burn");
 
-  // Non-vacuity: mint and burn events differ (from/to roles are swapped and
-  // the amounts differ), so the two matches above pin two distinct payloads.
+  // Non-vacuity: mint and burn events differ (distinct signature topics and
+  // distinct amounts), so the two matches above pin two distinct payloads.
   ASSERT_TRUE(rv32_burn.has_value());
+  ASSERT_TRUE(native_burn.has_value());
   EXPECT_NE(rv32_mint->serialized_event, rv32_burn->serialized_event);
+
+  // ...and neither is a Transfer wearing a different address: a mint carries
+  // the Mint signature and a burn the Burn signature, which is the whole
+  // point of the interface change.
+  auto signature_topic = [](TxEmittedEvent const &ev) {
+    Topic topic{};
+    EXPECT_GE(ev.serialized_event.size(), sizeof(Topic));
+    if (ev.serialized_event.size() >= sizeof(Topic)) {
+      std::memcpy(topic.data(), ev.serialized_event.data(), sizeof(Topic));
+    }
+    return topic;
+  };
+  EXPECT_EQ(signature_topic(*native_mint), native_token_mint_event_signature());
+  EXPECT_EQ(signature_topic(*native_burn), native_token_burn_event_signature());
+  EXPECT_NE(signature_topic(*native_mint),
+            native_token_transfer_event_signature());
 }
 
 // hogd#1918: a decrement below a fresh allowance, followed by a sibling
@@ -483,7 +507,7 @@ TEST_F(NativeRv32TokenEventParityTest,
   EXPECT_EQ(native_approval->contract_address, native_token);
 
   // The single surviving event is the increment's, identical on both backends.
-  expect_events_match(rv32_approval, native_approval,
+  expect_events_match(rv32_approval, native_approval, 3U,
                       "netted negative approval");
 
   // ...and it really is the increment's event, not the rejected decrement's:
@@ -491,8 +515,9 @@ TEST_F(NativeRv32TokenEventParityTest,
   // run afterwards emits a byte-identical event on each backend.
   auto rv32_plain = run_op(kMethodAdjustAllowance, kAlice, kRv32Token);
   auto native_plain = run_op(kMethodAdjustAllowance, kAlice, native_token);
-  expect_events_match(rv32_approval, rv32_plain, "rv32 netted vs plain");
-  expect_events_match(native_approval, native_plain, "native netted vs plain");
+  expect_events_match(rv32_approval, rv32_plain, 3U, "rv32 netted vs plain");
+  expect_events_match(native_approval, native_plain, 3U,
+                      "native netted vs plain");
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -31,6 +32,12 @@ namespace hogd {
 class EventRPCContext {
 public:
   explicit EventRPCContext(std::string_view work_directory);
+
+  // Wakes every indexer pull parked on the next publication so it answers
+  // now. ~EventIndexerServer calls this before RpcServer drains: destruction
+  // waits for in-flight handlers but cannot cancel a suspended one, and a
+  // parked pull is exactly that.
+  void release_indexer_pulls();
 
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
@@ -65,6 +72,14 @@ public:
   // rpc from the executor is in flight.
   x23::Async<void> gc_context(BlockID block_id);
 
+  // [draining] belongs to the RpcServer serving the request. Its destructor
+  // sets it and then calls release_indexer_pulls(); from then on a pull that
+  // would park is answered instead, so one arriving after the release cannot
+  // park on a count nothing will move past and pin the server's teardown.
+  x23::Async<EventIndexerPullResult>
+  pull_indexer_next(const EventIndexerPullRequest &request,
+                    const std::atomic<bool> &draining);
+  // For callers with no server to drain.
   x23::Async<EventIndexerPullResult>
   pull_indexer_next(const EventIndexerPullRequest &request);
 
@@ -98,6 +113,12 @@ private:
   // Drops one block's claim on [hash], unlinking the file when the last one
   // goes away.  Caller holds lock_.
   void release_events_file(SHA256Hash const &hash);
+
+  // Bumps indexer_publications_ and schedules its waiters. The tail path
+  // calls it under outbox_commit_lock_ so a handler's sample and commit's bump
+  // are ordered; the notice path needs no lock, since a parked handler checks
+  // the mailbox after sampling.
+  void publish_indexer_wake();
 
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
@@ -148,6 +169,12 @@ private:
   std::optional<BlockHeight> finalized_indexer_tail_;
   std::optional<IndexerOutboxOrigin> current_indexer_origin_;
   std::vector<IndexerOutboxEpochOriginInfo> indexer_origins_;
+
+  // Publication counter that caught-up indexer pulls park on. Bumped and
+  // broadcast under outbox_commit_lock_ whenever the finalized tail moves, and
+  // once more on release. A parked handler re-reads the tail on wake: a moved
+  // tail is served, an unmoved one is answered rather than re-parked.
+  x23::CoroFutex<std::uint64_t> indexer_publications_{0};
 
   std::mutex tx_failure_mutex_;
   std::vector<IndexerTxFailureNotice> tx_failure_mailbox_;

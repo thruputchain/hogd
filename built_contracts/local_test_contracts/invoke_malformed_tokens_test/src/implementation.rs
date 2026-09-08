@@ -38,6 +38,7 @@ fn inputs() -> sys::CopyableInvokeInputs {
         entrypoint_id: UNREGISTERED_ENTRYPOINT_ID,
         gas_limit: u64::MAX,
         flags: 0,
+        reserved: 0,
     }
 }
 

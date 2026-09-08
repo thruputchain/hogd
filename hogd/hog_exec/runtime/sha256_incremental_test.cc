@@ -259,8 +259,9 @@ private:
   static NetworkConfig genesis_network_config()
   {
     NetworkConfig config = stock_network_config();
-    set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers,
-                     kConfiguredMaxBuffers);
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                   kConfiguredMaxBuffers);
     return config;
   }
 };

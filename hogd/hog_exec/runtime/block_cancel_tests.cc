@@ -250,7 +250,12 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
-                                           .calldata = {}}}},
+                                           .calldata = {}},
+                            // Non-expired: this test drives a cancellation
+                            // abort, and a default (height-0) uniquifier is
+                            // rejected as expired during initial validation
+                            // before the canceled block is ever touched.
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   // keep a reference to the storage snapshot cache to avoid invalidating it
