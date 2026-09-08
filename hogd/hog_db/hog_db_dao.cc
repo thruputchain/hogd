@@ -120,7 +120,7 @@ HogDbDAO::validate_recovered_state()
   for_each_state_item([&corrupt](std::span<const std::byte> key, uint8_t type,
                                  std::span<const std::byte> value) {
     // key is non-empty here: for_each_state_item filters on is_state_item.
-    const Prefix prefix = static_cast<Prefix>(key[0]);
+    const auto prefix = static_cast<Prefix>(key[0]);
     if (!is_canonical_state_key_length(prefix, key.size())) {
       error("recovered state key has non-canonical length {} for prefix {}",
             key.size(), std::to_underlying(prefix));
