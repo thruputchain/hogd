@@ -214,6 +214,31 @@ TEST(MerkleTriePrefix, EmptyKey)
   EXPECT_TRUE(trie.get_proof_by_node(key).second.empty());
 }
 
+// Exercises a bump-allocator-backed [MerkleTriePrefix] end to end. Constructing
+// it drives [BumpAllocator::alloc_new_region], which maps the backing region
+// and validates its page alignment; the insert/find/hash path then allocates
+// nodes out of that region.
+TEST(MerkleTriePrefix, BumpAllocatorBasic)
+{
+  MerkleTriePrefix trie(Allocator<Node>::Type::kBump);
+
+  HexArray key("abc");
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
+  EXPECT_EQ(trie.size(), 1UL);
+
+  trie.generate_all_hashes();
+  EXPECT_TRUE(trie.check());
+
+  SHA256Hash *value_hash;
+  void *cookie;
+  EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value));
+  MerkleTriePrefix::find_end(cookie);
+}
+
 // These tests add an empty value to the trie.
 TEST(MerkleTrie, EmptyValue)
 {
