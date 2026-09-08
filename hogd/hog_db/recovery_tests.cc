@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string_view>
 #include <system_error>
@@ -491,14 +490,15 @@ TEST(RecoveryTests, ValidateRecoveredStateRejectsBoundaryShiftedItems)
 {
   constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
 
-  auto reopen_and_validate =
-      [](Directory &dir) -> std::optional<HogDbStatus<void>> {
+  // Reopens the persisted database and asserts recovery rejects it as corrupt.
+  auto expect_rejected_on_reopen = [](Directory &dir) {
     DBStatus<std::unique_ptr<Database>> db =
         Database::open(dir.get_path(), kHeapSize, 0);
-    if (!db.has_value())
-      return std::nullopt;
+    ASSERT_TRUE(db.has_value());
     HogDbDAO dao(RAMDB(std::move(*db)));
-    return dao.validate_recovered_state();
+    HogDbStatus<void> ok = dao.validate_recovered_state();
+    ASSERT_FALSE(ok.has_value());
+    EXPECT_EQ(ok.error().code(), HogDbCode::kCorruption);
   };
 
   // A kNNInt128 value that lost its leading byte to the key: 15 bytes under a
@@ -519,10 +519,7 @@ TEST(RecoveryTests, ValidateRecoveredStateRejectsBoundaryShiftedItems)
                       .has_value());
       ASSERT_TRUE(dao.commit().has_value());
     }
-    std::optional<HogDbStatus<void>> ok = reopen_and_validate(*dir);
-    ASSERT_TRUE(ok.has_value());
-    ASSERT_FALSE(ok->has_value());
-    EXPECT_EQ(ok->error().code(), HogDbCode::kCorruption);
+    expect_rejected_on_reopen(*dir);
   }
 
   // A contract-data key that gained the byte the value lost: 66 bytes with a
@@ -541,10 +538,7 @@ TEST(RecoveryTests, ValidateRecoveredStateRejectsBoundaryShiftedItems)
       ASSERT_TRUE(dao.get_ramdb().put(long_key, kNNInt128, value).has_value());
       ASSERT_TRUE(dao.commit().has_value());
     }
-    std::optional<HogDbStatus<void>> ok = reopen_and_validate(*dir);
-    ASSERT_TRUE(ok.has_value());
-    ASSERT_FALSE(ok->has_value());
-    EXPECT_EQ(ok->error().code(), HogDbCode::kCorruption);
+    expect_rejected_on_reopen(*dir);
   }
 
   // Non-contract-data prefixes are covered too: an address-keyed row (canonical
@@ -564,10 +558,7 @@ TEST(RecoveryTests, ValidateRecoveredStateRejectsBoundaryShiftedItems)
           dao.get_ramdb().put(long_addr_key, kNNInt128, value).has_value());
       ASSERT_TRUE(dao.commit().has_value());
     }
-    std::optional<HogDbStatus<void>> ok = reopen_and_validate(*dir);
-    ASSERT_TRUE(ok.has_value());
-    ASSERT_FALSE(ok->has_value());
-    EXPECT_EQ(ok->error().code(), HogDbCode::kCorruption);
+    expect_rejected_on_reopen(*dir);
   }
 }
 

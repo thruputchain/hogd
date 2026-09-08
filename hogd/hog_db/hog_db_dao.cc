@@ -79,16 +79,16 @@ is_canonical_state_key_length(Prefix prefix, size_t key_len)
     return key_len == kRetrocausalQueueBlockKeySize;
   case Prefix::kContractCode:
   case Prefix::kContractRefcount:
-    // Contract-code rows are content-addressed and immutable, so no later
-    // canonical-key update can miss a boundary-shifted ghost; kContractRefcount
-    // currently has no writer. Neither is exposed to the divergence, so accept
-    // whatever recovers rather than pin a key length here.
-    return true;
   case Prefix::kHogAge:
   case Prefix::kGlobalMetadata:
-    // Not state items (is_state_item is false), so unreachable from recovery.
-    return true;
+    break;
   }
+  // Contract-code rows are content-addressed and immutable, so no later
+  // canonical-key update can miss a boundary-shifted ghost, and
+  // kContractRefcount currently has no writer; neither is exposed to the
+  // divergence. kHogAge and kGlobalMetadata are not state items (is_state_item
+  // is false), so they never reach recovery here. Accept any length for these
+  // rather than pin one.
   return true;
 }
 
@@ -120,7 +120,7 @@ HogDbDAO::validate_recovered_state()
   for_each_state_item([&corrupt](std::span<const std::byte> key, uint8_t type,
                                  std::span<const std::byte> value) {
     // key is non-empty here: for_each_state_item filters on is_state_item.
-    Prefix prefix = static_cast<Prefix>(key[0]);
+    const Prefix prefix = static_cast<Prefix>(key[0]);
     if (!is_canonical_state_key_length(prefix, key.size())) {
       error("recovered state key has non-canonical length {} for prefix {}",
             key.size(), std::to_underlying(prefix));
