@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <expected>
 #include <format>
 #include <limits>
@@ -374,9 +375,12 @@ public:
     }
   }
 
+  // Both helpers take the tx by value and keep it alive in handler_txs_: the
+  // handler borrows tx.contracts_to_deploy for its whole lifetime, so a
+  // caller-supplied temporary must be owned by the framework, not borrowed
+  // from the call expression.
   SystemCallHandler
-  make_new_system_call_handler(Transaction const &tx,
-                               RuntimeContext &runtime_context,
+  make_new_system_call_handler(Transaction tx, RuntimeContext &runtime_context,
                                EphemeralTxIdentifier *identifier = nullptr)
   {
     ensure_db_tip_loaded();
@@ -385,19 +389,21 @@ public:
       identifier->block_id = block_number_;
       identifier->tx_id = txid;
     }
-    return SystemCallHandler(tx, *storage_snapshot_cache_,
+    handler_txs_.push_back(std::move(tx));
+    return SystemCallHandler(handler_txs_.back(), *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
                              ProposalModeCtor{}, runtime_context);
   }
 
   SystemCallHandler make_new_system_call_handler_validation(
-      Transaction const &tx, RuntimeContext &runtime_context,
+      Transaction tx, RuntimeContext &runtime_context,
       NondeterministicProposalData proposal_data)
   {
     ensure_db_tip_loaded();
     auto txid = allocate_txid();
-    return SystemCallHandler(tx, *storage_snapshot_cache_,
+    handler_txs_.push_back(std::move(tx));
+    return SystemCallHandler(handler_txs_.back(), *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
                              ValidationModeCtor{std::move(proposal_data)},
@@ -817,6 +823,11 @@ private:
   EventServerWrapper event_server_wrapper_;
 
   std::shared_ptr<StorageSnapshotCache> storage_snapshot_cache_;
+
+  // Owns every transaction handed to make_new_system_call_handler*: the
+  // handlers borrow tx.contracts_to_deploy for their whole lifetime. A deque
+  // so growth never moves entries a live handler still references.
+  std::deque<Transaction> handler_txs_;
 
   std::variant<MockDBWrapper, HogdbWrapper> db_wrapper_;
   std::unique_ptr<Logger> previous_logger_ = nullptr;

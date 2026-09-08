@@ -1,4 +1,5 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
@@ -9,9 +10,9 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
-#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "db_conflict.hh"
 #include "event.hh"
 #include "exec_result.hh"
+#include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -31,10 +33,9 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/utilities.h"
-#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
@@ -156,20 +157,6 @@ SystemCallHandler::SystemCallHandler(
     source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
-    newly_created_contracts_([&] {
-      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                         SipHash24Hasher>
-          contracts;
-      contracts.reserve(tx.contracts_to_deploy.size());
-
-      for (auto const &contract : tx.contracts_to_deploy) {
-        contracts.emplace(sha256(contract),
-                          std::make_unique<const Contract>(contract));
-      }
-      return contracts;
-    }()),
-    has_duplicate_attachment_(newly_created_contracts_.size() !=
-                              tx.contracts_to_deploy.size()),
     execution_mode_data_(
         [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
           if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
@@ -180,8 +167,13 @@ SystemCallHandler::SystemCallHandler(
                                    std::get<ValidationModeCtor>(
                                        execution_mode_ctor)};
         }(std::move(execution_mode_ctor))),
+    contracts_to_deploy_(tx.contracts_to_deploy),
     snapshot_cache_(snapshot_cache)
 {}
+
+namespace {
+constexpr NewContractBatch kEmptyVec = {};
+} // namespace
 
 SystemCallHandler::SystemCallHandler(
     StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
@@ -196,7 +188,6 @@ SystemCallHandler::SystemCallHandler(
         },
         db_proxy_),
     source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
-    newly_created_contracts_(),
     execution_mode_data_(
         [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
           if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
@@ -211,10 +202,10 @@ SystemCallHandler::SystemCallHandler(
                                    std::get<ValidationModeCtor>(
                                        execution_mode_ctor)};
         }(std::move(execution_mode_ctor))),
-    snapshot_cache_(snapshot_cache)
+    contracts_to_deploy_(kEmptyVec), snapshot_cache_(snapshot_cache)
 {}
 
-x23::Async<SystemStatus<void>>
+std::pair<InvokeStatus<void>, GasAmount>
 SystemCallHandler::perform_initial_validation()
 {
   // Reject a transaction whose replay uniquifier has already expired before any
@@ -228,10 +219,8 @@ SystemCallHandler::perform_initial_validation()
       // validation mode. In proposal mode this is only reachable when the
       // scheduler tried to propose a transaction it should have already dropped
       // -- try_commit_transaction() asserts (debug only) that any proposal-mode
-      // ValidationFailure is in fact a bad expiry height.
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
-      co_return SystemStatus<void>{};
+      // ValidationFailure came from this initial validation.
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }
 
@@ -241,101 +230,44 @@ SystemCallHandler::perform_initial_validation()
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.validate()) {
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
-      co_return SystemStatus<void>{};
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
-  }
-
-  // TODO(geoff): Adjust if some assumption on the rest of the system changes
-  //
-  // At this point, we do not know the provenance of signed_tx_.  As such,
-  // an attached contract may or may not have been validated by this point.
-  //
-  // We should validate contracts as they are sent to us from clients (before
-  // broadcasting to other nodes) and we may wish to validate them as they are
-  // broadcast to us from other nodes. But until we have a concrete design of
-  // the coordinator and know what is is and is not doing, we conservatively
-  // validate contracts here.
-  //
-  // If we make the assumption that all contracts are validated by the time they
-  // get to the executor, this check could be removed.
-
-  // Rejected rather than deduplicated: two different transaction encodings
-  // would otherwise have identical effect.
-  if (has_duplicate_attachment_) {
-    error("Transaction attaches the same contract more than once; {} are "
-          "distinct",
-          newly_created_contracts_.size());
-    cumulative_invoke_result_.result_ =
-        InvokeError{InvokeErrorCode::Deterministic};
-    co_return SystemStatus<void>{};
   }
 
   // Without this gate an oversized attachment set fails only at commit, where
   // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
-      newly_created_contracts_.size() > permitted) {
+      contracts_to_deploy_.size() > permitted) {
     error("Transaction attaches {} contracts; chain permits {}",
-          newly_created_contracts_.size(), permitted);
-    cumulative_invoke_result_.result_ =
-        InvokeError{InvokeErrorCode::Deterministic};
-    co_return SystemStatus<void>{};
+          contracts_to_deploy_.size(), permitted);
+    return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
-  for (auto const &[hash, contract] : newly_created_contracts_) {
-    // Enforce the contract size limit before verification: the limit is
-    // runtime-agnostic, and rejecting here -- before any body execution --
-    // guarantees commit_transaction never stages an oversized code row
-    // (#2569). Same deterministic classification as a failed
-    // verify_contract.
-    if (contract_blob_size(*contract) > kMaxContractSizeBytes) {
-      error("Attached contract blob exceeds kMaxContractSizeBytes");
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::Deterministic};
-      co_return SystemStatus<void>{};
+  for (auto const &contract : contracts_to_deploy_) {
+    if (contract_blob_size(contract) > kMaxContractSizeBytes) {
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
-    // Native contracts are registered at genesis, never deployed by a
-    // transaction: is_banned_redeploy_native_contract() rejects every id, so
-    // an attached one could never reach deploy_contract successfully.
-    //
-    // TODO(geoff): filter these out in the scheduler, which is what should
-    // stop one being proposed in the first place. Until then the
-    // classification depends on where the transaction came from: in proposal
-    // mode it is ours and the scheduler should already have dropped it, so
-    // reaching here is an internal inconsistency; in validation mode it came
-    // from another proposer and is attacker-controlled, so it is a
-    // proposer-attributable rejection and must never be reportable as an
-    // internal error a peer can induce.
-    //
-    // Genesis is unaffected: it installs the native token and wallet through
-    // the deployment prerequisites, not through contracts_to_deploy.
-    if (contract->contract_type() == ContractType::kNative) {
-      error("Attached contract is native; native contracts are not deployable");
-      cumulative_invoke_result_.result_ = InvokeError{
-          std::holds_alternative<ValidationModeData>(execution_mode_data_)
-              ? InvokeErrorCode::ValidationFailure
-              : InvokeErrorCode::Unrecoverable};
-      co_return SystemStatus<void>{};
-    }
-    PreparedContract prepared;
-    auto res = runtime_context_.verify_contract(*contract, prepared);
-    // TODO(geoff): gas costs for verifying contracts
-    if (res != InvokeErrorCode::None) {
-      error("Contract verification failed");
-      cumulative_invoke_result_.result_ = InvokeError{res};
-      co_return SystemStatus<void>{};
-    }
-    // rv32 is the only type that reaches here -- native is rejected above and
-    // an unregistered type fails verification -- and for rv32 verifying an
-    // attachment *is* translating it, so a successful verification always
-    // yields an image. Keep it: this is what stops the first same-transaction
-    // invocation from lowering the identical bytes again, both passes outside
-    // transaction gas (#3536).
-    CHECK(prepared.rv32.has_value());
-    local_preparations_.emplace(hash, std::move(prepared));
   }
-  co_return SystemStatus<void>{};
+
+  // make() allocates proportional to attacker-influenced input (the maps and
+  // each rv32 translation), and this runs inside an x23 coroutine where an
+  // escaping throw is fatal. The old attachment deep copy ran in the ctor
+  // under executor_context's bad_alloc containment; that containment moves
+  // here with the work. Contain bad_alloc only -- allocation-free, so the
+  // handler itself cannot rethrow -- and keep anything else terminating,
+  // since it is a genuine bug.
+  try {
+    auto [res, gas_consumed] =
+        NewContractSet::make(contracts_to_deploy_, runtime_context_);
+    if (!res.has_value()) {
+      return {res.error(), gas_consumed};
+    }
+    newly_created_contracts_ = std::move(*res);
+
+    return {InvokeStatus<void>{}, gas_consumed};
+  } catch (std::bad_alloc const &) {
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+  }
 }
 
 void
@@ -362,13 +294,18 @@ SystemCallHandler::root_invoke()
 {
   // A system error here (e.g. an unreadable db tip during the replay-expiry
   // check) is surfaced as the corresponding invoke error rather than dropped.
-  if (auto res = co_await perform_initial_validation(); !res.has_value()) {
-    cumulative_invoke_result_.result_ = res.error().to_invoke_error();
-  }
-  // if validation fails, cumulative_invoke_result_ is set to the appropriate
-  // error and we return it immediately
-  if (!cumulative_invoke_result_.is_root_success()) {
-    check_final_validation_data();
+  //
+  // TODO(geoff): gas cost calibration -- verification gas is hardwired to 0
+  // today, and only the failure branch below records it. When calibration
+  // lands, the success path must charge it too, or verification becomes free
+  // exactly when it did the most work.
+  if (auto [res, gas_consumed] = perform_initial_validation();
+      !res.has_value()) {
+    initial_validation_rejected_ = true;
+    cumulative_invoke_result_.result_ = res.error();
+    assert(cumulative_invoke_result_.gas_consumed_ == 0);
+    cumulative_invoke_result_.gas_consumed_ = gas_consumed;
+
     // The root invocation is terminally rejected before any frame ran (e.g. an
     // expired uniquifier or a failed contract verification). Mark it
     // finished/finalized so callers treat it as a completed-but-failed root: no
@@ -376,6 +313,7 @@ SystemCallHandler::root_invoke()
     // Fault, and try_commit_transaction() runs its failure path. The test FFI
     // wrapper gates commit on last_frame_finished(), so this lets a rejected
     // transaction surface its ExecResult via try_commit().
+    check_final_validation_data();
     last_frame_finished_ = true;
     finalized_ = true;
     co_return cumulative_invoke_result_;
@@ -533,21 +471,16 @@ SystemCallHandler::try_commit_transaction()
     }
 
     // Proposal mode should never reject a transaction with a ValidationFailure
-    // except when its replay uniquifier was already expired: the scheduler must
-    // not have tried to propose such a transaction in the first place. Assert
-    // that (debug only) so a future proposal-mode validation failure can't slip
-    // through silently -- generalize this once proposal mode gains other ones.
-    //
-    // The tip re-read here cannot fail: reaching a proposal-mode
-    // ValidationFailure means perform_initial_validation() already read the tip
-    // successfully (a failed read there surfaces as Abandon/Unrecoverable, not
-    // ValidationFailure), which pinned the tip on this handler. That pin stays
-    // valid for the whole synchronous root_invoke() -> try_commit_transaction()
-    // window, so re-reading the height here cannot fail.
+    // unless perform_initial_validation() rejected it (an expired replay
+    // uniquifier or a malformed attachment set): the scheduler must not have
+    // tried to propose such a transaction in the first place, and no mid-body
+    // execution path may produce one. Assert that (debug only) so a
+    // proposal-mode validation failure introduced elsewhere can't slip through
+    // silently.
     if constexpr (is_debug_build()) {
       if (error_code == InvokeErrorCode::ValidationFailure &&
           std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
-        CHECK(replay_uniquifier_expired());
+        CHECK(initial_validation_rejected_);
       }
     }
 
@@ -644,7 +577,7 @@ SystemCallHandler::try_commit_transaction()
             .value()
             .get_committed_contracts();
     auto res = co_await db_proxy_.commit_transaction(
-        BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
+        newly_created_contracts_.borrow_contracts(new_contract_hashes));
     if (!res.has_value()) {
       commit_failure = to_exec_result(res.error().code());
     }
@@ -1405,9 +1338,9 @@ x23::Async<SystemStatus<const PreparedContract *>>
 SystemCallHandler::resolve_prepared_contract(SHA256Hash hash)
 {
   // Attachments are prepared once, by perform_initial_validation.
-  auto it = local_preparations_.find(hash);
-  if (it != local_preparations_.end()) {
-    co_return &it->second;
+  auto const *local = newly_created_contracts_.get_prepared_contract(hash);
+  if (local != nullptr) {
+    co_return local;
   }
 
   // Anything else is already committed, and the snapshot cache prepared it
@@ -1431,10 +1364,9 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 {
   // Check cheap in-memory map first before hitting the snapshot cache
   // (which involves a shared_mutex and potentially a database round-trip).
-  auto it = newly_created_contracts_.find(hash);
-  if (it != newly_created_contracts_.end()) {
-    assert(it->second != nullptr);
-    co_return it->second.get();
+  auto const *local = newly_created_contracts_.get_contract_code(hash);
+  if (local != nullptr) {
+    co_return local;
   }
 
   auto entry = co_await snapshot_cache_.try_get_contract_entry(hash);

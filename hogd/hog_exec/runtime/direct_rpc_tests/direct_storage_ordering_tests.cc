@@ -364,8 +364,7 @@ TEST(DirectStorageOversizedFinalCommitBatchTest,
 
   BorrowedContractBatch::hash_set_t hashes{deployed_contract_hash.hash};
   BorrowedContractBatch::contract_map_t contracts;
-  contracts.emplace(deployed_contract_hash.hash,
-                    std::make_unique<const Contract>(contract));
+  contracts.emplace(deployed_contract_hash.hash, &contract);
   BorrowedContractBatch new_contracts(hashes, contracts);
 
   auto res = tx.commit_transaction(new_contracts)();

@@ -1462,10 +1462,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
 
-  // Oversized rather than native: the size gate rejects it Deterministically
-  // before verify_contract runs, which is what lets check_final_validation_-
-  // data() still convert to a ValidationFailure. A native attachment is now
-  // Unrecoverable and would short-circuit that conversion.
+  // Oversized: the size gate rejects the attachment as a ValidationFailure
+  // during initial validation (malformed transactions are dropped), before
+  // verify_contract runs. check_final_validation_data() must still flag the
+  // unused proposal data rather than downgrade it.
   Contract invalid_contract(ContractType::kRv32);
   invalid_contract.rv32_contract().data.resize_uninitialized(
       kMaxContractSizeBytes + 1);
@@ -1525,10 +1525,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
 
-  // Oversized rather than native: the size gate rejects it Deterministically
-  // before verify_contract runs, which is what lets check_final_validation_-
-  // data() still convert to a ValidationFailure. A native attachment is now
-  // Unrecoverable and would short-circuit that conversion.
+  // Oversized: the size gate rejects the attachment as a ValidationFailure
+  // during initial validation (malformed transactions are dropped), before
+  // verify_contract runs. check_final_validation_data() must still flag the
+  // unused proposal data rather than downgrade it.
   Contract invalid_contract(ContractType::kRv32);
   invalid_contract.rv32_contract().data.resize_uninitialized(
       kMaxContractSizeBytes + 1);

@@ -8,6 +8,7 @@ add_library(components_objects OBJECT
   auth_token_registry.cc
   execution_mode.cc
   hash_buffers.cc
+  new_contract_set.cc
   ${CMAKE_SOURCE_DIR}/hogd/hog_exec/runtime/contract_trait.cc
 )
 target_link_libraries(
