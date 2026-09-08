@@ -764,12 +764,12 @@ SystemCallHandler::validate_new_invocation(
   //
   // The bound is a plain load off the tip the snapshot cache loaded when the
   // block was opened; get_network_config_params() fails loudly on a cache
-  // whose tip was never loaded. NetworkConfigParams clamps it to the compiled
-  // kMaxCrossInvokeDepth ceiling, so this stays an independent hard maximum
-  // even if the tip's config was recovered from untrusted on-disk metadata
-  // (hogd issue #3919).
+  // whose tip was never loaded. effective_max_cross_invoke_depth() clamps it
+  // to the compiled kMaxCrossInvokeDepth ceiling, so this stays an independent
+  // hard maximum even if the tip's config was recovered from untrusted on-disk
+  // metadata (hogd issue #3919).
   if (invocation_frame_stack_.size() >=
-      config_params().max_cross_invoke_depth) {
+      config_params().effective_max_cross_invoke_depth()) {
     return SyscallStatus<void>{std::unexpected(
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
   }
