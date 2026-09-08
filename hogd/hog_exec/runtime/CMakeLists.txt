@@ -80,6 +80,7 @@ add_library(runtime_test_objects OBJECT
   cross_call_tests.cc
   cross_contract_revert_test.cc
   cross_invoke_depth_test.cc
+  cross_invoke_limit_test.cc
   delete_recreate_tests.cc
   default_wallet_fallback_test.cc
   default_wallet_parity_test.cc
