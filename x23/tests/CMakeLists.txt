@@ -112,6 +112,7 @@ endif()
 
 add_x23_gtest(str_cstr)
 add_x23_gtest(cxs_serialize_test)
+add_x23_gtest(compat_probe)
 add_x23_gtest(deserialize)
 add_x23_gtest(multiclient)
 add_x23_gtest(nmvec)
