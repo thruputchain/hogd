@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <limits>
 
 #include "hogd/base/network_config_params.h"
