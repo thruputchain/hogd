@@ -234,7 +234,7 @@ TEST(MerkleTriePrefix, BumpAllocatorBasic)
 
   SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
+  ASSERT_TRUE(trie.find_begin(key, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(value));
   MerkleTriePrefix::find_end(cookie);
 }
