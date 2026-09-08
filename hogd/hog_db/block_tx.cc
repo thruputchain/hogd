@@ -395,13 +395,13 @@ BlockTX::commit(WorkerPool &pool)
 }
 
 HogDbStatus<void>
-BlockTX::close_skip_hash_for_testing()
+BlockTX::close_skip_hash_for_testing(WorkerPool &pool)
 {
   if (is_poisoned()) {
     return HogDbError(HogDbCode::kInternal);
   }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/false);
-  if (auto r = stage_locks(changes); !r) {
+  if (auto r = stage_locks(changes, pool); !r) {
     return r;
   }
   changeset_ = std::move(changes);
@@ -409,13 +409,13 @@ BlockTX::close_skip_hash_for_testing()
 }
 
 HogDbStatus<StorageLongHash>
-BlockTX::close(const StorageLongHash &base_hash)
+BlockTX::close(const StorageLongHash &base_hash, WorkerPool &pool)
 {
   if (is_poisoned()) {
     return HogDbError(HogDbCode::kInternal);
   }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/true);
-  if (auto r = stage_locks(changes); !r) {
+  if (auto r = stage_locks(changes, pool); !r) {
     return r.error();
   }
 
@@ -428,7 +428,7 @@ BlockTX::close(const StorageLongHash &base_hash)
 }
 
 HogDbStatus<void>
-BlockTX::stage_locks(ChangeSet &changes)
+BlockTX::stage_locks(ChangeSet &changes, WorkerPool &pool)
 {
   std::mutex err_lock;
   HogDbStatus<void> status;
@@ -444,7 +444,8 @@ BlockTX::stage_locks(ChangeSet &changes)
           std::scoped_lock guard(err_lock);
           status = r;
         }
-      });
+      },
+      pool);
 
   if (!status) {
     return status;
@@ -463,7 +464,8 @@ BlockTX::stage_locks(ChangeSet &changes)
           std::scoped_lock guard(err_lock);
           status = r;
         }
-      });
+      },
+      pool);
 
   return status;
 }

@@ -15,10 +15,13 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "storage_item.hh"
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -217,7 +220,7 @@ HogDbSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
-  auto res = ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
+  auto res = co_await ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
   if (!res && res.error() == HogDbCode::kStaleBlock) {
     error("parent_id {} is not the last committed block", parent_id);
     co_return DbSchedResult::DbSchedResultInvalidParentId;
@@ -334,12 +337,41 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbSchedResult::DbSchedResultError;
   }
+  // Before compute_config_hash, which CHECKs this: the genesis is untrusted,
+  // so a non-canonical list has to be a rejection rather than an abort.
+  if (!config_hashable(genesis_configuration.network_config)) {
+    error("genesis network config parameters are not the gapless prefix 0, 1, "
+          "2, ... of the parameter ids");
+    co_return DbSchedResult::DbSchedResultError;
+  }
   if (value.proposal_header.block_height != kGenesisBlockHeight ||
       value.proposal_header.network_hash !=
           genesis_configuration.network_hash ||
       value.proposal_header.config_hash !=
           compute_config_hash(genesis_configuration)) {
     error("invalid genesis height, network hash, or config hash");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // A genesis can name a count whose commit batch this build could not send in
+  // one message; reject it here rather than at commit (#2190).
+  constexpr size_t kBatchOverhead = 1_KiB;
+  const size_t admissible =
+      (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
+  const NetworkConfigParams config_params(
+      genesis_configuration.network_config.v0());
+  if (const uint32_t stated = config_params.max_new_contracts_per_tx;
+      stated > admissible) {
+    error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
+          "commit in one message",
+          stated, admissible);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // The ceiling bounds the wire type, so a genesis naming more would let a
+  // contract write a bytestring no peer could carry.
+  if (const uint32_t stated = config_params.max_bytestring_len;
+      stated > static_cast<uint32_t>(kBytestringCeilingLen)) {
+    error("genesis max_bytestring_len {} exceeds the protocol ceiling of {}",
+          stated, kBytestringCeilingLen);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);
@@ -360,9 +392,8 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
       genesis_configuration,
       [&](auto const &contract) {
         const auto bytes = x23::serialize(*contract);
-        if (auto r =
-                ctx_.get_db().write_wasm_code(sha256(*contract),
-                                              std::as_bytes(std::span(bytes)));
+        if (auto r = ctx_.get_db().write_contract_code(
+                sha256(*contract), std::as_bytes(std::span(bytes)));
             !r) {
           error("failed to write genesis contract: {}", r.error());
           failure = true;

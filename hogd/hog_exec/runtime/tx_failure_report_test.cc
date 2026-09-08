@@ -21,6 +21,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -58,31 +59,31 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
   // the failed-push diagnostic path this test exists to exercise).
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0, // set_add on (0, 200)
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto key = make_storage_key("test");
-                  int128_t set_value = 0;
-                  auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                      key, &set_value, 200,
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!r.has_value() ||
-                      *r != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
-    fns.emplace(1, // add on (-100)
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto key = make_storage_key("test");
-                  auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                      key, static_cast<int128_t const *>(nullptr), -100,
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!r.has_value() ||
-                      *r != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
+    fns.emplace(
+        0, // set_add on (0, 200)
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("test");
+          int128_t set_value = 0;
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              key, &set_value, 200,
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        1, // add on (-100)
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("test");
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              key, static_cast<int128_t const *>(nullptr), -100,
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -114,25 +115,25 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
 
   // Block 1: method 0 creates the item (set_add(0, 200)).
   auto handler1 = run_method(0);
-  ASSERT_TRUE(handler1.root_invoke().is_root_success());
-  ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler1.root_invoke()().is_root_success());
+  ASSERT_EQ(handler1.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   // Block 2: method 1 nets the item down to 100 in its own block, so its
   // subtraction is bounded by the item's already-committed value.
   auto handler2 = run_method(1);
-  ASSERT_TRUE(handler2.root_invoke().is_root_success());
-  ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler2.root_invoke()().is_root_success());
+  ASSERT_EQ(handler2.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   // Block 3: method 0's set_add resets this block's capacity to base 0, so
   // method 1's push fails the 2-phase commit.
   auto handler3 = run_method(0);
-  ASSERT_TRUE(handler3.root_invoke().is_root_success());
-  ASSERT_EQ(handler3.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler3.root_invoke()().is_root_success());
+  ASSERT_EQ(handler3.try_commit_transaction()(), ExecResult::ExecResultOK);
   auto handler4 = run_method(1);
-  ASSERT_TRUE(handler4.root_invoke().is_root_success());
-  ASSERT_EQ(handler4.try_commit_transaction(),
+  ASSERT_TRUE(handler4.root_invoke()().is_root_success());
+  ASSERT_EQ(handler4.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError);
 
   if (GetParam() == TestDB::kHogDb) {

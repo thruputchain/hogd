@@ -32,6 +32,7 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/hog_exec/shared.h"
@@ -66,6 +67,7 @@ block_shutdown_signal()
   sigset_t blocked_mask;
   CHECK_EQ(sigemptyset(&blocked_mask), 0);
   CHECK_EQ(sigaddset(&blocked_mask, SIGTERM), 0);
+  CHECK_EQ(sigaddset(&blocked_mask, SIGINT), 0);
 
   sigset_t suspend_mask;
   // Use pthread_sigmask (not sigprocmask, whose behavior is unspecified in a
@@ -74,6 +76,7 @@ block_shutdown_signal()
   // blocked mask; see hog_devnode_init.
   CHECK_EQ(pthread_sigmask(SIG_BLOCK, &blocked_mask, &suspend_mask), 0);
   CHECK_EQ(sigdelset(&suspend_mask, SIGTERM), 0);
+  CHECK_EQ(sigdelset(&suspend_mask, SIGINT), 0);
 
   return {.suspend_mask = suspend_mask};
 }
@@ -85,14 +88,15 @@ install_signal_handler()
   action.sa_handler = request_shutdown;
   CHECK_EQ(sigemptyset(&action.sa_mask), 0);
   CHECK_EQ(sigaction(SIGTERM, &action, nullptr), 0);
+  CHECK_EQ(sigaction(SIGINT, &action, nullptr), 0);
 }
 
 void
 wait_for_shutdown(const ShutdownSignals &signals)
 {
   while (!shutdown_requested) {
-    // SIGTERM is blocked outside sigsuspend(), so checking the flag and
-    // sleeping are atomic with respect to the shutdown signal.
+    // Shutdown signals are blocked outside sigsuspend(), so checking the
+    // flag and sleeping are atomic with respect to them.
     sigsuspend(&signals.suspend_mask);
   }
   info("hog-devnode shutdown requested");
@@ -123,21 +127,31 @@ hog_devnode_init(std::string listen_host,
                  std::size_t ramdb_bytes)
 {
   install_signal_handler();
-  // Block SIGTERM before spawning any worker threads (init_hog_exec_metrics and
-  // the HogDevnodeNode constructor start well over a hundred of them). Threads
-  // inherit the signal mask of their creator, so blocking here means SIGTERM is
-  // blocked in every worker. A process-directed SIGTERM is then delivered only
-  // to the main thread inside sigsuspend(). Otherwise the kernel could deliver
-  // it to a worker thread; request_shutdown() would set the flag there, but the
-  // main thread's sigsuspend() only wakes when the signal is delivered to
-  // itself, so shutdown would hang until the test escalates to SIGKILL.
+  // Block the shutdown signals before spawning any worker threads
+  // (init_hog_exec_metrics and the HogDevnodeNode constructor start well over
+  // a hundred of them). Threads inherit the signal mask of their creator, so
+  // blocking here means they are blocked in every worker. A process-directed
+  // shutdown signal is then delivered only to the main thread inside
+  // sigsuspend(). Otherwise the kernel could deliver it to a worker thread;
+  // request_shutdown() would set the flag there, but the main thread's
+  // sigsuspend() only wakes when the signal is delivered to itself, so
+  // shutdown would hang until the test escalates to SIGKILL.
   ShutdownSignals shutdown_signals = block_shutdown_signal();
 
   init_hog_exec_metrics();
 
+  // An unusable $TMPDIR or data dir is an operator environment problem, so it
+  // is reported here rather than raised out of the node's construction.
+  std::expected<HogDevnodeDirectories, std::string> directories =
+      HogDevnodeDirectories::create(data_dir);
+  if (!directories) {
+    error("hog-devnode failed before readiness: {}", directories.error());
+    return EXIT_FAILURE;
+  }
+
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      bootstrap_config, data_dir, runtime_network_hash,
-                      ramdb_bytes);
+                      std::move(*directories), bootstrap_config, data_dir,
+                      runtime_network_hash, ramdb_bytes);
   emit_readiness(node, readiness_sink, runtime_network_hash);
   info("hog-devnode initialization complete.");
 
@@ -253,6 +267,15 @@ print_usage(FILE *stream, char *argv[])
 
 Start a local Groundhog development node.
 
+Typical use:
+  hog-devnode serves only hogd's internal x23 RPC, bound to loopback, and prints
+  one readiness JSON line on stdout. It is not the public JSON-RPC endpoint.
+  Contract developers normally run it through the groundhog CLI, which
+  supervises this process and serves JSON-RPC (port 9545 by default):
+
+    export GROUNDHOG_DEVNODE_BINARY=/path/to/hog-devnode
+    groundhog node
+
 Options:
   --listen-host <ip>             Host/interface for internal x23 services
                                  [default: 127.0.0.1]
@@ -272,7 +295,9 @@ Options:
                                  dev-account and wallet shorthand flags
                                  conflict.
   --dev-accounts <count>         Deterministic user accounts, excluding dev-0
-                                 [default: 0]
+                                 [default: 0]. groundhog node passes its own
+                                 count; pass at least 1 when running directly
+                                 so a non-faucet account exists.
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
                                  [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per user account
@@ -290,6 +315,8 @@ Options:
 Environment:
   HOGD_LOG_FORMAT=json           Emit newline-delimited JSON logs to stderr.
                                  The default is human-readable stderr logs.
+  TMPDIR                         Parent directory for ephemeral node state
+                                 when --data-dir is omitted [default: /tmp].
 
 Readiness:
   stdout is reserved for the readiness line when --readiness stdout is used.

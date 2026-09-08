@@ -37,15 +37,21 @@ protected:
     // Load contract
     auto contract = return_fault_test_meta::load_rv32();
 
-    // Deploy contract
+    // Deploy contract, plus a second copy for the caller to invoke. The two
+    // must be distinct: a self-invoke is reentrant, and the runtime refuses
+    // that before any child frame starts, so test_inner would never run and
+    // never reach the out-of-bounds Return this exercises.
     write_contract(contract);
     write_deployment(kContractAddress, contract);
+    write_deployment(kCalleeAddress, contract);
 
     // Grant storage tokens
     setup_grant_storage_token(kContractAddress, 1'000'000'000);
+    setup_grant_storage_token(kCalleeAddress, 1'000'000'000);
   }
 
   constexpr static ContractAddress kContractAddress = make_contract_address(0);
+  constexpr static ContractAddress kCalleeAddress = make_contract_address(1);
 
   ContractTraitClient<return_fault_test::ReturnFaultTest> client_ =
       ContractTraitClient<return_fault_test::ReturnFaultTest>(kContractAddress);
@@ -60,13 +66,14 @@ TEST_F(ReturnFaultTestRv32Test, InvokeRunTest)
   // Invoke the run_test method
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
-                      client_.make_invocation<u8"run_test">(UINT64_MAX),
+                      client_.make_invocation<u8"run_test">(UINT64_MAX,
+                                                            kCalleeAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 } // namespace hogd

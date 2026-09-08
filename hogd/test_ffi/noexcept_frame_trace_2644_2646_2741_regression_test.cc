@@ -8,7 +8,7 @@
 //
 //   * #2644: SystemCallHandler::start_syscall_trace() appends a SyscallTrace
 //     record to InvocationFrameTrace::system_calls before the noexcept syscall
-//     body in wrap_after_parse(); on the real WASM path the syscall dispatches
+//     body in wrap_after_parse(); on the real RV32 path the syscall dispatches
 //     through wrap_outer() noexcept, so the unguarded push_back terminated the
 //     process. It now drops the frame's trace and continues untraced.
 //   * #2646: SystemCallHandler::finish_frame() is noexcept but called

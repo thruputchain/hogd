@@ -33,7 +33,8 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   // ABI version is checked at artifact load time, so no per-call version
   // register is needed.
   //
-  // syscall_entry mutates WasmContext.memory in place. This canonical-test
+  // syscall_entry mutates ExecutionContext.memory in place. This
+  // canonical-test
   // bridge runs it against scratch memory so faults/OOG can be observed without
   // committing partial writes to Machine memory. The production threaded
   // runtime intentionally skips this copy and exposes live guest memory to
@@ -88,7 +89,7 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     return HostResult::out_of_gas(result.second);
   case HostFnErrorCode::Return:
     // Return terminates the VM invocation cleanly after committing the same
-    // guest-memory output writes the WASM path would expose.
+    // guest-memory output writes the production runtime would expose.
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.second);
     }

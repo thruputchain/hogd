@@ -95,7 +95,7 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0xac8aefb00a997407ULL);
+static_assert(kGasScheduleDigest == 0xbd9a5e2f5bf216fdULL);
 
 // The gas schedules an artifact is allowed to declare. The first entry is what
 // this build meters with and what a current lowerer stamps; any further entry
@@ -124,7 +124,8 @@ struct AcceptedGasSchedule {
 
 inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
     {.version = kGasTableVersion, .digest = kGasScheduleDigest},
-    // groundhog-cli <= 0.10.2. Remove once the lowerer stamps v4.
+    // groundhog-cli <= 0.11.0, which is what every deployed artifact was
+    // stamped by. Remove once the lowerer stamps v4.
     {.version = 3, .digest = 0x918317c21c46bb60ULL},
 }};
 
@@ -287,7 +288,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0xcc78e61a463f927eULL);
+static_assert(kArtifactFormatFingerprint == 0x002a3cb88d80b403ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
@@ -313,9 +314,9 @@ inline constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
     kAcceptedFormatFingerprints = accepted_format_fingerprints();
 static_assert(kAcceptedFormatFingerprints.front() ==
               kArtifactFormatFingerprint);
-// The v3 entry is what groundhog-cli 0.10.2 reports. Pinning it here proves
-// this derivation reproduces a fingerprint the lowerer actually emits, rather
-// than one only this header believes in.
+// The v3 entry is what groundhog-cli 0.11.0 still reports. Pinning it here
+// proves this derivation reproduces a fingerprint the lowerer actually emits,
+// rather than one only this header believes in.
 static_assert(kAcceptedFormatFingerprints.back() == 0x8e5caf3e9cd23b22ULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;

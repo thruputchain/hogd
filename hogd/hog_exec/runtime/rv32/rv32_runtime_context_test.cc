@@ -667,14 +667,14 @@ direct_invoke(std::shared_ptr<const Contract> const &contract,
 {
   const DeployedContractHash deployed =
       NativeContractTestFramework::make_deployed_contract_hash(contract);
-  auto runtime = rv32_context.make_new_runtime(deployed, &handler);
+  auto runtime = rv32_context.make_new_runtime(deployed, &handler)();
   EXPECT_TRUE(runtime.has_value());
   EXPECT_NE(runtime.value(), nullptr);
   if (!runtime.has_value() || runtime.value() == nullptr) {
     return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
                         .gas_consumed_ = 0};
   }
-  return runtime.value()->invoke(method_id, gas_limit);
+  return runtime.value()->invoke(method_id, gas_limit)();
 }
 
 std::shared_ptr<const Contract>
@@ -772,7 +772,7 @@ return_trace_entry(GasAmount gas, std::span<const uint8_t> buffer,
   SyscallTraceBody body(SyscallNo::kReturn);
   body.return_trace().inputs.buffer.append_range(buffer);
   body.return_trace().inputs.revert_frame = revert_frame;
-  return make_trace_entry(gas, gas, std::move(body),
+  return make_trace_entry(gas, gas - kSyscallBaseCost, std::move(body),
                           HostFunctionStatusXdr(HostFnErrorCode::Return));
 }
 
@@ -784,7 +784,8 @@ sha256_trace_entry(GasAmount gas_at_start, std::span<const uint8_t> input,
   body.sha256().inputs.input.append_range(input);
   body.sha256().outputs = SyscallSHA256Outputs{.hash = hash};
   return make_trace_entry(gas_at_start,
-                          gas_at_start - SHA256HashCost(input.size()),
+                          gas_at_start - GasCost::sha256_hash(input.size()) -
+                              kSyscallBaseCost,
                           std::move(body), ok_status());
 }
 
@@ -800,7 +801,7 @@ TEST_F(Rv32RuntimeContextTest, InvalidSyscallThenReturnTraceIsExact)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
   ASSERT_TRUE(result.is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
@@ -813,11 +814,14 @@ TEST_F(Rv32RuntimeContextTest, InvalidSyscallThenReturnTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(make_trace_entry(
       kEnoughGas - (2 * rv32::kBaseInstructionGas),
-      kEnoughGas - (2 * rv32::kBaseInstructionGas) - kNoSyscallCost,
+      kEnoughGas - (2 * rv32::kBaseInstructionGas) - kNoSyscallCost -
+          kSyscallBaseCost,
       SyscallTraceBody(static_cast<SyscallNo>(kSyscallCount)),
       error_status(SyscallErrorCode::kSyscallErrorCodeNoSyscall)));
-  expected.push_back(return_trace_entry(
-      kEnoughGas - (9 * rv32::kBaseInstructionGas) - kNoSyscallCost, {}));
+  expected.push_back(return_trace_entry(kEnoughGas -
+                                            (9 * rv32::kBaseInstructionGas) -
+                                            kNoSyscallCost - kSyscallBaseCost,
+                                        {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   EXPECT_EQ(handler.get_trace()->status.status_code(),
@@ -844,7 +848,7 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
   ASSERT_TRUE(result.is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
@@ -855,7 +859,7 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   auto const &trace = *handler.get_trace();
   const auto events = handler.get_most_recent_frame_events();
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
                                   ProposedTransaction{.signed_tx = tx})());
 
@@ -871,6 +875,12 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   // BytestringSet is 5 addi + ecall, LogEvent 6 addi + ecall, and the empty
   // Return 6 addi + ecall; syscall costs beyond base instruction gas come
   // from the gas cost table.
+  //
+  // The write pays its own cost on top of the crossing -- the storage access
+  // plus one block for these bytes -- and every later entry starts that much
+  // lower. Named rather than folded into the literals so the next repricing
+  // moves these expectations with the schedule instead of through them.
+  const GasAmount write_cost = GasCost::bytestring_set(value.size());
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
@@ -878,17 +888,23 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
     body.bytestring_set().inputs.bytestring.append_range(value);
     body.bytestring_set().inputs.flags =
         static_cast<uint32_t>(StorageDeltaFlags::None);
-    expected.push_back(make_trace_entry(kParityGas - 6, kParityGas - 6,
-                                        std::move(body), ok_status()));
+    expected.push_back(
+        make_trace_entry(kParityGas - 6,
+                         kParityGas - 6 - kSyscallBaseCost - write_cost,
+                         std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kLogEvent);
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
-    expected.push_back(make_trace_entry(kParityGas - 13, kParityGas - 13,
-                                        std::move(body), ok_status()));
+    expected.push_back(
+        make_trace_entry(kParityGas - 13 - kSyscallBaseCost - write_cost,
+                         kParityGas - 13 - (2 * kSyscallBaseCost) - write_cost,
+                         std::move(body), ok_status()));
   }
-  expected.push_back(return_trace_entry(kParityGas - 20, {}));
+  expected.push_back(
+      return_trace_entry(kParityGas - 20 - (2 * kSyscallBaseCost) - write_cost,
+                         {}));
 
   EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(trace.status.return_buffer().empty());
@@ -929,7 +945,7 @@ TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
                                               rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
 
@@ -939,8 +955,9 @@ TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
 
   // SHA256 is 4 addi + ecall; the hash-returning Return is 6 addi + ecall.
   const GasAmount sha_gas = kParityGas - (5 * rv32::kBaseInstructionGas);
-  const GasAmount return_gas =
-      sha_gas - SHA256HashCost(input.size()) - (7 * rv32::kBaseInstructionGas);
+  const GasAmount return_gas = sha_gas - GasCost::sha256_hash(input.size()) -
+                               kSyscallBaseCost -
+                               (7 * rv32::kBaseInstructionGas);
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, expected_hash));
@@ -949,7 +966,9 @@ TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
@@ -974,7 +993,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
       rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
 
@@ -985,7 +1004,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
   const GasAmount sha_gas = 9'977;
-  const GasAmount return_gas = 8'770;
+  const GasAmount return_gas = 9'898;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, expected_hash));
@@ -994,7 +1013,9 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
@@ -1019,7 +1040,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
       rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
 
@@ -1031,7 +1052,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
   const GasAmount sha_gas = 9'974;
-  const GasAmount return_gas = 8'767;
+  const GasAmount return_gas = 9'895;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, {}));
@@ -1040,7 +1061,9 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
@@ -1066,8 +1089,8 @@ TEST_F(Rv32RuntimeContextTest,
   handler1.enable_tracing();
   handler2.enable_tracing();
 
-  const auto result1 = handler1.root_invoke();
-  const auto result2 = handler2.root_invoke();
+  const auto result1 = handler1.root_invoke()();
+  const auto result2 = handler2.root_invoke()();
 
   ASSERT_TRUE(result1.is_root_success());
   ASSERT_TRUE(result2.is_root_success());
@@ -1103,8 +1126,8 @@ TEST_F(Rv32RuntimeContextTest, ArtifactMemoryTransformReturnsDeterministicBytes)
       make_new_system_call_handler(make_root_transaction(kParityGas),
                                    rv32_context);
 
-  const auto result1 = handler1.root_invoke();
-  const auto result2 = handler2.root_invoke();
+  const auto result1 = handler1.root_invoke()();
+  const auto result2 = handler2.root_invoke()();
 
   ASSERT_TRUE(result1.is_root_success());
   ASSERT_TRUE(result2.is_root_success());
@@ -1132,7 +1155,7 @@ TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodInGuest)
       make_new_system_call_handler(make_root_transaction(kEnoughGas, 1),
                                    rv32_context);
 
-  auto result = handler.root_invoke();
+  auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
   const auto output = handler.get_most_recent_frame_output();
@@ -1156,7 +1179,7 @@ TEST_F(Rv32RuntimeContextTest, UnknownMethodIsMeteredGuestTrap)
       make_root_transaction(kEnoughGas, kUnknownMethodId), rv32_context);
   rv32_handler.enable_tracing();
 
-  auto rv32_result = rv32_handler.root_invoke();
+  auto rv32_result = rv32_handler.root_invoke()();
 
   ASSERT_FALSE(rv32_result.is_root_success());
   EXPECT_EQ(rv32_result.result_.error().code(), InvokeErrorCode::Deterministic);
@@ -1174,11 +1197,12 @@ TEST_F(Rv32RuntimeContextTest, RootInvokeReturnsBufferThroughSystemCallHandler)
 
   auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
                                               rv32_context);
-  auto result = handler.root_invoke();
+  auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
   // Three argument loads (a0..a2) plus the ecall instruction.
-  EXPECT_EQ(result.gas_consumed_, 4U * rv32::kBaseInstructionGas);
+  EXPECT_EQ(result.gas_consumed_,
+            (4U * rv32::kBaseInstructionGas) + kSyscallBaseCost);
   auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   ASSERT_EQ(output.return_buffer().size(), payload.size());
@@ -1202,7 +1226,7 @@ TEST_F(Rv32RuntimeContextTest, DirectInvokeNormalizesOutOfGasConsumption)
   EXPECT_EQ(result.gas_consumed_, 10U);
 }
 
-TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
+TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToInvokeOutcomes)
 {
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
@@ -1260,8 +1284,8 @@ TEST_F(Rv32RuntimeContextTest, ZeroReturnHaltCodeMapsToSuccess)
 
 TEST_F(Rv32RuntimeContextTest, ExitPanicMapsToDeterministicRegardlessOfCode)
 {
-  // Parity with the wasm runtime and production Rv32Runtime: Exit is always a
-  // deterministic failure; the trampoline result_code is not an exit status.
+  // Parity with production Rv32Runtime: Exit is always a deterministic
+  // failure; the trampoline result_code is not an exit status.
   auto expect_deterministic = [&](SyscallFunction entry) {
     auto rv32_context = rv32::RuntimeContext(
         {{kRv32ContractId, make_single_ecall_image(entry)}});
@@ -1471,12 +1495,12 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
                             std::move(increment_calldata_bytes), 1),
       rv32_context);
   increment_handler.enable_tracing();
-  const auto increment_result = increment_handler.root_invoke();
+  const auto increment_result = increment_handler.root_invoke()();
   ASSERT_TRUE(increment_result.is_root_success())
       << "rv32 counter increment did not return cleanly";
   EXPECT_EQ(increment_handler.get_most_recent_frame_output().status_code(),
             InvocationFrameStatusCode::Return);
-  ASSERT_EQ(increment_handler.try_commit_transaction(),
+  ASSERT_EQ(increment_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
   ASSERT_NE(increment_handler.get_trace(), nullptr);
   auto const *increment_trace = increment_handler.get_trace();
@@ -1497,7 +1521,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
                                                          Calldata{}, 2),
                                    rv32_context);
   get_handler.enable_tracing();
-  const auto get_result = get_handler.root_invoke();
+  const auto get_result = get_handler.root_invoke()();
   ASSERT_TRUE(get_result.is_root_success())
       << "rv32 counter get did not return cleanly after increment";
   const auto get_output = get_handler.get_most_recent_frame_output();
@@ -1513,7 +1537,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
     return;
   }
   EXPECT_EQ(*decoded, kIncrementAmount);
-  ASSERT_EQ(get_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(get_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Smoke test for SDK-lowered RV32 artifacts.
@@ -1566,7 +1590,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   if (handler.get_trace() != nullptr) {
     std::cerr << "[smoke] trace status_code="

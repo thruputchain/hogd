@@ -17,6 +17,7 @@
 #include "built_contracts/itc_erc20.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -36,6 +37,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 // Offline analysis tool (NOT part of the main build): traces a real rv32
 // contract invocation on the canonical step-at-a-time Machine and builds a
@@ -290,9 +292,28 @@ private:
   rv32::ArtifactImage image_;
   PairHistogram *hist_;
 
-  std::pair<InvokeStatus<void>, GasAmount>
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override
   {
+    return invoke_off_pool(method_id, gas_limit);
+  }
+
+  // The machine loop cannot yield and its host calls block, which a thread
+  // pool worker may not do; run it outside the pool. See
+  // rv32::RuntimeContext's Runtime::invoke_off_pool.
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  invoke_off_pool(MethodID method_id, uint64_t gas_limit)
+  {
+    co_return co_await default_coropoll().pool_.async(
+        [this, method_id, gas_limit] {
+          return run_machine(method_id, gas_limit);
+        });
+  }
+
+  std::pair<InvokeStatus<void>, GasAmount> run_machine(MethodID method_id,
+                                                       uint64_t gas_limit)
+  {
+    using result_t = std::pair<InvokeStatus<void>, GasAmount>;
     rv32::Machine machine(image_.program, image_.memory_bytes, gas_limit);
     std::ranges::copy(image_.initial_memory, machine.memory().begin());
     machine.seed_method_id(method_id);
@@ -362,12 +383,12 @@ private:
     if (result == rv32::StepResult::kHalted) {
       // Halt only arises from a clean Return; Exit maps to a deterministic
       // trap in to_host_result.
-      return {{}, consumed};
+      return result_t{{}, consumed};
     }
     if (machine.trap() == rv32::Trap::kOutOfGas) {
-      return {InvokeError{InvokeErrorCode::OutOfGas}, consumed};
+      return result_t{InvokeError{InvokeErrorCode::OutOfGas}, consumed};
     }
-    return {InvokeError{InvokeErrorCode::Deterministic}, consumed};
+    return result_t{InvokeError{InvokeErrorCode::Deterministic}, consumed};
   }
 };
 
@@ -378,12 +399,13 @@ class TracingRv32Context final : public RuntimeContext {
 public:
   PairHistogram *active_histogram = nullptr;
 
-  InvokeErrorCode verify_contract(Contract const &contract) const override
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  PreparedContract &out) const override
   {
-    return delegate_.verify_contract(contract);
+    return delegate_.verify_contract(contract, out);
   }
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override
   {
@@ -393,23 +415,23 @@ public:
     }
     else {
       auto contract =
-          syscall_handler->resolve_contract(deployed_contract.hash.hash);
+          syscall_handler->resolve_contract(deployed_contract.hash.hash)();
       if (!contract.has_value()) {
-        return contract.error();
+        co_return contract.error();
       }
       if (contract.value() == nullptr) {
-        return SystemError{SystemErrorCode::Unrecoverable};
+        co_return SystemError{SystemErrorCode::Unrecoverable};
       }
       blob = &contract.value()->rv32_contract();
     }
 
     auto image = rv32::parse_artifact(blob->data);
     if (!image.has_value()) {
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
-    return std::make_unique<TracingRv32Runtime>(std::move(image.value()),
-                                                syscall_handler,
-                                                active_histogram);
+    co_return std::make_unique<TracingRv32Runtime>(std::move(image.value()),
+                                                   syscall_handler,
+                                                   active_histogram);
   }
 
 private:
@@ -453,9 +475,9 @@ protected:
                               Transaction{.invocation = std::move(invocation),
                                           .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    bool ok = handler.root_invoke().is_root_success();
+    bool ok = handler.root_invoke()().is_root_success();
     if (ok) {
-      handler.try_commit_transaction();
+      handler.try_commit_transaction()();
       advance_block();
     }
     return ok;

@@ -26,4 +26,8 @@ inline constexpr size_t kMaxContractSizeBytes = 256_KiB;
 inline constexpr size_t kMaxSerializedContractBytes =
     kMaxContractSizeBytes + 16;
 
+// The budget the executor holds itself to on the HogDb link (pinned to
+// kBulkRpcMaxMessageSize). Raising it changes which transactions abort.
+inline constexpr size_t kExecToDbMessageCap = 0x100'0000;
+
 } // namespace hogd

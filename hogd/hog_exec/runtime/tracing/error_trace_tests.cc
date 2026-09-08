@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "invoke_args.hh"
@@ -54,7 +55,7 @@ get_calldata_entry(GasAmount gas, Calldata const &calldata)
   SyscallGetCalldataOutputs outputs;
   outputs.calldata.append_range(calldata);
   body.get_calldata().outputs = std::move(outputs);
-  return make_entry(gas, gas, std::move(body),
+  return make_entry(gas, gas - kSyscallBaseCost, std::move(body),
                     status_with(SyscallErrorCode::kSyscallErrorCodeNone));
 }
 
@@ -63,7 +64,7 @@ empty_return_entry(GasAmount gas)
 {
   SyscallTraceBody body(SyscallNo::kReturn);
   body.return_trace().inputs.revert_frame = false;
-  return make_entry(gas, gas, std::move(body),
+  return make_entry(gas, gas - kSyscallBaseCost, std::move(body),
                     HostFunctionStatusXdr(HostFnErrorCode::Return));
 }
 
@@ -112,7 +113,7 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(98'922, tx.tx.invocation.calldata));
@@ -121,11 +122,11 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
     // bytes); the buffer-availability check wins and no outputs are written.
     SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
     expected.push_back(make_entry(
-        98'759, 98'759, std::move(body),
+        98'709, 98'709 - kSyscallBaseCost, std::move(body),
         status_with(
             SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable)));
   }
-  expected.push_back(empty_return_entry(98'720));
+  expected.push_back(empty_return_entry(98'620));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -152,7 +153,7 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(98'938, tx.tx.invocation.calldata));
@@ -161,7 +162,7 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
     body.get_current_address().outputs =
         SyscallGetCurrentAddressOutputs{.address = addr};
     expected.push_back(
-        make_entry(98'882, 98'882, std::move(body),
+        make_entry(98'832, 98'832 - kSyscallBaseCost, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
@@ -178,10 +179,10 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
         .flags = 0,
     };
     expected.push_back(
-        make_entry(98'831, 98'831, std::move(body),
+        make_entry(98'731, 98'731 - kSyscallBaseCost, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
-  expected.push_back(empty_return_entry(98'779));
+  expected.push_back(empty_return_entry(98'629));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

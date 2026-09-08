@@ -11,10 +11,15 @@
 
 namespace hogd::rv32::gas_calibration {
 
-// The only host in the harness: an ecall halts. Kernels never make a real
-// syscall, so no host work enters the measurement. (Syscall pricing, when it
-// lands, replaces this with a host that performs the call under measurement --
-// the sweep machinery above it does not change.)
+// The host the opcode kernels run under: an ecall halts. Those kernels never
+// make a real host call, so no host work enters their measurement -- their
+// single ecall is the terminal one that ends the run.
+//
+// The syscall-seam kernels run under SyscallDispatchHost instead, which
+// returns rather than halting so a body can be made of calls. That is why the
+// functions below take a Host& rather than a HaltHost&: the sweep machinery
+// above them is the same for both, which is the whole reason the seam
+// measurement did not need a second harness.
 class HaltHost : public Host {
 public:
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
@@ -38,13 +43,17 @@ struct RunOutcome {
 
 // Resets and runs one kernel, timing only run(). The reset (which restores the
 // 64 KiB memory image) stays outside the timed region.
-[[nodiscard]] RunOutcome run_once(ThreadedMachine &machine, HaltHost &host);
+[[nodiscard]] RunOutcome run_once(ThreadedMachine &machine, Host &host);
 
 // Picks a trip count that makes one run of `program` take at least
 // `target_ns`, so the measurement dominates clock resolution and per-run
 // constant overhead. Returns the multiplier to apply to a seed trip count.
+//
+// Takes the host the sweep will actually be measured under: a syscall kernel
+// tuned against a halting host would stop at its first body ecall and time a
+// few instructions instead of a loop, then extrapolate a trip count from it.
 [[nodiscard]] uint32_t
-tune_trip_count(const ThreadedMachinePreInstantiation & /*program*/,
+tune_trip_count(const ThreadedMachinePreInstantiation & /*program*/, Host &host,
                 uint32_t seed_trip_count, double target_ns);
 
 // One kernel in a sweep, with its independent-variable value and its samples.
@@ -76,7 +85,7 @@ struct MeasureConfig {
 // on a shared or thermally-throttled machine is slow drift, and measuring
 // points sequentially aliases that drift straight into the slope. Round-robin
 // spreads any drift across all points, where the per-point median removes it.
-void measure_interleaved(std::span<MeasurementPoint> points,
+void measure_interleaved(std::span<MeasurementPoint> points, Host &host,
                          const MeasureConfig &config);
 
 struct LinearFit {

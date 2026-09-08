@@ -787,7 +787,7 @@ InvokeTX::request_new_contract(Contract contract)
   // hog_exec rejects attached contract blobs above kMaxContractSizeBytes in
   // perform_initial_validation(), before execution, and storage stores any
   // legal row (chunked across RAMDB items if necessary; see
-  // for_each_wasm_code_item). A serialized row above the bound here
+  // for_each_contract_code_item). A serialized row above the bound here
   // therefore means the executor is misbehaving, not that the contract is
   // merely large. xdr_size computes the serialized length without
   // allocating; it equals the byte count NewContractLock stages.
@@ -795,9 +795,10 @@ InvokeTX::request_new_contract(Contract contract)
     return HogDbError(HogDbCode::kInvalidExecutorBehavior);
 
   // One-byte chunk indexes must cover the largest row hog_db accepts.
-  static_assert((kMaxSerializedContractBytes + kWasmCodeChunkPayloadSize - 1) /
-                    kWasmCodeChunkPayloadSize <=
-                255);
+  static_assert(
+      (kMaxSerializedContractBytes + kContractCodeChunkPayloadSize - 1) /
+          kContractCodeChunkPayloadSize <=
+      255);
 
   // hash is computed outside make_contract_code_item_key to dodge an
   // observed gcc-CI miscompile.

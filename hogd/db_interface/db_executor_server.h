@@ -9,6 +9,7 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
@@ -65,7 +66,7 @@ public:
     // TODO(jhumphri): Implement.
   }
 
-  ExpectedDBTip get_db_tip(BlockID block_id);
+  ExpectedDBTip get_db_tip(BlockID block_id, BlockHeight block_height);
 
   static ExpectedViewingSnapshot open_viewing_snapshot()
   {
@@ -92,7 +93,12 @@ static_assert(
 
 class DbExecutorServer : public RpcServer<DbExecutorRpc> {
 public:
-  DbExecutorServer(BlockManager *block_manager) : RpcServer(block_manager) {}
+  DbExecutorServer(BlockManager *block_manager) : RpcServer(block_manager)
+  {
+    // Match HogDbExecutorServer: the mock serves the same interface, so a test
+    // running against it must see the same message bound as production.
+    max_message_size_ = kBulkRpcMaxMessageSize;
+  }
 };
 
 } // namespace hogd

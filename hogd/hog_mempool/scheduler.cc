@@ -433,9 +433,24 @@ Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
                       tx_value->tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
   auto [account_state, lock] = get_account_state(account);
+  // The expiry sweep or commit may have removed the cache entry since the
+  // caller looked it up. Hold both locks in account-then-cache order so that
+  // a runqueue insertion cannot race with removal from the cache.
+  const auto [cached_value, txs_lock] = txs_.find(tx_hash);
+  if (!cached_value) {
+    return false;
+  }
   // Check if the tx is already present in [account_state->txs]. If it is, we
   // are adding a duplicate tx, so we do not want to increment [size_].
-  return account_state->txs.insert({key, tx_value}).second;
+  //
+  // We deliberately use [cached_value] instead of [tx_value]. [cached_value] is
+  // the current value in [txs_], whereas [tx_value] could point to a stale tx
+  // since [txs_] could have changed while we were not holding [txs_lock]. Note
+  // that even though [cached_value] and [tx_value] both point to txs with the
+  // same hash and therefore the txs are the same, the [SignedTransaction]'s
+  // that hold these inner txs could have different signatures. Thus,
+  // [cached_value] and [tx_value] could refer to different txs altogether.
+  return account_state->txs.insert({key, *cached_value}).second;
 }
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
@@ -1120,7 +1135,6 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   co_await default_coropoll().pool_.bg();
 
   static SynchronizedMap<ContractAddress, char, SipHash24Hasher> accounts;
-  accounts.clear();
 
   ElapsedTimer timer;
 
@@ -1132,6 +1146,9 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
+  // [accounts] is static and therefore used by multiple threads, so we wait to
+  // call [clear()] on it until after we have acquired the lock.
+  accounts.clear();
 
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -1153,10 +1170,15 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // are on the runqueue and remove them. We cannot skip this step and
             // just remove txs from [txs_], even if the *nominated* block is
             // being committed rather than a *validated* block.
-            auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-            CHECK_PTR(tx_value_ptr);
+            std::shared_ptr<TxValue> tx_value;
+            {
+              const auto [tx_value_ptr, txs_lock] =
+                  scheduler.txs_.find(tx_hash);
+              CHECK_PTR(tx_value_ptr);
+              tx_value = *tx_value_ptr;
+            }
 
-            const SignedTransaction &tx = (*tx_value_ptr)->tx;
+            const SignedTransaction &tx = tx_value->tx;
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const TxKey key = {.expiry_block_height =
                                    tx.tx.uniquifier.block_expiry_height,
@@ -1174,11 +1196,10 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
                 num_removed_from_runqueue++;
                 accounts.insert(account, 0);
               }
+              // Keep the account locked until the cache entry is gone, so a
+              // concurrent resubmit cannot restore only the runqueue entry.
+              CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
             }
-
-            // Careful! We remove the tx from [txs_] at the bottom here because
-            // once we remove it, the references above become invalidated.
-            CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
           }
 
           co_return num_removed_from_runqueue;
@@ -1196,7 +1217,15 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
+      // We do not CHECK that the account is removed from [ready_accounts_]
+      // because the account may not be currently in [ready_accounts_]. For
+      // example, if a tx is submitted that the contract does not have enough
+      // hogs for, the contract is removed from [ready_accounts_]. If other txs
+      // for that contract are committed in this block (maybe the contract had
+      // enough hogs for some of the txs but not all of them), then the line
+      // below will not remove [account] from [ready_accounts_] because the
+      // contract is already not in [ready_accounts_].
+      ready_accounts_.erase(get_account_key(account));
     }
   });
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);

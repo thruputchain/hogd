@@ -47,6 +47,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -257,11 +258,11 @@ protected:
   // Appends one ERC20 call's outcome to `record`: a tag byte, then either the
   // error code that stopped the call, or the child frame status followed by
   // the literal bytes the callee returned or aborted with.
-  static void append_invoke_record(NativeSyscallContext &ctx,
-                                   ContractAddress const &target,
-                                   Runtime::MethodID method_id,
-                                   Calldata const &calldata,
-                                   std::vector<uint8_t> &record)
+  static x23::Async<void> append_invoke_record(NativeSyscallContext &ctx,
+                                               ContractAddress const &target,
+                                               Runtime::MethodID method_id,
+                                               Calldata const &calldata,
+                                               std::vector<uint8_t> &record)
   {
     CopyableInvokeOutputs outputs{};
     CopyableInvokeInputs inputs{
@@ -269,7 +270,7 @@ protected:
         .gas_limit = static_cast<GasAmount>(UINT64_MAX),
         .flags = std::to_underlying(InvokeFlag::None),
     };
-    auto r = ctx.syscall<SyscallNo::kInvoke>(
+    auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
         target, std::as_bytes(std::span(calldata.data(), calldata.size())),
         std::span<uint32_t>{}, inputs, outputs);
 
@@ -278,13 +279,13 @@ protected:
       // paths, but record it distinctly rather than hiding it.
       record.push_back(0xEE);
       record.push_back(static_cast<uint8_t>(r.error().code()));
-      return;
+      co_return;
     }
     if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
       // Invoke rejected before any child frame ran.
       record.push_back(0x01);
       record.push_back(static_cast<uint8_t>(r.value()));
-      return;
+      co_return;
     }
     record.push_back(0x00);
     record.push_back(static_cast<uint8_t>(outputs.frame_status));
@@ -303,20 +304,20 @@ protected:
 
   // Writes a capture driver's record to `result_key` so the test can read it
   // back from the DB.
-  static InvokeStatus<void>
+  static x23::Async<InvokeStatus<void>>
   persist_record(NativeSyscallContext &ctx,
                  StorageKeyContractData const &result_key,
                  std::vector<uint8_t> const &record)
   {
-    auto set_r = ctx.syscall<SyscallNo::kBytestringSet>(
+    auto set_r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
         result_key, std::as_bytes(std::span(record.data(), record.size())),
         std::to_underlying(StorageDeltaFlags::None));
     if (!set_r.has_value() ||
         set_r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
       ADD_FAILURE() << "capture driver failed to persist result";
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
-    return {};
+    co_return InvokeStatus<void>{};
   }
 
   // Builds a native "driver" contract whose method 0 invokes `target`'s ERC20
@@ -330,10 +331,10 @@ protected:
     auto calldata = erc20_meta::make_calldata<Name>(args...);
     Runtime::MethodID method_id = erc20_meta::method_id<Name>();
     return [target, result_key, method_id, calldata = std::move(calldata)](
-               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+               NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       std::vector<uint8_t> record;
-      append_invoke_record(ctx, target, method_id, calldata, record);
-      return persist_record(ctx, result_key, record);
+      co_await append_invoke_record(ctx, target, method_id, calldata, record);
+      co_return co_await persist_record(ctx, result_key, record);
     };
   }
 
@@ -368,17 +369,17 @@ protected:
   make_multi_capture_driver(std::vector<CaptureStep> steps)
   {
     return [steps = std::move(steps)](
-               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+               NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       for (auto const &step : steps) {
         std::vector<uint8_t> record;
-        append_invoke_record(ctx, step.target, step.method_id, step.calldata,
-                             record);
-        if (auto r = persist_record(ctx, step.result_key, record);
+        co_await append_invoke_record(ctx, step.target, step.method_id,
+                                      step.calldata, record);
+        if (auto r = co_await persist_record(ctx, step.result_key, record);
             !r.has_value()) {
-          return r.error();
+          co_return r.error();
         }
       }
-      return {};
+      co_return InvokeStatus<void>{};
     };
   }
 
@@ -412,8 +413,8 @@ protected:
                                        .calldata = {}},
                         .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
                             ProposedTransaction{.signed_tx = handler_tx})());
@@ -441,8 +442,8 @@ protected:
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
-    EXPECT_TRUE(handler.root_invoke().is_root_success());
-    ExecResult commit = handler.try_commit_transaction();
+    EXPECT_TRUE(handler.root_invoke()().is_root_success());
+    ExecResult commit = handler.try_commit_transaction()();
     CapturedRecord outcome;
     outcome.push_back(static_cast<uint8_t>(commit));
     if (commit == ExecResult::ExecResultOK) {
@@ -484,8 +485,8 @@ protected:
                                        .calldata = {}},
                         .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
-    EXPECT_TRUE(handler.root_invoke().is_root_success());
-    ExecResult commit = handler.try_commit_transaction();
+    EXPECT_TRUE(handler.root_invoke()().is_root_success());
+    ExecResult commit = handler.try_commit_transaction()();
     std::vector<CapturedRecord> records;
     if (commit == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
@@ -564,14 +565,15 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         rv32_admin_fns;
     rv32_admin_fns.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -667,17 +669,17 @@ protected:
         [amount](ContractAddress token,
                  ContractAddress spender) -> NativeContract::function_t {
       return [token, spender, amount](
-                 NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                 NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
-        auto r = client.invoke_opt<u8"adjust_allowance">(
+        auto r = co_await client.invoke_opt<u8"adjust_allowance">(
             ctx, spender, make_difference(static_cast<int128_t>(amount)));
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
           ADD_FAILURE() << "grant allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       };
     };
 
@@ -716,22 +718,24 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         rv32_admin_fns;
     rv32_admin_fns.emplace(
-        0, [amount](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0,
+        [amount](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
-                                                  make_amount(amount));
+          auto mint = co_await client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
+                                                           make_amount(amount));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
             ADD_FAILURE() << "itc mint failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -832,22 +836,24 @@ protected:
     rv32_admin_fns.emplace(
         0,
         [start_balance](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<u8"mint">(ctx, kRv32CallerAddr,
-                                                  make_amount(start_balance));
+          auto mint =
+              co_await client.invoke_opt<u8"mint">(ctx, kRv32CallerAddr,
+                                                   make_amount(start_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
             ADD_FAILURE() << "itc mint failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -937,18 +943,18 @@ protected:
     // An owner driver that grants `spender` an allowance on `token`.
     auto make_grant = [](ContractAddress token, ContractAddress spender,
                          uint128_t amt) -> NativeContract::function_t {
-      return [token, spender,
-              amt](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      return [token, spender, amt](
+                 NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
-        auto r = client.invoke_opt<u8"adjust_allowance">(
+        auto r = co_await client.invoke_opt<u8"adjust_allowance">(
             ctx, spender, make_difference(static_cast<int128_t>(amt)));
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
           ADD_FAILURE() << "grant allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       };
     };
 
@@ -989,22 +995,24 @@ protected:
     rv32_admin_fns.emplace(
         0,
         [owner_balance](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
-                                                  make_amount(owner_balance));
+          auto mint =
+              co_await client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
+                                                   make_amount(owner_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
             ADD_FAILURE() << "itc mint failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -1063,13 +1071,15 @@ protected:
             run_capture_tx(kRv32SpenderAddr, rv32_result_key, ctx)};
   }
 
-  // Runs transfer_from(owner, distinct_recipient, transfer_amount) against both
+  // Runs transfer_from(owner, receiver, transfer_amount) against both
   // backends. The owner starts with `owner_balance` and grants the spender an
-  // allowance of `allowance`. The recipient is a distinct address from the
-  // owner. Returns {native_record, rv32_record}.
-  std::pair<CapturedRecord, CapturedRecord>
-  run_transfer_from_parity(uint128_t owner_balance, uint128_t allowance,
-                           uint128_t transfer_amount)
+  // allowance of `allowance`. The receivers default to a distinct address per
+  // backend; pass explicit addresses to aim the delegated transfer elsewhere
+  // (the all-zero address, say). Returns {native_record, rv32_record}.
+  std::pair<CapturedRecord, CapturedRecord> run_transfer_from_parity(
+      uint128_t owner_balance, uint128_t allowance, uint128_t transfer_amount,
+      ContractAddress native_receiver = kNativeTfRecipientAddr,
+      ContractAddress rv32_receiver = kRv32TfRecipientAddr)
   {
     auto native_result_key = make_storage_key("native_result");
     auto rv32_result_key = make_storage_key("rv32_result");
@@ -1077,18 +1087,18 @@ protected:
     // An owner driver that grants `spender` an allowance on `token`.
     auto make_grant = [](ContractAddress token, ContractAddress spender,
                          uint128_t amt) -> NativeContract::function_t {
-      return [token, spender,
-              amt](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      return [token, spender, amt](
+                 NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
-        auto r = client.invoke_opt<u8"adjust_allowance">(
+        auto r = co_await client.invoke_opt<u8"adjust_allowance">(
             ctx, spender, make_difference(static_cast<int128_t>(amt)));
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
           ADD_FAILURE() << "grant allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       };
     };
 
@@ -1110,7 +1120,7 @@ protected:
         native_spender_fns;
     native_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
                                       kNativeTokenAddr, native_result_key,
-                                      kNativeOwnerAddr, kNativeTfRecipientAddr,
+                                      kNativeOwnerAddr, native_receiver,
                                       make_amount(transfer_amount)));
     auto native_spender =
         std::make_unique<NativeContract>(std::move(native_spender_fns));
@@ -1119,7 +1129,7 @@ protected:
         rv32_spender_fns;
     rv32_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
                                     kRv32TokenAddr, rv32_result_key,
-                                    kRv32OwnerAddr, kRv32TfRecipientAddr,
+                                    kRv32OwnerAddr, rv32_receiver,
                                     make_amount(transfer_amount)));
     auto rv32_spender =
         std::make_unique<NativeContract>(std::move(rv32_spender_fns));
@@ -1129,22 +1139,24 @@ protected:
     rv32_admin_fns.emplace(
         0,
         [owner_balance](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
-                                                  make_amount(owner_balance));
+          auto mint =
+              co_await client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
+                                                   make_amount(owner_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
             ADD_FAILURE() << "itc mint failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -1233,14 +1245,15 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         rv32_admin_fns;
     rv32_admin_fns.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -1395,16 +1408,15 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         rv32_admin_fns;
     rv32_admin_fns.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init =
-              client.invoke_opt<u8"initialize">(ctx,
-                                                kGenesisRootContractAddress);
+          auto init = co_await client.invoke_opt<u8"initialize">(
+              ctx, kGenesisRootContractAddress);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -1738,6 +1750,41 @@ TEST_F(Erc20ParityTest, OneOverBalanceTransferFromToRecipientParity)
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
+// A funded transfer_from aimed at the all-zero address. As with the direct
+// transfer above (issue #2135), neither backend guards the zero recipient: the
+// allowance is spent, the zero address is credited, and a standard
+// Transfer(owner, zero, amount) event is emitted. This locks in that the two
+// implementations agree on the delegated path too --- the amendment case on
+// that issue.
+TEST_F(Erc20ParityTest, TransferFromToZeroAddressParity)
+{
+  auto [native_record, rv32_record] = run_transfer_from_parity(
+      /*owner_balance=*/1'000, /*allowance=*/200, /*transfer_amount=*/100,
+      ContractAddress{}, ContractAddress{});
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on transfer_from to "
+         "the zero address";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "transfer_from to the zero address must be accepted, not rejected";
+
+  // The tokens really landed on the zero address, and not on the recipient
+  // this harness otherwise defaults to. Comparing the two backends alone
+  // would still agree if the receiver override were dropped, so pin the
+  // committed native-token rows: the zero address gained one, the default
+  // recipient was never touched.
+  EXPECT_TRUE(lookup_storage_item_from_db(
+                  make_free_native_token_balance_addrkey(ContractAddress{}))
+                  .has_value())
+      << "the zero address must hold a committed native-token balance";
+  EXPECT_FALSE(
+      lookup_storage_item_from_db(
+          make_free_native_token_balance_addrkey(kNativeTfRecipientAddr))
+          .has_value())
+      << "the delegated transfer must not have gone to the default recipient";
+}
+
 // adjust_allowance(self, +amount): granting oneself an allowance is rejected by
 // both backends with ERC20Error::Internal at invoke, byte-identically.
 TEST_F(Erc20ParityTest, AdjustAllowanceToSelfParity)
@@ -1903,7 +1950,7 @@ TEST_F(Erc20ParityTest, FundedMintParity)
 }
 
 // A zero-amount mint: a no-op credit both backends accept identically
-// (including the zero-amount Transfer event path).
+// (including the zero-amount Mint event path).
 TEST_F(Erc20ParityTest, ZeroAmountMintParity)
 {
   auto nk = make_result_keys("native_step", 3);
@@ -2302,6 +2349,84 @@ TEST_F(Erc20ParityTest, MintThenBurnSameTxNetsSupplyParity)
       << "the committed supply must net back to the pre-mint value";
   EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[4]),
             std::optional<uint128_t>(0));
+}
+
+// The distinction issue #2135 turns on, pinned in a single transaction: a
+// zero-recipient transfer and a real burn both emit Transfer(x, zero, amount),
+// but only burn() moves supply. The transfer credits the zero address as an
+// ordinary account and leaves total_supply() alone; the burn debits the holder
+// and reduces total_supply(). Both backends agree, byte-for-byte.
+//
+// This is the working-as-intended reading of that issue: the zero address is
+// not a burn sink, and a zero-recipient Transfer event is a naming convention
+// (see the SDK's groundhog-erc20 events.rs) rather than a supply-reducing
+// state transition. Burning is the separate, owner-gated burn() call.
+//
+// The two paths are deliberately indistinguishable by event alone --- burn()
+// emits the same Transfer(owner, zero, amount) bytes, pinned by
+// NativeTokenAllowanceTest.GenesisRootBurnAuthorityIsNotHeightLimitedByPrecompile
+// against the bytes the zero-recipient transfer tests expect. Supply is the
+// signal that separates them, and that is what this test pins.
+TEST_F(Erc20ParityTest,
+       BurnReducesSupplyWhereZeroRecipientTransferDoesNotParity)
+{
+  auto nk = make_result_keys("native_step", 8);
+  auto rk = make_result_keys("rv32_step", 8);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    ContractAddress const zero{};
+    return std::vector<CaptureStep>{
+        // Fund the caller and establish a supply to watch.
+        make_step<u8"mint">(token, keys[0], holder, make_amount(1'000)),
+        make_step<u8"total_supply">(token, keys[1]),
+        // Path 1: transfer to the zero address. An ordinary move.
+        make_step<u8"transfer">(token, keys[2], zero, make_amount(300)),
+        make_step<u8"total_supply">(token, keys[3]),
+        make_step<u8"get_balance_of">(token, keys[4], zero),
+        // Path 2: a real burn of the same token by the contract owner.
+        make_step<u8"burn">(token, keys[5], holder, make_amount(200)),
+        make_step<u8"total_supply">(token, keys[6]),
+        make_step<u8"get_balance_of">(token, keys[7], holder)};
+  };
+  auto [native_outcome, rv32_outcome] = run_mint_burn_parity(
+      steps(kNativeTokenAddr, kGenesisRootContractAddress, nk),
+      steps(kRv32TokenAddr, kGenesisRootContractAddress, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on the supply "
+         "difference between a zero-recipient transfer and a burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 8U);
+
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[1]),
+            std::optional<uint128_t>(1'000));
+
+  // The zero-recipient transfer is accepted and leaves supply untouched.
+  ASSERT_GE(records[2].size(), 2U);
+  EXPECT_EQ(records[2][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "a transfer to the zero address must be accepted, not rejected";
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[3]),
+            std::optional<uint128_t>(1'000))
+      << "a zero-recipient transfer must not reduce total supply";
+
+  // The tokens are not destroyed -- they sit in the zero address's balance.
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[4]),
+            std::optional<uint128_t>(300))
+      << "the zero address must hold the transferred tokens";
+
+  // The burn is the path that actually reduces supply.
+  ASSERT_GE(records[5].size(), 2U);
+  EXPECT_EQ(records[5][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[6]),
+            std::optional<uint128_t>(800))
+      << "burn() must reduce total supply";
+
+  // The holder paid for both: 1000 - 300 transferred - 200 burned.
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[7]),
+            std::optional<uint128_t>(500));
 }
 
 // A burn against hand-crafted state where the balance exists but the supply

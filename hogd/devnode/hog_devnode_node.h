@@ -48,6 +48,7 @@ public:
 
   HogDevnodeNode(
       std::string bind_host, std::uint16_t requested_scheduler_port,
+      HogDevnodeDirectories directories,
       LocalBootstrapConfig const &bootstrap_config = {},
       std::optional<std::filesystem::path> const &data_dir = std::nullopt,
       NetworkHash network_hash = {},
@@ -96,7 +97,7 @@ public:
   {
     return recovered_existing_chain_;
   }
-  std::string const &runtime_dir() const { return runtime_dir_.directory(); }
+  std::string const &runtime_dir() const { return dirs_.runtime.directory(); }
 
 private:
   // ONC RPC single-fragment record limit; x23 cannot frame a larger message.
@@ -138,12 +139,9 @@ private:
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
   bool recovered_existing_chain_ = false;
 
-  HogDevnodeTmpDir runtime_dir_;
-  HogDevnodeTmpDir db_dir_;
-  // Declaration order matters: event_ctx_ borrows event_dir_.directory(),
+  // Declaration order matters: event_ctx_ borrows dirs_.event.directory(),
   // and the event RPC servers below borrow event_ctx_.
-  HogDevnodeTmpDir event_dir_;
-  HogDevnodeTmpDir indexer_dir_;
+  HogDevnodeDirectories dirs_;
   // Validate persistent HogDb before constructing runtime services. A corrupt
   // DbTip must not unwind partially constructed RPC/executor lifetimes.
   std::optional<HogDbDAO> opened_db_;

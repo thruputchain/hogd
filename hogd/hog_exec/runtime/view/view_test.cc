@@ -42,6 +42,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/vec.h"
 
@@ -83,13 +84,14 @@ protected:
                               RuntimeContext &context,
                               NondeterministicProposalData ndet = {})
   {
+    framework_.ensure_db_tip_loaded();
     return View::run_view_transaction(
         *framework_.get_storage_snapshot_cache(),
         framework_.make_new_per_tx_db_proxy(
             std::numeric_limits<TransactionID>::max()),
         framework_.make_new_per_tx_event_server_proxy(
             std::numeric_limits<TransactionID>::max()),
-        query, context, std::move(ndet));
+        query, context, std::move(ndet))();
   }
 
   static TransactionViewQuery make_query(Invocation invocation,
@@ -125,21 +127,21 @@ protected:
         reinterpret_cast<uint8_t const *>(data.data() + data.size()));
   }
 
-  static InvokeStatus<void> emit_event(NativeSyscallContext &ctx,
-                                       std::string const &payload)
+  static x23::Async<InvokeStatus<void>> emit_event(NativeSyscallContext &ctx,
+                                                   std::string const &payload)
   {
-    auto s = ctx.syscall<SyscallNo::kLogEvent>(
+    auto s = co_await ctx.syscall<SyscallNo::kLogEvent>(
         static_cast<SHA256Hash const *>(nullptr),
         static_cast<SHA256Hash const *>(nullptr),
         static_cast<SHA256Hash const *>(nullptr),
         std::as_bytes(std::span(payload)));
     if (!s.has_value()) {
-      return InvokeError{InvokeErrorCode::Unrecoverable};
+      co_return InvokeError{InvokeErrorCode::Unrecoverable};
     }
     if (s.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
-    return {};
+    co_return InvokeStatus<void>{};
   }
 
   struct NativeViewSetup {
@@ -250,19 +252,25 @@ TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
   EXPECT_EQ(result.error_code(), SyscallErrorCode::kSyscallErrorCodeReentrance);
 }
 
-TEST_F(ViewTest, ViewContractSelfInvokeFaults)
+TEST_F(ViewTest, ViewContractSelfInvokeAborts)
 {
   ContractTraitClient<read_only_test::ReadOnlyTest> client(kReadOnlyAddress);
   // Pointing the entrypoint's callee at its own address makes the inner invoke
-  // reentrant, which the guard rejects -- faulting the frame.
+  // reentrant, which the guard rejects. The entrypoint calls through the
+  // plain (non-try) client, which re-throws that rejection as the SDK's
+  // CallingError::Reentrance -- a library exception, so the frame aborts.
+  // It faulted instead until sdk_rs#421 stopped reporting reentrance and the
+  // depth bound as callee faults.
   auto invocation =
       client.make_invocation<u8"read_only_aliasing_before_read_only_check">(
           UINT64_MAX, kReadOnlyAddress);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
-  EXPECT_EQ(result.result().output,
-            InvocationFrameOutput(InvocationFrameStatusCode::Fault));
+  // Only the status code: the abort carries the library exception's payload,
+  // which is the SDK's to shape, not this test's to pin.
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Abort);
 }
 
 TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
@@ -271,18 +279,18 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractAddress sender{};
-        auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+        auto r = co_await ctx.syscall<SyscallNo::kGetMsgSender>(sender);
         if (!r.has_value()) {
           ADD_FAILURE() << "get_msg_sender syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeIsRootTransaction) {
           ADD_FAILURE() << "expected IsRootTransaction";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -306,19 +314,19 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
       NativeContractTestFramework::make_contract_address(20);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractAddress sender{};
-        auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+        auto r = co_await ctx.syscall<SyscallNo::kGetMsgSender>(sender);
         if (!r.has_value()) {
           ADD_FAILURE() << "get_msg_sender syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "expected successful get_msg_sender";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         EXPECT_EQ(sender, kParentAddr);
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -341,15 +349,14 @@ TEST_F(ViewTest, ViewFrameReverted)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto ret =
-            ctx.syscall<SyscallNo::kReturn>(std::as_bytes(
-                                                std::span("hello", 5)),
-                                            true, std::span<const std::byte>{});
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
+            std::as_bytes(std::span("hello", 5)), true,
+            std::span<const std::byte>{});
         if (ret.has_value() || ret.error().code() != HostFnErrorCode::Return) {
           ADD_FAILURE() << "expected Return error from kReturn syscall";
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -375,16 +382,16 @@ TEST_F(ViewTest, ViewOutputCorrectWithParentFrame)
       NativeContractTestFramework::make_contract_address(20);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         uint32_t val = 42;
-        auto ret = ctx.syscall<SyscallNo::kReturn>(
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
             std::as_bytes(
                 std::span(reinterpret_cast<const char *>(&val), sizeof(val))),
             false, std::span<const std::byte>{});
         if (ret.has_value() || ret.error().code() != HostFnErrorCode::Return) {
           ADD_FAILURE() << "expected Return from kReturn syscall";
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -411,10 +418,11 @@ TEST_F(ViewTest, ViewDeterministicRv32)
   static constexpr ContractAddress kNativeAddr =
       NativeContractTestFramework::make_contract_address(10);
 
-  NativeViewSetup setup(
-      0, [](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return InvokeError{InvokeErrorCode::Deterministic};
-      });
+  NativeViewSetup setup(0,
+                        [](NativeSyscallContext & /*unused*/)
+                            -> x23::Async<InvokeStatus<void>> {
+                          co_return InvokeError{InvokeErrorCode::Deterministic};
+                        });
 
   deploy_native(kNativeAddr);
 
@@ -440,29 +448,30 @@ TEST_F(ViewTest, ViewTryInvokeSucceedsWhenDefaulted)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(0,
-                    [](NativeSyscallContext & /*unused*/) noexcept
-                        -> InvokeStatus<void> { return {}; });
+                    [](NativeSyscallContext & /*unused*/)
+                        -> x23::Async<InvokeStatus<void>> {
+                      co_return InvokeStatus<void>{};
+                    });
   fns_setup.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, CopyableInvokeOutputs{});
         if (!r.has_value()) {
           ADD_FAILURE() << "try_invoke syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "try_invoke returned error: "
                         << static_cast<int>(r.value());
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -491,29 +500,30 @@ TEST_F(ViewTest, ViewTryInvokeSucceedsWhenSuppliedTrue)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(0,
-                    [](NativeSyscallContext & /*unused*/) noexcept
-                        -> InvokeStatus<void> { return {}; });
+                    [](NativeSyscallContext & /*unused*/)
+                        -> x23::Async<InvokeStatus<void>> {
+                      co_return InvokeStatus<void>{};
+                    });
   fns_setup.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, CopyableInvokeOutputs{});
         if (!r.has_value()) {
           ADD_FAILURE() << "try_invoke syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "try_invoke returned error: "
                         << static_cast<int>(r.value());
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -547,32 +557,33 @@ TEST_F(ViewTest, ViewTryInvokeFailsWhenSuppliedFalse)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(0,
-                    [](NativeSyscallContext & /*unused*/) noexcept
-                        -> InvokeStatus<void> { return {}; });
+                    [](NativeSyscallContext & /*unused*/)
+                        -> x23::Async<InvokeStatus<void>> {
+                      co_return InvokeStatus<void>{};
+                    });
   fns_setup.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, outputs);
         if (!r.has_value()) {
           ADD_FAILURE() << "try_invoke syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The supplied-false bit forces the try_invoke to roll back: the child
-        // frame runs (code None) but does not return normally.
+        // frame runs (code None) but does not co_return normally.
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             outputs.frame_status == InvocationFrameStatusCode::Return) {
           ADD_FAILURE() << "try_invoke should have failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -610,22 +621,23 @@ TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(0,
-                    [](NativeSyscallContext & /*unused*/) noexcept
-                        -> InvokeStatus<void> { return {}; });
+                    [](NativeSyscallContext & /*unused*/)
+                        -> x23::Async<InvokeStatus<void>> {
+                      co_return InvokeStatus<void>{};
+                    });
   fns_setup.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, outputs);
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         std::string_view branch =
@@ -637,7 +649,7 @@ TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
         out.resize(branch.size());
         std::memcpy(out.data(), branch.data(), branch.size());
         ctx.handler().set_return_buffer(std::move(out), false);
-        return {};
+        co_return InvokeStatus<void>{};
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -693,23 +705,23 @@ TEST_F(ViewTest, ViewRcqConsumeDefaultNotPresent)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
         QueueEntry entry;
         RuntimeMemoryLength written_len = 0;
-        auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
             key, false, std::as_writable_bytes(std::span(entry)), written_len);
         if (!r.has_value()) {
           ADD_FAILURE() << "rcq consume syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r.value() !=
             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
           ADD_FAILURE() << "expected NoRetrocausalQueueEntry, got "
                         << static_cast<int>(r.value());
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -731,23 +743,23 @@ TEST_F(ViewTest, ViewRcqConsumeSuppliedNotPresent)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
         QueueEntry entry;
         RuntimeMemoryLength written_len = 0;
-        auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
             key, false, std::as_writable_bytes(std::span(entry)), written_len);
         if (!r.has_value()) {
           ADD_FAILURE() << "rcq consume syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r.value() !=
             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
           ADD_FAILURE() << "expected NoRetrocausalQueueEntry, got "
                         << static_cast<int>(r.value());
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -774,24 +786,24 @@ TEST_F(ViewTest, ViewRcqConsumeSuppliedPresent)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
         QueueEntry entry = {0};
         RuntimeMemoryLength written_len = 0;
-        auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
             key, false, std::as_writable_bytes(std::span(entry)), written_len);
         if (!r.has_value()) {
           ADD_FAILURE() << "rcq consume syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "expected successful consume, got "
                         << static_cast<int>(r.value());
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         EXPECT_GT(written_len, 0U);
         EXPECT_EQ(entry[0], 0xAB);
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -822,22 +834,22 @@ TEST_F(ViewTest, ViewRcqConsumePresentButNoEntryData)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
         QueueEntry entry;
         RuntimeMemoryLength written_len = 0;
-        auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
             key, false, std::as_writable_bytes(std::span(entry)), written_len);
         if (r.has_value()) {
           ADD_FAILURE() << "rcq consume should not have succeeded";
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (r.error().code() != HostFnErrorCode::ValidationFailure) {
           ADD_FAILURE() << "expected ValidationFailure, got "
                         << static_cast<int>(r.error().code());
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
-        return InvokeError{InvokeErrorCode::ValidationFailure};
+        co_return InvokeError{InvokeErrorCode::ValidationFailure};
       });
 
   deploy_native(kNativeAddr);
@@ -865,8 +877,10 @@ TEST_F(ViewTest, ViewSingleFrameNoEvents)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(0,
-                        [](NativeSyscallContext & /*unused*/) noexcept
-                            -> InvokeStatus<void> { return {}; });
+                        [](NativeSyscallContext & /*unused*/)
+                            -> x23::Async<InvokeStatus<void>> {
+                          co_return InvokeStatus<void>{};
+                        });
 
   deploy_native(kNativeAddr);
 
@@ -890,14 +904,14 @@ TEST_F(ViewTest, ViewSingleFrameEmitsMultipleEvents)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (auto const *payload : {"first", "second", "third"}) {
-          auto r = emit_event(ctx, std::string(payload));
+          auto r = co_await emit_event(ctx, std::string(payload));
           if (!r.has_value()) {
-            return r;
+            co_return r;
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -941,30 +955,29 @@ TEST_F(ViewTest, ViewNestedFrameEventsCombinedInOrder)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        return emit_event(ctx, "inner_leaf");
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        co_return co_await emit_event(ctx, "inner_leaf");
       });
   fns_setup.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = emit_event(ctx, "outer_before"); !r.has_value()) {
-          return r;
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await emit_event(ctx, "outer_before"); !r.has_value()) {
+          co_return r;
         }
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, CopyableInvokeOutputs{});
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return emit_event(ctx, "outer_after");
+        co_return co_await emit_event(ctx, "outer_after");
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -1009,52 +1022,50 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        return emit_event(ctx, "leaf");
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        co_return co_await emit_event(ctx, "leaf");
       });
   fns_setup.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = emit_event(ctx, "middle_pre"); !r.has_value()) {
-          return r;
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await emit_event(ctx, "middle_pre"); !r.has_value()) {
+          co_return r;
         }
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kLeafAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kLeafAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, CopyableInvokeOutputs{});
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return emit_event(ctx, "middle_post");
+        co_return co_await emit_event(ctx, "middle_post");
       });
   fns_setup.emplace(
-      2, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = emit_event(ctx, "outer_pre"); !r.has_value()) {
-          return r;
+      2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await emit_event(ctx, "outer_pre"); !r.has_value()) {
+          co_return r;
         }
         CopyableInvokeInputs inputs{
             .entrypoint_id = 1,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kMiddleAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kMiddleAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, CopyableInvokeOutputs{});
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return emit_event(ctx, "outer_post");
+        co_return co_await emit_event(ctx, "outer_post");
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -1102,22 +1113,22 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = emit_event(ctx, "child_dropped"); !r.has_value()) {
-          return r;
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await emit_event(ctx, "child_dropped");
+            !r.has_value()) {
+          co_return r;
         }
-        auto ret =
-            ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{}, true,
-                                            std::span<const std::byte>{});
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
+            std::span<const std::byte>{}, true, std::span<const std::byte>{});
         if (ret.has_value() || ret.error().code() != HostFnErrorCode::Return) {
           ADD_FAILURE() << "expected Return error from kReturn syscall";
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_setup.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = emit_event(ctx, "before"); !r.has_value()) {
-          return r;
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await emit_event(ctx, "before"); !r.has_value()) {
+          co_return r;
         }
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
@@ -1125,20 +1136,19 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
             .flags = std::to_underlying(InvokeFlag::None),
         };
         CopyableInvokeOutputs r_outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r_outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, r_outputs);
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r_outputs.frame_status != InvocationFrameStatusCode::Abort) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return emit_event(ctx, "after");
+        co_return co_await emit_event(ctx, "after");
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -1191,28 +1201,28 @@ TEST_F(ViewTest, ViewForwardedTokenWithParentSucceeds)
       NativeContractTestFramework::make_contract_address(20);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // The first forwarded token receives id 0 from the registry.
         std::array<std::byte, 64> payload_buf{};
         ContractAddress minter{};
         RuntimeMemoryLength payload_written_len = 0;
         uint32_t child_start = 0;
         uint32_t child_count = 0;
-        auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+        auto r = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
             0U, std::span<std::byte>{payload_buf}, minter, payload_written_len,
             child_start, child_count);
         if (!r.has_value()) {
           ADD_FAILURE() << "consume_auth_token syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "consume_auth_token returned error: "
                         << static_cast<int>(r.value());
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         EXPECT_EQ(minter, kParentAddr);
         EXPECT_EQ(child_count, 0U);
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kCalleeAddr);
@@ -1254,11 +1264,12 @@ TEST_F(ViewTest, ViewForwardedTokenExceedingMaxDepthReturnsInvalidInput)
                          .child_nodes = {node}};
   }
 
-  NativeViewSetup setup(
-      0, [](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        ADD_FAILURE() << "contract should not be invoked";
-        return {};
-      });
+  NativeViewSetup setup(0,
+                        [](NativeSyscallContext & /*unused*/)
+                            -> x23::Async<InvokeStatus<void>> {
+                          ADD_FAILURE() << "contract should not be invoked";
+                          co_return InvokeStatus<void>{};
+                        });
 
   deploy_native(kCalleeAddr);
 
@@ -1297,22 +1308,22 @@ TEST_F(ViewTest, ViewForwardedTokenAtMaxDepthSucceeds)
   }
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         std::array<std::byte, 64> payload_buf{};
         ContractAddress minter{};
         RuntimeMemoryLength payload_written_len = 0;
         uint32_t child_start = 0;
         uint32_t child_count = 0;
-        auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+        auto r = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
             0U, std::span<std::byte>{payload_buf}, minter, payload_written_len,
             child_start, child_count);
         if (!r.has_value()) {
           ADD_FAILURE() << "consume_auth_token syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(minter, kParentAddr);
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kCalleeAddr);
@@ -1341,17 +1352,16 @@ TEST_F(ViewTest, RootManualRevertOmitsEvents)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = emit_event(ctx, "reverted"); !r.has_value()) {
-          return r;
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await emit_event(ctx, "reverted"); !r.has_value()) {
+          co_return r;
         }
-        auto ret =
-            ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{}, true,
-                                            std::span<const std::byte>{});
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
+            std::span<const std::byte>{}, true, std::span<const std::byte>{});
         if (ret.has_value() || ret.error().code() != HostFnErrorCode::Return) {
           ADD_FAILURE() << "expected Return error from kReturn syscall";
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
@@ -1376,11 +1386,11 @@ TEST_F(ViewTest, RootFaultOmitsEvents)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = emit_event(ctx, "faulted"); !r.has_value()) {
-          return r;
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await emit_event(ctx, "faulted"); !r.has_value()) {
+          co_return r;
         }
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   deploy_native(kNativeAddr);
@@ -1411,22 +1421,22 @@ TEST_F(ViewTest, ViewForwardedExpiredTokenConsumeReturnsError)
       framework_.get_db_tip().value.proposal_header.block_height - 1};
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         std::array<std::byte, 64> payload_buf{};
         ContractAddress minter{};
         RuntimeMemoryLength payload_written_len = 0;
         uint32_t child_start = 0;
         uint32_t child_count = 0;
-        auto r = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+        auto r = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
             0U, std::span<std::byte>{payload_buf}, minter, payload_written_len,
             child_start, child_count);
         if (!r.has_value()) {
           ADD_FAILURE() << "consume_auth_token syscall failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         EXPECT_EQ(r.value(),
                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kCalleeAddr);
@@ -1458,28 +1468,29 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         BlockHeight height = -1;
-        auto r = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+        auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
   framework_.advance_block();
 
-  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot();
+  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snapshot_res.has_value());
   auto &snapshot = snapshot_res.value();
 
   StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
+  ASSERT_TRUE(snapshot_cache.load_db_tip()().has_value());
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
@@ -1495,12 +1506,12 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
                                   std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {});
+      make_query(invocation), *setup.context, {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 
   auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
-      snapshot.viewing_block_id);
+      snapshot.viewing_block_id)();
   EXPECT_TRUE(close_res.has_value());
 }
 
@@ -1511,39 +1522,12 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
 // snapshot that went stale gets, and the one the gateway responds to by
 // rotating to a fresh viewing snapshot (ViewGatewayRpc::run_view_with_retries).
 //
-// The executor used to read the tip lazily, so this surfaced only once the
-// body called a tip-backed syscall, and the status the caller saw was whatever
-// the body chose to return for a failed syscall -- InternalError, for this
-// test's body, which is what this test asserted while it was named
-// SelfTipBlockIdCausesInternalError. invoke() now reads the tip at admission to
-// enforce kConfigParamMaxCrossInvokeDepth, so the runtime's own classification
-// reaches the caller unlaundered and the body never runs at all. Both halves
-// are pinned below; the body still maps a failed syscall to Unrecoverable, so
-// entering it would show up as InternalError rather than as Abandoned.
-TEST_F(ViewTest, SelfTipBlockIdAbandonedBeforeBodyRuns)
+// The executor used to read the tip lazily, so this surfaced only once a
+// view actually ran against the snapshot. The tip is now loaded once, when
+// the cache is built for the block, so the refusal lands there -- before any
+// view, and with it any contract body, can exist at all.
+TEST_F(ViewTest, SelfTipBlockIdRefusesTipLoad)
 {
-  static constexpr ContractAddress kNativeAddr =
-      NativeContractTestFramework::make_contract_address(11);
-
-  bool body_entered = false;
-
-  NativeViewSetup setup(
-      0,
-      [&body_entered](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        body_entered = true;
-        BlockHeight height = -1;
-        auto r = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
-        if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
-
-  deploy_native(kNativeAddr);
   framework_.advance_block();
 
   DbTip tip = framework_.get_db_tip();
@@ -1551,32 +1535,17 @@ TEST_F(ViewTest, SelfTipBlockIdAbandonedBeforeBodyRuns)
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
 
-  Invocation invocation{
-      .invoked_address = kNativeAddr,
-      .entrypoint = entrypoint_from_method_id(0),
-      .gas_limit = UINT64_MAX,
-      .calldata = {},
-  };
-
-  auto result = View::run_view_transaction(
-      snapshot_cache,
-      PerTransactionDatabaseProxy(framework_.get_db_proxy(), tip.id,
-                                  std::numeric_limits<TransactionID>::max()),
-      framework_.make_new_per_tx_event_server_proxy(
-          std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {});
-
-  EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
-  EXPECT_FALSE(body_entered)
-      << "an unreadable snapshot must be refused at invoke admission, before "
-         "any contract code runs";
+  auto load = snapshot_cache.load_db_tip()();
+  ASSERT_FALSE(load.has_value());
+  EXPECT_EQ(load.error().code(), SystemErrorCode::Abandon);
+  EXPECT_FALSE(snapshot_cache.has_db_tip());
 }
 
 TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
 {
   framework_.advance_block();
 
-  auto res = framework_.get_db_proxy().open_viewing_snapshot();
+  auto res = framework_.get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(res.has_value());
 
   auto &snapshot = res.value();
@@ -1584,7 +1553,7 @@ TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
   EXPECT_GE(snapshot.tip.value.proposal_header.block_height, 0);
 
   auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
-      snapshot.viewing_block_id);
+      snapshot.viewing_block_id)();
   EXPECT_TRUE(close_res.has_value());
 }
 
@@ -1594,30 +1563,33 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
       NativeContractTestFramework::make_contract_address(12);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         BlockHeight height = -1;
-        auto r = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+        auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);
   framework_.advance_block();
 
-  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot();
+  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snapshot_res.has_value());
   auto &snapshot = snapshot_res.value();
 
-  framework_.advance_block();
-
+  // Built and loaded while the snapshot is fresh, as the view gateway does
+  // when it opens one; the advance below is what makes it stale.
   StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
                                       framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
+  ASSERT_TRUE(snapshot_cache.load_db_tip()().has_value());
+
+  framework_.advance_block();
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
@@ -1633,12 +1605,12 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
                                   std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {});
+      make_query(invocation), *setup.context, {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
 
   auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
-      snapshot.viewing_block_id);
+      snapshot.viewing_block_id)();
   EXPECT_TRUE(close_res.has_value());
 }
 
@@ -1655,54 +1627,54 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
 
-  fns.emplace(0,
-              [](NativeSyscallContext & /*ctx*/) noexcept
-                  -> InvokeStatus<void> { return {}; });
-
   fns.emplace(
-      2, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        ADD_FAILURE() << "Consumer should never be invoked";
-        return {};
+      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
       });
 
-  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    std::array<uint32_t, 1> forwarded{0};
+  fns.emplace(
+      2, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        ADD_FAILURE() << "Consumer should never be invoked";
+        co_return InvokeStatus<void>{};
+      });
 
-    CopyableInvokeInputs inputs{
-        .entrypoint_id = 0,
-        .gas_limit = UINT64_MAX,
-        .flags = std::to_underlying(InvokeFlag::ReadOnly),
-    };
-    auto invoke_res =
-        ctx.syscall<SyscallNo::kInvoke>(kChildAddr,
-                                        std::span<const std::byte>{},
-                                        std::span<uint32_t const>{forwarded},
-                                        inputs, CopyableInvokeOutputs{});
-    if (!invoke_res.has_value()) {
-      ADD_FAILURE() << "read-only invoke syscall failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+  fns.emplace(
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        std::array<uint32_t, 1> forwarded{0};
 
-    CopyableInvokeInputs inputs2{
-        .entrypoint_id = 2,
-        .gas_limit = UINT64_MAX,
-        .flags = 0,
-    };
-    auto reuse_res =
-        ctx.syscall<SyscallNo::kInvoke>(kConsumerAddr,
-                                        std::span<const std::byte>{},
-                                        std::span<uint32_t const>{forwarded},
-                                        inputs2, CopyableInvokeOutputs{});
-    if (!reuse_res.has_value()) {
-      ADD_FAILURE() << "reuse invoke syscall failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    EXPECT_EQ(reuse_res.value(),
-              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = std::to_underlying(InvokeFlag::ReadOnly),
+        };
+        auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kChildAddr, std::span<const std::byte>{},
+            std::span<uint32_t const>{forwarded}, inputs,
+            CopyableInvokeOutputs{});
+        if (!invoke_res.has_value()) {
+          ADD_FAILURE() << "read-only invoke syscall failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
-    return {};
-  });
+        CopyableInvokeInputs inputs2{
+            .entrypoint_id = 2,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        auto reuse_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kConsumerAddr, std::span<const std::byte>{},
+            std::span<uint32_t const>{forwarded}, inputs2,
+            CopyableInvokeOutputs{});
+        if (!reuse_res.has_value()) {
+          ADD_FAILURE() << "reuse invoke syscall failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        EXPECT_EQ(reuse_res.value(),
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+        co_return InvokeStatus<void>{};
+      });
 
   NativeViewSetup setup(std::move(fns));
 
@@ -1737,37 +1709,37 @@ TEST_F(ViewTest, ViewRcqConsumeDeleteInsert)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
 
         QueueEntry entry = {0};
         RuntimeMemoryLength written_len = 0;
-        auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        auto r1 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
             key, false, std::as_writable_bytes(std::span(entry)), written_len);
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "consume failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
+        auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
             key, std::to_underlying(StorageDeltaFlags::None));
         if (!r2.has_value() ||
             r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "delete failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         uint32_t new_val = 99;
-        auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+        auto r3 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&new_val, 1)));
         if (!r3.has_value() ||
             r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "insert failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   deploy_native(kNativeAddr);

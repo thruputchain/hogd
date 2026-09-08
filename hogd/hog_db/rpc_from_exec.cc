@@ -38,6 +38,7 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
@@ -465,19 +466,30 @@ HogDbExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
 {
   // TODO(abelay): BlockID is ignored here too for the same reasons.
 
-  HogDbStatus<OwningSpan<const std::byte>> wasm =
-      ctx_.get_db().read_wasm_code(hash);
+  HogDbStatus<OwningSpan<const std::byte>> code =
+      ctx_.get_db().read_contract_code(hash);
 
   if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
     return ExpectedContract(RPCError::kRPCBadBlockID);
 
-  if (!wasm)
-    return ExpectedContract(to_rpc_error(wasm.error()));
+  if (!code)
+    return ExpectedContract(to_rpc_error(code.error()));
 
   ExpectedContract out;
   out.error(RPCError::kRPCNone);
 
-  x23::deserialize(&out.contract(), x23::BufView{*wasm});
+  try {
+    x23::deserialize(&out.contract(), x23::BufView{*code});
+  } catch (x23::XdrException &e) {
+    // A persistent contract-code row whose inline payload does not decode as a
+    // Contract is corrupt on-disk state. Report it as a structured corruption
+    // error -- the same way the retrocausal-queue metadata path above does --
+    // rather than letting the decode exception unwind across the executor RPC
+    // boundary, where the syscall wrapper would translate it into an opaque
+    // unrecoverable host error.
+    error("failed to deserialize persistent contract row: {}", e.what());
+    return ExpectedContract(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
+  }
 
   return out;
 }
@@ -565,54 +577,66 @@ HogDbExecutorRpc::get_concurrent_retrocausal_queue_entry(
   return ret;
 }
 
-ExpectedDBTip
-HogDbExecutorRpc::get_db_tip(BlockID block_id)
+x23::Async<ExpectedDBTip>
+HogDbExecutorRpc::get_db_tip(BlockID block_id, BlockHeight block_height)
 {
-  // Read the tip first, then check staleness. This ordering is paired with
-  // commit_block()'s ordering of invalidate_siblings before update_dbtip: if
-  // we observe a non-stale block at the stale check, then at the time of the
-  // tip read no sibling had begun committing yet, so the tip is still the
-  // parent's tip rather than a freshly committed sibling's.
+  // Serving is decided off the committed tip alone, keyed on the height the
+  // caller opened its block with -- never on per-block snapshot state -- so
+  // this cannot race the block's own creation (executor_to_db_rpc.x). Settle
+  // any in-flight commit publication first: mid-publication the tip can
+  // still read one below where it is about to land, the one transient way it
+  // can sit under block_height - 1.
+  co_await ctx_.co_wait_for_no_commit_publishing();
+
   HogDbStatus<DbTip> tip = ctx_.get_tip();
-
-  if (ctx_.is_snapshot_read_stale(block_id)) [[unlikely]]
-    return ExpectedDBTip(RPCError::kRPCBadBlockID);
-
   if (!tip) {
-    return ExpectedDBTip(to_rpc_error(tip.error()));
+    co_return ExpectedDBTip(to_rpc_error(tip.error()));
   }
-  // block_id is the id of the current (open) block; the returned tip is its
-  // parent. If the tip *is* block_id, this block has itself been committed out
-  // from under the reader (e.g. it was advanced while a transaction handler
-  // still held this snapshot). Report that as a bad block id, the same way the
-  // staleness check above does. DatabaseProxy::get_db_tip already treats an
-  // id == block_id tip as a recoverable error on the client side, so this just
-  // moves that handling to the server and makes both build types agree -- the
-  // assert that used to live here crashed debug builds on a condition release
-  // already handled gracefully.
+
+  const BlockHeight tip_height = tip->value.proposal_header.block_height;
+  if (tip_height >= block_height) [[unlikely]] {
+    // The chain has moved to or past the caller's block: the block is dead.
+    // Routine for staleness probes (the view gateway's refresh path), so not
+    // logged. A sibling whose commit begins after the wait above can still
+    // slip past this check; its per-transaction operations then report
+    // Abandon, the same window the per-transaction tip pin used to have.
+    co_return ExpectedDBTip(RPCError::kRPCBadBlockID);
+  }
+  if (tip_height < block_height - 1) [[unlikely]] {
+    // Still below with no commit in flight: the caller opened a block whose
+    // parent never committed, which dbsched_create_snapshot forbids.
+    error("get_db_tip for block {} at height {}: committed tip is at {}",
+          block_id, block_height, tip_height);
+    co_return ExpectedDBTip(RPCError::kRPCBadBlockID);
+  }
+
+  // The tip *is* the requested block: the caller is loading a tip for the
+  // committed block itself (e.g. a view opened on the tip's own id).
+  // DatabaseProxy::get_db_tip also refuses this client-side; answering here
+  // keeps both build types agreeing on the wire.
   if (tip->id == block_id) [[unlikely]] {
-    return ExpectedDBTip(RPCError::kRPCBadBlockID);
+    co_return ExpectedDBTip(RPCError::kRPCBadBlockID);
   }
 
   ExpectedDBTip out;
   out.error(RPCError::kRPCNone);
   out.db_tip() = *tip;
-  return out;
+  co_return out;
 }
 
-ExpectedViewingSnapshot
+x23::Async<ExpectedViewingSnapshot>
 HogDbExecutorRpc::open_viewing_snapshot()
 {
   BlockID block_id = generate_block_id();
-  auto res = ctx_.open_viewing_snapshot(block_id);
+  auto res = co_await ctx_.open_viewing_snapshot(block_id);
   if (!res) {
-    return ExpectedViewingSnapshot(to_rpc_error(res.error()));
+    co_return ExpectedViewingSnapshot(to_rpc_error(res.error()));
   }
 
   ExpectedViewingSnapshot out;
   out.error(RPCError::kRPCNone);
   out.snapshot() = std::move(*res);
-  return out;
+  co_return out;
 }
 
 RPCError

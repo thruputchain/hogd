@@ -30,6 +30,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -63,72 +64,72 @@ protected:
     //   method 0: each calldata byte → one queue entry
     //   method 1: consume calldata[0] entries (default 1)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &cd = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
-                  for (uint8_t val : cd) {
-                    auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&val, 1)));
-                    if (!res.has_value())
-                      return res.error().to_invoke_error();
-                  }
-                  return {};
-                });
-    fns.emplace(1,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &cd = ctx.handler().get_calldata();
-                  uint8_t count = cd.empty() ? 1 : cd[0];
-                  auto key = make_storage_key("rcq0");
-                  for (uint8_t i = 0; i < count; i++) {
-                    auto res =
-                        ctx.handler().retrocausal_queue_consume(key, false);
-                    if (!res.has_value())
-                      return res.error().to_invoke_error();
-                  }
-                  return {};
-                });
+    fns.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &cd = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
+          for (uint8_t val : cd) {
+            auto res = co_await ctx.handler().retrocausal_queue_insert(
+                key, std::as_bytes(std::span(&val, 1)));
+            if (!res.has_value())
+              co_return res.error().to_invoke_error();
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &cd = ctx.handler().get_calldata();
+          uint8_t count = cd.empty() ? 1 : cd[0];
+          auto key = make_storage_key("rcq0");
+          for (uint8_t i = 0; i < count; i++) {
+            auto res =
+                co_await ctx.handler().retrocausal_queue_consume(key, false);
+            if (!res.has_value())
+              co_return res.error().to_invoke_error();
+          }
+          co_return InvokeStatus<void>{};
+        });
     // method 2: delete the RCQ key
-    fns.emplace(2,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto key = make_storage_key("rcq0");
-                  auto res = ctx.handler().delete_object(
-                      key, std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value())
-                    return res.error().to_invoke_error();
-                  return {};
-                });
+    fns.emplace(
+        2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("rcq0");
+          auto res = co_await ctx.handler().delete_object(
+              key, std::to_underlying(StorageDeltaFlags::None));
+          if (!res.has_value())
+            co_return res.error().to_invoke_error();
+          co_return InvokeStatus<void>{};
+        });
     // method 3: set bytestring (type change from RCQ)
-    fns.emplace(3,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &cd = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
-                  auto res = ctx.handler().set_bytestring(
-                      key, std::as_bytes(std::span(cd)),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value())
-                    return res.error().to_invoke_error();
-                  return {};
-                });
+    fns.emplace(
+        3, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &cd = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
+          auto res = co_await ctx.handler().set_bytestring(
+              key, std::as_bytes(std::span(cd)),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!res.has_value())
+            co_return res.error().to_invoke_error();
+          co_return InvokeStatus<void>{};
+        });
     // method 4: delete + recreate (delete then insert)
-    fns.emplace(4,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &cd = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
-                  auto del = ctx.handler().delete_object(
-                      key, std::to_underlying(StorageDeltaFlags::None));
-                  if (!del.has_value())
-                    return del.error().to_invoke_error();
-                  if (!del.value().has_value())
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  for (uint8_t val : cd) {
-                    auto ins = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&val, 1)));
-                    if (!ins.has_value())
-                      return ins.error().to_invoke_error();
-                  }
-                  return {};
-                });
+    fns.emplace(
+        4, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &cd = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
+          auto del = co_await ctx.handler().delete_object(
+              key, std::to_underlying(StorageDeltaFlags::None));
+          if (!del.has_value())
+            co_return del.error().to_invoke_error();
+          if (!del.value().has_value())
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          for (uint8_t val : cd) {
+            auto ins = co_await ctx.handler().retrocausal_queue_insert(
+                key, std::as_bytes(std::span(&val, 1)));
+            if (!ins.has_value())
+              co_return ins.error().to_invoke_error();
+          }
+          co_return InvokeStatus<void>{};
+        });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -187,14 +188,14 @@ protected:
               return self->make_new_system_call_handler_validation(
                   s.tx.tx, *self->context_, s.proposal);
           }();
-          auto res = handler.root_invoke();
+          auto res = handler.root_invoke()();
           if (!res.is_root_success()) {
             s.committed = false;
             co_return;
           }
           if constexpr (Proposal)
             s.proposal = handler.get_proposal_data();
-          auto commit_res = handler.try_commit_transaction();
+          auto commit_res = handler.try_commit_transaction()();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
             panic("unexpected commit error");
@@ -327,8 +328,8 @@ TEST_F(RCQInterleavingTest, InsertAndConcurrentDelete)
 {
   // Seed the RCQ with an entry so delete has something to act on.
   auto handler = make_new_system_call_handler(make_insert_tx({42}), *context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   check_interleavings({
@@ -345,8 +346,8 @@ TEST_F(RCQInterleavingTest, DeleteRecreateAndConcurrentInsert)
 {
   // Seed the RCQ so the delete+recreate has something to delete.
   auto handler = make_new_system_call_handler(make_insert_tx({42}), *context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   check_interleavings({
@@ -362,8 +363,8 @@ TEST_F(RCQInterleavingTest, TypeChangeAndConcurrentInsert)
 {
   // Seed the RCQ.
   auto handler = make_new_system_call_handler(make_insert_tx({42}), *context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   check_interleavings({

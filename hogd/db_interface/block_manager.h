@@ -76,6 +76,14 @@ public:
     return *network_config_;
   }
 
+  // The network this chain belongs to, from the genesis configuration. Fixed
+  // for the life of the network, so every tip carries it.
+  NetworkHash const &get_network_hash() const
+  {
+    assert(network_hash_.has_value());
+    return *network_hash_;
+  }
+
 private:
   // One block.
   // Does not own a reference to children.
@@ -123,6 +131,7 @@ private:
   // The chain's execution parameters: handed to the executor in the DbTip and
   // committed to through the config hash preimage.
   std::optional<NetworkConfig> network_config_;
+  std::optional<NetworkHash> network_hash_;
 
   // remove the block, and all of its children
   // returns the block_data_ for each block that was removed;

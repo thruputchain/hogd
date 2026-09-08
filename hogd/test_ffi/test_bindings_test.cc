@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -20,6 +21,8 @@
 #include "ffi_enums.hh"
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
@@ -41,6 +44,7 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -540,7 +544,7 @@ TEST(TestBindingsTest, GrantStorageTokensTest)
                                                 1000),
             kTestFFIErrorCodeNone);
 
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 }
 
 namespace {
@@ -734,7 +738,7 @@ TEST(TestBindingsTest, VerifyAuthFromDB)
   ASSERT_TRUE(write_result.has_value()) << "Failed to write address auth data";
 
   // Advance block so auth data is available
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   // Serialize transaction
   auto serialized_stx = x23::serialize(stx);
@@ -796,7 +800,7 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
   x23::Defer d([db] { free_db(db); });
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   auto serialized_stx = x23::serialize(stx);
   VerifyAuthResultFromDBResult result =
@@ -872,8 +876,13 @@ TEST(TestBindingsTest, CostModelRoundtrip)
 TEST(TestBindingsTest, NetworkConfigRoundtrip)
 {
   NetworkConfig custom_config = stock_network_config();
-  custom_config.max_sha256_buffers += 1;
-  custom_config.max_cross_invoke_depth += 1;
+  const NetworkConfigParams stock_params(custom_config.v0());
+  NetworkConfigParams::set_param(custom_config,
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 stock_params.max_sha256_buffers + 1);
+  NetworkConfigParams::set_param(custom_config,
+                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                                 stock_params.max_cross_invoke_depth + 1);
   ASSERT_NE(custom_config, stock_network_config());
 
   auto serialized_config = x23::serialize(custom_config);
@@ -1323,7 +1332,9 @@ TEST(TestBindingsTest, ManualOpenCloseFrameTest)
   };
   auto open_res =
       open_mock_invocation_frame(handler.syscall_handler, ffi_invocation, 0);
-  EXPECT_EQ(open_res, kTestFFIErrorCodeNone);
+  EXPECT_EQ(open_res.ffi_error_code, kTestFFIErrorCodeNone);
+  EXPECT_EQ(open_res.syscall_error_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
 
   auto finish_res =
       finish_mock_invocation_frame(handler.syscall_handler,
@@ -1354,7 +1365,7 @@ namespace {
 //   std::span<const std::byte> input_calldata,
 //   std::span<const std::byte> input_owned_auth_token_ids_list,
 //   const CopyableInvokeInputs &input_inputs,
-//   CopyableInvokeOutputs &output_outputs) noexcept
+//   CopyableInvokeOutputs &output_outputs)() noexcept
 
 HostFnStatus<SyscallErrorCode>
 test_ffi_invoke(const ContractAddress &input_address,
@@ -1393,7 +1404,7 @@ test_ffi_invoke(const ContractAddress &input_address,
 // syscall_MintAuthToken_inner(SystemCallHandler &syscall_handler,
 //   const BlockHeight &input_expiry_height,
 //   std::span<const std::byte> input_serialized_auth_token,
-//   uint32_t &output_token_id) noexcept
+//   uint32_t &output_token_id)() noexcept
 HostFnStatus<SyscallErrorCode>
 test_ffi_mint_auth_token(BlockHeight input_expiry_height,
                          std::span<const std::byte> input_serialized_auth_token,
@@ -1421,7 +1432,7 @@ test_ffi_mint_auth_token(BlockHeight input_expiry_height,
 //   ContractAddress &output_token_minter,
 //   RuntimeMemoryLength &output_auth_payload_written_len,
 //   uint32_t &output_unwrapped_token_id_start,
-//   uint32_t &output_unwrapped_token_id_count) noexcept
+//   uint32_t &output_unwrapped_token_id_count)() noexcept
 HostFnStatus<SyscallErrorCode>
 test_ffi_consume_auth_token(
     uint32_t input_token_id, std::span<std::byte> output_auth_payload,
@@ -1498,7 +1509,7 @@ open_frame(void *syscall_handler, Invocation const &invocation,
       .data = serialized.data(),
       .len = static_cast<uint32_t>(serialized.size()),
   };
-  return open_mock_invocation_frame(syscall_handler, ffi, flags);
+  return open_mock_invocation_frame(syscall_handler, ffi, flags).ffi_error_code;
 }
 
 // Helper: deploy a mock contract at a specific address and return it
@@ -1797,6 +1808,216 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
 // proper has the same shape (one thread_local RuntimeContext per executor
 // thread). So the runtime context must resolve each mock invocation back to the
 // handler running it rather than to a single context-wide slot.
+namespace {
+
+// Forces the coroutine onto a pool worker before reading the slot. A database
+// read migrates the same way, but incidentally; these hop on purpose so the
+// migration is the thing under test rather than a side effect of the DB.
+x23::Async<SyscallHandlerContext *>
+context_after_pool_hop()
+{
+  co_await default_threadpool().bg();
+  co_return SyscallHandlerContext::get_context();
+}
+
+x23::Async<SyscallHandlerContext *>
+owner_after_pool_hop(SystemCallHandler *handler)
+{
+  co_await default_threadpool().bg();
+  co_return SyscallHandlerContext::from_handler(handler);
+}
+
+} // namespace
+
+// The whole design rests on the context slot NOT following a coroutine across
+// a resume -- if it did, from_handler() would be unnecessary. Assert the
+// premise directly, so this fails loudly if x23 ever gains thread-affine
+// resumption and the rest of the machinery becomes dead weight.
+// The shape sdk_rs actually runs: one TestEnvironment (one runtime context)
+// with a handler per thread, all invoking at once. Every invocation suspends
+// on the database reads under resolve_runtime and resumes on a worker, so each
+// one has to re-find its own handler while every other thread's is equally
+// live. A lookup that consulted the running thread, or a single shared slot,
+// fails here and passes every single-threaded test in this file.
+TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
+{
+  // A lookup that consulted the running thread or a single shared slot fails
+  // at two threads; eight with four rounds each leaves room for the push/pop
+  // cycle to interleave badly.  Almost all of the runtime is the shared DB
+  // setup, so the extra threads are close to free.
+  constexpr int kThreadCount = 8;
+  constexpr int kIterations = 4;
+
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  // One mock id and one deployment address per thread, so each invocation
+  // carries its own check block.  Both have to differ: the id selects the
+  // callback's check block, and the address is what the frame targets --
+  // deploying to the default address would put every thread's contract at the
+  // same place, leaving them all invoking whichever one was deployed last.
+  // The 0x80 base keeps these clear of the caller addresses below, since a
+  // nested invoke of an address already on the stack is rejected.
+  std::vector<CallerCheckData> check_data(kThreadCount);
+  std::vector<ContractAddress> contract_addrs(kThreadCount);
+  for (int t = 0; t < kThreadCount; t++) {
+    ContractAddress deployment_addr{};
+    deployment_addr[0] = static_cast<uint8_t>(0x80 + t);
+    contract_addrs[t] =
+        deploy_mock_contract(db, rc, 1 + t, mock_contract_check_caller,
+                             &check_data[t], deployment_addr);
+  }
+
+  std::vector<std::thread> threads;
+  threads.reserve(kThreadCount);
+  std::atomic<int> failures{0};
+
+  for (int t = 0; t < kThreadCount; t++) {
+    threads.emplace_back([&, t] {
+      auto handler = make_mocked_handler(db, rc);
+      if (handler.ffi_error_code != kTestFFIErrorCodeNone) {
+        failures.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+      x23::Defer close([&] {
+        if (close_syscall_handler(handler.syscall_handler) !=
+            kTestFFIErrorCodeNone)
+          failures.fetch_add(1, std::memory_order_relaxed);
+      });
+
+      ContractAddress frame_addr{};
+      frame_addr[0] = static_cast<uint8_t>(t + 1);
+
+      check_data[t].expected_self = contract_addrs[t];
+      check_data[t].expected_sender = frame_addr;
+
+      Invocation invocation = {
+          .invoked_address = frame_addr,
+          .entrypoint = entrypoint_from_method_id(0x1234),
+          .gas_limit = 1'000'000,
+          .calldata = {},
+      };
+      if (open_frame(handler.syscall_handler, invocation) !=
+          kTestFFIErrorCodeNone) {
+        failures.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+      // An open frame is owed a finish, and close_syscall_handler() refuses to
+      // destroy a handler that still has one -- which in turn makes free_db()
+      // refuse the DBContext, stranding its RPC clients and hanging the
+      // process in ~CoroPoll at exit.  Pay the debt on every path out, so a
+      // check that fails here fails as a test rather than as a hang.  Declared
+      // after `close` so it runs before it.
+      x23::Defer finish([&] {
+        auto done = finish_mock_invocation_frame(handler.syscall_handler,
+                                                 std::to_underlying(
+                                                     InvokeErrorCode::None));
+        free_ffi_data_buffer(done.serialized_output);
+        free_ffi_data_buffer(done.serialized_trace);
+        free_ffi_data_buffer(done.serialized_events);
+      });
+
+      for (int i = 0; i < kIterations; i++) {
+        check_data[t].sender_check_passed = false;
+        check_data[t].self_check_passed = false;
+
+        if (push_context(handler.syscall_handler) != kTestFFIErrorCodeNone) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+        x23::Defer pop([&] {
+          if (pop_context() != kTestFFIErrorCodeNone)
+            failures.fetch_add(1, std::memory_order_relaxed);
+        });
+        Calldata calldata;
+        RuntimeMemoryLength output_return_buffer_len = 0,
+                            output_returned_auth_token_len = 0;
+        auto res =
+            test_ffi_invoke(contract_addrs[t], 0x1234, UINT64_MAX, calldata,
+                            InvokeFlagSet{}, {}, output_return_buffer_len,
+                            output_returned_auth_token_len);
+        if (!res.has_value() ||
+            *res != SyscallErrorCode::kSyscallErrorCodeNone ||
+            !check_data[t].sender_check_passed ||
+            !check_data[t].self_check_passed) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+      }
+    });
+  }
+
+  for (auto &th : threads) {
+    th.join();
+  }
+  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
+}
+
+TEST(TestBindingsTest, ContextSlotDoesNotFollowACoroutineHop)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+  ASSERT_NE(SyscallHandlerContext::get_context(), nullptr);
+
+  // The pool worker's own stack is empty; the push happened on this thread.
+  EXPECT_EQ(context_after_pool_hop()(), nullptr);
+
+  // ...and the hop did not disturb the pushing thread's stack.
+  EXPECT_EQ(SyscallHandlerContext::get_context(),
+            static_cast<SyscallHandlerContext *>(handler.syscall_handler));
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+}
+
+// What make_new_runtime() actually does once it resumes on a worker: recover
+// the owner from the handler hog_exec handed it, with no thread involved.
+// Two live handlers on one runtime context, so a lookup that ignored its
+// argument would have a 50% chance of passing.
+TEST(TestBindingsTest, FromHandlerResolvesOwnerOnAPoolThread)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler_a = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_a.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler_a.syscall_handler); });
+
+  auto handler_b = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_b.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { close_syscall_handler(handler_b.syscall_handler); });
+
+  auto *ctx_a = static_cast<SyscallHandlerContext *>(handler_a.syscall_handler);
+  auto *ctx_b = static_cast<SyscallHandlerContext *>(handler_b.syscall_handler);
+
+  EXPECT_EQ(owner_after_pool_hop(&ctx_a->to_handler())(), ctx_a);
+  EXPECT_EQ(owner_after_pool_hop(&ctx_b->to_handler())(), ctx_b);
+
+  // Same answer on the calling thread: the lookup is thread-independent, which
+  // is the entire point of it.
+  EXPECT_EQ(SyscallHandlerContext::from_handler(&ctx_a->to_handler()), ctx_a);
+  EXPECT_EQ(SyscallHandlerContext::from_handler(&ctx_b->to_handler()), ctx_b);
+}
+
 TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
 {
   auto *db = make_db();
@@ -3319,7 +3540,7 @@ TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
                                                 1'000'000'000),
             kTestFFIErrorCodeNone);
 
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   // Build signed transaction targeting root contract
   SignedTransaction stx{
@@ -3434,7 +3655,7 @@ TEST(TestBindingsTest, ConcurrentCreateDB)
 }
 
 // Regression test for #2683: setup_create_contract must run the runtime
-// verifier for RV32 contracts (not just Wasmi) before storing them. An invalid
+// verifier for RV32 contracts before storing them. An invalid
 // RV32 artifact that do_verify_contract rejects must be rejected here too with
 // a structured ContractVerificationFailed error, rather than being stored and
 // surfacing later as an Unrecoverable error during invocation.
@@ -3970,12 +4191,13 @@ TEST(TestBindingsTest, AdvanceBlockRejectedWhileHandlerOpen)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   // Advancing the block while the handler is open is rejected.
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(advance_new_block(db, nullptr),
+            kTestFFIErrorCodeUnrecoverableError);
 
   // After the handler is closed, advancing the block succeeds.
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
             kTestFFIErrorCodeNone);
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)

@@ -13,6 +13,7 @@
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -36,14 +37,17 @@ public:
       base_context_(std::move(base_context))
   {}
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 
-  InvokeErrorCode verify_contract(Contract const &contract) const override
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  PreparedContract &out) const override
   {
-    return base_context_->verify_contract(contract);
-  };
+    return base_context_->verify_contract(contract, out);
+  }
+  using RuntimeContext::verify_contract;
+  ;
 
   // Sets the function pointer and context that a mocked contract calls into.
   void set_trampoline(int32_t contract, ForeignEntryPoint entry_point,
@@ -135,9 +139,9 @@ private:
 class MockRuntime : public MockGasRuntime {
 public:
   // [owner] is the handler context this runtime executes under. It is captured
-  // here rather than read from the thread_local slot inside invoke_internal, so
-  // the guest call does not depend on running on the thread that entered the
-  // FFI call.
+  // here rather than read from the thread_local slot inside invoke_internal,
+  // which runs on whichever thread the coroutine resumed on -- never reliably
+  // the one that entered the FFI call.
   MockRuntime(MockContract contract, SyscallHandlerContext *owner)
     : backing_contract_(std::move(contract)), owner_(owner)
   {
@@ -147,8 +151,15 @@ public:
   ~MockRuntime() override = default;
 
 private:
-  std::pair<InvokeStatus<void>, GasAmount>
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
+
+  // Body of invoke_internal(). The guest call it runs is synchronous down to
+  // the mock syscall entry, which blocks on an Async -- illegal on a thread
+  // pool worker, and this coroutine may well be resumed onto one. So the call
+  // goes to a thread outside the pool and this awaits it.
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  invoke_off_pool(MethodID method_id);
 
   MockContract backing_contract_;
   SyscallHandlerContext *owner_;
@@ -163,7 +174,7 @@ public:
   ~EmptyRuntime() override = default;
 
 protected:
-  std::pair<InvokeStatus<void>, GasAmount>
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID /*unused*/, uint64_t /*gas_limit*/) override
   {
     panic("unreachable: EmptyRuntime::invoke_internal called");

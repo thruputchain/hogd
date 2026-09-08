@@ -10,6 +10,7 @@
 
 #include "built_contracts/syscall_misc_tests.h"
 #include "consensus.hh"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
@@ -17,11 +18,12 @@
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/os.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/interface/rpc_from_coord.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -144,7 +146,7 @@ protected:
         .shards = x23::Vec<ShardCard>{std::move(shard_card)},
         .event = make_event_card(),
     };
-    rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+    rpc_server_->impl()->init(std::move(exec_result));
   }
 
   // CHECK, not ASSERT_*: a fatal gtest assertion in a void helper records the
@@ -222,6 +224,29 @@ protected:
                        .calldata = {}},
         .uniquifier = Uniquifier{.block_expiry_height = expiry, .nonce = 1},
     };
+  }
+
+  // A (non-expired) tx carrying the given contract attachments, rooted at an
+  // (undeployed) ordinary address. Initial validation rejects a malformed
+  // attachment set before the body runs, so the missing deployment is never
+  // reached.
+  static Transaction
+  make_tx_with_contracts(x23::Vec<Contract, 0xffffffff> contracts)
+  {
+    Transaction tx = make_tx_with_expiry(/*expiry=*/1'000'000);
+    tx.contracts_to_deploy = std::move(contracts);
+    return tx;
+  }
+
+  // A well-typed rv32 attachment whose blob is garbage of the given size:
+  // passes the type and size gates that precede verification, fails
+  // verification itself.
+  static Contract make_garbage_rv32_contract(size_t blob_size, uint8_t fill)
+  {
+    Contract contract(ContractType::kRv32);
+    contract.rv32_contract().data =
+        x23::Vec<std::uint8_t, 0xffffffff>(blob_size, fill);
+    return contract;
   }
 
   // A (non-expired) tx whose serialized size exceeds kMaxBytesSignedTransaction
@@ -324,7 +349,7 @@ TEST_F(RpcNegativeTest, TestProposeToNonExistentBlock)
 // ExecResultTxValidationFailure (#2568). block_expiry_height 0 is already in
 // the past at the execution height (>= 1). The scheduler should not have tried
 // to propose an expired transaction; the executor asserts (debug only) that any
-// proposal-mode ValidationFailure is in fact a bad expiry height.
+// proposal-mode ValidationFailure came from initial validation.
 //
 TEST_F(RpcNegativeTest, ProposeRejectsExpiredReplayUniquifier)
 {
@@ -415,6 +440,182 @@ TEST_F(RpcNegativeTest, ValidateRejectsOversizedTransaction)
   };
   EXPECT_EQ(client_.executorsched_validate_transaction(block_id, proposed_tx),
             ExecResult::ExecResultTxNonDeterministicError);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+//
+// Malformed attachment sets are dropped, not included: each rejection below
+// locks in ExecResultTxValidationFailure (the tx is excluded from the
+// proposal and burns nothing), never ExecResultTxDeterministicError, which
+// would include it in the block as a failed transaction.
+//
+
+// Attaching the same contract twice: two different transaction encodings would
+// otherwise have identical effect, so the duplicate is rejected, not deduped.
+TEST_F(RpcNegativeTest, ProposeRejectsDuplicateContractAttachment)
+{
+  using syscall_misc_tests_meta =
+      ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
+  init_executor();
+
+  BlockID block_id = 1030;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+
+  auto contract = syscall_misc_tests_meta::load_rv32();
+  x23::Vec<Contract, 0xffffffff> contracts;
+  contracts.push_back(*contract);
+  contracts.push_back(*contract);
+
+  EXPECT_EQ(client_
+                .executorsched_propose_transaction(
+                    block_id, SignedTransaction{.tx = make_tx_with_contracts(
+                                                    std::move(contracts))})
+                .result(),
+            ExecResult::ExecResultTxValidationFailure);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// Same on the validation path: a peer-proposed duplicate attachment is a
+// proposer-attributable rejection.
+TEST_F(RpcNegativeTest, ValidateRejectsDuplicateContractAttachment)
+{
+  using syscall_misc_tests_meta =
+      ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
+  init_executor();
+
+  BlockID block_id = 1031;
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id,
+                                                        kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  auto db_res = db_client_.dbsched_create_snapshot(
+      0, block_id, BlockExecutionMode::kBlockExecutionModeValidation);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+  open_event_block(block_id);
+
+  auto contract = syscall_misc_tests_meta::load_rv32();
+  x23::Vec<Contract, 0xffffffff> contracts;
+  contracts.push_back(*contract);
+  contracts.push_back(*contract);
+
+  ProposedTransaction proposed_tx{
+      .signed_tx =
+          SignedTransaction{.tx = make_tx_with_contracts(std::move(contracts))},
+      .nondeterministic_proposal_data = {},
+  };
+  EXPECT_EQ(client_.executorsched_validate_transaction(block_id, proposed_tx),
+            ExecResult::ExecResultTxValidationFailure);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// More attachments than max_new_contracts_per_tx (#2190). The count gate runs
+// before verification, so garbage blobs are fine here.
+TEST_F(RpcNegativeTest, ProposeRejectsOverCapContractAttachments)
+{
+  init_executor();
+
+  BlockID block_id = 1032;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+
+  const uint32_t over_cap = NetworkConfigParams(stock_network_config().v0())
+                                .max_new_contracts_per_tx +
+                            1;
+  x23::Vec<Contract, 0xffffffff> contracts;
+  for (uint32_t i = 0; i < over_cap; i++) {
+    contracts.push_back(
+        make_garbage_rv32_contract(/*blob_size=*/8, /*fill=*/i));
+  }
+
+  EXPECT_EQ(client_
+                .executorsched_propose_transaction(
+                    block_id, SignedTransaction{.tx = make_tx_with_contracts(
+                                                    std::move(contracts))})
+                .result(),
+            ExecResult::ExecResultTxValidationFailure);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// A contract blob over kMaxContractSizeBytes (#2569). The size gate runs
+// before verification; the whole tx still fits under
+// kMaxBytesSignedTransaction, so it reaches the executor.
+TEST_F(RpcNegativeTest, ProposeRejectsOversizedContractBlob)
+{
+  init_executor();
+
+  BlockID block_id = 1033;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+
+  x23::Vec<Contract, 0xffffffff> contracts;
+  contracts.push_back(
+      make_garbage_rv32_contract(kMaxContractSizeBytes + 1, /*fill=*/0));
+
+  EXPECT_EQ(client_
+                .executorsched_propose_transaction(
+                    block_id, SignedTransaction{.tx = make_tx_with_contracts(
+                                                    std::move(contracts))})
+                .result(),
+            ExecResult::ExecResultTxValidationFailure);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// A native contract attachment: native contracts are registered at genesis,
+// never deployed by a transaction, so a non-rv32 attachment is malformed.
+TEST_F(RpcNegativeTest, ProposeRejectsNativeContractAttachment)
+{
+  init_executor();
+
+  BlockID block_id = 1034;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+
+  x23::Vec<Contract, 0xffffffff> contracts;
+  contracts.push_back(Contract(ContractType::kNative));
+
+  EXPECT_EQ(client_
+                .executorsched_propose_transaction(
+                    block_id, SignedTransaction{.tx = make_tx_with_contracts(
+                                                    std::move(contracts))})
+                .result(),
+            ExecResult::ExecResultTxValidationFailure);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// An rv32 attachment that fails verification (garbage artifact bytes).
+TEST_F(RpcNegativeTest, ProposeRejectsUnverifiableContractAttachment)
+{
+  init_executor();
+
+  BlockID block_id = 1035;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+
+  x23::Vec<Contract, 0xffffffff> contracts;
+  contracts.push_back(make_garbage_rv32_contract(/*blob_size=*/64, /*fill=*/7));
+
+  EXPECT_EQ(client_
+                .executorsched_propose_transaction(
+                    block_id, SignedTransaction{.tx = make_tx_with_contracts(
+                                                    std::move(contracts))})
+                .result(),
+            ExecResult::ExecResultTxValidationFailure);
 
   client_.executorsched_finish_block(block_id);
 }

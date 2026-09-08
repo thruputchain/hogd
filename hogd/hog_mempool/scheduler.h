@@ -105,9 +105,13 @@ public:
     size_t num_inserted = 0;
     for (auto it = begin; it != end; it++) {
       const TransactionHash &tx_hash = *it;
-      const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
-      CHECK_PTR(tx_value_ptr);
-      if (insert_tx_into_runqueue(tx_hash, *tx_value_ptr)) {
+      std::shared_ptr<TxValue> tx_value;
+      {
+        const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+        CHECK_PTR(tx_value_ptr);
+        tx_value = *tx_value_ptr;
+      }
+      if (insert_tx_into_runqueue(tx_hash, tx_value)) {
         num_inserted++;
       }
     }
@@ -247,6 +251,8 @@ private:
 
   // Inserts the tx with [tx_hash] into the runqueue. Returns true if the
   // insertion succeeded and false otherwise.
+  // The caller must not hold a [txs_] bucket lock: when both locks are needed,
+  // acquire the account bucket lock before the tx cache bucket lock.
   //
   // This method does *not* modify [size_]! The caller must do this. Generally,
   // the caller will often want to add multiple txs to the runqueue, so it is

@@ -50,6 +50,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -114,63 +115,65 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
   auto contract = make_contract(
       // method 0 (TX_A): peek queue_a, require {kValA}, insert {kValB} into
       // queue_b
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key_a = make_storage_key("queue_a");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key_a, true);
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key_a, true);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         auto const &entry = peek_res.value().value();
         if (entry.size() != 1 || entry[0] != kValA)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         uint8_t val = kValB;
         auto key_b = make_storage_key("queue_b");
-        auto ins = ctx.handler().retrocausal_queue_insert(
+        auto ins = co_await ctx.handler().retrocausal_queue_insert(
             key_b, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
-          return ins.error().to_invoke_error();
+          co_return ins.error().to_invoke_error();
 
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_a"),
             std::as_bytes(std::span(std::string_view("a_ok"))),
             std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       },
       // method 1 (TX_B): peek queue_b, require {kValB}, insert {kValA} into
       // queue_a
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key_b = make_storage_key("queue_b");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key_b, true);
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key_b, true);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         auto const &entry = peek_res.value().value();
         if (entry.size() != 1 || entry[0] != kValB)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         uint8_t val = kValA;
         auto key_a = make_storage_key("queue_a");
-        auto ins = ctx.handler().retrocausal_queue_insert(
+        auto ins = co_await ctx.handler().retrocausal_queue_insert(
             key_a, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
-          return ins.error().to_invoke_error();
+          co_return ins.error().to_invoke_error();
 
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_b"),
             std::as_bytes(std::span(std::string_view("b_ok"))),
             std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -183,14 +186,14 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
   // Honest proposal: neither order works.
   {
     auto ha = make_new_system_call_handler(tx_a, *ctx);
-    ASSERT_FALSE(ha.root_invoke().is_root_success())
+    ASSERT_FALSE(ha.root_invoke()().is_root_success())
         << "TX_A fails: queue_a is empty, nothing to peek";
-    ASSERT_TRUE(ha.abort_transaction().has_value());
+    ASSERT_TRUE(ha.abort_transaction()().has_value());
 
     auto hb = make_new_system_call_handler(tx_b, *ctx);
-    ASSERT_FALSE(hb.root_invoke().is_root_success())
+    ASSERT_FALSE(hb.root_invoke()().is_root_success())
         << "TX_B fails: queue_b is empty, nothing to peek";
-    ASSERT_TRUE(hb.abort_transaction().has_value());
+    ASSERT_TRUE(hb.abort_transaction()().has_value());
   }
 
   EXPECT_FALSE(
@@ -216,13 +219,13 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
   {
     auto ha = make_new_system_call_handler_validation(tx_a, *ctx,
                                                       std::move(forged_a));
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler_validation(tx_b, *ctx,
                                                       std::move(forged_b));
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_NO_THROW(

@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
@@ -15,6 +16,7 @@
 #include "hogd/hog_db/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -43,7 +45,7 @@ RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
   return &it->second;
 }
 
-HogDbStatus<PerThreadARC<BlockTX> *>
+x23::Async<HogDbStatus<PerThreadARC<BlockTX> *>>
 RPCContext::open_block_tx_at_parent(BlockTXID parent_id, BlockTXID bid,
                                     BlockExecutionMode mode)
 {
@@ -52,16 +54,16 @@ RPCContext::open_block_tx_at_parent(BlockTXID parent_id, BlockTXID bid,
       std::scoped_lock g(lock_);
       if (!commit_publishing_.load(std::memory_order_acquire)) {
         if (parent_id != get_tip().id) {
-          return HogDbError(HogDbCode::kStaleBlock);
+          co_return HogDbError(HogDbCode::kStaleBlock);
         }
-        return open_block_tx_locked(bid, mode);
+        co_return open_block_tx_locked(bid, mode);
       }
     }
-    commit_publishing_.wait(true, std::memory_order_acquire);
+    co_await co_wait_for_no_commit_publishing();
   }
 }
 
-HogDbStatus<ViewingSnapshot>
+x23::Async<HogDbStatus<ViewingSnapshot>>
 RPCContext::open_viewing_snapshot(BlockTXID bid)
 {
   while (true) {
@@ -70,21 +72,21 @@ RPCContext::open_viewing_snapshot(BlockTXID bid)
       if (!commit_publishing_.load(std::memory_order_acquire)) {
         DbTip tip = get_tip();
         if (tip.value.proposal_header.block_height < 0) {
-          return HogDbError(HogDbCode::kNotFound);
+          co_return HogDbError(HogDbCode::kNotFound);
         }
         auto res = open_block_tx_locked(
             bid, BlockExecutionMode::kBlockExecutionModeViewing);
         if (!res) {
-          return res.error();
+          co_return res.error();
         }
 
         ViewingSnapshot snapshot;
         snapshot.viewing_block_id = bid;
         snapshot.tip = std::move(tip);
-        return snapshot;
+        co_return snapshot;
       }
     }
-    commit_publishing_.wait(true, std::memory_order_acquire);
+    co_await co_wait_for_no_commit_publishing();
   }
 }
 
@@ -205,6 +207,27 @@ RPCContext::finish_commit_publication() noexcept
 {
   commit_publishing_.store(false, std::memory_order_release);
   commit_publishing_.notify_all();
+  // After the clear, so a woken coroutine's re-check observes it. The pool is
+  // named explicitly: the committer usually runs on a worker of that very
+  // pool, but tests finish publications from plain threads, where the
+  // thread-local pool lookup broadcast() defaults to has nothing.
+  publication_generation_.rmw([](auto &v) { ++v; });
+  publication_generation_.broadcast(&default_threadpool());
+}
+
+x23::Async<void>
+RPCContext::co_wait_for_no_commit_publishing()
+{
+  for (;;) {
+    // The generation is read before the flag: a publication finishing
+    // between the two bumps the generation, so the wait below returns
+    // immediately rather than missing the wake.
+    const auto generation = publication_generation_.load();
+    if (!commit_publishing_.load(std::memory_order_acquire)) {
+      co_return;
+    }
+    co_await publication_generation_.wait(generation);
+  }
 }
 
 RPCContext::CommitPublicationGuard::CommitPublicationGuard(RPCContext &ctx,
@@ -224,7 +247,34 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
                          const StorageLongHash &db_hash)
 {
   DbTip new_tip;
+  bool network_hash_mismatch = false;
+  bool timepoint_went_backwards = false;
   tip_.with([&](DbTip &tip) {
+    // The network hash is fixed for the life of the chain, but it lives in
+    // the consensus value, which this replaces wholesale rather than carrying
+    // forward the way default_wallet and network_config are. A caller that
+    // builds a value without it moves the chain onto network zero, and
+    // contracts reading GetNetworkHash then see a different network than
+    // signatures are verified against. Genesis installs it -- the tip before
+    // it is pre-genesis, at height -1 -- and every commit after must agree.
+    if (tip.value.proposal_header.block_height >= 0 &&
+        value.proposal_header.network_hash !=
+            tip.value.proposal_header.network_hash) {
+      network_hash_mismatch = true;
+      return;
+    }
+    // Blocks only move forward in time. The timepoint reaches the db the same
+    // way the network hash does -- carried on a consensus value that replaces
+    // the tip wholesale -- so the same class of caller bug puts an older
+    // timepoint on a newer block, and anything reading the chain back then
+    // sees time run backwards across a commit. Equal is left alone: two
+    // blocks sharing a nanosecond is implausible, not incoherent.
+    if (tip.value.proposal_header.block_height >= 0 &&
+        value.proposal_header.block_timepoint <
+            tip.value.proposal_header.block_timepoint) {
+      timepoint_went_backwards = true;
+      return;
+    }
     tip.value = std::move(value);
     tip.storage_long_hash = db_hash;
     tip.id = bid;
@@ -233,6 +283,18 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
     current_committed_id_.store(bid, std::memory_order_release);
     new_tip = tip;
   });
+  if (network_hash_mismatch) [[unlikely]] {
+    error("Refusing to commit block {}: its consensus value carries a "
+          "different network hash than the committed tip",
+          bid);
+    return HogDbError(HogDbCode::kInternal);
+  }
+  if (timepoint_went_backwards) [[unlikely]] {
+    error("Refusing to commit block {}: its consensus value carries a "
+          "timepoint earlier than the committed tip's",
+          bid);
+    return HogDbError(HogDbCode::kInternal);
+  }
   return get_db().write_dbtip(new_tip);
 }
 

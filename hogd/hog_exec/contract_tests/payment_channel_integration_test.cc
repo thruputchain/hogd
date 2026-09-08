@@ -251,9 +251,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -292,9 +292,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -327,9 +327,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     EXPECT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -364,11 +364,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -399,11 +399,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -434,11 +434,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -463,11 +463,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -500,9 +500,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -522,9 +522,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -541,9 +541,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -560,9 +560,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -605,9 +605,9 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -666,9 +666,9 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -728,9 +728,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -780,9 +780,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -833,9 +833,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -889,9 +889,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -949,9 +949,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -1002,9 +1002,9 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,

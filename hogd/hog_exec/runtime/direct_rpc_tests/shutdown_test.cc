@@ -39,13 +39,13 @@ TEST_F(ShutdownTest, AcceptedBlockUAF)
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   EXPECT_FALSE(try_advance_block().has_value());
 
-  auto res = tx1.abort_transaction();
+  auto res = tx1.abort_transaction()();
   ASSERT_TRUE(res.has_value());
 }
 
@@ -59,7 +59,7 @@ TEST_F(ShutdownTest, AcceptedBlockUAFUnclosedShutdown)
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
@@ -76,11 +76,11 @@ TEST_F(ShutdownTest, AbandonNoBlockClose)
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.abort_transaction()().has_value());
 }
 
 TEST_F(ShutdownTest, RejectedBlockUAF)
@@ -93,7 +93,7 @@ TEST_F(ShutdownTest, RejectedBlockUAF)
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 

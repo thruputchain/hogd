@@ -10,6 +10,7 @@
 // generated x23 headers
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hog_db/invoke_tx.h"
 #include "rpc_types.hh"
@@ -49,9 +50,13 @@ public:
   ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  ExpectedDBTip get_db_tip(BlockID block);
+  // A coroutine: it may suspend to wait out a commit publication, and the
+  // rpc server runs handlers on ThreadPool workers, which must not park.
+  x23::Async<ExpectedDBTip> get_db_tip(BlockID block, BlockHeight block_height);
 
-  ExpectedViewingSnapshot open_viewing_snapshot();
+  // A coroutine for the same reason as get_db_tip(): it may suspend on a
+  // commit publication.
+  x23::Async<ExpectedViewingSnapshot> open_viewing_snapshot();
   RPCError close_viewing_snapshot(BlockID block);
 
   void shut_down()
@@ -70,12 +75,20 @@ private:
                               StorageDelta &&delta, StorageDeltaFlagSet flags,
                               DbConflictCode *conflict_code);
 };
+// MaybeAsync rather than type_identity_t: get_db_tip and
+// open_viewing_snapshot are coroutines (they can suspend on a commit
+// publication), which is also the transform RpcServer itself validates.
 static_assert(
-    is_DatabaseToExecutorInterfaceV1<HogDbExecutorRpc *, std::type_identity_t>);
+    is_DatabaseToExecutorInterfaceV1<HogDbExecutorRpc *, x23::MaybeAsync>);
 
 class HogDbExecutorServer : public RpcServer<HogDbExecutorRpc> {
 public:
-  explicit HogDbExecutorServer(RPCContext &ctx) : RpcServer(ctx) {}
+  explicit HogDbExecutorServer(RPCContext &ctx) : RpcServer(ctx)
+  {
+    // New contract bodies commit in one message, so this link is sized by the
+    // aggregate a transaction is admitted with, not a per-message budget.
+    max_message_size_ = kBulkRpcMaxMessageSize;
+  }
 };
 
 } // namespace hogd
