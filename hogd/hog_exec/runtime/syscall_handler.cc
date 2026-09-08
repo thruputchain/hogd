@@ -2,6 +2,7 @@
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -66,6 +67,23 @@
 namespace hogd {
 
 namespace {
+
+// A compiled ceiling on how many invocation frames one transaction may keep
+// open, enforced independently of the network config. Every open frame holds a
+// live contract runtime, so bounding the frame count bounds the executor's
+// live-runtime memory to a small, recoverable multiple of the stock footprint
+// no matter what value the config states. validate_new_invocation admits a new
+// frame only below min(configured max_cross_invoke_depth, this): a chain may
+// lower the frame limit but never raise it above the ceiling. That matters
+// because the config is read off the DBTIP, which sits outside the consensus
+// state hash and so can be rewritten on disk without perturbing
+// storage_long_hash (hogd issue #3919); the clamp keeps such a rewrite (or
+// plain corruption) from disabling the bound and letting one transaction hold
+// unbounded live frames until the executor faults. Set generously above the
+// stock default (kDefaultMaxCrossInvokeDepth) so no legitimate configuration is
+// affected.
+constexpr uint32_t kMaxCrossInvokeDepth = 1024;
+static_assert(kMaxCrossInvokeDepth >= kDefaultMaxCrossInvokeDepth);
 
 size_t
 contract_blob_size(Contract const &contract)
@@ -764,12 +782,12 @@ SystemCallHandler::validate_new_invocation(
   //
   // The bound is a plain load off the tip the snapshot cache loaded when the
   // block was opened; get_network_config_params() fails loudly on a cache
-  // whose tip was never loaded. effective_max_cross_invoke_depth() clamps it
-  // to the compiled kMaxCrossInvokeDepth ceiling, so this stays an independent
-  // hard maximum even if the tip's config was recovered from untrusted on-disk
-  // metadata (hogd issue #3919).
+  // whose tip was never loaded. It is clamped to the compiled
+  // kMaxCrossInvokeDepth ceiling, so this stays an independent hard maximum
+  // even if the tip's config was recovered from untrusted on-disk metadata
+  // (hogd issue #3919).
   if (invocation_frame_stack_.size() >=
-      config_params().effective_max_cross_invoke_depth()) {
+      std::min(config_params().max_cross_invoke_depth, kMaxCrossInvokeDepth)) {
     return SyscallStatus<void>{std::unexpected(
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
   }

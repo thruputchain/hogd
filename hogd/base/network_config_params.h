@@ -19,21 +19,6 @@ namespace hogd {
 inline constexpr uint32_t kDefaultMaxSHA256Buffers = 8;
 inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 256;
 
-// A compiled ceiling on how many invocation frames one transaction may keep
-// open, enforced independently of the network config. Every open frame holds a
-// live contract runtime, so bounding the frame count bounds the executor's
-// live-runtime memory to a small, recoverable multiple of the stock footprint
-// no matter what value the config states. See effective_max_cross_invoke_depth:
-// a chain may lower the frame limit but never raise it above this ceiling. That
-// matters because the config is recovered from the DBTIP, which sits outside
-// the consensus state hash and so can be rewritten on disk without perturbing
-// storage_long_hash (hogd issue #3919); the clamp keeps such a rewrite (or
-// plain corruption) from disabling the bound and letting one transaction hold
-// unbounded live frames until the executor faults. Set generously above the
-// stock default so no legitimate configuration is affected.
-inline constexpr uint32_t kMaxCrossInvokeDepth = 1024;
-static_assert(kMaxCrossInvokeDepth >= kDefaultMaxCrossInvokeDepth);
-
 // Not permissive: a chain predating the parameter would otherwise attach
 // contracts without bound, which is #2190.
 inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
@@ -45,16 +30,6 @@ struct NetworkConfigParams {
   uint32_t max_cross_invoke_depth = kDefaultMaxCrossInvokeDepth;
   uint32_t max_new_contracts_per_tx = kDefaultMaxNewContractsPerTx;
   uint32_t max_bytestring_len = static_cast<uint32_t>(kDefaultMaxBytestringLen);
-
-  // The frame limit the executor enforces: the stated max_cross_invoke_depth
-  // clamped to the compiled kMaxCrossInvokeDepth ceiling. The stored field is
-  // left faithful so set_param round-trips and config_hash stay independent of
-  // this clamp; the ceiling is applied only here, where the value is resolved
-  // for execution.
-  uint32_t effective_max_cross_invoke_depth() const
-  {
-    return std::min(max_cross_invoke_depth, kMaxCrossInvokeDepth);
-  }
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
