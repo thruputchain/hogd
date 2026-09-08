@@ -441,6 +441,14 @@ Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
   }
   // Check if the tx is already present in [account_state->txs]. If it is, we
   // are adding a duplicate tx, so we do not want to increment [size_].
+  //
+  // We deliberately use [cached_value] instead of [tx_value]. [cached_value] is
+  // the current value in [txs_], whereas [tx_value] could point to a stale tx
+  // since [txs_] could have changed while we were not holding [txs_lock]. Note
+  // that even though [cached_value] and [tx_value] both point to txs with the
+  // same hash and therefore the txs are the same, the [SignedTransaction]'s
+  // that hold these inner txs could have different signatures. Thus,
+  // [cached_value] and [tx_value] could refer to different txs altogether.
   return account_state->txs.insert({key, *cached_value}).second;
 }
 
