@@ -5,9 +5,9 @@
 #include <stdexcept>
 #include <sys/socket.h>
 
-#include "compat_probe.hh"
 #include "x23/rpc.h"
 #include "x23/threadpool.h"
+#include "xdrtest.hh"
 
 namespace x23 {
 namespace {
