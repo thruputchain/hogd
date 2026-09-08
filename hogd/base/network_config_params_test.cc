@@ -15,8 +15,9 @@ config_with_cross_invoke_depth(uint32_t depth)
 {
   NetworkConfig config;
   config.v(0);
-  NetworkConfigParams::set_param(
-      config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, depth);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                                 depth);
   return config;
 }
 

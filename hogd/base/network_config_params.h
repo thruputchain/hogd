@@ -156,10 +156,11 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
   : max_sha256_buffers(
         stated_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers)
             .value_or(kDefaultMaxSHA256Buffers)),
-    max_cross_invoke_depth(std::min(
-        stated_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth)
-            .value_or(kDefaultMaxCrossInvokeDepth),
-        kMaxCrossInvokeDepth)),
+    max_cross_invoke_depth(
+        std::min(stated_param(config,
+                              ConfigParamID::kConfigParamMaxCrossInvokeDepth)
+                     .value_or(kDefaultMaxCrossInvokeDepth),
+                 kMaxCrossInvokeDepth)),
     max_new_contracts_per_tx(
         stated_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx)
             .value_or(kDefaultMaxNewContractsPerTx)),
