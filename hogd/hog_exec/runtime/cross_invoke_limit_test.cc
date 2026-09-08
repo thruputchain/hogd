@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <limits>
 
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/cross_invoke_limit.h"
 
 namespace hogd {
