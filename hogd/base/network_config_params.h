@@ -19,6 +19,22 @@ namespace hogd {
 inline constexpr uint32_t kDefaultMaxSHA256Buffers = 8;
 inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 256;
 
+// A compiled ceiling on how many invocation frames one transaction may keep
+// open, enforced independently of the network config. Every open frame holds a
+// live contract runtime, so this bounds the executor's live-runtime memory to a
+// small, recoverable multiple of the stock footprint no matter what value the
+// config states. The bound the executor actually applies is
+// min(configured max_cross_invoke_depth, this) -- a chain may lower the limit
+// but never raise it above the ceiling. This matters because the config is
+// recovered from the DBTIP, which sits outside the consensus state hash and so
+// can be rewritten on disk without perturbing storage_long_hash (hogd issue
+// #3919); clamping here keeps such a rewrite (or plain corruption) from
+// disabling the bound and letting one transaction hold unbounded live frames
+// until the executor faults. Set generously above the stock default so no
+// legitimate configuration is affected.
+inline constexpr uint32_t kMaxCrossInvokeDepth = 1024;
+static_assert(kMaxCrossInvokeDepth >= kDefaultMaxCrossInvokeDepth);
+
 // Not permissive: a chain predating the parameter would otherwise attach
 // contracts without bound, which is #2190.
 inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
@@ -140,9 +156,10 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
   : max_sha256_buffers(
         stated_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers)
             .value_or(kDefaultMaxSHA256Buffers)),
-    max_cross_invoke_depth(
+    max_cross_invoke_depth(std::min(
         stated_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth)
-            .value_or(kDefaultMaxCrossInvokeDepth)),
+            .value_or(kDefaultMaxCrossInvokeDepth),
+        kMaxCrossInvokeDepth)),
     max_new_contracts_per_tx(
         stated_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx)
             .value_or(kDefaultMaxNewContractsPerTx)),
