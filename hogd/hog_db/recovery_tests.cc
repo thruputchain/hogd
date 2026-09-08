@@ -473,6 +473,17 @@ TEST(RecoveryTests, ValidateRecoveredStateAcceptsCanonicalItems)
         dao.write_address_balance(item_key.get_address(), int128_t{1} << 70)
             .has_value());
     ASSERT_TRUE(dao.write_nnint128(item_key, int128_t{1} << 120).has_value());
+    // Canonical contract-code rows: a 33-byte inline/head key and a 34-byte
+    // chunk key must both be accepted by the type-aware length check.
+    const auto head_key = make_contract_code_key(SHA256Hash{});
+    const auto chunk_key = make_contract_code_chunk_key(SHA256Hash{}, 0);
+    std::array<std::byte, 4> code_value{};
+    ASSERT_TRUE(dao.get_ramdb()
+                    .put(head_key, kContractCodeInline, code_value)
+                    .has_value());
+    ASSERT_TRUE(dao.get_ramdb()
+                    .put(chunk_key, kContractCodeChunk, code_value)
+                    .has_value());
     ASSERT_TRUE(dao.commit().has_value());
   }
 
@@ -556,6 +567,28 @@ TEST(RecoveryTests, ValidateRecoveredStateRejectsBoundaryShiftedItems)
       HogDbDAO dao(RAMDB(std::move(*db)));
       ASSERT_TRUE(
           dao.get_ramdb().put(long_addr_key, kNNInt128, value).has_value());
+      ASSERT_TRUE(dao.commit().has_value());
+    }
+    expect_rejected_on_reopen(*dir);
+  }
+
+  // Contract-code inline rows are keyed by a 33-byte content-addressed hash key
+  // with type kContractCodeInline. A hash-preserving shift lengthens the key to
+  // 34 bytes -- a valid *chunk* length -- so the check must be type-aware.
+  // Store a 34-byte key under the inline type and expect rejection.
+  {
+    const auto chunk_len_key = make_contract_code_chunk_key(SHA256Hash{}, 0);
+    std::array<std::byte, 4> value{};
+    ErrnoStatus<Directory> dir = Directory::open_temporary();
+    ASSERT_TRUE(dir.has_value());
+    {
+      DBStatus<std::unique_ptr<Database>> db =
+          Database::open(dir->get_path(), kHeapSize, 0);
+      ASSERT_TRUE(db.has_value());
+      HogDbDAO dao(RAMDB(std::move(*db)));
+      ASSERT_TRUE(dao.get_ramdb()
+                      .put(chunk_len_key, kContractCodeInline, value)
+                      .has_value());
       ASSERT_TRUE(dao.commit().has_value());
     }
     expect_rejected_on_reopen(*dir);

@@ -55,12 +55,13 @@ constexpr std::string kGlobalTipKey = "<DBTIP";
 constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
 
 // is_canonical_state_key_length returns whether key_len is a length that a
-// legitimate writer produces for a state item with this prefix. Lengths are
-// derived from the same constants/types the key constructors use so they can
-// never drift from them. Used by recovery to reject boundary-shifted keys
-// (#3912); a mismatch means the on-disk key_len/value_len split was tampered.
-constexpr bool
-is_canonical_state_key_length(Prefix prefix, size_t key_len)
+// legitimate writer produces for a state item with this (prefix, type).
+// Lengths are derived from the same constants/types/constructors the key
+// builders use so they can never drift. Used by recovery to reject
+// boundary-shifted keys (#3912); a mismatch means the on-disk
+// key_len/value_len split was tampered.
+bool
+is_canonical_state_key_length(Prefix prefix, uint8_t type, size_t key_len)
 {
   switch (prefix) {
   case Prefix::kBalance:
@@ -78,17 +79,28 @@ is_canonical_state_key_length(Prefix prefix, size_t key_len)
   case Prefix::kRetrocausalQueueBlock:
     return key_len == kRetrocausalQueueBlockKeySize;
   case Prefix::kContractCode:
+  {
+    // Inline and chunked-head rows are keyed by the content-addressed hash;
+    // chunk rows append a one-byte chunk index. Pin the length per type: even
+    // though contract-code rows are immutable, a hash-preserving boundary
+    // shift (an inline row's zero type byte swapping with a leading zero value
+    // byte) could otherwise plant a longer ghost key that read_contract_code
+    // -- which only ever queries the canonical hash key -- silently misses,
+    // diverging execution.
+    const size_t head_key_size = make_contract_code_key(SHA256Hash{}).size();
+    const size_t chunk_key_size =
+        make_contract_code_chunk_key(SHA256Hash{}, 0).size();
+    return key_len ==
+           (type == kContractCodeChunk ? chunk_key_size : head_key_size);
+  }
   case Prefix::kContractRefcount:
   case Prefix::kHogAge:
   case Prefix::kGlobalMetadata:
     break;
   }
-  // Contract-code rows are content-addressed and immutable, so no later
-  // canonical-key update can miss a boundary-shifted ghost, and
-  // kContractRefcount currently has no writer; neither is exposed to the
-  // divergence. kHogAge and kGlobalMetadata are not state items (is_state_item
-  // is false), so they never reach recovery here. Accept any length for these
-  // rather than pin one.
+  // kContractRefcount currently has no writer, and kHogAge/kGlobalMetadata are
+  // not state items (is_state_item is false) so they never reach recovery here.
+  // Accept any length for these rather than pin one.
   return true;
 }
 
@@ -121,7 +133,7 @@ HogDbDAO::validate_recovered_state()
                                  std::span<const std::byte> value) {
     // key is non-empty here: for_each_state_item filters on is_state_item.
     const auto prefix = static_cast<Prefix>(key[0]);
-    if (!is_canonical_state_key_length(prefix, key.size())) {
+    if (!is_canonical_state_key_length(prefix, type, key.size())) {
       error("recovered state key has non-canonical length {} for prefix {}",
             key.size(), std::to_underlying(prefix));
       corrupt.store(true, std::memory_order_relaxed);
