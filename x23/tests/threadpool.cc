@@ -97,6 +97,29 @@ TEST(ThreadPoolOnQuiesce, DestructionWakeupStress)
   }
 }
 
+// async() resumes the coroutine awaiting it from a detached thread that
+// nothing joins, and that thread touches the run queue's condition
+// variable after handing the resumption to a worker.  Destroying the pool
+// the instant the coroutine finishes catches a notify that is not ordered
+// against the destructor.  Needs TSAN to see the race, and hits it
+// probabilistically, hence the loop.
+TEST(ThreadPoolAsync, DestructionAfterDetachedCompletion)
+{
+  for (unsigned i = 0; i < 400; ++i) {
+    std::atomic_bool done{false};
+    auto pool = std::make_unique<ThreadPool>(1);
+
+    [](ThreadPool &pool, std::atomic_bool &done) -> Detached {
+      co_await pool.async([] {});
+      done.store(true, std::memory_order_release);
+      done.notify_all();
+    }(*pool, done);
+
+    done.wait(false, std::memory_order_relaxed);
+    pool.reset();
+  }
+}
+
 TEST(ThreadPoolOnQuiesce, RepeatedWakeups)
 {
   constexpr unsigned kCoroutines = 64;

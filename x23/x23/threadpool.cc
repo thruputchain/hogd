@@ -108,28 +108,14 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
   }
 }
 
-// Both go() overloads signal nonempty while still holding the run
-// queue's lock, rather than dropping the lock first.  Notifying outside
-// the lock avoids waking a worker that then immediately blocks on the
-// mutex, but it is not safe here: once the lock is released the job is
-// visible to a worker, and nothing keeps this ThreadPool alive while the
-// notifying thread still holds a reference to the condition variable.
-//
-// ThreadPool::async() is the case that bites.  It runs the caller's task
-// on a detached thread, so no one joins it; the thread's last act is
-// make_callback() -> go(), which resumes the coroutine that was awaiting
-// the Async.  That coroutine can run to completion on a worker, let the
-// program fall off the end of main, and destroy the ThreadPool -- and so
-// the QueueState and its condition variables -- while the detached thread
-// is still inside notify_all().  Destroying a condition_variable
-// concurrently with a notify on it is a data race and undefined
-// behavior; the TSAN schedule caught it as a race between
-// QueueState::~QueueState() and pthread_cond_broadcast() from go().
-//
-// Signalling under the lock closes the window: a worker cannot dequeue
-// the job until we release the mutex, which is after the notify has
-// returned, so the notify is ordered before anything the job can go on
-// to do.  qpop() already signals `consumed` this way.
+// Both go() overloads signal nonempty under the run queue's lock, not
+// after dropping it.  Releasing first makes the job visible to a worker
+// while we still point at the condition variable, and nothing keeps the
+// ThreadPool alive in between: async() notifies from a detached thread
+// nobody joins, so the coroutine it resumes can finish and destroy the
+// pool before notify_all() returns.  Holding the lock keeps a worker from
+// dequeuing until the notify is done.  qpop() signals `consumed` the same
+// way.
 void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
