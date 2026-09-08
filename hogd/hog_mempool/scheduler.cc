@@ -432,9 +432,16 @@ Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
                       tx_value->tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
   auto [account_state, lock] = get_account_state(account);
+  // The expiry sweep or commit may have removed the cache entry since the
+  // caller looked it up. Hold both locks in account-then-cache order so that
+  // a runqueue insertion cannot race with removal from the cache.
+  const auto [cached_value, txs_lock] = txs_.find(tx_hash);
+  if (!cached_value) {
+    return false;
+  }
   // Check if the tx is already present in [account_state->txs]. If it is, we
   // are adding a duplicate tx, so we do not want to increment [size_].
-  return account_state->txs.insert({key, tx_value}).second;
+  return account_state->txs.insert({key, *cached_value}).second;
 }
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
@@ -1128,10 +1135,15 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // are on the runqueue and remove them. We cannot skip this step and
             // just remove txs from [txs_], even if the *nominated* block is
             // being committed rather than a *validated* block.
-            auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-            CHECK_PTR(tx_value_ptr);
+            std::shared_ptr<TxValue> tx_value;
+            {
+              const auto [tx_value_ptr, txs_lock] =
+                  scheduler.txs_.find(tx_hash);
+              CHECK_PTR(tx_value_ptr);
+              tx_value = *tx_value_ptr;
+            }
 
-            const SignedTransaction &tx = (*tx_value_ptr)->tx;
+            const SignedTransaction &tx = tx_value->tx;
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const TxKey key = {.expiry_block_height =
                                    tx.tx.uniquifier.block_expiry_height,
@@ -1149,11 +1161,10 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
                 num_removed_from_runqueue++;
                 accounts.insert(account, 0);
               }
+              // Keep the account locked until the cache entry is gone, so a
+              // concurrent resubmit cannot restore only the runqueue entry.
+              CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
             }
-
-            // Careful! We remove the tx from [txs_] at the bottom here because
-            // once we remove it, the references above become invalidated.
-            CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
           }
 
           co_return num_removed_from_runqueue;

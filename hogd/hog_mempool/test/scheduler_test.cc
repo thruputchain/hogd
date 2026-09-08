@@ -1013,13 +1013,14 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
   }
 }
 
-// [add_txs_helper()] looks the tx up in the tx cache under the cache bucket
-// lock, drops that lock, and only then takes the account lock to insert the tx
-// into the runqueue. [schedule()]'s expiry sweep nests the other way: it holds
+// [add_txs_helper()] looks the tx up under the cache bucket lock, drops that
+// lock, and only then takes the account lock to insert the tx into the
+// runqueue. [schedule()]'s expiry sweep nests the other way: it holds
 // the account lock while it removes expired txs from the cache. So a resubmit
 // of an expired tx that finds it in the cache just as the sweep is removing it
-// re-inserts the tx into the runqueue with no cache entry behind it. The next
-// sweep of that account then fails [CHECK_EQ(txs_.remove(tx_hash), 1UL)].
+// could re-insert the tx into the runqueue with no cache entry behind it
+// before the fix added a cache recheck under the account lock. The next sweep
+// of that account would fail [CHECK_EQ(txs_.remove(tx_hash), 1UL)].
 //
 // The test stages that interleaving with two txs on one account, both expired.
 // [blocker] sorts first in the runqueue; holding its cache bucket lock parks
@@ -1107,6 +1108,9 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
   // lock.
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
+  // The accessor itself takes the mutex, so obtain it before the sweep can
+  // hold it while waiting for [pin_sweep] to be released by this thread.
+  std::mutex &account_mutex = scheduler->account_bucket_mutex(account);
   std::thread sweep([&] {
     [](Scheduler &scheduler, x23::XdrVec<TransactionHash> &hashes,
        x23::XdrVec<SignedTransaction> &txs) -> x23::Async<void> {
@@ -1115,7 +1119,6 @@ TEST(Scheduler, ResubmitDuringExpirySweepKeepsRunqueueAndCacheConsistent)
       scheduler.schedule(kBlockSize, hashes, txs);
     }(*scheduler, scheduled_hashes, scheduled)();
   });
-  std::mutex &account_mutex = scheduler->account_bucket_mutex(account);
   const bool sweep_parked = resubmit_parked && wait_until([&] {
                               return mutex_is_held(account_mutex);
                             });
