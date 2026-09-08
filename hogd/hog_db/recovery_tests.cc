@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <system_error>
@@ -455,6 +456,96 @@ TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)
   EXPECT_EQ(recovered.get_tip().default_wallet.hash, wallet.hash);
   EXPECT_EQ(recovered.get_tip().default_wallet.contract_type,
             ContractType::kNative);
+}
+
+TEST(RecoveryTests, ValidateRecoveredStateAcceptsCanonicalItems)
+{
+  constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
+  const ItemKey item_key(ContractAddress{7}, StorageKeyContractData{42});
+
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kHeapSize, 0);
+    ASSERT_TRUE(db.has_value());
+    HogDbDAO dao(RAMDB(std::move(*db)));
+    ASSERT_TRUE(
+        dao.write_address_balance(item_key.get_address(), int128_t{1} << 70)
+            .has_value());
+    ASSERT_TRUE(dao.write_nnint128(item_key, int128_t{1} << 120).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kHeapSize, 0);
+  ASSERT_TRUE(db.has_value());
+  HogDbDAO dao(RAMDB(std::move(*db)));
+  EXPECT_TRUE(dao.validate_recovered_state().has_value());
+}
+
+// A data-directory attacker can shift the ItemHeader key_len/value_len boundary
+// and recompute the unkeyed WAL CRC (#3912). Recovery must reject the resulting
+// non-canonical shapes rather than fold them into the consensus hash.
+TEST(RecoveryTests, ValidateRecoveredStateRejectsBoundaryShiftedItems)
+{
+  constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
+
+  auto reopen_and_validate =
+      [](Directory &dir) -> std::optional<HogDbStatus<void>> {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir.get_path(), kHeapSize, 0);
+    if (!db.has_value())
+      return std::nullopt;
+    HogDbDAO dao(RAMDB(std::move(*db)));
+    return dao.validate_recovered_state();
+  };
+
+  // A kNNInt128 value that lost its leading byte to the key: 15 bytes under a
+  // canonical 65-byte contract-data key.
+  {
+    const ItemKey item_key(ContractAddress{7}, StorageKeyContractData{42});
+    const auto canonical_key = make_contract_data_key(item_key);
+    ErrnoStatus<Directory> dir = Directory::open_temporary();
+    ASSERT_TRUE(dir.has_value());
+    {
+      DBStatus<std::unique_ptr<Database>> db =
+          Database::open(dir->get_path(), kHeapSize, 0);
+      ASSERT_TRUE(db.has_value());
+      HogDbDAO dao(RAMDB(std::move(*db)));
+      std::array<std::byte, sizeof(int128_xdr) - 1> short_value{};
+      ASSERT_TRUE(dao.get_ramdb()
+                      .put(canonical_key, kNNInt128, short_value)
+                      .has_value());
+      ASSERT_TRUE(dao.commit().has_value());
+    }
+    std::optional<HogDbStatus<void>> ok = reopen_and_validate(*dir);
+    ASSERT_TRUE(ok.has_value());
+    ASSERT_FALSE(ok->has_value());
+    EXPECT_EQ(ok->error().code(), HogDbCode::kCorruption);
+  }
+
+  // A contract-data key that gained the byte the value lost: 66 bytes with a
+  // canonical 16-byte kNNInt128 value.
+  {
+    std::array<std::byte, kContractDataItemKeySize + 1> long_key{};
+    long_key[0] = static_cast<std::byte>(Prefix::kContractDataKey);
+    std::array<std::byte, sizeof(int128_xdr)> value{};
+    ErrnoStatus<Directory> dir = Directory::open_temporary();
+    ASSERT_TRUE(dir.has_value());
+    {
+      DBStatus<std::unique_ptr<Database>> db =
+          Database::open(dir->get_path(), kHeapSize, 0);
+      ASSERT_TRUE(db.has_value());
+      HogDbDAO dao(RAMDB(std::move(*db)));
+      ASSERT_TRUE(dao.get_ramdb().put(long_key, kNNInt128, value).has_value());
+      ASSERT_TRUE(dao.commit().has_value());
+    }
+    std::optional<HogDbStatus<void>> ok = reopen_and_validate(*dir);
+    ASSERT_TRUE(ok.has_value());
+    ASSERT_FALSE(ok->has_value());
+    EXPECT_EQ(ok->error().code(), HogDbCode::kCorruption);
+  }
 }
 
 } // namespace hogd

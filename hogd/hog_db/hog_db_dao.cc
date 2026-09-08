@@ -74,6 +74,34 @@ HogDbDAO::compute_full_db_hash()
   return db_hash_from_lthash16(db_hash);
 }
 
+HogDbStatus<void>
+HogDbDAO::validate_recovered_state()
+{
+  // for_each_state_item runs in parallel; a plain bool would race.
+  std::atomic<bool> corrupt{false};
+  for_each_state_item([&corrupt](std::span<const std::byte> key, uint8_t type,
+                                 std::span<const std::byte> value) {
+    // key is non-empty here: for_each_state_item filters on is_state_item.
+    // Contract-data keys are always Prefix || address || item-key.
+    if (static_cast<Prefix>(key[0]) == Prefix::kContractDataKey &&
+        key.size() != kContractDataItemKeySize) {
+      error("recovered contract-data key has non-canonical length {} (want {})",
+            key.size(), kContractDataItemKeySize);
+      corrupt.store(true, std::memory_order_relaxed);
+    }
+    // kNNInt128 values (address balances and NNInt storage) are a fixed-width
+    // int128.
+    if (type == kNNInt128 && value.size() != sizeof(int128_xdr)) {
+      error("recovered kNNInt128 value has non-canonical length {} (want {})",
+            value.size(), sizeof(int128_xdr));
+      corrupt.store(true, std::memory_order_relaxed);
+    }
+  });
+  if (corrupt.load(std::memory_order_relaxed))
+    return HogDbError(HogDbCode::kCorruption);
+  return {};
+}
+
 void
 HogDbDAO::for_each_state_item(GetEachCallback fn)
 {

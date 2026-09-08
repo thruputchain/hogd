@@ -520,6 +520,18 @@ public:
   // computes the db hash from scratch.
   StorageLongHash compute_full_db_hash();
 
+  // validate_recovered_state rejects consensus state items whose recovered
+  // key/value shape no legitimate writer produces. The RAMDB WAL checksum is
+  // unkeyed, so a data-directory attacker can shift an ItemHeader's
+  // key_len/value_len boundary and recompute it; because the db_hash frames an
+  // item as key || type || value with no length separators, a boundary shift
+  // can preserve the hash yet install a row under a non-canonical key, which a
+  // later canonical-key update then misses -- diverging the consensus
+  // StorageLongHash from an untampered node (#3912). Returns kCorruption if any
+  // state item is malformed so recovery fails closed instead of silently
+  // diverging.
+  HogDbStatus<void> validate_recovered_state();
+
   //
   // Global Operations
   //

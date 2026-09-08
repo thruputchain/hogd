@@ -103,6 +103,14 @@ hog_db_init(std::string_view path, size_t ram_bytes,
 
   // create the RPC context.
   HogDbDAO db_tmp(RAMDB(std::move(*ramdb)));
+
+  // Reject semantically malformed state rows recovered from the (unkeyed-CRC)
+  // WAL before they can feed the consensus hash (#3912).
+  if (HogDbStatus<void> ok = db_tmp.validate_recovered_state(); !ok) {
+    critical("recovered database contains malformed state: {}", ok.error());
+    return EXIT_FAILURE;
+  }
+
   StorageLongHash db_hash = db_tmp.compute_full_db_hash();
 
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
