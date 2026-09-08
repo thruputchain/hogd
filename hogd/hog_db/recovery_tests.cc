@@ -546,6 +546,29 @@ TEST(RecoveryTests, ValidateRecoveredStateRejectsBoundaryShiftedItems)
     ASSERT_FALSE(ok->has_value());
     EXPECT_EQ(ok->error().code(), HogDbCode::kCorruption);
   }
+
+  // Non-contract-data prefixes are covered too: an address-keyed row (canonical
+  // kAddressSize + 1 key) shifted to one byte longer is rejected.
+  {
+    std::array<std::byte, kAddressSize + 2> long_addr_key{};
+    long_addr_key[0] = static_cast<std::byte>(Prefix::kBalance);
+    std::array<std::byte, sizeof(int128_xdr)> value{};
+    ErrnoStatus<Directory> dir = Directory::open_temporary();
+    ASSERT_TRUE(dir.has_value());
+    {
+      DBStatus<std::unique_ptr<Database>> db =
+          Database::open(dir->get_path(), kHeapSize, 0);
+      ASSERT_TRUE(db.has_value());
+      HogDbDAO dao(RAMDB(std::move(*db)));
+      ASSERT_TRUE(
+          dao.get_ramdb().put(long_addr_key, kNNInt128, value).has_value());
+      ASSERT_TRUE(dao.commit().has_value());
+    }
+    std::optional<HogDbStatus<void>> ok = reopen_and_validate(*dir);
+    ASSERT_TRUE(ok.has_value());
+    ASSERT_FALSE(ok->has_value());
+    EXPECT_EQ(ok->error().code(), HogDbCode::kCorruption);
+  }
 }
 
 } // namespace hogd

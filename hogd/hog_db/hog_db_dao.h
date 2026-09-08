@@ -527,9 +527,10 @@ public:
   // item as key || type || value with no length separators, a boundary shift
   // can preserve the hash yet install a row under a non-canonical key, which a
   // later canonical-key update then misses -- diverging the consensus
-  // StorageLongHash from an untampered node (#3912). Returns kCorruption if any
-  // state item is malformed so recovery fails closed instead of silently
-  // diverging.
+  // StorageLongHash from an untampered node (#3912). It enforces the canonical
+  // key length for each state prefix and the fixed width of kNNInt128 values,
+  // returning kCorruption on the first malformed item so recovery fails closed
+  // instead of silently diverging.
   HogDbStatus<void> validate_recovered_state();
 
   //
