@@ -108,6 +108,28 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
   }
 }
 
+// Both go() overloads signal nonempty while still holding the run
+// queue's lock, rather than dropping the lock first.  Notifying outside
+// the lock avoids waking a worker that then immediately blocks on the
+// mutex, but it is not safe here: once the lock is released the job is
+// visible to a worker, and nothing keeps this ThreadPool alive while the
+// notifying thread still holds a reference to the condition variable.
+//
+// ThreadPool::async() is the case that bites.  It runs the caller's task
+// on a detached thread, so no one joins it; the thread's last act is
+// make_callback() -> go(), which resumes the coroutine that was awaiting
+// the Async.  That coroutine can run to completion on a worker, let the
+// program fall off the end of main, and destroy the ThreadPool -- and so
+// the QueueState and its condition variables -- while the detached thread
+// is still inside notify_all().  Destroying a condition_variable
+// concurrently with a notify on it is a data race and undefined
+// behavior; the TSAN schedule caught it as a race between
+// QueueState::~QueueState() and pthread_cond_broadcast() from go().
+//
+// Signalling under the lock closes the window: a worker cannot dequeue
+// the job until we release the mutex, which is after the notify has
+// returned, so the notify is ordered before anything the job can go on
+// to do.  qpop() already signals `consumed` this way.
 void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
@@ -119,20 +141,9 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  std::condition_variable *nonempty = nullptr;
-  for (auto &j : jobs) {
-    int affinity_queue = llc_map->bucket(j.cpuhint);
-    if (nonempty && qno(lq) != affinity_queue) {
-      lq.reset();
-      nonempty->notify_all();
-      nonempty = nullptr;
-    }
+  for (auto &j : jobs)
     if (enqueue_selected(lq, j, now))
-      nonempty = &lq->nonempty;
-  }
-  lq.reset();
-  if (nonempty)
-    nonempty->notify_all();
+      lq->nonempty.notify_all();
 }
 
 void
@@ -142,11 +153,8 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  bool wasempty = enqueue_selected(lq, job, now);
-  auto *nonempty = &lq->nonempty;
-  lq.reset();
-  if (wasempty)
-    nonempty->notify_all();
+  if (enqueue_selected(lq, job, now))
+    lq->nonempty.notify_all();
 }
 
 void
