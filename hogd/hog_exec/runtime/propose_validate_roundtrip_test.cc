@@ -1462,10 +1462,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
 
-  // Oversized rather than native: the size gate rejects it Deterministically
-  // before verify_contract runs, which is what lets check_final_validation_-
-  // data() still convert to a ValidationFailure. A native attachment is now
-  // Unrecoverable and would short-circuit that conversion.
+  // Oversized: the size gate rejects the attachment as a ValidationFailure
+  // during initial validation (malformed transactions are dropped), before
+  // verify_contract runs. check_final_validation_data() must still flag the
+  // unused proposal data rather than downgrade it.
   Contract invalid_contract(ContractType::kRv32);
   invalid_contract.rv32_contract().data.resize_uninitialized(
       kMaxContractSizeBytes + 1);
@@ -1491,11 +1491,9 @@ TEST_P(ProposeValidateRoundtripTest,
 
 // An attached native contract is refused during initial validation. In
 // validation mode the transaction came from another proposer, so it is a
-// proposer-attributable ValidationFailure rather than the
-// ExecResultMalformedTransaction proposal mode reports -- the verdict on a
-// peer's block is not the same as the decision to drop our own candidate,
-// and a peer must not be able to induce an internal error on every
-// validating node.
+// proposer-attributable ValidationFailure rather than the Unrecoverable that
+// proposal mode reports -- a peer must not be able to induce an internal
+// error on every validating node.
 TEST_P(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
 {
   auto native_context = make_noop_context();
@@ -1527,10 +1525,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
 
-  // Oversized rather than native: the size gate rejects it Deterministically
-  // before verify_contract runs, which is what lets check_final_validation_-
-  // data() still convert to a ValidationFailure. A native attachment is now
-  // Unrecoverable and would short-circuit that conversion.
+  // Oversized: the size gate rejects the attachment as a ValidationFailure
+  // during initial validation (malformed transactions are dropped), before
+  // verify_contract runs. check_final_validation_data() must still flag the
+  // unused proposal data rather than downgrade it.
   Contract invalid_contract(ContractType::kRv32);
   invalid_contract.rv32_contract().data.resize_uninitialized(
       kMaxContractSizeBytes + 1);

@@ -125,7 +125,6 @@ public:
   Metrics::Counter rejected_capacity_rpc_count;
   Metrics::Counter rejected_malformed_unvetted_rpc_count;
   Metrics::Counter rejected_malformed_vetted_rpc_count;
-  Metrics::Counter rejected_not_well_formed_tx_count;
   Metrics::Counter auth_failed_tx_count;
   Metrics::Counter nomination_attempt_count;
   Metrics::Counter nomination_success_count;
@@ -230,10 +229,6 @@ MempoolMetrics::init()
       kComponent, "rejected_malformed_vetted_rpc_count",
       "Vetted submission RPCs rejected due to malformed transaction "
       "batches.");
-  rejected_not_well_formed_tx_count = metrics.per_thread_counter(
-      kComponent, "rejected_not_well_formed_tx_count",
-      "Submitted transactions dropped because is_tx_well_formed() rejected "
-      "them.");
   auth_failed_tx_count = metrics.per_thread_counter(
       kComponent, "auth_failed_tx_count",
       "Submitted transactions rejected by authentication.");

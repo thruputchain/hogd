@@ -4,6 +4,7 @@
 #include <cstddef> // NOLINT(misc-include-cleaner)
 #include <cstdint> // NOLINT(misc-include-cleaner)
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <span>
 #include <utility>
@@ -89,6 +90,72 @@ TEST_F(IndexDBTest, OpenNonExistent)
   auto db = IndexDB::open(tmp_dir_.directory());
   EXPECT_FALSE(db.has_value());
   EXPECT_EQ(db.error(), IndexerErrorCode::kDBNotFound);
+}
+
+// A daemon's data directory usually exists before the daemon does: a
+// deployment script, or the CI control server clearing and recreating its
+// work directory, gets there first. That must still be a fresh database
+// rather than the kDBNotFound the previous [exists] dispatch produced,
+// which every caller turns into a startup panic (#3890).
+TEST_F(IndexDBTest, OpenOrMakeNewCreatesInPreCreatedEmptyDirectory)
+{
+  ASSERT_TRUE(std::filesystem::exists(tmp_dir_.directory()));
+
+  {
+    auto created = IndexDB::open_or_make_new(tmp_dir_.directory());
+    ASSERT_TRUE(created.has_value()) << created.error();
+    EXPECT_TRUE(created->is_open());
+  }
+
+  // What it created is a database, not just a directory it tolerated.
+  auto opened = IndexDB::open(tmp_dir_.directory());
+  ASSERT_TRUE(opened.has_value()) << opened.error();
+  EXPECT_TRUE(opened->is_open());
+}
+
+// A path with nothing at it is created too, as before.
+TEST_F(IndexDBTest, OpenOrMakeNewCreatesAtMissingPath)
+{
+  const std::filesystem::path path =
+      std::filesystem::path(tmp_dir_.directory()) / "indexer-db";
+  ASSERT_FALSE(std::filesystem::exists(path));
+
+  auto created = IndexDB::open_or_make_new(path);
+  ASSERT_TRUE(created.has_value()) << created.error();
+  EXPECT_TRUE(created->is_open());
+}
+
+// A path that does hold a database is opened, not refused as already
+// existing.
+TEST_F(IndexDBTest, OpenOrMakeNewOpensExistingDatabase)
+{
+  {
+    auto created = IndexDB::make_new(tmp_dir_.directory());
+    ASSERT_TRUE(created.has_value());
+  }
+
+  auto reopened = IndexDB::open_or_make_new(tmp_dir_.directory());
+  ASSERT_TRUE(reopened.has_value()) << reopened.error();
+  EXPECT_TRUE(reopened->is_open());
+}
+
+// Only an empty directory is created into. A directory holding anything
+// else -- a database whose CURRENT file is gone reads exactly like this --
+// is refused, rather than having a fresh database written over the top of
+// whatever is in there.
+TEST_F(IndexDBTest, OpenOrMakeNewRefusesNonEmptyDirectoryWithoutDatabase)
+{
+  {
+    std::ofstream residue(std::filesystem::path(tmp_dir_.directory()) /
+                          "000123.sst");
+    ASSERT_TRUE(residue.good());
+  }
+
+  auto db = IndexDB::open_or_make_new(tmp_dir_.directory());
+  EXPECT_FALSE(db.has_value());
+  // No database was initialized over the top of it.
+  EXPECT_FALSE(std::filesystem::exists(
+      std::filesystem::path(tmp_dir_.directory()) / "CURRENT"));
 }
 
 // Test consuming events and looking them up by transaction

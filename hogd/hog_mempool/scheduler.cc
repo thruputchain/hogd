@@ -28,6 +28,7 @@
 #include "hogd/hog_mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/corosync.h"
@@ -432,9 +433,24 @@ Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
                       tx_value->tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
   auto [account_state, lock] = get_account_state(account);
+  // The expiry sweep or commit may have removed the cache entry since the
+  // caller looked it up. Hold both locks in account-then-cache order so that
+  // a runqueue insertion cannot race with removal from the cache.
+  const auto [cached_value, txs_lock] = txs_.find(tx_hash);
+  if (!cached_value) {
+    return false;
+  }
   // Check if the tx is already present in [account_state->txs]. If it is, we
   // are adding a duplicate tx, so we do not want to increment [size_].
-  return account_state->txs.insert({key, tx_value}).second;
+  //
+  // We deliberately use [cached_value] instead of [tx_value]. [cached_value] is
+  // the current value in [txs_], whereas [tx_value] could point to a stale tx
+  // since [txs_] could have changed while we were not holding [txs_lock]. Note
+  // that even though [cached_value] and [tx_value] both point to txs with the
+  // same hash and therefore the txs are the same, the [SignedTransaction]'s
+  // that hold these inner txs could have different signatures. Thus,
+  // [cached_value] and [tx_value] could refer to different txs altogether.
+  return account_state->txs.insert({key, *cached_value}).second;
 }
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
@@ -460,9 +476,28 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
   return insert_tx_into_runqueue(tx_hash, value);
 }
 
-x23::Async<void>
+bool
+Scheduler::is_pending(const SignedTransaction &tx)
+{
+  const TransactionHash tx_hash = sha256(tx.tx);
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const TxKey key{
+      .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+      .tx_hash = tx_hash,
+  };
+  const auto [account_state, lock] = accounts_.find(account);
+  if (account_state == nullptr) {
+    return false;
+  }
+  return account_state->txs.contains(key);
+}
+
+x23::Async<SchedGatewaySubmitOutcomeBatch>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
+  SchedGatewaySubmitOutcomeBatch outcomes(
+      txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
   // hide its overhead by removing the [co_await] below, doing other work, and
   // then calling [co_await] on the handle. We instead need to execute
@@ -478,16 +513,22 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
            const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
+           SchedGatewaySubmitOutcomeBatch &outcomes,
            Scheduler &scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
           size_t num_added = 0;
           for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
             if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
-              // The account for this tx does not exist in our copy of hog_db,
-              // so we silently drop the tx.
-              info("scheduler: dropping tx for unknown account {}",
+              // The DB RPC currently cannot distinguish an unknown account
+              // from a transient or internal read failure. Standalone-pubkey
+              // claims can authenticate without an on-chain auth entry and
+              // reach this path, so conservatively report the ambiguous
+              // scheduler-side failure as internal.
+              info("scheduler: dropping tx after hog-age lookup failed for {}",
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
+              outcomes[tx_idx] =
+                  SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
               continue;
             }
             if (scheduler.add_txs_helper(txs[tx_idx])) {
@@ -496,7 +537,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
           }
           scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
           co_return;
-        }(&chunk, txs, missing, *this));
+        }(&chunk, txs, missing, outcomes, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -516,6 +557,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   }
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
+  co_return outcomes;
 }
 
 void
@@ -1128,10 +1170,15 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // are on the runqueue and remove them. We cannot skip this step and
             // just remove txs from [txs_], even if the *nominated* block is
             // being committed rather than a *validated* block.
-            auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-            CHECK_PTR(tx_value_ptr);
+            std::shared_ptr<TxValue> tx_value;
+            {
+              const auto [tx_value_ptr, txs_lock] =
+                  scheduler.txs_.find(tx_hash);
+              CHECK_PTR(tx_value_ptr);
+              tx_value = *tx_value_ptr;
+            }
 
-            const SignedTransaction &tx = (*tx_value_ptr)->tx;
+            const SignedTransaction &tx = tx_value->tx;
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const TxKey key = {.expiry_block_height =
                                    tx.tx.uniquifier.block_expiry_height,
@@ -1149,11 +1196,10 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
                 num_removed_from_runqueue++;
                 accounts.insert(account, 0);
               }
+              // Keep the account locked until the cache entry is gone, so a
+              // concurrent resubmit cannot restore only the runqueue entry.
+              CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
             }
-
-            // Careful! We remove the tx from [txs_] at the bottom here because
-            // once we remove it, the references above become invalidated.
-            CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
           }
 
           co_return num_removed_from_runqueue;

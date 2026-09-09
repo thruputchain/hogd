@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -79,6 +80,12 @@ protected:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
 
+  // The handler borrows tx.contracts_to_deploy for its whole lifetime, so the
+  // fixture keeps every transaction alive here (call sites pass temporaries
+  // freely). A deque so growth never moves earlier entries a live handler
+  // still references.
+  std::deque<Transaction> handler_txs_;
+
   SystemCallHandler make_handler(Transaction tx, StorageSnapshotCache &snapshot,
                                  BlockID block_id, TransactionID tx_id,
                                  RuntimeContext &runtime_context)
@@ -92,8 +99,10 @@ protected:
       tx.uniquifier.block_expiry_height = 1'000'000;
     }
 
+    handler_txs_.push_back(std::move(tx));
     return SystemCallHandler(
-        tx, snapshot, PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
+        handler_txs_.back(), snapshot,
+        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
         PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
         ProposalModeCtor{}, runtime_context);
   }
@@ -102,6 +111,7 @@ protected:
 TEST_F(NativeContractTest, BasicInstantiate)
 {
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -164,10 +174,13 @@ TEST_F(NativeContractTest, BasicInstantiate)
   };
   auto context = make_context();
 
-  Transaction tx{};
-  tx.contracts_to_deploy.push_back(contract);
+  // Register the contract in the snapshot so make_new_runtime can resolve
+  // it: initial validation now refuses any non-rv32 attachment, so a native
+  // contract can no longer ride in via contracts_to_deploy.
+  snapshot_server_->impl()->setup_create_contract(contract);
 
-  SystemCallHandler handler = make_handler(tx, snapshot, 0, 0, *context);
+  SystemCallHandler handler =
+      make_handler(Transaction{}, snapshot, 0, 0, *context);
 
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
@@ -348,6 +361,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressMiddle,
                                               kAddressEntry};
@@ -443,6 +457,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -585,6 +600,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -684,6 +700,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -822,6 +839,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   auto context = make_context();
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -872,22 +890,15 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 // Regression test for issue #1512. An attached native contract with an
 // unknown native_contract_id must be rejected during initial validation
 // rather than reaching the panic in the deploy path. Attachments are now
-// refused by contract type before verify_contract runs, so this no longer
-// exercises that unknown-id branch, but it still pins what #1512 is about:
-// the panic stays unreachable.
-//
-// The InvokeErrorCode is ValidationFailure even though this handler is in
-// proposal mode. That is the internal representation, shared by both modes:
-// InvokeErrorCode has no "malformed" code, so the mode-dependent verdict is
-// applied later, at the ExecResult, in try_commit_transaction(). Both of
-// those branches are pinned by SelectiveDeploymentTest's
-// RejectsAttachedNativeContract (proposal -> ExecResultMalformedTransaction)
-// and RejectsAttachedNativeContractInValidationMode (validation ->
-// ExecResultTxValidationFailure). This test stops at root_invoke(), which is
-// all #1512 needs.
+// refused by contract type before verify_contract runs -- as a
+// ValidationFailure: a non-rv32 attachment makes the transaction malformed,
+// and malformed transactions are dropped -- so this no longer exercises that
+// unknown-id branch, but it still pins what #1512 is about: the panic stays
+// unreachable.
 TEST_F(NativeContractTest, InvalidNativeContractIdRejectedBeforeDeploy)
 {
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract malicious_contract(ContractType::kNative);
   malicious_contract.native_contract_id() =
@@ -1013,6 +1024,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract parent_contract(ContractType::kNative);
   parent_contract.native_contract_id() =
@@ -1035,14 +1047,13 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
                            .contract_size = 0,
                            .contract_type = child_contract.contract_type()});
 
+  Transaction tx{.invocation =
+                     Invocation{.invoked_address = kAddrParent,
+                                .entrypoint = entrypoint_from_method_id(0),
+                                .gas_limit = UINT64_MAX,
+                                .calldata = {}}};
   SystemCallHandler handler =
-      make_handler(Transaction{.invocation =
-                                   Invocation{.invoked_address = kAddrParent,
-                                              .entrypoint =
-                                                  entrypoint_from_method_id(0),
-                                              .gas_limit = UINT64_MAX,
-                                              .calldata = {}}},
-                   snapshot, 0, 0, *runtime_context);
+      make_handler(tx, snapshot, 0, 0, *runtime_context);
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
@@ -1105,6 +1116,7 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
   ContractAddress address{};
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =

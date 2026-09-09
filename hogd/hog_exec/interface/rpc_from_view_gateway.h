@@ -78,7 +78,11 @@ private:
     ViewState(BlockID id, DbTip t, DatabaseProxy &db_proxy)
       : block_id(id), tip(std::move(t)),
         snapshot_cache(id, view_block_execution_context(tip), db_proxy)
-    {}
+    {
+      // The gateway fetched this tip when it opened the viewing snapshot;
+      // seed it rather than paying load_db_tip()'s second fetch.
+      snapshot_cache.set_db_tip(tip);
+    }
   };
 
   x23::Async<ViewGatewayResult>

@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -38,7 +39,6 @@
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
@@ -91,11 +91,6 @@ namespace hogd {
 namespace {
 
 constexpr uint64_t kPlentyOfGas = 1'000'000'000;
-// The mock serves a genesis tip at height 0, so the executing block is 1.
-constexpr BlockExecutionContext kBenchBlockExecution{
-    .block_height = 1,
-    .block_timepoint = 1'700'000'000,
-};
 constexpr uint32_t kGuestMemoryBytes = rv32::kMaxMemoryBytes;
 // Output pointers the guest hands the syscall. Two, because GetCalldataLen
 // writes through two.
@@ -227,8 +222,9 @@ NetworkConfig
 bench_network_config()
 {
   NetworkConfig config = stock_network_config();
-  set_config_param(config, ConfigParamID::kConfigParamMaxBytestringLen,
-                   kMaxBytestringBytes);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 kMaxBytestringBytes);
   return config;
 }
 
@@ -305,6 +301,12 @@ constexpr uint64_t kFirstTouchKeys = 262144;
 // the warm-up calls and a few extra repetitions. Exhausting it fails the row
 // with a message rather than recycling keys and quietly measuring hits.
 constexpr uint64_t kColdPoolKeys = uint64_t{1} << 18;
+// Heap for the bench's hog_db. The cold pool alone is a quarter-million NNInt
+// items, each carrying its key, and ramdb's allocator fails a write rather
+// than growing, so this is sized well past what the pool needs -- an
+// over-estimate costs address space in one benchmark process and an
+// under-estimate fails the row.
+constexpr size_t kHogDbHeapBytes = size_t{1} << 30;
 constexpr int64_t kColdIterations = 20000;
 
 // A RuntimeContext that can build nothing.
@@ -331,51 +333,21 @@ public:
   }
 };
 
-// Everything a SystemCallHandler needs, and nothing else.
+// Everything a SystemCallHandler needs.
 //
-// Deliberately not NativeContractTestFramework: that stands up genesis, the
-// contract loader and a real hog_db, none of which a stateless syscall touches,
-// and all of which would have to be linked and paid for at startup. This is the
-// same shape native_contract_test.cc uses -- an in-process snapshot server and
-// event aggregator behind the ordinary proxies -- so the handler under
-// measurement is the production class, constructed the production way.
+// Set up the way every other test sets one up: NativeContractTestFramework
+// against a real hog_db, which runs genesis and opens the block. The one row
+// that measures a snapshot-cache miss then measures a database rather than a
+// stand-in map; every other row has its key in a frame or in the cache and
+// never reaches it while timed.
 class SyscallBenchFixture {
 public:
   SyscallBenchFixture()
   {
-    snapshot_server_.start_server(/*port=*/0);
-    const auto event_exec_port = event_server_exec_server_.start_server(0);
-    db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = snapshot_server_.port()});
-    event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_exec_port});
-    event_server_.open_block(0)();
-    runtime_context_ = std::make_unique<NoChildRuntimeContext>();
-    snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(0, kBenchBlockExecution,
-                                               *db_proxy_);
-    handler_ = std::make_unique<SystemCallHandler>(
-        Transaction{}, *snapshot_cache_,
-        PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-        PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
-        ProposalModeCtor{}, *runtime_context_);
 
-    // Pin the db tip. Production entry paths (invoke(), root_invoke()) await
-    // init_db_tip() before dispatching anything, because the pin is the
-    // transaction's one fallible tip read and every later height read is then
-    // a plain load. This harness calls syscall_entry() directly, so it has to
-    // do the pinning those entry paths do -- without it GetBlockHeight reads
-    // through a null tip and db_tip()'s CHECK aborts the process.
-    //
-    // Held rather than checked here: this fixture is a lazily constructed
-    // static, so its constructor runs inside whichever benchmark row runs
-    // first, and panicking there truncates the JSON mid-write and costs every
-    // row in the run.
-    if (auto pinned = handler_->init_db_tip()(); !pinned.has_value()) {
-      setup_error_ = std::format("could not pin the db tip: system error {}",
-                                 pinned.error().raw_code());
-      return;
-    }
+    // The db tip is loaded by make_new_system_call_handler() when handler_ is
+    // initialized, so GetBlockHeight and its kin read a pinned tip with no
+    // per-fixture step here.
 
     // A syscall runs inside an invocation frame; without one the handler has no
     // current address, no calldata and no gas budget, and every call under
@@ -422,10 +394,10 @@ public:
     }
     // Completed, not discarded: finish_frame() returns a MaybeAsync, and
     // dropping one on its Async arm abandons the coroutine unrun.
-    (void)handler_->finish_frame(InvokeStatus<void>{},
-                                 std::move(inner_trace_))();
-    (void)handler_->finish_frame(InvokeStatus<void>{},
-                                 std::move(outer_trace_))();
+    (void)handler_.finish_frame(InvokeStatus<void>{},
+                                std::move(inner_trace_))();
+    (void)handler_.finish_frame(InvokeStatus<void>{},
+                                std::move(outer_trace_))();
   }
 
   SyscallBenchFixture(const SyscallBenchFixture &) = delete;
@@ -433,7 +405,7 @@ public:
   SyscallBenchFixture(SyscallBenchFixture &&) = delete;
   SyscallBenchFixture &operator=(SyscallBenchFixture &&) = delete;
 
-  [[nodiscard]] SystemCallHandler &handler() { return *handler_; }
+  [[nodiscard]] SystemCallHandler &handler() { return handler_; }
 
   // Why the fixture is unusable, if it is. Empty when setup completed. Every
   // row checks this before touching the handler: a fixture that could not be
@@ -491,7 +463,7 @@ public:
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   push_frame(ContractAddress address)
   {
-    return handler_->start_frame(
+    return handler_.start_frame(
         Invocation{
             .invoked_address = address,
             .entrypoint = ContractEntrypointID{},
@@ -518,7 +490,7 @@ public:
     // happens when it is invoked; dropping one on its Async arm abandons the
     // coroutine with the frame still open, and has_value() on the undriven
     // MaybeAsync answers which arm it took rather than whether it succeeded.
-    auto finished = handler_->finish_frame(result, std::move(trace))();
+    auto finished = handler_.finish_frame(result, std::move(trace))();
     if (!finished.has_value()) {
       return std::format("could not finish a frame: system error {}",
                          finished.error().raw_code());
@@ -534,9 +506,8 @@ public:
     for (uint64_t index = first; index < last; ++index) {
       StorageKey key(StorageKeyType::ContractData);
       key.contract_data_key() = make_item_key(space, index);
-      snapshot_server_.impl()->setup_create_item(
-          AddressAndKey{.address = address, .key = key},
-          StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
+      seed_item(AddressAndKey{.address = address, .key = key},
+                StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
     }
   }
 
@@ -553,9 +524,8 @@ public:
       // Not zeros: a path that special-cased an empty or all-zero value would
       // be measuring something other than the copy it is meant to.
       std::ranges::fill(value, uint8_t{0xAB});
-      snapshot_server_.impl()->setup_create_item(
-          AddressAndKey{.address = address, .key = key},
-          StorageItemWrapper(std::move(value), &cost_model()));
+      seed_item(AddressAndKey{.address = address, .key = key},
+                StorageItemWrapper(std::move(value), &cost_model()));
     }
   }
 
@@ -603,17 +573,29 @@ private:
     return model;
   }
 
-  BlockSnapshotServer snapshot_server_ =
-      BlockSnapshotServer(/*block_id=*/0, /*tip_block_height=*/0,
-                          bench_network_config());
-  TestEventAggregator event_server_;
-  TestEventAggregatorExecServer event_server_exec_server_ =
-      TestEventAggregatorExecServer(event_server_);
-  std::unique_ptr<DatabaseProxy> db_proxy_;
-  std::unique_ptr<EventServerProxy> event_server_proxy_;
-  std::unique_ptr<RuntimeContext> runtime_context_;
-  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-  std::unique_ptr<SystemCallHandler> handler_;
+  void seed_item(AddressAndKey const &addrkey, StorageItemWrapper item)
+  {
+    framework_.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
+                                       std::move(item)));
+  }
+
+  NativeContractTestFramework framework_{
+      /*log=*/false,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      TestDB::kHogDb,
+      /*empty_genesis=*/true,
+      /*genesis_cost_model=*/std::nullopt,
+      bench_network_config(),
+      kBulkRpcMaxMessageSize,
+      kHogDbHeapBytes,
+  };
+  Transaction tx_{};
+  // Built in place: SystemCallHandler is neither movable nor copyable. Declared
+  // after what it borrows.
+  std::unique_ptr<RuntimeContext> runtime_context_ =
+      std::make_unique<NoChildRuntimeContext>();
+  SystemCallHandler handler_ =
+      framework_.make_new_system_call_handler(tx_, *runtime_context_);
   std::unique_ptr<InvocationFrameTrace> outer_trace_;
   std::unique_ptr<InvocationFrameTrace> inner_trace_;
   std::string setup_error_;
@@ -1576,15 +1558,19 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
 // What this measures: get_item_view's miss, the UnmodifiedItem load,
 // StorageSnapshotCache::try_get_snapshot_item missing under its shared lock,
 // DatabaseProxy::get_snapshot_item -- an x23 RPC, serialized, over a local
-// socket, to BlockSnapshotRpc -- the SnapshotStorageItem built from the reply,
-// and the cache insert. Everything on the executor's side of a cold read.
+// socket -- the lookup a real hog_db does over a real ramdb, the
+// SnapshotStorageItem built from the reply, and the cache insert. A cold read
+// end to end.
 //
-// What it does not measure: hog_db. The server answering is the in-process
-// mock, whose lookup is an unordered_map find, so this is the fixed cost of
-// going to the db and not the cost of the db. Read it as a floor under a
-// cold read and as the size of the thing the schedule declines to price,
-// and not as a number to put in gas_cost_table.h. The report keeps it out of
-// --schedule for that reason.
+// It answers from hog_db rather than the light server every other row uses,
+// because what a miss costs is mostly what the database does; against the
+// light server's map find this row reported the cost of *going* to a database
+// and not the cost of one.
+//
+// What it still does not measure: the shard topology. hog_db is in-process and
+// the socket is local, so a chain whose executor and database sit on different
+// hosts pays a network hop this does not. Read it as a floor in that one
+// respect.
 //
 // Keys come from a pool used strictly once: the cache is never reset within
 // the process, so a key read by any earlier call -- an earlier repetition,
@@ -1785,7 +1771,8 @@ register_benchmarks()
   // chain runs at. The parent walk on a first touch is linear in the stack,
   // and the schedule has to hold at whatever depth the chain allows.
   const uint32_t stock_max_depth =
-      max_cross_invoke_depth(stock_network_config()) - 2;
+      NetworkConfigParams(stock_network_config().v0()).max_cross_invoke_depth -
+      2;
   std::vector<uint32_t> depths = {1, 8, 16};
   if (std::ranges::find(depths, stock_max_depth) == depths.end()) {
     depths.push_back(stock_max_depth);
@@ -1896,6 +1883,10 @@ add_provenance_context()
 {
   const rv32::gas_calibration::Provenance provenance =
       rv32::gas_calibration::collect_provenance();
+  // What answered the cold row's misses. Absent in a run recorded before the
+  // bench moved off the light server, which is what lets the report decline to
+  // label those rather than claim this backend for them.
+  benchmark::AddCustomContext("syscall_bench_item_backend", "hog_db");
   benchmark::AddCustomContext("engine_fingerprint",
                               provenance.engine_fingerprint);
   benchmark::AddCustomContext("engine_source_digest",

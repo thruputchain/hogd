@@ -454,7 +454,12 @@ TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
             IndexerBlockApplyOutcome::IndexerBlockContentConflict);
 }
 
-TEST_F(StrictIndexerTest, RejectsPrevBodyEventRootAndDigestConflicts)
+// Content binding -- the bodies and event logs against the header's roots --
+// is established by the event server when it publishes the record, not
+// recomputed here. Ingest rejects only what it can see locally: a block that
+// does not chain, one that is not the block its identity names, or batches
+// that do not pair up.
+TEST_F(StrictIndexerTest, RejectsPrevHashIdentityAndPairingConflicts)
 {
   IndexerOutboxOrigin origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
@@ -479,28 +484,13 @@ TEST_F(StrictIndexerTest, RejectsPrevBodyEventRootAndDigestConflicts)
   refresh_identity(negative);
   expect_conflict(negative);
 
-  IndexerCommittedBlock body_conflict = valid;
-  body_conflict.payload.tx_bodies[0].signed_tx.tx.uniquifier.nonce++;
-  refresh_identity(body_conflict);
-  expect_conflict(body_conflict);
+  IndexerCommittedBlock misnamed = valid;
+  misnamed.identity.consensus_hash[0] ^= 1;
+  expect_conflict(misnamed);
 
-  IndexerCommittedBlock event_conflict = valid;
-  event_conflict.payload.event_logs[0].tx_hash[0] ^= 1;
-  event_conflict.payload.consensus_value.proposal_header.events_hash =
-      compute_indexer_outbox_event_root(event_conflict.payload.event_logs,
-                                        event_conflict.payload.tx_bodies);
-  refresh_identity(event_conflict);
-  expect_conflict(event_conflict);
-
-  IndexerCommittedBlock root = valid;
-  root.payload.consensus_value.proposal_header.events_hash[0] ^= 1;
-  refresh_identity(root);
-  expect_conflict(root);
-
-  IndexerCommittedBlock txs_root = valid;
-  txs_root.payload.consensus_value.proposal_header.txs_hash[0] ^= 1;
-  refresh_identity(txs_root);
-  expect_conflict(txs_root);
+  IndexerCommittedBlock unpaired = valid;
+  unpaired.payload.tx_bodies.push_back(body);
+  expect_conflict(unpaired);
 }
 
 TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)

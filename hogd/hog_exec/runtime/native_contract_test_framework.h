@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <expected>
 #include <format>
 #include <limits>
@@ -255,7 +256,8 @@ private:
 class NativeContractTestFramework {
 public:
   // [db_max_message_size] caps this framework's executor->db client; see
-  // DatabaseProxy.
+  // DatabaseProxy. [db_heap_bytes] sizes a kHogDb ramdb heap; see
+  // HogdbWrapper.
   NativeContractTestFramework(
       bool log = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
@@ -263,8 +265,9 @@ public:
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
           std::nullopt,
       std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
-      size_t db_max_message_size = kBulkRpcMaxMessageSize)
-    : db_wrapper_(make_db_wrapper(test_db))
+      size_t db_max_message_size = kBulkRpcMaxMessageSize,
+      std::optional<size_t> db_heap_bytes = std::nullopt)
+    : db_wrapper_(make_db_wrapper(test_db, db_heap_bytes))
   {
     bool logging_enabled = log || do_logging_env();
     if (logging_enabled) {
@@ -291,15 +294,18 @@ public:
   void enable_logging();
 
   static std::variant<MockDBWrapper, HogdbWrapper>
-  make_db_wrapper(TestDB test_db)
+  make_db_wrapper(TestDB test_db, std::optional<size_t> db_heap_bytes)
   {
     switch (test_db) {
     case TestDB::kMockInMemory:
       return std::variant<MockDBWrapper, HogdbWrapper>(
           std::in_place_type<MockDBWrapper>);
     case TestDB::kHogDb:
-      return std::variant<MockDBWrapper, HogdbWrapper>(
-          std::in_place_type<HogdbWrapper>);
+      return db_heap_bytes.has_value()
+                 ? std::variant<MockDBWrapper, HogdbWrapper>(
+                       std::in_place_type<HogdbWrapper>, *db_heap_bytes)
+                 : std::variant<MockDBWrapper, HogdbWrapper>(
+                       std::in_place_type<HogdbWrapper>);
     default:
       panic("make_db_wrapper: invalid test_db {}", static_cast<int>(test_db));
     }
@@ -353,29 +359,51 @@ public:
   {
     return make_new_system_call_handler(tx.tx, runtime_context, identifier);
   }
-  SystemCallHandler
-  make_new_system_call_handler(Transaction const &tx,
-                               RuntimeContext &runtime_context,
-                               EphemeralTxIdentifier *identifier = nullptr)
+  // Loads the current block's db tip into the snapshot cache if it is not
+  // loaded yet. Handler and view paths read tip-derived values, so they load
+  // here rather than at block open, which must cost no rpc (see
+  // get_block_execution_context()). Off-pool, so completing it here is legal.
+  void ensure_db_tip_loaded()
   {
     assert(storage_snapshot_cache_);
+    if (storage_snapshot_cache_->has_db_tip()) {
+      return;
+    }
+    auto res = storage_snapshot_cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("ensure_db_tip_loaded: failed to load db tip: {}", res.error());
+    }
+  }
+
+  // Both helpers take the tx by value and keep it alive in handler_txs_: the
+  // handler borrows tx.contracts_to_deploy for its whole lifetime, so a
+  // caller-supplied temporary must be owned by the framework, not borrowed
+  // from the call expression.
+  SystemCallHandler
+  make_new_system_call_handler(Transaction tx, RuntimeContext &runtime_context,
+                               EphemeralTxIdentifier *identifier = nullptr)
+  {
+    ensure_db_tip_loaded();
     auto txid = allocate_txid();
     if (identifier) {
       identifier->block_id = block_number_;
       identifier->tx_id = txid;
     }
-    return SystemCallHandler(tx, *storage_snapshot_cache_,
+    handler_txs_.push_back(std::move(tx));
+    return SystemCallHandler(handler_txs_.back(), *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
                              ProposalModeCtor{}, runtime_context);
   }
 
   SystemCallHandler make_new_system_call_handler_validation(
-      Transaction const &tx, RuntimeContext &runtime_context,
+      Transaction tx, RuntimeContext &runtime_context,
       NondeterministicProposalData proposal_data)
   {
+    ensure_db_tip_loaded();
     auto txid = allocate_txid();
-    return SystemCallHandler(tx, *storage_snapshot_cache_,
+    handler_txs_.push_back(std::move(tx));
+    return SystemCallHandler(handler_txs_.back(), *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
                              ValidationModeCtor{std::move(proposal_data)},
@@ -593,7 +621,7 @@ public:
 
   DbTip get_db_tip() const
   {
-    auto r = db_proxy_->get_db_tip(block_number_)();
+    auto r = db_proxy_->get_db_tip(block_number_, committed_height_ + 1)();
     CHECK(r.has_value());
     return *r;
   }
@@ -795,6 +823,11 @@ private:
   EventServerWrapper event_server_wrapper_;
 
   std::shared_ptr<StorageSnapshotCache> storage_snapshot_cache_;
+
+  // Owns every transaction handed to make_new_system_call_handler*: the
+  // handlers borrow tx.contracts_to_deploy for their whole lifetime. A deque
+  // so growth never moves entries a live handler still references.
+  std::deque<Transaction> handler_txs_;
 
   std::variant<MockDBWrapper, HogdbWrapper> db_wrapper_;
   std::unique_ptr<Logger> previous_logger_ = nullptr;

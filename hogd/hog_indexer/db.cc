@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <future>
@@ -43,6 +44,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/key_format.h"
 #include "hogd/hog_indexer/status.h"
@@ -61,6 +63,48 @@
 namespace hogd {
 
 namespace {
+
+// What ingest checks about a pulled block before applying it. The event
+// server established both consensus roots over the block's bodies when it
+// published the record, so ingest does not recompute them: it verifies that
+// the block is the one its identity names and that its two batches pair up.
+IndexerPayloadStatus<void>
+check_committed_block_shape(const IndexerCommittedBlock &block)
+{
+  if (block.payload.format_version != kIndexerOutboxFormatVersion) {
+    return std::unexpected(
+        std::format("unknown committed outbox format version {}",
+                    block.payload.format_version));
+  }
+  if (block.payload.consensus_value.proposal_header.block_height < 0) {
+    return std::unexpected("committed outbox height is negative");
+  }
+  if (block.payload.event_logs.size() != block.payload.tx_bodies.size()) {
+    return std::unexpected("event/body batch cardinalities differ");
+  }
+  if (block.identity.consensus_hash != sha256(block.payload.consensus_value)) {
+    return std::unexpected(
+        "committed block identity differs from canonical payload");
+  }
+  return {};
+}
+
+// True when there is nothing at [path] to open: no such path, or an empty
+// directory. A filesystem error reads as false, so an unreadable path is
+// left to [IndexDB::open] to refuse rather than treated as absent.
+bool
+path_holds_nothing(const std::filesystem::path &path)
+{
+  std::error_code ec;
+  if (!std::filesystem::exists(path, ec)) {
+    return !ec;
+  }
+  if (!std::filesystem::is_directory(path, ec) || ec) {
+    return false;
+  }
+  const bool empty = std::filesystem::is_empty(path, ec);
+  return empty && !ec;
+}
 
 // Helper function to create a tx_index SST file chunk
 IndexerStatus<bool>
@@ -382,6 +426,29 @@ void
 RocksDBDeleter::operator()(rocksdb::DB *db) const
 {
   delete db;
+}
+
+IndexerStatus<IndexDB>
+IndexDB::open_or_make_new(const std::filesystem::path &path,
+                          rocksdb::CompressionType compression_algorithm)
+{
+  // Only a path with nothing at it is created. Dispatching on whether the
+  // path exists sent an existing but empty data directory down [open],
+  // which does not create and so fails with kDBNotFound -- fatal, since
+  // every caller panics on it. Launchers make a daemon's data directory
+  // before the daemon runs often enough (a deployment script, the CI
+  // control server clearing its work directory, a plain [mkdir -p]) that
+  // an empty directory says nothing about whether a database is there
+  // (#3890).
+  //
+  // Anything else is [open]'s to make sense of, including a directory
+  // holding files this cannot identify: a database whose CURRENT file is
+  // gone still fails closed rather than having a fresh manifest written
+  // over the top of its data.
+  if (path_holds_nothing(path)) {
+    return make_new(path, compression_algorithm);
+  }
+  return open(path, compression_algorithm);
 }
 
 IndexerStatus<IndexDB>
@@ -1184,7 +1251,7 @@ IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
     apply_validation_test_hook_();
   }
   try {
-    if (auto valid = co_await validate_indexer_committed_block(block); !valid) {
+    if (auto valid = check_committed_block_shape(block); !valid) {
       co_return apply_failure(
           IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
     }

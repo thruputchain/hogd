@@ -48,6 +48,7 @@
 #include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_gateway.hh"
 #include "scheduler.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -198,6 +199,11 @@ public:
   x23::Async<void>
   schedulercoord_submit_unvetted(ParallelSignedTransactionBatch batch);
 
+  // Gateway-facing admission helper. This is deliberately not part of the
+  // coordinator RPC service; MempoolGatewayRpc exposes it as SchedGateway1.
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  submit_unvetted_with_outcomes(ParallelSignedTransactionBatch batch);
+
   // Submit a vetted tx.
   x23::Async<void>
   schedulercoord_submit_vetted(ValidatorID validator_id,
@@ -307,10 +313,10 @@ public:
     co_return ret;
   }
 
-  x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
-    x23::XdrVec<XdrSharedPtr<SignedTransaction>> ret;
+    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
       ret.resize(tx_hashes.size());
       co_return ret;
@@ -327,7 +333,7 @@ public:
       // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
       // is an ownership change, not a wire change.
       ret.push_back(
-          XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
+          x23::XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
 
     co_return ret;
@@ -426,6 +432,10 @@ public:
   }
 
 private:
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  submit_unvetted(ParallelSignedTransactionBatch batch,
+                  bool malformed_is_protocol_error);
+
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
   // NOLINTNEXTLINE(bugprone-exception-escape)

@@ -455,6 +455,90 @@ TEST_F(EventRpcTest, ExactProgressReturnsNextAndUnchangedProgressRepeatsIt)
             x23::serialize(repeated.pulled_block()));
 }
 
+// A pull in the Initialized state is answered at once, every time: it is the
+// client asking whether it is caught up, and a client that reconnected or
+// restarted with persisted progress asks exactly that. Only a pull in the
+// CaughtUp state parks, and it is served the next commit.
+TEST_F(EventRpcTest, InitializedPullIsAnsweredEveryTimeAndCaughtUpPullParks)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.indexer_outbox_store()
+                  .initialize_current_epoch_origin(1, sha256(genesis))()
+                  .has_value());
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  ConsensusValue one = commit_empty_block(ctx, 84, 1, sha256(genesis));
+
+  EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  auto record = ctx.indexer_outbox_store().load_committed_record_info_raw(1);
+  ASSERT_TRUE(record.has_value()) << record.error();
+  IndexerProgress progress(IndexerProgressState::IndexerProgressInitialized);
+  progress.initialized() = {
+      .origin = first.pulled_block().origin,
+      .contiguous_height = 1,
+      .last_consensus_hash = record->consensus_hash,
+  };
+
+  // The same cursor, Initialized, three times: each is a fresh connection's
+  // first question and each is answered.
+  for (int i = 0; i < 3; ++i) {
+    EventIndexerPullResult caught_up =
+        ctx.pull_indexer_next(pull_request(progress))();
+    ASSERT_EQ(caught_up.outcome(),
+              EventIndexerPullOutcome::EventIndexerPullCaughtUp)
+        << std::string_view(caught_up.diagnostic());
+  }
+
+  // The same cursor in the CaughtUp state parks; the next commit answers it.
+  IndexerProgress caught_up_progress(
+      IndexerProgressState::IndexerProgressCaughtUp);
+  caught_up_progress.initialized() = progress.initialized();
+  auto parked = ctx.pull_indexer_next(pull_request(caught_up_progress));
+  ConsensusValue two = commit_empty_block(ctx, 85, 2, sha256(one));
+  EventIndexerPullResult next = parked();
+  ASSERT_EQ(next.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock)
+      << std::string_view(next.diagnostic());
+  EXPECT_EQ(next.pulled_block().block.payload.consensus_value, two);
+}
+
+// A pull that would park is answered once its server is draining.
+// ~EventIndexerServer sets the flag and then releases parked pulls; a client
+// at the tip re-asks the moment its released pull is answered, and without
+// the flag that pull would park on the post-release count and pin ~RpcServer.
+TEST_F(EventRpcTest, DrainingServerAnswersCaughtUpPullInsteadOfParking)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.indexer_outbox_store()
+                  .initialize_current_epoch_origin(1, sha256(genesis))()
+                  .has_value());
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  [[maybe_unused]] const ConsensusValue one =
+      commit_empty_block(ctx, 86, 1, sha256(genesis));
+
+  EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  auto record = ctx.indexer_outbox_store().load_committed_record_info_raw(1);
+  ASSERT_TRUE(record.has_value()) << record.error();
+  IndexerProgress caught_up(IndexerProgressState::IndexerProgressCaughtUp);
+  caught_up.initialized() = {
+      .origin = first.pulled_block().origin,
+      .contiguous_height = 1,
+      .last_consensus_hash = record->consensus_hash,
+  };
+
+  std::atomic<bool> draining = true;
+  ctx.release_indexer_pulls();
+  EventIndexerPullResult answered =
+      ctx.pull_indexer_next(pull_request(caught_up), draining)();
+  EXPECT_EQ(answered.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp)
+      << std::string_view(answered.diagnostic());
+}
+
 TEST_F(EventRpcTest, ForgedAndUnknownProgressConflict)
 {
   EventRPCContext ctx(temp_dir());

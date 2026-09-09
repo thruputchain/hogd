@@ -14,6 +14,9 @@ class View {
 public:
   View() = delete;
 
+  // The syscalls the view runs read tip-derived values (executing height,
+  // network hash, configuration parameters) off `snapshot_cache`, whose tip
+  // the caller must have loaded or seeded before calling this.
   static x23::Async<ExpectedViewResult> run_view_transaction(
       StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy proxy,
       PerTransactionEventServerProxy event_proxy,

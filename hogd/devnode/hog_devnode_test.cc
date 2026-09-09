@@ -81,6 +81,7 @@
 #include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
@@ -170,6 +171,7 @@ struct Readiness {
   };
 
   Endpoint scheduler;
+  Endpoint scheduler_gateway;
   Endpoint indexer;
   Endpoint db_gateway;
   Endpoint view_gateway;
@@ -486,6 +488,10 @@ parse_readiness(std::string line)
       .scheduler = parse_endpoint(require_string_field(*endpoints, "scheduler",
                                                        manifest_bytes),
                                   "scheduler", manifest_bytes),
+      .scheduler_gateway =
+          parse_endpoint(require_string_field(*endpoints, "schedulerGateway",
+                                              manifest_bytes),
+                         "schedulerGateway", manifest_bytes),
       .indexer = parse_endpoint(require_string_field(*endpoints, "indexer",
                                                      manifest_bytes),
                                 "indexer", manifest_bytes),
@@ -1212,6 +1218,9 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
             "0000000000000000000000000000000000000000000000000000000000000000");
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
   EXPECT_GT(readiness.scheduler.port, 0);
+  EXPECT_EQ(readiness.scheduler_gateway.host, "127.0.0.1");
+  EXPECT_GT(readiness.scheduler_gateway.port, 0);
+  EXPECT_NE(readiness.scheduler_gateway.port, readiness.scheduler.port);
   EXPECT_EQ(readiness.indexer.host, "127.0.0.1");
   EXPECT_GT(readiness.indexer.port, 0);
   EXPECT_EQ(readiness.db_gateway.host, "127.0.0.1");
@@ -1246,6 +1255,14 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   if (!git_hash.empty() && git_hash != "unknown") {
     EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
   }
+
+  auto scheduler_gateway =
+      create_client<SchedGateway1>(readiness.scheduler_gateway.host,
+                                   readiness.scheduler_gateway.port,
+                                   /*retry=*/true)()
+          .value();
+  EXPECT_EQ(scheduler_gateway.schedgateway_intro(version::kHogdProtocol())(),
+            SchedGatewayIntroOutcome::SchedGatewayIntroSuccess);
 
   const json::Value *bootstrap = readiness.manifest.find("bootstrap");
   ASSERT_NE(bootstrap, nullptr);
@@ -1690,7 +1707,8 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
       R"({"schemaVersion":2,"kind":"hogd-dev-runtime","chainState":"fresh",)"
       R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
-      R"("endpoints":{"scheduler":"[::1]:12345","indexer":"[::1]:23456",)"
+      R"("endpoints":{"scheduler":"[::1]:12345",)"
+      R"("schedulerGateway":"[::1]:22345","indexer":"[::1]:23456",)"
       R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"
       R"("bootstrapAccountDerivation":{"scheme":"groundhog-bootstrap-account-v1","seed":"test"},)"
       R"("bootstrapAccounts":[],"bootstrap":{"devWallet":{)"
@@ -1711,6 +1729,8 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
       std::format(R"({{"schemaVersion":2,"status":"ready",)"
                   R"("manifestPath":"{}","manifestHash":"{}"}})",
                   manifest_path.string(), hex_string(hash_string(manifest))));
+  EXPECT_EQ(readiness.scheduler_gateway.host, "::1");
+  EXPECT_EQ(readiness.scheduler_gateway.port, 22345);
 
   EXPECT_EQ(readiness.scheduler.host, "::1");
   EXPECT_EQ(readiness.scheduler.port, 12345);

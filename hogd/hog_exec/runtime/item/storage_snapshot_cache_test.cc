@@ -5,6 +5,7 @@
 #include <optional>
 #include <string_view>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
@@ -73,6 +74,11 @@ protected:
         BlockID{1},
         BlockExecutionContext{.block_height = 1, .block_timepoint = 0},
         *db_proxy_);
+    auto res = cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("StorageSnapshotCacheTest::SetUp: failed to load db tip: {}",
+            res.error());
+    }
   }
 
   void seed_bytestring(AddressAndKey const &addrkey, std::string_view text)

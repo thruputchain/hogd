@@ -152,6 +152,9 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
     w.object_field("endpoints", [&](json::Writer &w) {
       w.field("scheduler", format_advertised_address(node.bind_host(),
                                                      node.scheduler_port()));
+      w.field("schedulerGateway",
+              format_advertised_address(node.bind_host(),
+                                        node.scheduler_gateway_port()));
       w.field("indexer",
               format_advertised_address(node.bind_host(), node.read_port()));
       w.field("dbGateway",

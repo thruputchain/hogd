@@ -8,11 +8,13 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "event_outbox_internal.hh"
 #include "hogd/base/cleanup.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
@@ -325,6 +327,13 @@ private:
   mutable std::unique_ptr<x23::CoroLock> committed_publication_lock_ =
       std::make_unique<x23::CoroLock>();
   mutable std::optional<CommittedAppendCache> committed_append_cache_;
+  // Event roots whose files this process has established: streamed by one of
+  // its own blocks, validated in full at promotion, or recomputed once on
+  // first load. A load of an established file is a parse and nothing more;
+  // a file first seen after a restart gets the full root recomputation once.
+  // Guarded by committed_publication_lock_.
+  mutable std::unordered_set<SHA256Hash, SipHash24Hasher>
+      established_event_roots_;
   mutable size_t committed_history_scan_count_ = 0;
 };
 

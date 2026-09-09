@@ -369,7 +369,8 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
 
   auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
 
   auto deployment_lookup = lookup_deployment_from_db(deployed_addr);
   EXPECT_FALSE(deployment_lookup.has_value());
@@ -1333,9 +1334,10 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
   EXPECT_EQ(sha256(lookup.value()), limit_hash);
 }
 
-// An attached contract blob above kMaxContractSizeBytes is rejected
-// deterministically during initial validation: the body never runs and
-// nothing is deployed (#2569).
+// An attached contract blob above kMaxContractSizeBytes is rejected as a
+// ValidationFailure during initial validation (malformed transactions are
+// dropped, not included): the body never runs and nothing is deployed
+// (#2569).
 TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 {
   Contract oversized(ContractType::kRv32);
@@ -1380,9 +1382,10 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 
   auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
   EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultTxDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(oversized_hash).has_value());
 }
@@ -1391,7 +1394,8 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 // the same failure reports as unrecoverable (#2190).
 TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 {
-  const uint32_t limit = max_new_contracts_per_tx(stock_network_config());
+  const uint32_t limit =
+      NetworkConfigParams(stock_network_config().v0()).max_new_contracts_per_tx;
 
   // One more distinct contract than the chain admits. Each is tiny and
   // individually valid, so the count is the only thing being rejected.
@@ -1442,9 +1446,10 @@ TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 
   auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
   EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultTxDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(first_hash).has_value());
 }
@@ -1494,9 +1499,10 @@ TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
 
   auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
   EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultTxDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(contract_hash).has_value());
 }
@@ -1505,7 +1511,8 @@ TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
 // the bound is inclusive, so a transaction at the limit still runs its body.
 TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
 {
-  const uint32_t limit = max_new_contracts_per_tx(stock_network_config());
+  const uint32_t limit =
+      NetworkConfigParams(stock_network_config().v0()).max_new_contracts_per_tx;
 
   decltype(Transaction{}.contracts_to_deploy) attached;
   for (uint32_t i = 0; i < limit; ++i) {
@@ -1560,9 +1567,9 @@ TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
 // A native contract attached to a transaction is rejected during initial
 // validation, even when the body never deploys or invokes it: every native id
 // is refused by deploy_contract's banned-redeploy check, so an attachment
-// could never be deployed. In proposal mode that is a transaction to drop,
-// not an internal error, so it reports ExecResultMalformedTransaction and the
-// scheduler declines to nominate it. The contract here is registered in the
+// could never be deployed. A non-rv32 attachment makes the transaction
+// malformed, and malformed transactions are dropped (ValidationFailure), not
+// included in the block as failures. The contract here is registered in the
 // NativeContext, so it is rejected for being native, not for being unknown.
 TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
 {
@@ -1619,75 +1626,9 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
   EXPECT_EQ(res.result_.error(),
             InvokeError{InvokeErrorCode::ValidationFailure});
   EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultMalformedTransaction);
+            ExecResult::ExecResultTxValidationFailure);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(attached_hash).has_value());
-}
-
-// The other half of the mode split. The same rejection, reached the same way,
-// but validating a block a peer proposed rather than assembling our own: the
-// verdict becomes a proposer-attributable ExecResultTxValidationFailure
-// instead of ExecResultMalformedTransaction. Note that the InvokeErrorCode is
-// ValidationFailure in both modes -- it is the internal representation, and
-// the mode-dependent verdict is applied at the ExecResult, in
-// try_commit_transaction().
-TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContractInValidationMode)
-{
-  auto attached_native = make_native_contract(1);
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
-  fns_0.emplace(
-      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
-        ADD_FAILURE() << "transaction body must not execute when a native "
-                         "contract is attached";
-        co_return InvokeError{InvokeErrorCode::Deterministic};
-      });
-  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
-  fns_1.emplace(
-      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
-        ADD_FAILURE() << "the attached native contract must never be invoked";
-        co_return InvokeError{InvokeErrorCode::Deterministic};
-      });
-  auto native_contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract_0));
-  contract_map.emplace(1, std::move(native_contract_1));
-  NativeContext native_context(std::move(contract_map));
-  NoopRv32Context noop_context;
-  MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
-          {ContractType::kNative, {&native_context, false}},
-          {ContractType::kRv32, {&noop_context, false}}});
-
-  auto deployer_contract = make_native_contract(0);
-  write_contract(deployer_contract);
-  auto deployer_addr = make_contract_address(1);
-  write_deployment(deployer_addr, deployer_contract);
-
-  setup_grant_storage_token(deployer_addr, 1'000'000'000);
-
-  auto handler_tx = Transaction{
-      .invocation = Invocation{.invoked_address = deployer_addr,
-                               .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}},
-      .uniquifier = make_new_uniquifier(),
-      .contracts_to_deploy = {*attached_native},
-  };
-
-  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
-
-  auto handler =
-      make_new_system_call_handler_validation(handler_tx, context,
-                                              NondeterministicProposalData{});
-
-  auto res = handler.root_invoke()();
-  EXPECT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(),
-            InvokeError{InvokeErrorCode::ValidationFailure});
-  EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultTxValidationFailure);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/shared.h"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/x23/async.h"
@@ -40,16 +41,17 @@ public:
     co_return;
   }
 
-  // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
-  // scheduler detects and silently drops the duplicates rather than enqueue
-  // them.
+  // Adds txs to the scheduler and returns one admission outcome per tx, in
+  // input order. Adding the same tx multiple times is okay; a duplicate that
+  // is already pending is reported as admitted rather than enqueued again.
   //
   // This method will cycle the groups for an account if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  x23::Async<void> add_txs(const x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  add_txs(const x23::XdrVec<SignedTransaction> &txs);
 
   x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
@@ -103,9 +105,13 @@ public:
     size_t num_inserted = 0;
     for (auto it = begin; it != end; it++) {
       const TransactionHash &tx_hash = *it;
-      const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
-      CHECK_PTR(tx_value_ptr);
-      if (insert_tx_into_runqueue(tx_hash, *tx_value_ptr)) {
+      std::shared_ptr<TxValue> tx_value;
+      {
+        const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+        CHECK_PTR(tx_value_ptr);
+        tx_value = *tx_value_ptr;
+      }
+      if (insert_tx_into_runqueue(tx_hash, tx_value)) {
         num_inserted++;
       }
     }
@@ -163,6 +169,11 @@ public:
   {
     current_block_.store(height, std::memory_order_relaxed);
   }
+
+  // Returns whether this transaction body is already pending in the account's
+  // runqueue or stranded set. Callers must authenticate the submitted signed
+  // encoding before treating an existing body as admitted.
+  bool is_pending(const SignedTransaction &tx);
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
@@ -240,6 +251,8 @@ private:
 
   // Inserts the tx with [tx_hash] into the runqueue. Returns true if the
   // insertion succeeded and false otherwise.
+  // The caller must not hold a [txs_] bucket lock: when both locks are needed,
+  // acquire the account bucket lock before the tx cache bucket lock.
   //
   // This method does *not* modify [size_]! The caller must do this. Generally,
   // the caller will often want to add multiple txs to the runqueue, so it is
