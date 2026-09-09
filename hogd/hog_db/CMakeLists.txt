@@ -28,6 +28,7 @@ add_library(hog_db_objects OBJECT
   rpc_from_exec.cc
   rpc_from_gateway.cc
   rpc_from_sched.cc
+  startup_validation.cc
   status.cc
 )
 target_link_libraries(
@@ -95,6 +96,7 @@ add_executable(
   rpc_context_lifetime_test.cc
   rpc_from_exec_test.cc
   rpc_from_gateway_test.cc
+  startup_validation_test.cc
 )
 target_link_libraries(
   hog_db_test

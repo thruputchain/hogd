@@ -3666,7 +3666,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
   const ConfigHash expected_config_hash = compute_config_hash(
-      make_config_hash_preimage(cost_model, stock_network_config()));
+      make_config_hash_preimage(cost_model, stock_network_config(),
+                                native_default_wallet_hash()));
   EXPECT_EQ(parent.db_tip().value.proposal_header.config_hash,
             expected_config_hash);
 
