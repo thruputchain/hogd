@@ -198,7 +198,13 @@ inline void
 release_memory_slot(std::vector<uint8_t> &&slot) noexcept
 {
   auto &pool = memory_slot_pool();
-  if (pool.count < kMemorySlotPoolCap) {
+  // Only retain buffers that already satisfy a full kMaxMemoryBytes
+  // guest-memory allocation without reallocating. This keeps the pool invariant
+  // -- every retained buffer has capacity() >= kMaxMemoryBytes --
+  // self-contained, rather than depending on any assumption about a moved-from
+  // or default-constructed vector's capacity: an undersized buffer can never be
+  // admitted.
+  if (slot.capacity() >= kMaxMemoryBytes && pool.count < kMemorySlotPoolCap) {
     pool.slots[pool.count++] = std::move(slot);
   }
 }
@@ -217,7 +223,10 @@ release_memory_slot(std::vector<uint8_t> &&slot) noexcept
 // moved-from library object is "valid but unspecified", not empty()/capacity()
 // == 0 -- because the move constructor makes the source's empty state explicit
 // (which also makes a double move safe: a second move sees a source with no
-// allocation). buf_ holds the slot directly so MemorySlot is exactly the width
+// allocation). As an independent backstop, release_memory_slot only admits
+// buffers with capacity() >= kMaxMemoryBytes, so pool correctness never depends
+// on the empty-vector capacity even if this predicate were wrong.
+// buf_ holds the slot directly so MemorySlot is exactly the width
 // of a std::vector, keeping ThreadedMachine's cache-line layout (the
 // static_assert after the class guards this). The pool is thread_local, so a
 // slot must be destroyed on its constructing thread while that thread is alive

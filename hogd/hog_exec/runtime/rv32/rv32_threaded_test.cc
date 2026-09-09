@@ -554,6 +554,36 @@ TEST(Rv32Threaded, memorySlotDoubleMoveReleasesExactlyOnce)
   memory_slot_pool() = MemorySlotPool{};
 }
 
+// release_memory_slot only retains buffers that already satisfy a full
+// kMaxMemoryBytes guest-memory allocation, so the pool invariant does not
+// depend on the capacity of a moved-from or default-constructed vector (issue
+// #3922): an undersized buffer is dropped rather than admitted, and can never
+// displace a full-capacity slot.
+TEST(Rv32Threaded, memorySlotPoolRejectsUndersizedBuffers)
+{
+  memory_slot_pool() = MemorySlotPool{};
+
+  std::vector<uint8_t> undersized;
+  undersized.reserve(1);
+  ASSERT_GT(undersized.capacity(), 0U);
+  ASSERT_LT(undersized.capacity(), size_t{kMaxMemoryBytes});
+  release_memory_slot(std::move(undersized));
+  EXPECT_EQ(memory_slot_pool().count, 0U); // dropped, not pooled
+
+  std::vector<uint8_t> full;
+  full.reserve(kMaxMemoryBytes);
+  const uint8_t *full_buffer = full.data();
+  release_memory_slot(std::move(full));
+  ASSERT_EQ(memory_slot_pool().count, 1U); // retained
+
+  // Acquiring reuses the retained full buffer, never a dropped undersized one.
+  std::vector<uint8_t> acquired = acquire_memory_slot();
+  EXPECT_EQ(acquired.data(), full_buffer);
+  EXPECT_GE(acquired.capacity(), size_t{kMaxMemoryBytes});
+
+  memory_slot_pool() = MemorySlotPool{};
+}
+
 TEST(Rv32Threaded, branchTakenSkipsInstruction)
 {
   using test_program::branch;
