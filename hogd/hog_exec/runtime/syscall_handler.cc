@@ -1,5 +1,4 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>

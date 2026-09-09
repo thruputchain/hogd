@@ -2,6 +2,7 @@
 
 #include "hogd/hog_db/rpc_from_sched.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <optional>
@@ -379,7 +380,7 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   const size_t stated_batch =
       count * serialized_contract_bound(config_params.max_contract_size_bytes);
   const size_t carried_batch =
-      kContractSizeCeilingBytes + count * kSerializedContractEnvelopeBytes;
+      kContractSizeCeilingBytes + (count * kSerializedContractEnvelopeBytes);
   const size_t batch_bytes =
       std::min(stated_batch, carried_batch) + kBatchOverhead;
   if (batch_bytes > kExecToDbMessageCap) {
