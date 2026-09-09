@@ -260,7 +260,8 @@ HogDbSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
   result.block().storage_long_hash = tip.storage_long_hash;
   result.block().config_hash_preimage =
       make_config_hash_preimage(ctx_.get_cost_model(),
-                                ctx_.get_tip().network_config);
+                                ctx_.get_tip().network_config,
+                                ctx_.get_tip().default_wallet);
   co_return result;
 }
 
@@ -310,7 +311,8 @@ HogDbSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   ret.block().storage_long_hash = *db_hash_result;
   ret.block().config_hash_preimage =
       make_config_hash_preimage(ctx_.get_cost_model(),
-                                ctx_.get_tip().network_config);
+                                ctx_.get_tip().network_config,
+                                ctx_.get_tip().default_wallet);
   co_return ret;
 }
 
@@ -412,6 +414,18 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
         }
       });
   if (failure) {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  // A genesis may name a default wallet other than the native one, which is
+  // the only wallet the prerequisites above write. Refusing it here rather
+  // than letting the absence surface at the first root call to an undeployed
+  // address, as an unrecoverable execution error -- and rather than at the
+  // next restart, where validate_recovered_tip would refuse a database this
+  // call had already accepted.
+  if (!ctx_.get_db().read_contract_code(
+          genesis_configuration.default_wallet.hash)) {
+    error("genesis names a default wallet with no contract");
     co_return DbSchedResult::DbSchedResultError;
   }
 

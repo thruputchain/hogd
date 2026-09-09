@@ -4,6 +4,7 @@
 #include <array>
 #include <utility>
 
+#include "contract.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -20,19 +21,20 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
 {
   const StorageCostModel model = StorageCostModel::default_cost_model();
   const NetworkConfig network_config = stock_network_config();
+  const DeployedContractHash wallet = native_default_wallet_hash();
   // Moves whenever the stock configuration changes, which is the point: it
   // pins the preimage so a change to it is deliberate.
   const ConfigHash expected{
-      0x53, 0xa8, 0x94, 0x0a, 0x37, 0x53, 0xa4, 0x41, 0xef, 0x9d, 0x17,
-      0xf7, 0xb8, 0xc1, 0x0a, 0xcc, 0xaa, 0x1d, 0xac, 0x02, 0xdb, 0x73,
-      0x9a, 0x7b, 0x79, 0xea, 0x07, 0xf8, 0x9f, 0xe6, 0xb7, 0x7d,
+      0x92, 0x30, 0x28, 0x1b, 0xec, 0xad, 0x1f, 0x79, 0x8f, 0x5b, 0x48,
+      0x88, 0xf2, 0x7d, 0xd6, 0x4b, 0x0a, 0xc5, 0x55, 0xd6, 0x7b, 0x29,
+      0xe6, 0x3e, 0x2d, 0x55, 0xc9, 0x2b, 0x82, 0xda, 0xa5, 0x87,
   };
   EXPECT_EQ(compute_config_hash(
-                make_config_hash_preimage(model, network_config)),
+                make_config_hash_preimage(model, network_config, wallet)),
             expected);
 
-  const ConfigHash original =
-      compute_config_hash(make_config_hash_preimage(model, network_config));
+  const ConfigHash original = compute_config_hash(
+      make_config_hash_preimage(model, network_config, wallet));
   StorageCostModelXdr xdr = model.to_xdr();
   std::array<StorageCostModelXdr, 8> variants;
   variants.fill(xdr);
@@ -47,7 +49,7 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(StorageCostModel(variant),
-                                            network_config)),
+                                            network_config, wallet)),
               original);
   }
 }
@@ -58,7 +60,8 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
 {
   const StorageCostModel model = StorageCostModel::default_cost_model();
   const ConfigHash original = compute_config_hash(
-      make_config_hash_preimage(model, stock_network_config()));
+      make_config_hash_preimage(model, stock_network_config(),
+                                native_default_wallet_hash()));
 
   std::array<NetworkConfig, 4> variants;
   variants.fill(stock_network_config());
@@ -76,7 +79,35 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
                                  ConfigParamID::kConfigParamMaxBytestringLen,
                                  stock.max_bytestring_len + 1);
   for (auto const &variant : variants) {
-    EXPECT_NE(compute_config_hash(make_config_hash_preimage(model, variant)),
+    EXPECT_NE(compute_config_hash(
+                  make_config_hash_preimage(model, variant,
+                                            native_default_wallet_hash())),
+              original);
+  }
+}
+
+// The default wallet selects executing code, and a node's copy of it rides in
+// database metadata the state hash does not cover, so the header has to be
+// what pins it. See groundhogchain/hogd#3926.
+TEST(ConfigHashTest, CommitsToDefaultWallet)
+{
+  const StorageCostModel model = StorageCostModel::default_cost_model();
+  const NetworkConfig network_config = stock_network_config();
+  const DeployedContractHash wallet = native_default_wallet_hash();
+  const ConfigHash original = compute_config_hash(
+      make_config_hash_preimage(model, network_config, wallet));
+
+  DeployedContractHash other_hash = wallet;
+  other_hash.hash[0] ^= 1;
+  DeployedContractHash other_size = wallet;
+  other_size.contract_size++;
+  DeployedContractHash other_type = wallet;
+  other_type.contract_type = ContractType::kRv32;
+  ASSERT_NE(other_type.contract_type, wallet.contract_type);
+
+  for (auto const &variant : {other_hash, other_size, other_type}) {
+    EXPECT_NE(compute_config_hash(
+                  make_config_hash_preimage(model, network_config, variant)),
               original);
   }
 }

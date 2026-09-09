@@ -1,0 +1,206 @@
+#include <gtest/gtest.h>
+
+#include <cstddef>
+#include <memory>
+#include <span>
+#include <string>
+#include <utility>
+
+#include "consensus.hh"
+#include "contract.hh"
+#include "hogd/base/io.h"
+#include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
+#include "hogd/base/status.h"
+#include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/startup_validation.h"
+#include "hogd/hog_db/status.h"
+#include "hogd/hog_mempool/config_hash.h"
+#include "hogd/ramdb/db.h"
+#include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
+#include "precompiles.hh"
+#include "rpc_types.hh"
+#include "types.hh"
+#include "x23/serialize.h"
+
+namespace hogd {
+
+namespace {
+
+constexpr std::size_t kHeapSize = 10_MiB;
+constexpr BlockTXID kBlock = 7;
+
+Contract
+native_default_wallet_contract()
+{
+  Contract contract;
+  contract.contract_type(ContractType::kNative);
+  contract.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+  return contract;
+}
+
+// A committed database holding the default wallet's contract row, the cost
+// model, and a tip whose header states the config hash its own configuration
+// hashes to -- what an honest node leaves behind, and the state every case
+// below starts from.
+class RecoveredTipTest : public testing::Test {
+protected:
+  void SetUp() override
+  {
+    const ErrnoStatus<Directory> dir = Directory::open_temporary();
+    ASSERT_TRUE(dir.has_value());
+    db_path_ = dir->get_path();
+
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(db_path_, Database::estimate_heap_size(kHeapSize), 0);
+    ASSERT_TRUE(db.has_value());
+    RPCContext ctx(HogDbDAO(RAMDB(std::move(*db))), nullptr);
+
+    ctx.initialize_cost_model(cost_model_);
+    ASSERT_TRUE(ctx.get_db().write_cost_model(cost_model_).has_value());
+
+    const Contract wallet = native_default_wallet_contract();
+    // The genesis helper derives this hash from its own copy of the contract;
+    // writing the row under a hash it does not name would make every case
+    // below pass for the wrong reason.
+    ASSERT_EQ(sha256(wallet), native_default_wallet_hash().hash);
+    const auto encoded = x23::serialize(wallet);
+    ASSERT_TRUE(ctx.get_db()
+                    .write_contract_code(sha256(wallet),
+                                         std::as_bytes(std::span(encoded)))
+                    .has_value());
+
+    ctx.set_default_wallet(native_default_wallet_hash());
+    ctx.set_network_config(stock_network_config());
+    ConsensusValue value{};
+    value.proposal_header.block_height = 0;
+    value.proposal_header.config_hash = compute_config_hash(
+        make_config_hash_preimage(cost_model_, stock_network_config(),
+                                  native_default_wallet_hash()));
+    const StorageLongHash state_hash = ctx.get_db().compute_full_db_hash();
+    ASSERT_NE(state_hash, StorageLongHash{});
+    ASSERT_TRUE(
+        ctx.update_dbtip(kBlock, std::move(value), state_hash).has_value());
+    ASSERT_TRUE(ctx.get_db().commit().has_value());
+  }
+
+  // The recovered database, reopened the way startup does.
+  HogDbDAO reopen()
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(db_path_, Database::estimate_heap_size(kHeapSize), 0);
+    CHECK(db.has_value());
+    return HogDbDAO(RAMDB(std::move(*db)));
+  }
+
+  std::string db_path_;
+  StorageCostModel cost_model_ = StorageCostModel::default_cost_model();
+};
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+TEST_F(RecoveredTipTest, AcceptsTheTipItsHeaderCommitsTo)
+{
+  HogDbDAO db = reopen();
+  const HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+  EXPECT_EQ(tip->default_wallet, native_default_wallet_hash());
+  EXPECT_TRUE(validate_recovered_tip(db, *tip, cost_model_).has_value());
+}
+
+// The point of #3926: `<DBTIP` is global metadata, so rewriting the wallet
+// selector there leaves the state hash the tip carries untouched and startup
+// used to accept it. The config hash is what notices.
+TEST_F(RecoveredTipTest, RejectsRewrittenDefaultWallet)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  const StorageLongHash state_hash = db.compute_full_db_hash();
+  DeployedContractHash absent = native_default_wallet_hash();
+  absent.hash.fill(0xE7);
+  tip->default_wallet = absent;
+  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  // Unchanged, which is why nothing else catches this.
+  EXPECT_EQ(db.compute_full_db_hash(), state_hash);
+
+  const HogDbStatus<DbTip> tampered = db.read_dbtip();
+  ASSERT_TRUE(tampered.has_value());
+  ASSERT_EQ(tampered->default_wallet, absent);
+  const auto servable = validate_recovered_tip(db, *tampered, cost_model_);
+  ASSERT_FALSE(servable.has_value());
+  EXPECT_EQ(servable.error(), TipRejection::kConfigHashMismatch);
+}
+
+// `<COSTMODEL` is the other unhashed metadata row, and startup reads the model
+// it hands here straight off it. So a rewritten row reaches this function as a
+// cost model differing from the committed one, and is caught the same way.
+TEST_F(RecoveredTipTest, RejectsRewrittenCostModel)
+{
+  HogDbDAO db = reopen();
+  const HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  StorageCostModelXdr xdr = cost_model_.to_xdr();
+  xdr.balance_cost++;
+  const auto servable = validate_recovered_tip(db, *tip, StorageCostModel(xdr));
+  ASSERT_FALSE(servable.has_value());
+  EXPECT_EQ(servable.error(), TipRejection::kConfigHashMismatch);
+}
+
+// A wallet the header does commit to, but whose contract row is not there.
+// Nothing before execution reads that row, so without this check the first
+// root call to an undeployed address is the one that finds out.
+TEST_F(RecoveredTipTest, RejectsDefaultWalletWithNoContractRow)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  DeployedContractHash absent = native_default_wallet_hash();
+  absent.hash.fill(0xE7);
+  tip->default_wallet = absent;
+  tip->value.proposal_header.config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model_, tip->network_config, absent));
+  ASSERT_FALSE(db.read_contract_code(absent.hash).has_value());
+
+  const auto servable = validate_recovered_tip(db, *tip, cost_model_);
+  ASSERT_FALSE(servable.has_value());
+  EXPECT_EQ(servable.error(), TipRejection::kDefaultWalletMissing);
+}
+
+// A non-canonical parameter list has no single hash, so it is refused before
+// the hash is computed rather than aborting inside make_config_hash_preimage.
+TEST_F(RecoveredTipTest, RejectsNonCanonicalNetworkConfig)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  NetworkConfig gapped;
+  gapped.v(0);
+  gapped.v0().params.push_back(NetworkConfigParams::make_param(
+      ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
+  ASSERT_FALSE(NetworkConfigParams::is_canonical(gapped.v0()));
+  tip->network_config = gapped;
+
+  const auto servable = validate_recovered_tip(db, *tip, cost_model_);
+  ASSERT_FALSE(servable.has_value());
+  EXPECT_EQ(servable.error(), TipRejection::kNetworkConfigNotCanonical);
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
+
+} // namespace
+
+} // namespace hogd
