@@ -294,19 +294,15 @@ SystemCallHandler::root_invoke()
   auto [initial_validation_res, initial_validation_gas_consumed] =
       perform_initial_validation();
   if (!initial_validation_res.has_value()) {
-    initial_validation_rejected_ = true;
     // The root invocation is terminally rejected before any frame ran (e.g. an
-    // expired uniquifier or a failed contract verification). Mark it
-    // finished/finalized so callers treat it as a completed-but-failed root: no
-    // further frames will start, get_most_recent_frame_output() reports a
-    // Fault, and try_commit_transaction() runs its failure path. The test FFI
-    // wrapper gates commit on last_frame_finished(), so this lets a rejected
-    // transaction surface its ExecResult via try_commit().
-    last_frame_finished_ = true;
-    finalize_after_root_frame(
+    // expired uniquifier or a failed contract verification).
+    // finalize_after_root_frame() marks it finished/finalized so callers treat
+    // it as a completed-but-failed root, letting the rejected transaction
+    // surface its ExecResult via try_commit_transaction().
+    initial_validation_rejected_ = true;
+    co_return finalize_after_root_frame(
         InvokeResult{.result_ = initial_validation_res.error(),
                      .gas_consumed_ = initial_validation_gas_consumed});
-    co_return root_invoke_result_;
   }
 
   // root_invocation_ is nullopt only in the test harness
@@ -332,40 +328,41 @@ SystemCallHandler::root_invoke()
                       sdk_method_id(root_invocation.entrypoint), available_gas,
                       std::move(root_invocation.calldata),
                       std::to_underlying(InvokeFlag::None), {});
-  auto invoke_result =
+
+  co_return finalize_after_root_frame(
       InvokeResult{.result_ = handle_root_host_fn_status(res),
                    .gas_consumed_ =
-                       gas_consumed + initial_validation_gas_consumed};
-
-  finalize_after_root_frame(invoke_result);
-
-  co_return root_invoke_result_;
+                       gas_consumed + initial_validation_gas_consumed});
 }
 
-void
+InvokeResult
 SystemCallHandler::finalize_after_root_frame(InvokeResult result)
 {
   assert(!finalized_);
   assert(invocation_frame_stack_.empty());
   finalized_ = true;
+  // The root invocation is complete, whether a frame ran (finish_frame already
+  // set this when the stack emptied) or the invoke was rejected before one
+  // started. Owning the flag here keeps "finalized" and "last frame finished"
+  // in lockstep: no further frames may start, get_most_recent_frame_output()
+  // reports the finished (or absent) root frame, and the test FFI wrapper's
+  // commit gate on last_frame_finished() admits the finalized result.
+  last_frame_finished_ = true;
 
   root_invoke_result_ = result;
 
-  if (!check_final_validation_data()) {
-    // don't overwrite abandon or unrecoverable errors
-    if (root_invoke_result_.is_root_success() ||
-        root_invoke_result_.result_.error().code() ==
-            InvokeErrorCode::Deterministic ||
-        root_invoke_result_.result_.error().code() ==
-            InvokeErrorCode::OutOfGas) {
-      root_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
-    }
+  // A failed final validation check rewrites exactly the results a frame can
+  // legitimately produce -- success or a deterministic fault, the partition
+  // to_frame_status() reports as a frame status -- to ValidationFailure.
+  // Block-ending system errors (Abandon, Unrecoverable, an existing
+  // ValidationFailure) are preserved.
+  if (!check_final_validation_data() &&
+      root_invoke_result_.to_frame_status().first.has_value()) {
+    root_invoke_result_.result_ =
+        InvokeError{InvokeErrorCode::ValidationFailure};
   }
 
-  if (root_invoke_result_.is_root_success()) {
-    root_invoke_succeeded_ = true;
-  }
+  return root_invoke_result_;
 }
 
 InvocationFrameOutput
@@ -504,7 +501,7 @@ SystemCallHandler::try_commit_transaction()
     co_return to_exec_result(error_code);
   }
   assert(last_frame_.has_value());
-  assert(root_invoke_succeeded_);
+  assert(root_invoke_succeeded());
   assert(root_invoke_result_.result_.has_value());
 
   // If the last frame was set to manually revert, then we commit the
@@ -1338,7 +1335,7 @@ SystemCallHandler::~SystemCallHandler()
       }
     }
     if (last_frame_.has_value() && !last_frame_->extract_events().empty() &&
-        root_invoke_succeeded_ && !two_phase_commit_failed_) {
+        root_invoke_succeeded() && !two_phase_commit_failed_) {
       panic("SystemCallHandler destroyed with events to emit");
     }
   }
@@ -1455,8 +1452,8 @@ x23::Async<SystemStatus<void>>
 SystemCallHandler::emit_events(ExecResult exec_result,
                                ProposedTransaction proposed_tx)
 {
-  assert(exec_result != ExecResult::ExecResultOK || root_invoke_succeeded_);
-  auto events = (root_invoke_succeeded_ && last_frame_.has_value())
+  assert(exec_result != ExecResult::ExecResultOK || root_invoke_succeeded());
+  auto events = (root_invoke_succeeded() && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
   auto root_output =
