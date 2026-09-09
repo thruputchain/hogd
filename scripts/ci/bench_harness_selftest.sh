@@ -307,13 +307,18 @@ check_contains "a ready host is still reported" \
 reap_port_bin="$work_dir/reap_port_bin"
 mkdir -p "$reap_port_bin"
 
-# Stands in for [ss -Hltnp "sport = :<port>"]. $SS_LISTENERS is the output,
+# Stands in for [ss -Hltnpe "sport = :<port>"]. $SS_LISTENERS is the output,
 # empty when the port is free; $SS_FAILS makes the query itself fail, the way
-# an unsupported filter or a netlink error would.
+# an unsupported filter or a netlink error would; $SS_NO_E rejects [-e], the
+# way an [ss] too old to report socket details would.
 cat >"$reap_port_bin/ss" <<'FAKE_SS'
 #!/usr/bin/env bash
 if [[ -n ${SS_FAILS:-} ]]; then
   echo "ss: bad filter" >&2
+  exit 1
+fi
+if [[ -n ${SS_NO_E:-} && $1 == *e* ]]; then
+  echo "ss: unrecognized option '-e'" >&2
   exit 1
 fi
 printf '%s' "${SS_LISTENERS:-}"
@@ -333,7 +338,7 @@ run_reap_port() {
   reap_port_status=0
   reap_port_output=$(
     PATH="$reap_port_bin:$PATH" SS_LISTENERS="$1" KILLALL_LOG="$killall_log" \
-      SS_FAILS="${SS_FAILS:-}" \
+      SS_FAILS="${SS_FAILS:-}" SS_NO_E="${SS_NO_E:-}" \
       REAP_TERM_TIMEOUT_SEC=0 REAP_KILL_TIMEOUT_SEC=0 \
       "$CI_BENCH_HARNESS_DIR/reap_control_server.sh" 11111 2>&1
   ) || reap_port_status=$?
@@ -353,6 +358,42 @@ check_contains "an unreapable holder is named" \
 check_contains "an unreapable holder is shown" "*:11111" "$reap_port_output"
 check_contains "an unreapable holder is still signalled by name" \
   "killall -TERM control_server" "$(cat "$killall_log")"
+
+# The raw [ss] line for such a holder names nobody -- the process column is
+# empty, which is what made the reap in hogd issue #3947 a dead end. [-e]
+# still carries the owning uid, so the failure has to say whose the socket is
+# and which account failed to signal it.
+run_reap_port 'LISTEN 0 128 *:11111 *:* uid:1002 ino:98765 sk:2f <->'
+check_eq "a holder owned by another account fails the reap" "1" \
+  "$reap_port_status"
+check_contains "a holder owned by another account names its uid" \
+  "owned by uid 1002" "$reap_port_output"
+check_contains "a holder owned by another account names the reaping account" \
+  "this reap runs as" "$reap_port_output"
+
+# [ss] prints [uid:] only when it is nonzero, so a listener carrying an inode
+# and no uid belongs to root -- not to an owner the report should call
+# unknown, since root is precisely who has to be woken to clear it.
+run_reap_port 'LISTEN 0 128 *:11111 *:* ino:98765 sk:2f <->'
+check_contains "a root-owned holder is reported as root's" \
+  "owned by uid 0" "$reap_port_output"
+
+# A pid the reap signalled and could not kill is a different report: it says
+# what survived SIGKILL rather than who owns a socket nothing was sent to.
+run_reap_port 'LISTEN 0 128 *:11111 *:* users:(("control_server",pid=42,fd=7))'
+check_contains "a surviving pid is named" "held by pid 42" "$reap_port_output"
+
+# An [ss] that does not take [-e] still answers the question the reap turns
+# on. Fall back to the plain query rather than failing a reap over a detail
+# that only enriches the report of a holder that cannot be reaped anyway.
+SS_NO_E=1 run_reap_port ""
+check_eq "an ss without -e still reaps a free port" "0" "$reap_port_status"
+check_contains "an ss without -e reports the port free" "port 11111 is free" \
+  "$reap_port_output"
+SS_NO_E=1 run_reap_port 'LISTEN 0 128 *:11111 *:*'
+check_eq "an ss without -e still fails on a held port" "1" "$reap_port_status"
+check_contains "an ss without -e says the holder is unattributable" \
+  "holder not attributable" "$reap_port_output"
 
 # A query that could not run has not shown the port to be free. Reporting no
 # output as an empty port would let the bind this reap protects abort anyway,

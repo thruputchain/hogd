@@ -42,6 +42,13 @@ command -v killall >/dev/null || {
 # it at a stub, and at a name that is not installed.
 REAP_SS=${REAP_SS:-ss}
 
+# The flags [query_listeners] passes to [$REAP_SS]. [-e] adds the socket's
+# owning uid and inode, which is the only ownership this script gets for a
+# holder it cannot attribute to a pid -- and the holder it cannot attribute is
+# exactly the one it cannot reap, so it is the one whose owner the failure has
+# to name. Settled once, below, against an [ss] too old to take [-e].
+REAP_SS_FLAGS=-Hltnpe
+
 # Reaping by port needs that tool. A host without it must fall back to the
 # by-name reap this script replaced rather than fail: it is the weaker reap,
 # but failing here would take down a host the old reap served, which is a
@@ -51,6 +58,14 @@ if ! command -v "$REAP_SS" >/dev/null; then
   killall -TERM control_server 2>/dev/null && sleep 3 || true
   killall -KILL control_server 2>/dev/null || true
   exit 0
+fi
+
+# [-e] is not worth failing the reap over: it only enriches the report of a
+# holder that cannot be reaped anyway. An [ss] that rejects it still answers
+# the question the reap turns on -- is the port free -- so drop back to the
+# plain query rather than treating the port as unknowable.
+if ! "$REAP_SS" "$REAP_SS_FLAGS" "sport = :$PORT" >/dev/null 2>&1; then
+  REAP_SS_FLAGS=-Hltnp
 fi
 
 # The listening sockets on $PORT from the most recent query, one raw [ss] line
@@ -67,7 +82,7 @@ REAP_LISTENERS=""
 query_listeners() {
   local status=0
 
-  REAP_LISTENERS=$("$REAP_SS" -Hltnp "sport = :$PORT") || status=$?
+  REAP_LISTENERS=$("$REAP_SS" "$REAP_SS_FLAGS" "sport = :$PORT") || status=$?
   if [ "$status" -ne 0 ]; then
     REAP_LISTENERS=""
     echo "$REAP_SS exited $status querying port $PORT; cannot establish" \
@@ -120,6 +135,62 @@ signal_listeners() {
   done
 }
 
+# The account name for uid [$1], or the bare uid if it cannot be resolved.
+uid_name() {
+  local uid=$1
+  local name
+
+  name=$(getent passwd "$uid" 2>/dev/null | cut -d: -f1) || name=""
+  if [ -n "$name" ]; then
+    echo "$uid ($name)"
+  else
+    echo "$uid"
+  fi
+}
+
+# Says who holds each socket in [REAP_LISTENERS], one line per listener.
+#
+# The raw [ss] line is not an answer on its own: a holder this account cannot
+# attribute prints as a bare address with an empty process column, which is
+# what the reap that could not free port 11111 in hogd issue #3947 left in the
+# log -- a failure naming nothing to act on. [ss] withholds the process for a
+# socket owned by another account, but [-e] still reports that account's uid,
+# and a listener with an inode and no uid at all is root's, since [ss] prints
+# [uid:] only when it is nonzero. So name the owner from whatever the line
+# carries, and say which account looked, because "another account owns it" is
+# the difference between reaping harder and waking someone with a root shell.
+describe_holders() {
+  local line pid uid ino
+  local whoami
+  whoami=$(id -un 2>/dev/null || echo "uid $(id -u)")
+
+  # Each field is absent on some listener this has to describe -- that is the
+  # case being described -- and [grep] reports absence as failure, which under
+  # this script's errexit would abort the report instead of writing it.
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid=$(printf '%s\n' "$line" | grep -o 'pid=[0-9]*' | cut -d= -f2 |
+      sort -u | paste -sd, - || true)
+    if [ -n "$pid" ]; then
+      echo "  held by pid $pid, which outlived SIGKILL"
+      continue
+    fi
+    ino=$(printf '%s\n' "$line" | grep -o 'ino:[0-9]*' | cut -d: -f2 |
+      head -1 || true)
+    if [ -z "$ino" ]; then
+      echo "  holder not attributable: $REAP_SS reported no process and no" \
+        "socket details for this listener"
+      continue
+    fi
+    uid=$(printf '%s\n' "$line" | grep -o 'uid:[0-9]*' | cut -d: -f2 |
+      head -1 || true)
+    # [ss] omits [uid:] for a socket owned by root, so an inode with no uid is
+    # uid 0 rather than an unknown owner.
+    echo "  held by socket inode $ino owned by uid $(uid_name "${uid:-0}");" \
+      "this reap runs as $whoami and cannot signal it"
+  done <<<"$REAP_LISTENERS"
+}
+
 # A query that cannot answer is a failed reap, not a free port.
 query_listeners || exit 1
 
@@ -158,5 +229,6 @@ echo "could not free port $PORT" >&2
 if [ -n "$REAP_LISTENERS" ]; then
   echo "still held by:" >&2
   printf '%s\n' "$REAP_LISTENERS" >&2
+  describe_holders >&2
 fi
 exit 1

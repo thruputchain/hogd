@@ -48,9 +48,19 @@ public:
     return status;
   }
 
-  void stop_server() { client_.ciserver_stop(kHogdGitHash); }
+  // These two return the server's verdict rather than discarding it: a server
+  // built from another commit answers both by refusing, and a refusal that
+  // reads as success is how a stale control server survives the shutdown that
+  // was supposed to retire it and goes on holding the control port.
+  CIServerErrorCode stop_server()
+  {
+    return client_.ciserver_stop(kHogdGitHash);
+  }
 
-  void shutdown_server() { client_.ciserver_shutdown(kHogdGitHash); }
+  CIServerErrorCode shutdown_server()
+  {
+    return client_.ciserver_shutdown(kHogdGitHash);
+  }
 
   CIProcStatus query_proc_status()
   {

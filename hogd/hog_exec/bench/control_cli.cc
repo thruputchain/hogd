@@ -96,7 +96,17 @@ handle_shutdown_command(std::string const &host, std::string const &port)
     auto client = hogd::connect_to_control_server(host, port, false);
 
     hogd::info("Sending shutdown command to {}:{}", host, port);
-    client.shutdown_server();
+    // A server built from another commit refuses this RPC and keeps running,
+    // holding the control port into the next run, which then cannot bind it.
+    // Reporting the refusal as a successful shutdown is what hides that: the
+    // reap the next run does instead is left to discover a port held by a
+    // server nobody was told had declined to leave. See hogd issue #3947.
+    auto error_code = client.shutdown_server();
+    if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Control server on {}:{} refused the shutdown: {}", host, port,
+                 error_code);
+      return 1;
+    }
     hogd::info("Shutdown command sent successfully");
 
     return 0;
@@ -149,7 +159,12 @@ handle_stop_command(std::string const &host, std::string const &port)
 {
   try {
     auto client = hogd::connect_to_control_server(host, port, false);
-    client.stop_server();
+    auto error_code = client.stop_server();
+    if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Control server on {}:{} refused the stop: {}", host, port,
+                 error_code);
+      return 1;
+    }
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
