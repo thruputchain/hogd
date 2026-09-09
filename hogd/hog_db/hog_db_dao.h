@@ -530,9 +530,10 @@ public:
   HogDbStatus<StorageCostModel> read_cost_model();
   HogDbStatus<void> write_cost_model(const StorageCostModel &cost_model);
 
-  // Startup guard for a recovered DbTip::default_wallet. Returns kNotFound
-  // (from read_contract_code) when the selector has no backing contract row.
-  // See the definition for why this is a recovery-integrity check.
+  // Startup guard for a recovered DbTip::default_wallet. Returns kNotFound when
+  // the selector has no backing contract row, or kCorruption when the row's
+  // type disagrees with the selector. See the definition for why this is a
+  // recovery-integrity check.
   HogDbStatus<void>
   validate_default_wallet_present(const DeployedContractHash &default_wallet);
 

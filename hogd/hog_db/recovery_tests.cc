@@ -494,13 +494,26 @@ TEST(RecoveryTests, ValidateDefaultWalletPresentRejectsMissingRow)
   // Present: the genuine selector is accepted.
   EXPECT_TRUE(dao.validate_default_wallet_present(genuine).has_value());
 
-  // Tampered: a structurally valid selector with no backing row is rejected up
-  // front rather than surfacing later as an Unrecoverable root invocation.
-  DeployedContractHash tampered = genuine;
-  tampered.hash.fill(0xE7);
-  HogDbStatus<void> rejected = dao.validate_default_wallet_present(tampered);
-  ASSERT_FALSE(rejected.has_value());
-  EXPECT_EQ(rejected.error().code(), HogDbCode::kNotFound);
+  // Tampered hash: a structurally valid selector with no backing row is
+  // rejected up front rather than surfacing later as an Unrecoverable root
+  // invocation.
+  DeployedContractHash missing = genuine;
+  missing.hash.fill(0xE7);
+  HogDbStatus<void> missing_rejected =
+      dao.validate_default_wallet_present(missing);
+  ASSERT_FALSE(missing_rejected.has_value());
+  EXPECT_EQ(missing_rejected.error().code(), HogDbCode::kNotFound);
+
+  // Tampered type: hash left on the genuine native row but contract_type
+  // flipped. The row is present, so an existence-only guard would accept it and
+  // leave the type-mismatch Unrecoverable reachable; binding contract_type to
+  // the row rejects it.
+  DeployedContractHash wrong_type = genuine;
+  wrong_type.contract_type = ContractType::kRv32;
+  HogDbStatus<void> type_rejected =
+      dao.validate_default_wallet_present(wrong_type);
+  ASSERT_FALSE(type_rejected.has_value());
+  EXPECT_EQ(type_rejected.error().code(), HogDbCode::kCorruption);
 }
 
 } // namespace hogd

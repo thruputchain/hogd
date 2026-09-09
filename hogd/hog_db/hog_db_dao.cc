@@ -132,6 +132,23 @@ HogDbDAO::validate_default_wallet_present(
   if (!code) {
     return code.error();
   }
+
+  // .hash alone is not enough: default_wallet.contract_type is unhashed too, so
+  // an attacker can leave .hash on the genuine native-wallet row but flip
+  // .contract_type. resolve_runtime would then select the runtime for the
+  // forged type and make_new_runtime still faults Unrecoverable on the
+  // type mismatch against the row. The kContractCode row *is* authenticated
+  // state and is content-addressed by .hash, so decode it and bind
+  // contract_type to the row it names.
+  Contract contract;
+  try {
+    x23::deserialize(&contract, x23::BufViewEnd(*code));
+  } catch (x23::XdrException &) {
+    return HogDbError(HogDbCode::kCorruption);
+  }
+  if (contract.contract_type() != default_wallet.contract_type) {
+    return HogDbError(HogDbCode::kCorruption);
+  }
   return {};
 }
 
