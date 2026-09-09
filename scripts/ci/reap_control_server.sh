@@ -53,46 +53,63 @@ if ! command -v "$REAP_SS" >/dev/null; then
   exit 0
 fi
 
-# The listening sockets on $PORT, one raw [ss] line each. Empty output means
-# the port is free, which is the only thing this script has to establish.
-listeners() {
-  "$REAP_SS" -Hltnp "sport = :$PORT" 2>/dev/null || true
+# The listening sockets on $PORT from the most recent query, one raw [ss] line
+# each. Empty means the port is free, which is the only thing this script has
+# to establish.
+REAP_LISTENERS=""
+
+# Refreshes [REAP_LISTENERS]. Fails if the query itself failed -- an
+# unsupported filter, a netlink error -- rather than reporting no output as an
+# empty port: a query that could not run has not shown the port to be free,
+# and passing on that reading is how this script would hand the next bind the
+# very abort it exists to prevent. [ss] diagnostics are left on stderr, where
+# the job log wants them; only stdout is the answer.
+query_listeners() {
+  local status=0
+
+  REAP_LISTENERS=$("$REAP_SS" -Hltnp "sport = :$PORT") || status=$?
+  if [ "$status" -ne 0 ]; then
+    REAP_LISTENERS=""
+    echo "$REAP_SS exited $status querying port $PORT; cannot establish" \
+      "that the port is free" >&2
+    return 1
+  fi
+  return 0
 }
 
-# The pids holding those sockets. [ss] reports process details only for
-# sockets the calling user owns, so a port held by another user's process
-# yields a listener line with no pid -- which [port_free] still sees as held,
-# and which the failure below reports rather than silently passing.
-listener_pids() {
-  listeners | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u
-}
-
-port_free() {
-  [ -z "$(listeners)" ]
-}
-
-# Polls until the port is free, for up to $1 seconds.
+# Polls until the port is free, for up to $1 seconds. Fails if the port stays
+# held, and fails immediately if the query stops working, for the same reason.
 wait_port_free() {
   local timeout=$1
   local start=$SECONDS
 
-  while ! port_free; do
+  while true; do
+    query_listeners || return 1
+    if [ -z "$REAP_LISTENERS" ]; then
+      return 0
+    fi
     if [ $((SECONDS - start)) -ge "$timeout" ]; then
       return 1
     fi
     sleep 0.2
   done
-  return 0
 }
 
+# Signals the holders named by the most recent query. [ss] reports process
+# details only for sockets the calling user owns, so a port held by another
+# user's process yields a listener line with no pid -- which still counts as
+# held, and which the failure below reports rather than silently passing.
 signal_listeners() {
   local signal=$1
   local pid
   local -a pids=()
 
-  # Read the holders once: signalling walks the list, and a pid that exits
-  # partway through must not shorten it.
-  mapfile -t pids < <(listener_pids)
+  # Read the holders from one snapshot: signalling walks the list, and a pid
+  # that exits partway through must not shorten it.
+  mapfile -t pids < <(
+    printf '%s\n' "$REAP_LISTENERS" | grep -o 'pid=[0-9]*' | cut -d= -f2 |
+      sort -u
+  )
   if [ "${#pids[@]}" -eq 0 ]; then
     return 0
   fi
@@ -103,13 +120,16 @@ signal_listeners() {
   done
 }
 
-if port_free; then
+# A query that cannot answer is a failed reap, not a free port.
+query_listeners || exit 1
+
+if [ -z "$REAP_LISTENERS" ]; then
   echo "port $PORT is free"
   exit 0
 fi
 
 echo "port $PORT is held; reaping:"
-listeners
+printf '%s\n' "$REAP_LISTENERS"
 
 # Ask the previous run's server to come down the way its own shutdown would,
 # so it still gets to reap the processes it launched. [killall] covers a
@@ -131,7 +151,12 @@ fi
 
 # Nothing this script can do frees the port -- most often a holder belonging
 # to another user, which it may not signal. Say so here, where the holder is
-# still visible, rather than letting the bind abort with only an errno.
-echo "could not free port $PORT; still held by:" >&2
-listeners >&2
+# still visible, rather than letting the bind abort with only an errno. The
+# snapshot is whatever the last query returned, and is empty only when that
+# query failed, which reported itself above.
+echo "could not free port $PORT" >&2
+if [ -n "$REAP_LISTENERS" ]; then
+  echo "still held by:" >&2
+  printf '%s\n' "$REAP_LISTENERS" >&2
+fi
 exit 1

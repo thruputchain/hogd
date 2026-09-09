@@ -308,9 +308,14 @@ reap_port_bin="$work_dir/reap_port_bin"
 mkdir -p "$reap_port_bin"
 
 # Stands in for [ss -Hltnp "sport = :<port>"]. $SS_LISTENERS is the output,
-# empty when the port is free.
+# empty when the port is free; $SS_FAILS makes the query itself fail, the way
+# an unsupported filter or a netlink error would.
 cat >"$reap_port_bin/ss" <<'FAKE_SS'
 #!/usr/bin/env bash
+if [[ -n ${SS_FAILS:-} ]]; then
+  echo "ss: bad filter" >&2
+  exit 1
+fi
 printf '%s' "${SS_LISTENERS:-}"
 FAKE_SS
 cat >"$reap_port_bin/killall" <<'FAKE_KILLALL_PORT'
@@ -328,6 +333,7 @@ run_reap_port() {
   reap_port_status=0
   reap_port_output=$(
     PATH="$reap_port_bin:$PATH" SS_LISTENERS="$1" KILLALL_LOG="$killall_log" \
+      SS_FAILS="${SS_FAILS:-}" \
       REAP_TERM_TIMEOUT_SEC=0 REAP_KILL_TIMEOUT_SEC=0 \
       "$CI_BENCH_HARNESS_DIR/reap_control_server.sh" 11111 2>&1
   ) || reap_port_status=$?
@@ -343,10 +349,24 @@ check_eq "a free port is not signalled" "" "$(cat "$killall_log")"
 run_reap_port 'LISTEN 0 128 *:11111 *:*'
 check_eq "an unreapable holder fails the reap" "1" "$reap_port_status"
 check_contains "an unreapable holder is named" \
-  "could not free port 11111; still held by:" "$reap_port_output"
+  "could not free port 11111" "$reap_port_output"
 check_contains "an unreapable holder is shown" "*:11111" "$reap_port_output"
 check_contains "an unreapable holder is still signalled by name" \
   "killall -TERM control_server" "$(cat "$killall_log")"
+
+# A query that could not run has not shown the port to be free. Reporting no
+# output as an empty port would let the bind this reap protects abort anyway,
+# which is the whole failure the script exists to prevent.
+SS_FAILS=1 run_reap_port ""
+check_eq "a failed query fails the reap" "1" "$reap_port_status"
+check_contains "a failed query says it could not establish the port is free" \
+  "cannot establish that the port is free" "$reap_port_output"
+if [[ "$reap_port_output" == *"port 11111 is free"* ]]; then
+  echo "FAIL a failed query must not report the port as free"
+  fail=1
+else
+  echo "ok   a failed query makes no free-port claim"
+fi
 
 # A host without [ss] cannot be reaped by port. Fall back to the by-name reap
 # this script replaced instead of failing: the weaker reap still serves the
