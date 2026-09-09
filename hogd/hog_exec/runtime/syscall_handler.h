@@ -194,17 +194,10 @@ public:
     return (*last_frame_).get_events();
   }
   // Called after the root invocation frame finishes (by root_invoke or
-  // the mock path).  Runs final validation on cumulative_invoke_result_
-  // and sets root_invoke_succeeded_ if appropriate.
-  void finalize_after_root_frame();
-
-  // Allow the mock path to set cumulative_invoke_result_ before calling
-  // finalize_after_root_frame().  Must be called before finalization.
-  void mock_set_cumulative_invoke_result(InvokeResult result)
-  {
-    assert(!finalized_);
-    cumulative_invoke_result_ = result;
-  }
+  // the mock path) with the root frame's result. Stores it as
+  // root_invoke_result_ (rewriting it to ValidationFailure if final
+  // validation fails) and sets root_invoke_succeeded_ if appropriate.
+  void finalize_after_root_frame(InvokeResult result);
 
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {
@@ -500,7 +493,7 @@ private:
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
-  InvokeResult cumulative_invoke_result_ =
+  InvokeResult root_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool root_invoke_succeeded_{false};
   // perform_initial_validation() rejected the transaction (expired replay
@@ -532,14 +525,14 @@ private:
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the contracts are valid, and that the replay
   // uniquifier has not already expired.
-  // Sets cumulative_invoke_result_ to the appropriate error on a deterministic
-  // validation failure; returns a system error (e.g. an unreadable db tip)
-  // through the SystemStatus so the caller can surface it rather than drop it.
+  // Returns the appropriate error on a deterministic validation failure;
+  // a system error (e.g. an unreadable db tip) comes back through the
+  // SystemStatus so the caller can surface it rather than drop it.
   std::pair<InvokeStatus<void>, GasAmount> perform_initial_validation();
 
   // check the validation data at the end of a transaction, if in validation
   // mode
-  void check_final_validation_data();
+  [[nodiscard]] bool check_final_validation_data() const;
 
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.
