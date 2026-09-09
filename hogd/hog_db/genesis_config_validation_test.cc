@@ -155,24 +155,36 @@ TEST_F(GenesisConfigValidationTest, RejectsContractSizeLimitAboveCeiling)
             DbSchedResult::DbSchedResultError);
 }
 
-// The commit-batch bound is on the pair: a count of contracts at the stated
-// size has to fit one executor->HogDb message. Pinned at the boundary the
-// ceiling gives, so a change to either constant moves this test.
-TEST_F(GenesisConfigValidationTest, BoundsCommitBatchByStatedContractSize)
+// The commit-batch bound is on what a transaction can realize, not on the
+// product of the two maxima: a count of contracts at the ceiling whose
+// product would not fit one executor->HogDb message still loads, because no
+// transaction can carry more than kMaxBytesSignedTransaction of attachments.
+// The count only starts to matter through the per-row slack each stored row
+// adds, so the boundary sits far out. Pinned from the constants, so a change
+// to any of them moves this test.
+TEST_F(GenesisConfigValidationTest, BoundsCommitBatchByWhatATransactionCarries)
 {
   constexpr size_t kBatchOverhead = 1_KiB;
-  const auto fits_at_ceiling = static_cast<uint32_t>(
+  const auto product_fits = static_cast<uint32_t>(
       (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes);
-  ASSERT_GE(fits_at_ceiling, 1U);
-  EXPECT_EQ(load_with_contract_limits(kContractCeiling, fits_at_ceiling),
+  ASSERT_GE(product_fits, 1U);
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling, product_fits),
             DbSchedResult::DbSchedResultOK);
-  EXPECT_EQ(load_with_contract_limits(kContractCeiling, fits_at_ceiling + 1),
-            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling, product_fits + 1),
+            DbSchedResult::DbSchedResultOK);
 
-  // The same count is admissible once the contracts are small: the bound is
-  // on what the chain states, not on the ceiling.
-  EXPECT_EQ(load_with_contract_limits(1_KiB, fits_at_ceiling + 1),
+  // Past the count whose slack alone overflows the message, the pair is
+  // refused whatever the size, and one fewer is admitted.
+  const auto slack_fits = static_cast<uint32_t>(
+      (kExecToDbMessageCap - kBatchOverhead - kContractSizeCeilingBytes) /
+      kSerializedContractEnvelopeBytes);
+  ASSERT_GT(slack_fits, product_fits);
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling, slack_fits),
             DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling, slack_fits + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_contract_limits(1_KiB, slack_fits + 1),
+            DbSchedResult::DbSchedResultError);
 }
 
 // The stock wallet is written among the genesis prerequisites, so a genesis

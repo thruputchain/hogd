@@ -367,19 +367,26 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   }
   // A genesis can name a size and count whose commit batch this build could
   // not send in one message; reject the pair here rather than at commit
-  // (#2190). Checked against what is stated rather than the ceiling, so a
-  // chain admitting small contracts may attach more of them.
+  // (#2190). The batch a transaction can realize is the smaller of two
+  // bounds: the stated count of contracts at the stated size, and what one
+  // transaction carries -- every attached contract rides in the signed
+  // transaction, which the executor caps at kMaxBytesSignedTransaction, plus
+  // the per-row slack a stored row adds over its in-transaction encoding. So
+  // a chain may admit one large contract or several smaller ones without the
+  // product of the two maxima being held against it.
   constexpr size_t kBatchOverhead = 1_KiB;
+  const size_t count = config_params.max_new_contracts_per_tx;
+  const size_t stated_batch =
+      count * serialized_contract_bound(config_params.max_contract_size_bytes);
+  const size_t carried_batch =
+      kContractSizeCeilingBytes + count * kSerializedContractEnvelopeBytes;
   const size_t batch_bytes =
-      size_t{config_params.max_new_contracts_per_tx} *
-          serialized_contract_bound(config_params.max_contract_size_bytes) +
-      kBatchOverhead;
+      std::min(stated_batch, carried_batch) + kBatchOverhead;
   if (batch_bytes > kExecToDbMessageCap) {
     error("genesis max_new_contracts_per_tx {} of max_contract_size_bytes {} "
           "needs a {}-byte commit batch; this build sends at most {} in one "
           "message",
-          config_params.max_new_contracts_per_tx,
-          config_params.max_contract_size_bytes, batch_bytes,
+          count, config_params.max_contract_size_bytes, batch_bytes,
           kExecToDbMessageCap);
     co_return DbSchedResult::DbSchedResultError;
   }
