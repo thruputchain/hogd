@@ -367,18 +367,32 @@ TEST(LtHash16, MultisetProperty)
   EXPECT_EQ(once, twice);
 }
 
+namespace {
+// Serialize v as a fixed-width little-endian uint64, matching the key-length
+// frame apply_pieces prepends to each element.
+std::vector<uint8_t>
+le_u64(uint64_t v)
+{
+  std::vector<uint8_t> out;
+  for (size_t i = 0; i < sizeof(v); ++i)
+    out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+  return out;
+}
+} // namespace
+
 // Defense-in-depth: both consensus paths (incremental ChangeSet and full
-// rehash) now hash state elements through the piecewise overload, so they agree
-// by construction. This test pins that streaming encoding to the raw contiguous
-// add(BufView) primitive, so the documented format key || type || value cannot
-// silently drift between them.
+// rehash) hash state elements through the piecewise overload, so they agree by
+// construction. This test pins that streaming encoding -- key_len || key ||
+// type || value, with key_len a fixed-width little-endian uint64 (see
+// apply_pieces) -- to the raw contiguous add(BufView) primitive, so the format
+// cannot silently drift between them.
 TEST(LtHash16, PiecewiseEqualsContiguous)
 {
   std::vector<uint8_t> key = {1, 2, 3, 4};
   uint8_t type = 0x7;
   std::vector<uint8_t> value = {5, 6, 7, 8, 9};
 
-  std::vector<uint8_t> contiguous;
+  std::vector<uint8_t> contiguous = le_u64(key.size());
   contiguous.insert(contiguous.end(), key.begin(), key.end());
   contiguous.push_back(type);
   contiguous.insert(contiguous.end(), value.begin(), value.end());
@@ -396,14 +410,16 @@ TEST(LtHash16, PiecewiseEqualsContiguous)
   EXPECT_EQ(piecewise, LtHash16{});
 }
 
-// Empty key and empty value must still place the type byte between them, so the
-// piecewise and contiguous encodings stay aligned at the boundaries.
+// Empty key and empty value must still emit the framed key length and the type
+// byte, so the piecewise and contiguous encodings stay aligned at the
+// boundaries.
 TEST(LtHash16, PiecewiseEqualsContiguousEmptyPieces)
 {
   std::vector<uint8_t> empty;
   uint8_t type = 0x0;
 
-  std::vector<uint8_t> contiguous = {type};
+  std::vector<uint8_t> contiguous = le_u64(0);
+  contiguous.push_back(type);
 
   LtHash16 piecewise;
   piecewise.add(empty, type, empty);
