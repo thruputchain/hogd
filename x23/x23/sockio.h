@@ -160,13 +160,15 @@ namespace x23 {
 // Create a TCP connection.  You can bind the socket or make the file
 // descriptor non-blocking in prep_fd.
 UniqueFd tcpconnect(const sockaddr_storage &ss,
-                    std::function<void(int)> prep_fd = nullptr);
+                    std::function<void(int)> prep_fd = nullptr,
+                    int sock_flags = SOCK_CLOEXEC);
 inline UniqueFd
-tcpconnect(auto host, auto port, std::function<void(int)> prep_fd = nullptr)
+tcpconnect(auto host, auto port, std::function<void(int)> prep_fd = nullptr,
+           int sock_flags = SOCK_CLOEXEC)
     requires requires { HostPort{std::move(host), std::move(port)}; }
 {
   if (auto addr = HostPort{host, port}.to_addr())
-    return tcpconnect(*addr, std::move(prep_fd));
+    return tcpconnect(*addr, std::move(prep_fd), sock_flags);
   else
     throw addr.error();
 }

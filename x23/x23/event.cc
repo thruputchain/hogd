@@ -251,11 +251,11 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
 }
 
 Async<std::expected<int, Errno>>
-CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
+CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len, int sock_flags SLOC_ARG)
 {
   if (stop_requested())
     co_return Errno{EBADF};
-  UniqueFd fd{socket(sa->sa_family, SOCK_STREAM | SOCK_CLOEXEC, 0)};
+  UniqueFd fd{socket(sa->sa_family, SOCK_STREAM | sock_flags, 0)};
   if (!fd)
     co_return Errno{};
   auto res = co_await connect(fd, sa, len X23_IFTRACE(, SLOC_VAR));
@@ -266,7 +266,8 @@ CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
 }
 
 Async<std::expected<int, std::system_error>>
-CoroPoll::tcpconnect(std::string host, std::string port SLOC_ARG)
+CoroPoll::tcpconnect(std::string host, std::string port,
+                     int sock_flags SLOC_ARG)
 {
   if (stop_requested())
     co_return std::unexpected{
@@ -284,7 +285,7 @@ CoroPoll::tcpconnect(std::string host, std::string port SLOC_ARG)
                                     &hints, &ai);
   if (status)
     co_return std::unexpected{std::system_error{status, gai_category(), host}};
-  if (auto res = co_await tcpconnect(ai->ai_addr, ai->ai_addrlen))
+  if (auto res = co_await tcpconnect(ai->ai_addr, ai->ai_addrlen, sock_flags))
     co_return *res;
   else
     co_return std::unexpected{std::system_error{res.error(), host}};

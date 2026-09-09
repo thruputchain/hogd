@@ -223,14 +223,16 @@ stcplisten(const sockaddr_storage &bind_addr, int backlog)
 }
 
 UniqueFd
-tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
+tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd,
+           int sock_flags)
 {
   extern bool in_thread_pool();
   x23assert(!in_thread_pool());
 
-  UniqueFd fd(socket(ss.ss_family, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  UniqueFd fd(socket(ss.ss_family, SOCK_STREAM | sock_flags, 0));
   if (!fd)
-    Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
+    Errno{}.raise("socket({}, SOCK_STREAM | 0x{:x}, 0)", ss.ss_family,
+                  sock_flags);
   if (prep_fd)
     prep_fd(fd.get());
   if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss),
