@@ -37,15 +37,26 @@ command -v killall >/dev/null || {
   echo 'killall not found (install psmisc)' >&2
   exit 1
 }
-command -v ss >/dev/null || {
-  echo 'ss not found (install iproute2)' >&2
-  exit 1
-}
+
+# The tool that says who holds a port. Overridable so the self-test can point
+# it at a stub, and at a name that is not installed.
+REAP_SS=${REAP_SS:-ss}
+
+# Reaping by port needs that tool. A host without it must fall back to the
+# by-name reap this script replaced rather than fail: it is the weaker reap,
+# but failing here would take down a host the old reap served, which is a
+# worse outcome than the bind race this script closes.
+if ! command -v "$REAP_SS" >/dev/null; then
+  echo "warning: $REAP_SS not found (install iproute2); reaping by name only" >&2
+  killall -TERM control_server 2>/dev/null && sleep 3 || true
+  killall -KILL control_server 2>/dev/null || true
+  exit 0
+fi
 
 # The listening sockets on $PORT, one raw [ss] line each. Empty output means
 # the port is free, which is the only thing this script has to establish.
 listeners() {
-  ss -Hltnp "sport = :$PORT" 2>/dev/null || true
+  "$REAP_SS" -Hltnp "sport = :$PORT" 2>/dev/null || true
 }
 
 # The pids holding those sockets. [ss] reports process details only for

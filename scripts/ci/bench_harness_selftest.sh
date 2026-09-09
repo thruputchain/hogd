@@ -348,6 +348,22 @@ check_contains "an unreapable holder is shown" "*:11111" "$reap_port_output"
 check_contains "an unreapable holder is still signalled by name" \
   "killall -TERM control_server" "$(cat "$killall_log")"
 
+# A host without [ss] cannot be reaped by port. Fall back to the by-name reap
+# this script replaced instead of failing: the weaker reap still serves the
+# host, where failing here would break one the old reap handled.
+: >"$killall_log"
+no_ss_status=0
+no_ss_output=$(
+  PATH="$reap_port_bin:$PATH" KILLALL_LOG="$killall_log" \
+    REAP_SS=ss_not_installed \
+    "$CI_BENCH_HARNESS_DIR/reap_control_server.sh" 11111 2>&1
+) || no_ss_status=$?
+check_eq "a host without ss still reaps" "0" "$no_ss_status"
+check_contains "a host without ss says so" "reaping by name only" \
+  "$no_ss_output"
+check_contains "a host without ss reaps by name" \
+  "killall -TERM control_server" "$(cat "$killall_log")"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1
