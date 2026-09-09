@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/startup_validation.h"
 #include "hogd/hog_db/status.h"
@@ -26,6 +27,7 @@
 #include "network_config.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"
+#include "storage_cost.hh"
 #include "types.hh"
 #include "x23/serialize.h"
 
