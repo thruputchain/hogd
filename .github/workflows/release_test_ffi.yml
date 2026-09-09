@@ -1,5 +1,8 @@
 name: Release test_ffi Library
 
+# Successful tagged releases are published to public S3 by publish_test_ffi.yml.
+# Release and retry instructions: docs/test-ffi-releases.md.
+
 on:
   push:
     tags:
