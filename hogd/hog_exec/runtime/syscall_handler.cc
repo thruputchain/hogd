@@ -269,8 +269,13 @@ SystemCallHandler::perform_initial_validation()
     return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
+  // The blob bound is the chain's (#2569): a configuration may raise it past
+  // the default, and hog_db stores whatever a loadable genesis admits.
   for (auto const &contract : contracts_to_deploy_) {
-    if (contract_blob_size(contract) > kMaxContractSizeBytes) {
+    if (const uint32_t permitted = config_params().max_contract_size_bytes;
+        contract_blob_size(contract) > permitted) {
+      error("Transaction attaches a {}-byte contract; chain permits {}",
+            contract_blob_size(contract), permitted);
       return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }

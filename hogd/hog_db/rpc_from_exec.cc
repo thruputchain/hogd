@@ -178,8 +178,9 @@ HogDbExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
     // write_contract fails if a sibling block commits and this block is
     // abandoned (kStaleBlock), or if the serialized contract exceeds
     // kMaxSerializedContractBytes (kInvalidExecutorBehavior): hog_exec
-    // enforces the contract size limit before execution and storage chunks
-    // any legal row, so an oversized row here means the executor is buggy.
+    // enforces the chain's contract size limit before execution, genesis load
+    // keeps that limit under the ceiling, and storage chunks any legal row,
+    // so an oversized row here means the executor is buggy.
     // Either way, abort just this transaction.
     if (auto r = write_contract(std::move(contract)); !r.has_value()) {
       CHECK(r.error().code() == HogDbCode::kStaleBlock ||

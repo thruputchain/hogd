@@ -354,18 +354,33 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("invalid genesis height, network hash, or config hash");
     co_return DbSchedResult::DbSchedResultError;
   }
-  // A genesis can name a count whose commit batch this build could not send in
-  // one message; reject it here rather than at commit (#2190).
-  constexpr size_t kBatchOverhead = 1_KiB;
-  const size_t admissible =
-      (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
   const NetworkConfigParams config_params(
       genesis_configuration.network_config.v0());
-  if (const uint32_t stated = config_params.max_new_contracts_per_tx;
-      stated > admissible) {
-    error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
-          "commit in one message",
-          stated, admissible);
+  // A contract above the ceiling could never be carried by a transaction, and
+  // hog_db is only proven to store rows up to it.
+  if (const uint32_t stated = config_params.max_contract_size_bytes;
+      stated > kContractSizeCeilingBytes) {
+    error("genesis max_contract_size_bytes {} exceeds the {} this build can "
+          "store and a transaction can carry",
+          stated, kContractSizeCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // A genesis can name a size and count whose commit batch this build could
+  // not send in one message; reject the pair here rather than at commit
+  // (#2190). Checked against what is stated rather than the ceiling, so a
+  // chain admitting small contracts may attach more of them.
+  constexpr size_t kBatchOverhead = 1_KiB;
+  const size_t batch_bytes =
+      size_t{config_params.max_new_contracts_per_tx} *
+          serialized_contract_bound(config_params.max_contract_size_bytes) +
+      kBatchOverhead;
+  if (batch_bytes > kExecToDbMessageCap) {
+    error("genesis max_new_contracts_per_tx {} of max_contract_size_bytes {} "
+          "needs a {}-byte commit batch; this build sends at most {} in one "
+          "message",
+          config_params.max_new_contracts_per_tx,
+          config_params.max_contract_size_bytes, batch_bytes,
+          kExecToDbMessageCap);
     co_return DbSchedResult::DbSchedResultError;
   }
   // The ceiling bounds the wire type, so a genesis naming more would let a

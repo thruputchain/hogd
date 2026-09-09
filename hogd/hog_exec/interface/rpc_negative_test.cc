@@ -544,12 +544,15 @@ TEST_F(RpcNegativeTest, ProposeRejectsOverCapContractAttachments)
   client_.executorsched_finish_block(block_id);
 }
 
-// A contract blob over kMaxContractSizeBytes (#2569). The size gate runs
-// before verification; the whole tx still fits under
+// A contract blob over the chain's max_contract_size_bytes (#2569). The size
+// gate runs before verification; the whole tx still fits under
 // kMaxBytesSignedTransaction, so it reaches the executor.
 TEST_F(RpcNegativeTest, ProposeRejectsOversizedContractBlob)
 {
   init_executor();
+  const uint32_t limit =
+      NetworkConfigParams(stock_network_config().v0()).max_contract_size_bytes;
+  ASSERT_LT(limit + 1_KiB, kContractSizeCeilingBytes);
 
   BlockID block_id = 1033;
   ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
@@ -558,8 +561,7 @@ TEST_F(RpcNegativeTest, ProposeRejectsOversizedContractBlob)
   open_db_block(block_id);
 
   x23::Vec<Contract, 0xffffffff> contracts;
-  contracts.push_back(
-      make_garbage_rv32_contract(kMaxContractSizeBytes + 1, /*fill=*/0));
+  contracts.push_back(make_garbage_rv32_contract(limit + 1, /*fill=*/0));
 
   EXPECT_EQ(client_
                 .executorsched_propose_transaction(

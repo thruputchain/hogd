@@ -628,8 +628,8 @@ TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsUnrecoverable)
 
 // A contract whose serialized code row exceeds one RAMDB item deploys
 // end-to-end: hog_db stores the row chunked, transparently to hog_exec
-// (#2569). 100 KiB is between the ~64 KiB single-item ceiling and
-// kMaxContractSizeBytes.
+// (#2569). 100 KiB is between the ~64 KiB single-item ceiling and the stock
+// max_contract_size_bytes.
 TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 {
   Contract big_contract(ContractType::kRv32);
@@ -1251,17 +1251,16 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
   ASSERT_TRUE(row.has_value());
 }
 
-// The attached-contract size gate is strict (> kMaxContractSizeBytes): a
-// blob of exactly kMaxContractSizeBytes passes initial validation, the body
-// runs, and the deploy commits through the chunked-row path (its serialized
-// row is exactly kMaxSerializedContractBytes). Pins the accept side of the
-// boundary whose reject side is RejectsAttachedContractAboveSizeLimit; a
-// > -> >= drift would reject transactions other validators accept.
+// The attached-contract size gate is strict (> max_contract_size_bytes): a
+// blob of exactly the chain's limit passes initial validation, the body runs,
+// and the deploy commits through the chunked-row path. Pins the accept side
+// of the boundary whose reject side is RejectsAttachedContractAboveSizeLimit;
+// a > -> >= drift would reject transactions other validators accept.
 TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
 {
   Contract limit_contract(ContractType::kRv32);
   limit_contract.rv32_contract().data.resize_uninitialized(
-      kMaxContractSizeBytes);
+      NetworkConfigParams(stock_network_config().v0()).max_contract_size_bytes);
   for (size_t i = 0; i < limit_contract.rv32_contract().data.size(); ++i) {
     limit_contract.rv32_contract().data[i] =
         static_cast<uint8_t>((i * 37) + 11);
@@ -1334,15 +1333,16 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
   EXPECT_EQ(sha256(lookup.value()), limit_hash);
 }
 
-// An attached contract blob above kMaxContractSizeBytes is rejected as a
-// ValidationFailure during initial validation (malformed transactions are
-// dropped, not included): the body never runs and nothing is deployed
-// (#2569).
+// An attached contract blob above the chain's max_contract_size_bytes is
+// rejected as a ValidationFailure during initial validation (malformed
+// transactions are dropped, not included): the body never runs and nothing
+// is deployed (#2569).
 TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 {
   Contract oversized(ContractType::kRv32);
-  oversized.rv32_contract().data.resize_uninitialized(kMaxContractSizeBytes +
-                                                      1);
+  oversized.rv32_contract().data.resize_uninitialized(
+      NetworkConfigParams(stock_network_config().v0()).max_contract_size_bytes +
+      1);
   auto oversized_hash = sha256(oversized);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
@@ -1632,6 +1632,150 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+// The size gate reads the chain's configuration, not a build constant: a
+// chain stating a larger max_contract_size_bytes admits, executes, and stores
+// contracts the stock 256 KiB would refuse. Well above the default so the two
+// cannot be confused, and under the ceiling genesis load enforces.
+constexpr uint32_t kRaisedContractSizeBytes =
+    2 * static_cast<uint32_t>(kDefaultMaxContractSizeBytes);
+static_assert(kRaisedContractSizeBytes == 512_KiB);
+static_assert(kRaisedContractSizeBytes < kContractSizeCeilingBytes);
+
+class RaisedContractSizeLimitTest : public ::testing::TestWithParam<TestDB>,
+                                    public NativeContractTestFramework {
+public:
+  RaisedContractSizeLimitTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
+          true, std::nullopt, raised_network_config())
+  {}
+
+protected:
+  struct AttachOutcome {
+    bool root_success = false;
+    ExecResult commit = ExecResult::ExecResultOK;
+    bool deployed = false;
+  };
+
+  // Attaches a `blob_bytes` placeholder rv32 contract to a transaction whose
+  // body deploys it, runs the transaction to commit, and reports what
+  // happened. The body must not run when the attachment is refused.
+  AttachOutcome attach_and_deploy(size_t blob_bytes, uint8_t nonce_seed)
+  {
+    Contract contract(ContractType::kRv32);
+    contract.rv32_contract().data.resize_uninitialized(blob_bytes);
+    for (size_t i = 0; i < blob_bytes; ++i) {
+      contract.rv32_contract().data[i] =
+          static_cast<uint8_t>((i * 41) + nonce_seed);
+    }
+    const auto contract_hash = sha256(contract);
+
+    SHA256Hash deploy_nonce{};
+    deploy_nonce[0] = nonce_seed;
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+    fns_0.emplace(0,
+                  [contract_hash, deploy_nonce](NativeSyscallContext &ctx)
+                      -> x23::Async<InvokeStatus<void>> {
+                    auto deploy_result =
+                        co_await ctx.handler().deploy_contract(deploy_nonce,
+                                                               contract_hash);
+                    if (!deploy_result.has_value()) {
+                      co_return deploy_result.error().to_invoke_error();
+                    }
+                    if (!deploy_result.value().has_value()) {
+                      co_return InvokeError{InvokeErrorCode::Deterministic};
+                    }
+                    co_return InvokeStatus<void>{};
+                  });
+    auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_0));
+    NativeContext native_context(std::move(contract_map));
+    NoopRv32Context noop_context;
+    MultiplexedContext context(
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
+            {ContractType::kNative, {&native_context, false}},
+            {ContractType::kRv32, {&noop_context, false}}});
+
+    auto deployer_contract = make_native_contract(0);
+    write_contract(deployer_contract);
+    auto deployer_addr = make_contract_address(1);
+    write_deployment(deployer_addr, deployer_contract);
+
+    auto deployed_addr =
+        SystemCallHandler::static_get_deploy_address(deployer_addr,
+                                                     deploy_nonce,
+                                                     contract_hash);
+    setup_grant_storage_token(deployer_addr, 1'000'000'000);
+    setup_grant_storage_token(deployed_addr, 1'000'000'000);
+
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = deployer_addr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+            .uniquifier = make_new_uniquifier(),
+            .contracts_to_deploy = {contract},
+        }};
+    auto handler = make_new_system_call_handler(handler_tx, context);
+
+    AttachOutcome outcome;
+    outcome.root_success = handler.root_invoke()().is_root_success();
+    outcome.commit = handler.try_commit_transaction()();
+    if (outcome.commit == ExecResult::ExecResultOK) {
+      EXPECT_TRUE(
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = handler_tx})());
+    }
+    advance_block();
+    auto lookup = lookup_contract_from_db(contract_hash);
+    outcome.deployed =
+        lookup.has_value() && sha256(lookup.value()) == contract_hash;
+    return outcome;
+  }
+
+private:
+  static NetworkConfig raised_network_config()
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxContractSizeBytes,
+        kRaisedContractSizeBytes);
+    return config;
+  }
+};
+
+// A blob at the raised limit -- twice what the stock configuration admits --
+// is accepted, executed, and committed through the chunked-row path: raising
+// the parameter is all it takes to deploy larger contracts.
+TEST_P(RaisedContractSizeLimitTest, DeploysContractAtRaisedLimit)
+{
+  const AttachOutcome outcome =
+      attach_and_deploy(kRaisedContractSizeBytes, /*nonce_seed=*/71);
+  EXPECT_TRUE(outcome.root_success);
+  EXPECT_EQ(outcome.commit, ExecResult::ExecResultOK);
+  EXPECT_TRUE(outcome.deployed);
+}
+
+// The gate moves with the parameter rather than vanishing: one byte past the
+// raised limit is still refused before the body runs.
+TEST_P(RaisedContractSizeLimitTest, RejectsAttachedContractAboveRaisedLimit)
+{
+  const AttachOutcome outcome =
+      attach_and_deploy(kRaisedContractSizeBytes + 1, /*nonce_seed=*/72);
+  EXPECT_FALSE(outcome.root_success);
+  EXPECT_EQ(outcome.commit, ExecResult::ExecResultTxValidationFailure);
+  EXPECT_FALSE(outcome.deployed);
+}
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, RaisedContractSizeLimitTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDb),
+                         test_db_to_string);
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, SelectiveDeploymentTest,
                          ::testing::Values(TestDB::kMockInMemory,

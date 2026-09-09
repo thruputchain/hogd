@@ -219,6 +219,10 @@ build_genesis_json(GenesisConfiguration const &genesis)
                         w.field("max_bytestring_len",
                                 std::int64_t{param.max_bytestring_len()});
                         break;
+                      case ConfigParamID::kConfigParamMaxContractSizeBytes:
+                        w.field("max_contract_size_bytes",
+                                std::int64_t{param.max_contract_size_bytes()});
+                        break;
                       }
                     });
               });

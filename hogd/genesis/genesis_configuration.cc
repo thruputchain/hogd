@@ -147,6 +147,9 @@ stock_network_config()
                                  ConfigParamID::kConfigParamMaxBytestringLen,
                                  static_cast<uint32_t>(
                                      kDefaultMaxBytestringLen));
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxContractSizeBytes,
+      static_cast<uint32_t>(kDefaultMaxContractSizeBytes));
   return config;
 }
 

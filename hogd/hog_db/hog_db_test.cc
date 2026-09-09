@@ -1527,9 +1527,10 @@ TEST_F(HogDbTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
 }
 
 // Regression for #1775/#2569: a serialized contract row larger than
-// kMaxSerializedContractBytes is executor misbehavior -- hog_exec enforces
-// kMaxContractSizeBytes on attached blobs before execution, and hog_db stores
-// any legal row (chunked if necessary). Reject at staging with
+// kMaxSerializedContractBytes is executor misbehavior -- hog_exec enforces the
+// chain's max_contract_size_bytes on attached blobs before execution, genesis
+// load keeps that under kContractSizeCeilingBytes, and hog_db stores any legal
+// row (chunked if necessary). Reject at staging with
 // kInvalidExecutorBehavior, not at block write-back, where apply() would
 // leave earlier writes visible and the commit error would abort the node.
 TEST_F(HogDbTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)

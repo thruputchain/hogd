@@ -16,8 +16,9 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/common/limits.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -1468,7 +1469,8 @@ TEST_P(ProposeValidateRoundtripTest,
   // unused proposal data rather than downgrade it.
   Contract invalid_contract(ContractType::kRv32);
   invalid_contract.rv32_contract().data.resize_uninitialized(
-      kMaxContractSizeBytes + 1);
+      NetworkConfigParams(stock_network_config().v0()).max_contract_size_bytes +
+      1);
   tx.contracts_to_deploy = {invalid_contract};
 
   NondeterministicProposalData proposal_data;
@@ -1531,7 +1533,8 @@ TEST_P(ProposeValidateRoundtripTest,
   // unused proposal data rather than downgrade it.
   Contract invalid_contract(ContractType::kRv32);
   invalid_contract.rv32_contract().data.resize_uninitialized(
-      kMaxContractSizeBytes + 1);
+      NetworkConfigParams(stock_network_config().v0()).max_contract_size_bytes +
+      1);
   tx.contracts_to_deploy = {invalid_contract};
 
   NondeterministicProposalData proposal_data;

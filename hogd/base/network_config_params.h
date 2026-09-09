@@ -8,6 +8,7 @@
 #include <optional>
 #include <utility>
 
+#include "contract.hh"
 #include "hogd/base/log.h"
 #include "network_config.hh"
 #include "storage_item.hh"
@@ -30,6 +31,8 @@ struct NetworkConfigParams {
   uint32_t max_cross_invoke_depth = kDefaultMaxCrossInvokeDepth;
   uint32_t max_new_contracts_per_tx = kDefaultMaxNewContractsPerTx;
   uint32_t max_bytestring_len = static_cast<uint32_t>(kDefaultMaxBytestringLen);
+  uint32_t max_contract_size_bytes =
+      static_cast<uint32_t>(kDefaultMaxContractSizeBytes);
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -82,6 +85,8 @@ NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
     return param.max_new_contracts_per_tx();
   case ConfigParamID::kConfigParamMaxBytestringLen:
     return param.max_bytestring_len();
+  case ConfigParamID::kConfigParamMaxContractSizeBytes:
+    return param.max_contract_size_bytes();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", index);
 }
@@ -103,6 +108,9 @@ NetworkConfigParams::make_param(ConfigParamID id, uint32_t value)
   case ConfigParamID::kConfigParamMaxBytestringLen:
     out.max_bytestring_len() = value;
     break;
+  case ConfigParamID::kConfigParamMaxContractSizeBytes:
+    out.max_contract_size_bytes() = value;
+    break;
   }
   return out;
 }
@@ -119,6 +127,8 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return max_new_contracts_per_tx;
   case ConfigParamID::kConfigParamMaxBytestringLen:
     return max_bytestring_len;
+  case ConfigParamID::kConfigParamMaxContractSizeBytes:
+    return max_contract_size_bytes;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -148,7 +158,10 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
             .value_or(kDefaultMaxNewContractsPerTx)),
     max_bytestring_len(
         stated_param(config, ConfigParamID::kConfigParamMaxBytestringLen)
-            .value_or(static_cast<uint32_t>(kDefaultMaxBytestringLen)))
+            .value_or(static_cast<uint32_t>(kDefaultMaxBytestringLen))),
+    max_contract_size_bytes(
+        stated_param(config, ConfigParamID::kConfigParamMaxContractSizeBytes)
+            .value_or(static_cast<uint32_t>(kDefaultMaxContractSizeBytes)))
 {}
 
 inline void

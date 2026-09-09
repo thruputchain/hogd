@@ -153,16 +153,18 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   const auto &stated_params =
       artifact.genesis_configuration.network_config.v0().params;
   ASSERT_EQ(encoded_params.size(), stated_params.size());
-  const std::array<std::string_view, 4> fields{"max_sha256_buffers",
+  const std::array<std::string_view, 5> fields{"max_sha256_buffers",
                                                "max_cross_invoke_depth",
                                                "max_new_contracts_per_tx",
-                                               "max_bytestring_len"};
+                                               "max_bytestring_len",
+                                               "max_contract_size_bytes"};
   ASSERT_EQ(stated_params.size(), fields.size());
-  const std::array<std::int64_t, 4> values{
+  const std::array<std::int64_t, 5> values{
       stated_params[0].max_sha256_buffers(),
       stated_params[1].max_cross_invoke_depth(),
       stated_params[2].max_new_contracts_per_tx(),
-      stated_params[3].max_bytestring_len()};
+      stated_params[3].max_bytestring_len(),
+      stated_params[4].max_contract_size_bytes()};
   for (std::size_t i = 0; i < fields.size(); ++i) {
     const auto &body =
         require_field(encoded_params[i],

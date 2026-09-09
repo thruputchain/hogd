@@ -16,6 +16,7 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -28,10 +29,16 @@ namespace hogd {
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
+namespace {
+constexpr auto kContractCeiling =
+    static_cast<uint32_t>(kContractSizeCeilingBytes);
+} // namespace
+
 // A genesis states max_bytestring_len, and the wire type only admits values up
 // to kBytestringCeilingLen. Loading is the one place that bound is checked, so
 // a chain naming more has to be refused here rather than aborting later on a
-// write the syscall let through.
+// write the syscall let through. The same goes for max_contract_size_bytes
+// against what this build can store and commit.
 class GenesisConfigValidationTest : public testing::Test {
 protected:
   void SetUp() override
@@ -56,6 +63,22 @@ protected:
     NetworkConfigParams::set_param(config,
                                    ConfigParamID::kConfigParamMaxBytestringLen,
                                    max_bytestring_len);
+    return load(config, std::nullopt);
+  }
+
+  // Loads a genesis stating `max_contract_size_bytes` and
+  // `max_new_contracts_per_tx` and reports the result. Both, because the
+  // commit-batch bound is on the pair.
+  DbSchedResult load_with_contract_limits(uint32_t max_contract_size_bytes,
+                                          uint32_t max_new_contracts_per_tx)
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxContractSizeBytes,
+        max_contract_size_bytes);
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxNewContractsPerTx,
+        max_new_contracts_per_tx);
     return load(config, std::nullopt);
   }
 
@@ -111,6 +134,45 @@ TEST_F(GenesisConfigValidationTest, RejectsBytestringLimitAboveCeiling)
   EXPECT_EQ(load_with_bytestring_limit(
                 static_cast<uint32_t>(kBytestringCeilingLen) + 1),
             DbSchedResult::DbSchedResultError);
+}
+
+// The largest contract a transaction can carry is admissible, and with it the
+// stock attachment count: raising the size past the 256 KiB default is a
+// configuration choice, not a protocol change.
+TEST_F(GenesisConfigValidationTest, AcceptsContractSizeLimitAtCeiling)
+{
+  const uint32_t stock_count =
+      NetworkConfigParams(stock_network_config().v0()).max_new_contracts_per_tx;
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling, stock_count),
+            DbSchedResult::DbSchedResultOK);
+}
+
+// One byte past the ceiling is refused: hog_db is only proven to store rows up
+// to it, and no transaction could carry the contract anyway.
+TEST_F(GenesisConfigValidationTest, RejectsContractSizeLimitAboveCeiling)
+{
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling + 1, 1),
+            DbSchedResult::DbSchedResultError);
+}
+
+// The commit-batch bound is on the pair: a count of contracts at the stated
+// size has to fit one executor->HogDb message. Pinned at the boundary the
+// ceiling gives, so a change to either constant moves this test.
+TEST_F(GenesisConfigValidationTest, BoundsCommitBatchByStatedContractSize)
+{
+  constexpr size_t kBatchOverhead = 1_KiB;
+  const auto fits_at_ceiling = static_cast<uint32_t>(
+      (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes);
+  ASSERT_GE(fits_at_ceiling, 1U);
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling, fits_at_ceiling),
+            DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling, fits_at_ceiling + 1),
+            DbSchedResult::DbSchedResultError);
+
+  // The same count is admissible once the contracts are small: the bound is
+  // on what the chain states, not on the ceiling.
+  EXPECT_EQ(load_with_contract_limits(1_KiB, fits_at_ceiling + 1),
+            DbSchedResult::DbSchedResultOK);
 }
 
 // The stock wallet is written among the genesis prerequisites, so a genesis

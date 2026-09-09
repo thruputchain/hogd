@@ -25,9 +25,9 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   // Moves whenever the stock configuration changes, which is the point: it
   // pins the preimage so a change to it is deliberate.
   const ConfigHash expected{
-      0x92, 0x30, 0x28, 0x1b, 0xec, 0xad, 0x1f, 0x79, 0x8f, 0x5b, 0x48,
-      0x88, 0xf2, 0x7d, 0xd6, 0x4b, 0x0a, 0xc5, 0x55, 0xd6, 0x7b, 0x29,
-      0xe6, 0x3e, 0x2d, 0x55, 0xc9, 0x2b, 0x82, 0xda, 0xa5, 0x87,
+      0xc1, 0xa7, 0xf8, 0xfe, 0xe4, 0x9e, 0x41, 0xa2, 0x60, 0x28, 0xef,
+      0x56, 0x7e, 0xc8, 0xd4, 0x63, 0x82, 0x2b, 0xe5, 0x2f, 0x03, 0xc3,
+      0xe4, 0x89, 0x33, 0xba, 0x22, 0x44, 0xde, 0xb0, 0xeb, 0x49,
   };
   EXPECT_EQ(compute_config_hash(
                 make_config_hash_preimage(model, network_config, wallet)),
@@ -63,7 +63,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       make_config_hash_preimage(model, stock_network_config(),
                                 native_default_wallet_hash()));
 
-  std::array<NetworkConfig, 4> variants;
+  std::array<NetworkConfig, 5> variants;
   variants.fill(stock_network_config());
   const NetworkConfigParams stock(stock_network_config().v0());
   NetworkConfigParams::set_param(variants[0],
@@ -78,6 +78,9 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   NetworkConfigParams::set_param(variants[3],
                                  ConfigParamID::kConfigParamMaxBytestringLen,
                                  stock.max_bytestring_len + 1);
+  NetworkConfigParams::set_param(
+      variants[4], ConfigParamID::kConfigParamMaxContractSizeBytes,
+      stock.max_contract_size_bytes + 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
@@ -129,7 +132,7 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
                                  4);
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 4U);
+  EXPECT_EQ(config.v0().params.size(), 5U);
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);
@@ -141,11 +144,13 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
 // default-fills a slot a later one then replaces.
 TEST(ConfigHashTest, SetParamOrderIndependent)
 {
-  std::array<std::pair<ConfigParamID, uint32_t>, 4> stated{{
+  std::array<std::pair<ConfigParamID, uint32_t>, 5> stated{{
       {ConfigParamID::kConfigParamMaxSHA256Buffers, 5},
       {ConfigParamID::kConfigParamMaxCrossInvokeDepth, 33},
       {ConfigParamID::kConfigParamMaxNewContractsPerTx, 7},
       {ConfigParamID::kConfigParamMaxBytestringLen, 4096},
+      {ConfigParamID::kConfigParamMaxContractSizeBytes,
+       static_cast<uint32_t>(1_MiB)},
   }};
 
   NetworkConfig reference;
@@ -186,6 +191,31 @@ TEST(ConfigHashTest, ShortListYieldsBytestringDefault)
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
   EXPECT_EQ(config.v0().params.size(), 4U);
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_bytestring_len, 4096U);
+}
+
+// Likewise for the contract size parameter: a list stopping at the bytestring
+// limit reads as the 256 KiB every chain ran under before the size was
+// configurable.
+TEST(ConfigHashTest, ShortListYieldsContractSizeDefault)
+{
+  NetworkConfig config;
+  config.v(0);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 4096);
+  ASSERT_EQ(config.v0().params.size(), 4U);
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes,
+            static_cast<uint32_t>(kDefaultMaxContractSizeBytes));
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes, 256_KiB);
+
+  // Stating it extends the prefix by one and takes effect, above the default
+  // as well as below it.
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxContractSizeBytes,
+      static_cast<uint32_t>(1_MiB));
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
+  EXPECT_EQ(config.v0().params.size(), 5U);
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes, 1_MiB);
 }
 
 // A repeated or misordered list is refused, because it would give one
