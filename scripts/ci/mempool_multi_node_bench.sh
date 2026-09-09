@@ -313,8 +313,10 @@ trap 'cleanup 130' INT TERM
 echo 'make sure bench servers are running'
 # This gate waits on every host at once and collapses them to one status, so say
 # which gate failed rather than exiting 1 with only the per-host lines above.
-if ! ci_wait_port_hosts "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"; then
-  echo "readiness: a bench control server is not listening on $CI_CONTROL_PORT" >&2
+if ! ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+  "${ALL_HOSTS[@]}"; then
+  echo "readiness: a bench control server built from this commit is not" \
+    "serving on $CI_CONTROL_PORT" >&2
   exit 1
 fi
 
