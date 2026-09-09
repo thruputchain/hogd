@@ -80,6 +80,52 @@ contract_blob_size(Contract const &contract)
   panic("Unrecoverable; Invalid contract type: {}", contract.contract_type());
 }
 
+constexpr NewContractBatch kEmptyVec = {};
+
+ExecutionModeData
+make_execution_mode_data(ExecutionModeCtor execution_mode_ctor)
+{
+  if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
+    return ProposalModeData{};
+  }
+  if (std::holds_alternative<ViewingModeCtor>(execution_mode_ctor)) {
+    return ExecutionModeData{std::in_place_type<ViewingModeData>,
+                             std::get<ViewingModeCtor>(execution_mode_ctor)};
+  }
+  return ExecutionModeData{std::in_place_type<ValidationModeData>,
+                           std::get<ValidationModeCtor>(execution_mode_ctor)};
+}
+
+// Run a logging statement that may itself throw (allocation or sink failure)
+// behind a noexcept boundary. Returns false if the log was dropped, in which
+// case dropped_desc reaches the no-allocation reporter instead.
+template<typename F>
+bool
+guarded_log(char const *dropped_desc, F &&log_fn) noexcept
+{
+  try {
+    std::forward<F>(log_fn)();
+    return true;
+  } catch (...) {
+    report_dropped_log(dropped_desc);
+    return false;
+  }
+}
+
+// Populate an UnmodifiedItem's base item from the snapshot cache if it has
+// not been loaded yet. Not a coroutine: the already-loaded arm answers with a
+// plain value, and the load arm forwards load()'s own MaybeAsync, preserving
+// its no-frame-on-cache-hit property.
+x23::MaybeAsync<SystemStatus<void>>
+ensure_loaded(UnmodifiedItem const &item, StorageSnapshotCache &snapshot_cache,
+              FrameItemKey const &item_key)
+{
+  if (item.is_loaded()) {
+    return SystemStatus<void>{};
+  }
+  return item.load(snapshot_cache, item_key);
+}
+
 } // namespace
 
 ExecResult
@@ -158,22 +204,16 @@ SystemCallHandler::SystemCallHandler(
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
     execution_mode_data_(
-        [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
-          if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
-            return ProposalModeData{};
-          }
-          assert(!std::holds_alternative<ViewingModeCtor>(execution_mode_ctor));
-          return ExecutionModeData{std::in_place_type<ValidationModeData>,
-                                   std::get<ValidationModeCtor>(
-                                       execution_mode_ctor)};
-        }(std::move(execution_mode_ctor))),
+        make_execution_mode_data(std::move(execution_mode_ctor))),
     contracts_to_deploy_(tx.contracts_to_deploy),
     snapshot_cache_(snapshot_cache)
-{}
-
-namespace {
-constexpr NewContractBatch kEmptyVec = {};
-} // namespace
+{
+  // Real transactions execute in proposal or validation mode only; viewing
+  // mode goes through the tx-less constructor. CHECK, not assert: the old
+  // per-ctor construction failed loudly (bad_variant_access) on this misuse
+  // in release builds too.
+  CHECK(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
+}
 
 SystemCallHandler::SystemCallHandler(
     StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
@@ -189,19 +229,7 @@ SystemCallHandler::SystemCallHandler(
         db_proxy_),
     source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
     execution_mode_data_(
-        [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
-          if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
-            return ProposalModeData{};
-          }
-          if (std::holds_alternative<ViewingModeCtor>(execution_mode_ctor)) {
-            return ExecutionModeData{std::in_place_type<ViewingModeData>,
-                                     std::get<ViewingModeCtor>(
-                                         execution_mode_ctor)};
-          }
-          return ExecutionModeData{std::in_place_type<ValidationModeData>,
-                                   std::get<ValidationModeCtor>(
-                                       execution_mode_ctor)};
-        }(std::move(execution_mode_ctor))),
+        make_execution_mode_data(std::move(execution_mode_ctor))),
     contracts_to_deploy_(kEmptyVec), snapshot_cache_(snapshot_cache)
 {}
 
@@ -212,16 +240,14 @@ SystemCallHandler::perform_initial_validation()
   // attached-contract verification or body execution runs (#2568). Without this
   // the body would run to completion and the transaction would only be rejected
   // by the late replay-cache reservation.
-  {
-    if (replay_uniquifier_expired()) {
-      // An expired uniquifier is a deterministic, proposer-attributable
-      // rejection: map it to ValidationFailure uniformly in proposal and
-      // validation mode. In proposal mode this is only reachable when the
-      // scheduler tried to propose a transaction it should have already dropped
-      // -- try_commit_transaction() asserts (debug only) that any proposal-mode
-      // ValidationFailure came from this initial validation.
-      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
-    }
+  if (replay_uniquifier_expired()) {
+    // An expired uniquifier is a deterministic, proposer-attributable
+    // rejection: map it to ValidationFailure uniformly in proposal and
+    // validation mode. In proposal mode this is only reachable when the
+    // scheduler tried to propose a transaction it should have already dropped
+    // -- try_commit_transaction() asserts (debug only) that any proposal-mode
+    // ValidationFailure came from this initial validation.
+    return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
   // Validate the proposal data structure before execution begins.
@@ -273,10 +299,9 @@ SystemCallHandler::perform_initial_validation()
 bool
 SystemCallHandler::check_final_validation_data() const
 {
-  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
-    const auto &validation_data =
-        std::get<ValidationModeData>(execution_mode_data_);
-    return validation_data.check_all_consumed();
+  if (auto const *validation_data =
+          std::get_if<ValidationModeData>(&execution_mode_data_)) {
+    return validation_data->check_all_consumed();
   }
   return true;
 }
@@ -455,6 +480,24 @@ SystemCallHandler::handle_root_host_fn_status(
 }
 
 x23::Async<ExecResult>
+SystemCallHandler::abort_after_commit_failure(ExecResult failure_result,
+                                              bool report_diagnostic)
+{
+  two_phase_commit_failed_ = true;
+  if (report_diagnostic) {
+    report_db_conflict_diagnostic();
+  }
+  // abort_transaction() marks tx_failed and sets
+  // transaction_committed_or_aborted_. A failed abort (e.g. an unreadable db)
+  // outranks the commit failure being reported.
+  auto abort_status = co_await abort_transaction();
+  if (!abort_status.has_value()) {
+    co_return to_exec_result(abort_status.error().code());
+  }
+  co_return failure_result;
+}
+
+x23::Async<ExecResult>
 SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
@@ -503,17 +546,16 @@ SystemCallHandler::try_commit_transaction()
   assert(last_frame_.has_value());
   assert(root_invoke_succeeded());
   assert(root_invoke_result_.result_.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  InvocationFrame &last_frame = last_frame_.value();
 
   // If the last frame was set to manually revert, then we commit the
   // transaction as a no-op: body effects are discarded, but RCQ observations
   // and the replay nonce are still committed (see commit_body_discarded).
-  if (last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-          .value()
-          .should_revert()) {
+  if (last_frame.should_revert()) {
     // Extract the events so that the reverted transaction's events cannot be
     // sent later to the event server.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    last_frame_.value().extract_events();
+    last_frame.extract_events();
     co_return co_await commit_body_discarded(
         ExecResult::ExecResultTxRootFrameReverted);
   }
@@ -526,9 +568,7 @@ SystemCallHandler::try_commit_transaction()
   // future refactor bumps it in validation, mark_frame_as_failed on a later
   // failure path would pop_subtransactions a savepoint that was never pushed.
   assert(!std::holds_alternative<ValidationModeData>(execution_mode_data_) ||
-         last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-                 .value()
-                 .get_try_invoke_frame_count() == 0);
+         last_frame.get_try_invoke_frame_count() == 0);
 
   auto const &observations = std::visit(
       [](auto const &mode)
@@ -540,34 +580,20 @@ SystemCallHandler::try_commit_transaction()
   // Add the replay-nonce consume delta to the batch before acquiring the body
   // locks, so it rides in the same subtransaction push. A duplicate or expired
   // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
-  co_await add_replay_nonce_delta();
+  add_replay_nonce_delta();
 
-  auto r = co_await last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-               .value()
-               .try_acquire_frame_locks(db_proxy_, observations);
+  auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations);
   if (!r.has_value()) {
-    two_phase_commit_failed_ = true;
-    co_await report_db_conflict_diagnostic();
-    auto abort_res = co_await abort_transaction();
-    if (!abort_res.has_value()) {
-      co_return to_exec_result(abort_res.error().code());
-    }
-    co_return to_exec_result(r.error().code());
+    co_return co_await abort_after_commit_failure(to_exec_result(
+                                                      r.error().code()),
+                                                  /*report_diagnostic=*/true);
   }
 
-  bool result = r.value();
   // check if any of the 2pc database operations failed
-  if (!result) {
-    two_phase_commit_failed_ = true;
-    co_await report_db_conflict_diagnostic();
-
-    auto abort_status = co_await abort_transaction();
-    if (!abort_status.has_value()) {
-      co_return to_exec_result(abort_status.error().code());
-    }
-
-    // abort_transaction() sets transaction_committed_or_aborted_ to true
-    co_return ExecResult::ExecResultTxNonDeterministicError;
+  if (!r.value()) {
+    co_return co_await abort_after_commit_failure(
+        ExecResult::ExecResultTxNonDeterministicError,
+        /*report_diagnostic=*/true);
   }
 
   // Abort on a throw here rather than let it escape with the tx still open: a
@@ -579,10 +605,7 @@ SystemCallHandler::try_commit_transaction()
   // below, still before anything else can observe the open transaction.
   std::optional<ExecResult> commit_failure;
   try {
-    auto new_contract_hashes =
-        last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-            .value()
-            .get_committed_contracts();
+    auto new_contract_hashes = last_frame.get_committed_contracts();
     auto res = co_await db_proxy_.commit_transaction(
         newly_created_contracts_.borrow_contracts(new_contract_hashes));
     if (!res.has_value()) {
@@ -593,12 +616,8 @@ SystemCallHandler::try_commit_transaction()
     commit_failure = ExecResult::ExecResultUnrecoverable;
   }
   if (commit_failure.has_value()) {
-    two_phase_commit_failed_ = true;
-    auto abort_res = co_await abort_transaction();
-    if (!abort_res.has_value()) {
-      co_return to_exec_result(abort_res.error().code());
-    }
-    co_return *commit_failure;
+    co_return co_await abort_after_commit_failure(*commit_failure,
+                                                  /*report_diagnostic=*/false);
   }
 
   // This is past the point of successful commitment;
@@ -629,13 +648,13 @@ SystemCallHandler::abort_transaction()
   co_return co_await db_proxy_.abort_transaction();
 }
 
-x23::Async<void>
+void
 SystemCallHandler::add_replay_nonce_delta()
 {
   // Only real transactions (constructed from a Transaction) carry a uniquifier;
   // the test-harness constructor leaves it empty and consumes no nonce.
   if (!tx_uniquifier_.has_value()) {
-    co_return;
+    return;
   }
   // tx_uniquifier_ and root_invoked_address_ are populated together by the
   // Transaction constructor; a uniquifier without a root address would make the
@@ -675,27 +694,20 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
   // The replay nonce rides in the same batch as the observation deltas: a
   // duplicate/expired nonce (or a forged observation) fails the reservation and
   // the transaction is not included.
-  co_await add_replay_nonce_delta();
+  add_replay_nonce_delta();
 
   auto push_res = co_await db_proxy_.try_push_current_subtransaction();
   if (!push_res.has_value()) {
     // A system error (e.g. a stale block) leaves the HogDb InvokeTX open; abort
     // it before returning, mirroring the root-success lock-push failure path.
-    two_phase_commit_failed_ = true;
-    auto abort_status = co_await abort_transaction();
-    if (!abort_status.has_value()) {
-      co_return to_exec_result(abort_status.error().code());
-    }
-    co_return to_exec_result(push_res.error().code());
+    co_return co_await abort_after_commit_failure(to_exec_result(
+                                                      push_res.error().code()),
+                                                  /*report_diagnostic=*/false);
   }
   if (!push_res.value()) {
-    two_phase_commit_failed_ = true;
-    co_await report_db_conflict_diagnostic();
-    auto abort_status = co_await abort_transaction();
-    if (!abort_status.has_value()) {
-      co_return to_exec_result(abort_status.error().code());
-    }
-    co_return ExecResult::ExecResultTxNonDeterministicError;
+    co_return co_await abort_after_commit_failure(
+        ExecResult::ExecResultTxNonDeterministicError,
+        /*report_diagnostic=*/true);
   }
 
   auto res = co_await db_proxy_.commit_transaction();
@@ -703,14 +715,9 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
     // A system error (e.g. a stale block) leaves the HogDb InvokeTX open; abort
     // it before returning, mirroring the push-failure paths above and the
     // success-path commit failure in try_commit_transaction().
-    // abort_transaction() marks tx_failed and sets
-    // transaction_committed_or_aborted_.
-    two_phase_commit_failed_ = true;
-    auto abort_status = co_await abort_transaction();
-    if (!abort_status.has_value()) {
-      co_return to_exec_result(abort_status.error().code());
-    }
-    co_return to_exec_result(res.error().code());
+    co_return co_await abort_after_commit_failure(to_exec_result(
+                                                      res.error().code()),
+                                                  /*report_diagnostic=*/false);
   }
 
   HogexecMetrics::mark_tx_failed(root_invoke_result_,
@@ -845,27 +852,19 @@ SystemCallHandler::invoke(ContractAddress const &address,
     // logger allocation/sink failure (typically std::bad_alloc out of memory)
     // must not throw across the noexcept boundary and terminate the caller;
     // fail the invocation as unrecoverable instead (issue #2714).
-    try {
-      trace("SystemError: resolving runtime for address: {}, error {}",
-            x23::show(address), runtime.error());
-    } catch (std::exception const &e) {
-      report_dropped_log(e.what());
-      co_return invoke_result_t{SystemError{SystemErrorCode::Unrecoverable}, 0};
-    } catch (...) {
-      report_dropped_log("unknown exception");
+    if (!guarded_log("runtime-resolution failure diagnostic", [&] {
+          trace("SystemError: resolving runtime for address: {}, error {}",
+                x23::show(address), runtime.error());
+        })) {
       co_return invoke_result_t{SystemError{SystemErrorCode::Unrecoverable}, 0};
     }
     co_return invoke_result_t{runtime.error(), 0};
   }
   if (!runtime.value()) {
-    try {
-      trace("Failed to instantiate runtime for address: {}",
-            x23::show(address));
-    } catch (std::exception const &e) {
-      report_dropped_log(e.what());
-      co_return invoke_result_t{SystemError{SystemErrorCode::Unrecoverable}, 0};
-    } catch (...) {
-      report_dropped_log("unknown exception");
+    if (!guarded_log("runtime-instantiation failure diagnostic", [&] {
+          trace("Failed to instantiate runtime for address: {}",
+                x23::show(address));
+        })) {
       co_return invoke_result_t{SystemError{SystemErrorCode::Unrecoverable}, 0};
     }
     co_return invoke_result_t{
@@ -982,11 +981,9 @@ SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
                                                  flags, owned_auth_token_ids,
                                                  max_sha256_buffers);
     } catch (std::exception const &e) {
-      try {
+      guarded_log("frame-admission failure diagnostic", [&] {
         error("unrecoverable: frame admission threw: {}", e.what());
-      } catch (...) {
-        report_dropped_log("frame-admission failure diagnostic");
-      }
+      });
       return SystemError{SystemErrorCode::Unrecoverable};
     } catch (...) {
       report_dropped_log("non-std exception from frame admission");
@@ -1017,11 +1014,9 @@ SystemCallHandler::finish_frame(
   try {
     return finish_frame_impl(result, std::move(stashed_parent_trace));
   } catch (std::exception const &e) {
-    try {
+    guarded_log("frame-completion start failure diagnostic", [&] {
       error("unrecoverable: could not start frame completion: {}", e.what());
-    } catch (...) {
-      report_dropped_log("frame-completion start failure diagnostic");
-    }
+    });
     return SystemStatus<std::pair<InvokeResult, bool>>{
         SystemError{SystemErrorCode::Unrecoverable}};
   } catch (...) {
@@ -1084,11 +1079,9 @@ SystemCallHandler::finish_frame_impl(
       last_frame_finished_ = true;
     }
   } catch (std::exception const &e) {
-    try {
+    guarded_log("frame-completion failure diagnostic", [&] {
       error("unrecoverable: frame completion threw: {}", e.what());
-    } catch (...) {
-      report_dropped_log("frame-completion failure diagnostic");
-    }
+    });
     co_return SystemError{SystemErrorCode::Unrecoverable};
   } catch (...) {
     report_dropped_log("non-std exception from frame completion");
@@ -1223,12 +1216,12 @@ SystemCallHandler::last_commit_conflict() const
   return db_proxy_.last_push_conflict();
 }
 
-x23::Async<void>
+void
 SystemCallHandler::report_db_conflict_diagnostic() const
 {
   auto const &conflict = db_proxy_.last_push_conflict();
   if (conflict.level() == DbDiagnosticLevel::kDbDiagnosticNone) {
-    co_return;
+    return;
   }
   trace("two-phase commit conflict diagnostics: {}", x23::show(conflict));
 
@@ -1639,12 +1632,10 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, item_key);
-      if (!load_status.has_value()) {
-        co_return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
@@ -1750,12 +1741,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
       co_return std::make_pair(std::nullopt, 0);
     }
 
-    if (!unmodified_item->is_loaded()) {
-      auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, item_key);
-      if (!load_status.has_value()) {
-        co_return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
@@ -1859,6 +1848,33 @@ get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
   co_return co_await base_item.get_retrocausally_consumed_entries(count);
 }
 
+// An RCQ access to a DeletedItem key resolves against a fully-consumed view
+// of the snapshot's queue: the tx-local delete hides every entry, but the
+// retrocausally-consumed count already recorded on the view must be carried
+// forward. Loads the snapshot base item fresh (the DeletedItem holds none)
+// and builds that view.
+x23::Async<SystemStatus<RetrocausalQueueItem>>
+make_deleted_key_queue_item(FrameItemKey const &item_key,
+                            AddressAndKey const &addrkey,
+                            uint32_t retrocausally_consumed_count,
+                            StorageSnapshotCache &snapshot_cache,
+                            ExecutionModeData &execution_mode_data)
+{
+  UnmodifiedItem unmodified_item;
+  auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
+  if (!load_status.has_value()) {
+    co_return load_status.error();
+  }
+
+  auto consumed =
+      co_await get_retrocausally_consumed_entries(execution_mode_data,
+                                                  unmodified_item.base_item(),
+                                                  addrkey,
+                                                  retrocausally_consumed_count);
+  co_return RetrocausalQueueItem::make_fully_consumed_item(
+      unmodified_item.base_item(), std::move(consumed));
+}
+
 x23::Async<SystemStatus<SyscallStatus<RetrocausalQueueItem *>>>
 retrocausal_queue_item_from_view(ItemView *item_view,
                                  FrameItemKey const &item_key,
@@ -1870,12 +1886,10 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     co_return queue_item;
   }
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status =
-          co_await unmodified_item->load(snapshot_cache, item_key);
-      if (!load_status.has_value()) {
-        co_return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     RetrocausalQueueItem new_item(unmodified_item->base_item());
 
@@ -1887,21 +1901,14 @@ retrocausal_queue_item_from_view(ItemView *item_view,
   }
 
   if (item_view->get<DeletedItem>()) {
-
-    UnmodifiedItem unmodified_item;
-    assert(!unmodified_item.is_loaded());
-    auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
-    if (!load_status.has_value()) {
-      co_return load_status.error();
+    auto new_item = co_await make_deleted_key_queue_item(
+        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+        snapshot_cache, execution_mode_data);
+    if (!new_item.has_value()) {
+      co_return new_item.error();
     }
 
-    auto consumed = co_await get_retrocausally_consumed_entries(
-        execution_mode_data, unmodified_item.base_item(), addrkey,
-        item_view->get_retrocausally_consumed_count());
-    auto new_item = RetrocausalQueueItem::make_fully_consumed_item(
-        unmodified_item.base_item(), std::move(consumed));
-
-    auto set_status = item_view->set(new_item);
+    auto set_status = item_view->set(new_item.value());
     if (!set_status.has_value()) {
       co_return set_status.error();
     }
@@ -1961,12 +1968,10 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status =
-          co_await unmodified_item->load(snapshot_cache, item_key);
-      if (!load_status.has_value()) {
-        co_return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
 
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
@@ -1975,18 +1980,14 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
   }
 
   if (item_view->get<DeletedItem>()) {
-    UnmodifiedItem unmodified_item;
-    auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
-    if (!load_status.has_value()) {
-      co_return load_status.error();
+    auto queue_item = co_await make_deleted_key_queue_item(
+        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+        snapshot_cache, execution_mode_data);
+    if (!queue_item.has_value()) {
+      co_return queue_item.error();
     }
-
-    auto consumed = co_await get_retrocausally_consumed_entries(
-        execution_mode_data, unmodified_item.base_item(), addrkey,
-        item_view->get_retrocausally_consumed_count());
-    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
-        unmodified_item.base_item(), std::move(consumed));
-    co_return co_await load_next_queue_entry(queue_item, execution_mode_data,
+    co_return co_await load_next_queue_entry(queue_item.value(),
+                                             execution_mode_data,
                                              /*advance_cursor=*/false);
   }
 
@@ -2045,12 +2046,10 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   // into the view if an entry is found, so that a no-op consume on an
   // absent key does not pin the storage type.
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, item_key);
-      if (!load_status.has_value()) {
-        co_return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     auto entry =
@@ -2077,16 +2076,13 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   // Same treatment for deleted keys: a no-op consume should leave the
   // key deleted rather than converting it to an empty RCQ.
   if (item_view->get<DeletedItem>()) {
-    UnmodifiedItem unmodified_item;
-    auto load_status = co_await unmodified_item.load(snapshot_cache_, item_key);
-    if (!load_status.has_value()) {
-      co_return load_status.error();
+    auto queue_item_res = co_await make_deleted_key_queue_item(
+        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+        snapshot_cache_, execution_mode_data_);
+    if (!queue_item_res.has_value()) {
+      co_return queue_item_res.error();
     }
-    auto consumed = co_await get_retrocausally_consumed_entries(
-        execution_mode_data_, unmodified_item.base_item(), addrkey,
-        item_view->get_retrocausally_consumed_count());
-    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
-        unmodified_item.base_item(), std::move(consumed));
+    auto &queue_item = queue_item_res.value();
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
@@ -2119,12 +2115,10 @@ SystemCallHandler::get_native_token_balance(
   assert(item_view);
 
   if (auto *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status =
-          co_await unmodified_item->load(snapshot_cache_, item_key);
-      if (!load_status.has_value()) {
-        co_return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     auto const &base_item = unmodified_item->base_item();
     assert(base_item.type() == ItemViewType::kNativeTokenBalance);
@@ -2220,6 +2214,34 @@ auth_data_addrkey(ContractAddress const &address)
 {
   return {.address = address, .key = StorageKey(StorageKeyType::AuthData)};
 }
+
+// Apply a mutation to the given address's tx-local AddressAuthDataItem,
+// creating the item from scratch on first touch. Synchronous: the item view
+// is tx-local state, so no snapshot read is needed. The mutation runs exactly
+// once per call.
+SystemStatus<SyscallStatus<void>>
+modify_auth_data(InvocationFrameStack &invocation_frame_stack,
+                 ContractAddress const &address, auto mutate)
+{
+  auto *item_view =
+      invocation_frame_stack.get_item_view(auth_data_addrkey(address));
+  assert(item_view);
+
+  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    mutate(*address_auth_data_item);
+    return SystemStatus<SyscallStatus<void>>{};
+  }
+
+  if (item_view->get<DeletedItem>()) [[unlikely]] {
+    error("Unrecoverable: unexpected manual delete of authentication data");
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
+
+  assert(item_view->get<UnmodifiedItem>());
+  AddressAuthDataItem new_item;
+  mutate(new_item);
+  return item_view->set(new_item);
+}
 } // namespace
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -2232,49 +2254,20 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   }
 
   assert(!invocation_frame_stack_.empty());
-  auto addr = get_current_address();
-  AddressAndKey addrkey = auth_data_addrkey(addr);
-
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
-  assert(item_view);
-
-  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
-    address_auth_data_item->change_public_key(key_index, std::move(new_key));
-    co_return SystemStatus<SyscallStatus<void>>{};
-  }
-
-  if (item_view->get<DeletedItem>()) [[unlikely]] {
-    error("Unrecoverable: unexpected manual delete of authentication data");
-    co_return SystemError{SystemErrorCode::Unrecoverable};
-  }
-
-  assert(item_view->get<UnmodifiedItem>());
-  AddressAuthDataItem new_item;
-  new_item.change_public_key(key_index, std::move(new_key));
-  co_return item_view->set(new_item);
+  co_return modify_auth_data(invocation_frame_stack_, get_current_address(),
+                             [&](AddressAuthDataItem &item) {
+                               item.change_public_key(key_index,
+                                                      std::move(new_key));
+                             });
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_address_required_weight(Weight required_weight)
 {
-  auto addr = get_current_address();
-  auto addrkey = auth_data_addrkey(addr);
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
-  assert(item_view);
-
-  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
-    address_auth_data_item->set_required_weight(required_weight);
-    co_return SystemStatus<SyscallStatus<void>>{};
-  }
-
-  if (item_view->get<DeletedItem>()) [[unlikely]] {
-    error("Unrecoverable: unexpected manual delete of authentication data");
-    co_return SystemError{SystemErrorCode::Unrecoverable};
-  }
-  assert(item_view->get<UnmodifiedItem>());
-  AddressAuthDataItem new_item;
-  new_item.set_required_weight(required_weight);
-  co_return item_view->set(new_item);
+  co_return modify_auth_data(invocation_frame_stack_, get_current_address(),
+                             [&](AddressAuthDataItem &item) {
+                               item.set_required_weight(required_weight);
+                             });
 }
 
 const AuthClaim &
