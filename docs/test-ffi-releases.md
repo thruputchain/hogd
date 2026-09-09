@@ -14,7 +14,10 @@ After that tagged build succeeds, `Publish test_ffi to public S3` starts
 automatically. It runs publisher code from the default branch, downloads the
 six authenticated GitHub release assets, and verifies all checksums, archive
 layouts, binary formats, architectures, and shared-library types before
-assuming the dedicated AWS role. It publishes unchanged files under:
+assuming the dedicated AWS role. Archive inspection is streamed, with a 512 MiB
+library limit, 1 MiB per binding/header, and a total decompressed limit of
+514 MiB plus 64 KiB for tar overhead. The total bound also covers extended
+metadata and trailing data. It publishes unchanged files under:
 
 ```text
 test-ffi/test-ffi-vX.Y.Z/libtest_ffi-linux-x86_64.tar.gz

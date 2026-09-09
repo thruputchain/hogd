@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import importlib.util
 import io
@@ -54,6 +55,74 @@ class PublicationTests(unittest.TestCase):
             for item in files:
                 self.assertEqual(item['key'], f'test-ffi/test-ffi-v1.2.3/{item["path"].name}')
                 self.assertEqual(item['sha256'], hashlib.sha256(item['path'].read_bytes()).hexdigest())
+
+    def replace_archive(self, root, raw):
+        name = 'libtest_ffi-linux-x86_64.tar.gz'
+        path = root / name
+        path.write_bytes(gzip.compress(raw))
+        (root / f'{name}.sha256').write_text(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {name}\n')
+
+    def test_oversized_members_rejected_from_header_without_reading_payload(self):
+        for member, limit in [('libtest_ffi.so', script.MAX_LIBRARY_BYTES),
+                              ('bindings.rs', script.MAX_BINDING_BYTES)]:
+            with self.subTest(member=member), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                make_assets(root)
+                info = tarfile.TarInfo(member)
+                info.size = limit + 1
+                # No payload: a parser advancing beyond this header fails with
+                # a truncated-archive error instead of the required early limit.
+                self.replace_archive(root, info.tobuf())
+                with self.assertRaisesRegex(script.PublicationError, 'member exceeds size limit'):
+                    script.prepare_files(root, 'test-ffi-v1.2.3')
+
+    def test_metadata_expansion_is_bounded_before_tar_yields_a_member(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_assets(root)
+            info = tarfile.TarInfo('././@LongLink')
+            info.type = tarfile.GNUTYPE_LONGNAME
+            info.size = 2 * 1024 * 1024
+            self.replace_archive(root, info.tobuf() + b'x' * info.size)
+            consumed = []
+            original_read = gzip.GzipFile.read
+            def counted_read(handle, size=-1):
+                data = original_read(handle, size)
+                consumed.append(len(data))
+                return data
+            with patch.object(script, 'MAX_UNCOMPRESSED_BYTES', 64 * 1024), \
+                    patch.object(gzip.GzipFile, 'read', counted_read):
+                with self.assertRaisesRegex(script.PublicationError, 'total uncompressed-size'):
+                    script.prepare_files(root, 'test-ffi-v1.2.3')
+            self.assertLessEqual(sum(consumed), 64 * 1024 + 1)
+
+    def test_total_limit_applies_across_individually_valid_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_assets(root)
+            raw = io.BytesIO()
+            with tarfile.open(fileobj=raw, mode='w') as archive:
+                for name in ('libtest_ffi.so', 'test_bindings.h', 'bindings.rs'):
+                    info = tarfile.TarInfo(name)
+                    payload = library_header('linux-x86_64') if name.endswith('.so') else b''
+                    payload = payload.ljust(32 * 1024, b'\0')
+                    info.size = len(payload)
+                    archive.addfile(info, io.BytesIO(payload))
+            self.replace_archive(root, raw.getvalue())
+            with patch.object(script, 'MAX_UNCOMPRESSED_BYTES', 64 * 1024):
+                with self.assertRaisesRegex(script.PublicationError, 'total uncompressed-size'):
+                    script.prepare_files(root, 'test-ffi-v1.2.3')
+
+    def test_trailing_data_after_tar_end_is_bounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_assets(root)
+            path = root / 'libtest_ffi-linux-x86_64.tar.gz'
+            raw = gzip.decompress(path.read_bytes()) + b'\0' * (128 * 1024)
+            self.replace_archive(root, raw)
+            with patch.object(script, 'MAX_UNCOMPRESSED_BYTES', 64 * 1024):
+                with self.assertRaisesRegex(script.PublicationError, 'total uncompressed-size'):
+                    script.prepare_files(root, 'test-ffi-v1.2.3')
 
     def test_wrong_platform_and_malformed_libraries_rejected(self):
         cases = [

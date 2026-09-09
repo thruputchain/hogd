@@ -461,6 +461,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
+          fail_on_unmatched_files: true
           tag_name: ${{ github.ref_name }}
           name: Bindings for Rust SDK (${{ github.ref_name }})
           draft: false

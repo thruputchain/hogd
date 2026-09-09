@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import re
 import struct
 import sys
@@ -15,6 +16,25 @@ from public_artifacts import PublicationError, publish_file, sha256_file
 
 PLATFORMS = ('linux-x86_64', 'linux-arm64', 'macos-arm64')
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_LIBRARY_BYTES = 512 * 1024 * 1024
+MAX_BINDING_BYTES = 1024 * 1024
+# Includes tar headers, padding, extended metadata, and trailing gzip data.
+MAX_UNCOMPRESSED_BYTES = MAX_LIBRARY_BYTES + 2 * MAX_BINDING_BYTES + 64 * 1024
+
+
+class BoundedReader:
+    """Cap decompressed bytes before tarfile can consume payload or metadata."""
+    def __init__(self, handle, limit):
+        self.handle = handle
+        self.remaining = limit
+
+    def read(self, size=-1):
+        size = self.remaining + 1 if size < 0 else min(size, self.remaining + 1)
+        data = self.handle.read(size)
+        self.remaining -= len(data)
+        if self.remaining < 0:
+            raise PublicationError('archive exceeds total uncompressed-size limit')
+        return data
 
 
 def validate_library_header(header: bytes, platform: str) -> None:
@@ -52,13 +72,28 @@ def prepare_files(assets_dir: Path, tag: str) -> list[dict]:
             raise PublicationError(f'checksum mismatch or invalid sidecar: {name}')
         library = 'libtest_ffi.dylib' if platform.startswith('macos') else 'libtest_ffi.so'
         expected = {library, 'test_bindings.h', 'bindings.rs'}
-        with tarfile.open(archive, 'r:gz') as tar:
-            members = tar.getmembers()
-            if (len(members) != len(expected) or {m.name for m in members} != expected
-                    or any(not m.isfile() or not 0 < m.size <= MAX_ARCHIVE_BYTES for m in members)):
+        seen = set()
+        with gzip.open(archive, 'rb') as handle:
+            bounded = BoundedReader(handle, MAX_UNCOMPRESSED_BYTES)
+            # Stream so an oversized member is rejected before advancing over
+            # its payload. The outer bound also covers hidden PAX/GNU metadata.
+            with tarfile.open(fileobj=bounded, mode='r|') as tar:
+                for member in tar:
+                    if member.name not in expected or member.name in seen or not member.isfile():
+                        raise PublicationError(f'unexpected archive layout: {name}')
+                    limit = MAX_LIBRARY_BYTES if member.name == library else MAX_BINDING_BYTES
+                    if not 0 < member.size <= limit:
+                        raise PublicationError(f'archive member exceeds size limit: {member.name}')
+                    seen.add(member.name)
+                    if member.name == library:
+                        with tar.extractfile(member) as payload:
+                            validate_library_header(payload.read(64), platform)
+            if seen != expected:
                 raise PublicationError(f'unexpected archive layout: {name}')
-            with tar.extractfile(library) as handle:
-                validate_library_header(handle.read(64), platform)
+            # Finish the gzip stream under the same bound, including trailing
+            # padding/data and the checksum footer, even after tar's end marker.
+            while bounded.read(64 * 1024):
+                pass
         for path, content_type in ((archive, 'application/gzip'), (checksum, 'text/plain; charset=utf-8')):
             files.append({'path': path, 'key': f'test-ffi/{tag}/{path.name}',
                           'size': path.stat().st_size, 'sha256': sha256_file(path),
@@ -81,7 +116,7 @@ def main() -> int:
         for item in files:
             outcome = publish_file(item, bucket=args.bucket, base_url=args.base_url) if args.publish else 'validated'
             print(f'{outcome}: {item["key"]}')
-    except (PublicationError, OSError, ValueError, tarfile.TarError) as error:
+    except (PublicationError, OSError, ValueError, EOFError, tarfile.TarError) as error:
         print(f'error: {error}', file=sys.stderr)
         return 1
     return 0
