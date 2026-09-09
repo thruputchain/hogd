@@ -133,7 +133,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
       return EXIT_FAILURE;
     }
     // The state hash above covers no part of the chain configuration.
-    if (!tip_is_servable(ctx.get_db(), *tip, *cost_model)) {
+    if (!StartupValidation::tip_is_servable(ctx.get_db(), *tip, *cost_model)) {
       return EXIT_FAILURE;
     }
     ctx.set_tip(*tip);

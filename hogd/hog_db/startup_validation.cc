@@ -9,8 +9,8 @@
 namespace hogd {
 
 bool
-tip_is_servable(HogDbDAO &db, const DbTip &tip,
-                const StorageCostModel &cost_model)
+StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
+                                   const StorageCostModel &cost_model)
 {
   // Ahead of make_config_hash_preimage, which CHECKs this.
   if (!config_hashable(tip.network_config)) {

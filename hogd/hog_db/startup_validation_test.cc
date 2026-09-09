@@ -115,7 +115,7 @@ TEST_F(RecoveredTipTest, AcceptsTheTipItsHeaderCommitsTo)
   const HogDbStatus<DbTip> tip = db.read_dbtip();
   ASSERT_TRUE(tip.has_value());
   EXPECT_EQ(tip->default_wallet, native_default_wallet_hash());
-  EXPECT_TRUE(tip_is_servable(db, *tip, cost_model_));
+  EXPECT_TRUE(StartupValidation::tip_is_servable(db, *tip, cost_model_));
 }
 
 // #3926: `<DBTIP` is global metadata, so rewriting the wallet selector there
@@ -139,7 +139,7 @@ TEST_F(RecoveredTipTest, RejectsRewrittenDefaultWallet)
   const HogDbStatus<DbTip> tampered = db.read_dbtip();
   ASSERT_TRUE(tampered.has_value());
   ASSERT_EQ(tampered->default_wallet, absent);
-  EXPECT_FALSE(tip_is_servable(db, *tampered, cost_model_));
+  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *tampered, cost_model_));
 }
 
 // `<COSTMODEL` is the other unhashed row; startup reads the model it passes
@@ -152,7 +152,8 @@ TEST_F(RecoveredTipTest, RejectsRewrittenCostModel)
 
   StorageCostModelXdr xdr = cost_model_.to_xdr();
   xdr.balance_cost++;
-  EXPECT_FALSE(tip_is_servable(db, *tip, StorageCostModel(xdr)));
+  EXPECT_FALSE(
+      StartupValidation::tip_is_servable(db, *tip, StorageCostModel(xdr)));
 }
 
 // A wallet the header commits to but whose row is absent. Nothing before
@@ -171,7 +172,7 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletWithNoContractRow)
       make_config_hash_preimage(cost_model_, tip->network_config, absent));
   ASSERT_FALSE(db.read_contract_code(absent.hash).has_value());
 
-  EXPECT_FALSE(tip_is_servable(db, *tip, cost_model_));
+  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *tip, cost_model_));
 }
 
 // The same tip at height 0 is served: the genesis ceremony attaches that code
@@ -191,7 +192,7 @@ TEST_F(RecoveredTipTest, AcceptsDefaultWalletTheCeremonyHasYetToDeploy)
                                 ceremony_deployed));
   ASSERT_FALSE(db.read_contract_code(ceremony_deployed.hash).has_value());
 
-  EXPECT_TRUE(tip_is_servable(db, *tip, cost_model_));
+  EXPECT_TRUE(StartupValidation::tip_is_servable(db, *tip, cost_model_));
 }
 
 // Refused before the hash is computed, rather than aborting inside
@@ -209,7 +210,7 @@ TEST_F(RecoveredTipTest, RejectsNonCanonicalNetworkConfig)
   ASSERT_FALSE(NetworkConfigParams::is_canonical(gapped.v0()));
   tip->network_config = gapped;
 
-  EXPECT_FALSE(tip_is_servable(db, *tip, cost_model_));
+  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *tip, cost_model_));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

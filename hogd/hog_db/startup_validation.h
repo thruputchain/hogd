@@ -8,11 +8,14 @@
 
 namespace hogd {
 
-// Whether a recovered `tip` may be served, logging what failed if not. The
-// `<DBTIP` and `<COSTMODEL` rows are global metadata, outside the consensus
-// state hash, so re-deriving the config hash here is the only thing binding
-// the configuration a node executes under to what consensus agreed (#3926).
-bool tip_is_servable(HogDbDAO &db, const DbTip &tip,
-                     const StorageCostModel &cost_model);
+class StartupValidation {
+public:
+  // Whether a recovered `tip` may be served, logging what failed if not. The
+  // `<DBTIP` and `<COSTMODEL` rows are global metadata, outside the consensus
+  // state hash, so re-deriving the config hash here is the only thing binding
+  // the configuration a node executes under to what consensus agreed (#3926).
+  static bool tip_is_servable(HogDbDAO &db, const DbTip &tip,
+                              const StorageCostModel &cost_model);
+};
 
 } // namespace hogd
