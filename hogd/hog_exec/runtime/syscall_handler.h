@@ -133,12 +133,6 @@ public:
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
 
-  // Body of finish_frame(). Not noexcept: it is the coroutine, and its frame
-  // allocation is what finish_frame() catches on its behalf.
-  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
-  finish_frame_impl(InvokeStatus<void> result,
-                    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
-
   InvocationFrameOutput get_most_recent_frame_output() const;
   x23::Vec<TxEmittedEvent> get_most_recent_frame_events() const;
 
@@ -251,7 +245,7 @@ public:
   // rides in the same batch/push as the surrounding deltas, so a duplicate or
   // expired nonce makes that batch's reservation fail and the transaction is
   // rejected as a replay.
-  x23::Async<void> add_replay_nonce_delta();
+  void add_replay_nonce_delta();
 
   // Commits a transaction whose body effects are discarded (a manual revert or
   // a deterministic fault). Adds validation-mode RCQ observation deltas and the
@@ -549,6 +543,12 @@ private:
   static InvokeStatus<void> handle_root_host_fn_status(
       SystemStatus<SyscallStatus<InvocationFrameStatusCode>> status);
 
+  // Body of finish_frame(). Not noexcept: it is the coroutine, and its frame
+  // allocation is what finish_frame() catches on its behalf.
+  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+  finish_frame_impl(InvokeStatus<void> result,
+                    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
+
   // Resolve the Runtime associated with the queried address.
   // Creates a new runtime if contract is deployed at
   // that address in the current context (i.e. if a contract is deployed there
@@ -562,6 +562,14 @@ private:
   // transaction.
   void commit_last_call_frame_success(InvocationFrame &&frame);
 
+  // Shared failure epilogue for the two-phase-commit push/commit sites in
+  // try_commit_transaction() and commit_body_discarded(): records the 2pc
+  // failure, optionally reports the conflict diagnostic (only push sites that
+  // detected a conflict do), aborts the HogDb transaction, and returns
+  // failure_result -- unless the abort itself fails, whose error outranks it.
+  x23::Async<ExecResult> abort_after_commit_failure(ExecResult failure_result,
+                                                    bool report_diagnostic);
+
   // On a failed 2pc push: trace-logs db_proxy_'s last_push_conflict() and
   // fire-and-forgets a best-effort TxFailureDiagnostic (first conflict +
   // executing block height) to the event server, which relays it to the
@@ -571,9 +579,9 @@ private:
   // validation/viewing blocks) -- hog_db selects the level from the block's
   // execution mode, so there is no seam to configure here. Called right
   // after each 2pc push failure site sets two_phase_commit_failed_. Never
-  // fails; suspends only on the db-tip read the diagnostic's attempt height
-  // needs, and the send itself stays fire-and-forget.
-  x23::Async<void> report_db_conflict_diagnostic() const;
+  // fails and never suspends: the attempt height is a plain read off the
+  // pinned tip, and the send runs in its own detached coroutine.
+  void report_db_conflict_diagnostic() const;
 
   BlockExecutionMode get_block_execution_mode() const
   {
