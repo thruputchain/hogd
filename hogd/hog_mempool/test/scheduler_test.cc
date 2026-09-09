@@ -14,6 +14,7 @@
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -54,7 +55,10 @@ TEST(Scheduler, AddVettedTx)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
@@ -71,8 +75,12 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]})();
 
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
@@ -82,6 +90,18 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
+}
+
+TEST(Scheduler, IsPendingReturnsFalseForUncachedAccount)
+{
+  const ContractAddress kUncachedAccount = make_account_address(99);
+  fib_client_t fib_client(kUncachedAccount);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  EXPECT_FALSE(scheduler->is_pending(txs[0]));
 }
 
 TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
@@ -118,10 +138,16 @@ TEST(Scheduler, AddVettedTxDuplicate)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch first = scheduler->add_txs({txs[0]})();
+  ASSERT_EQ(first.size(), 1UL);
+  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
   // Now add the transaction a second time.
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch duplicate =
+      scheduler->add_txs({txs[0]})();
+  ASSERT_EQ(duplicate.size(), 1UL);
+  EXPECT_EQ(duplicate[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
