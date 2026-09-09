@@ -245,7 +245,7 @@ public:
   // rides in the same batch/push as the surrounding deltas, so a duplicate or
   // expired nonce makes that batch's reservation fail and the transaction is
   // rejected as a replay.
-  x23::Async<void> add_replay_nonce_delta();
+  void add_replay_nonce_delta();
 
   // Commits a transaction whose body effects are discarded (a manual revert or
   // a deterministic fault). Adds validation-mode RCQ observation deltas and the
@@ -579,9 +579,9 @@ private:
   // validation/viewing blocks) -- hog_db selects the level from the block's
   // execution mode, so there is no seam to configure here. Called right
   // after each 2pc push failure site sets two_phase_commit_failed_. Never
-  // fails; suspends only on the db-tip read the diagnostic's attempt height
-  // needs, and the send itself stays fire-and-forget.
-  x23::Async<void> report_db_conflict_diagnostic() const;
+  // fails and never suspends: the attempt height is a plain read off the
+  // pinned tip, and the send runs in its own detached coroutine.
+  void report_db_conflict_diagnostic() const;
 
   BlockExecutionMode get_block_execution_mode() const
   {

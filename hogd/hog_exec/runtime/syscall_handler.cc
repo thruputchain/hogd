@@ -80,8 +80,6 @@ contract_blob_size(Contract const &contract)
   panic("Unrecoverable; Invalid contract type: {}", contract.contract_type());
 }
 
-constexpr NewContractBatch kEmptyVec = {};
-
 ExecutionModeData
 make_execution_mode_data(ExecutionModeCtor execution_mode_ctor)
 {
@@ -214,6 +212,10 @@ SystemCallHandler::SystemCallHandler(
   // in release builds too.
   CHECK(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
 }
+
+namespace {
+constexpr NewContractBatch kEmptyVec = {};
+} // namespace
 
 SystemCallHandler::SystemCallHandler(
     StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
@@ -485,7 +487,7 @@ SystemCallHandler::abort_after_commit_failure(ExecResult failure_result,
 {
   two_phase_commit_failed_ = true;
   if (report_diagnostic) {
-    co_await report_db_conflict_diagnostic();
+    report_db_conflict_diagnostic();
   }
   // abort_transaction() marks tx_failed and sets
   // transaction_committed_or_aborted_. A failed abort (e.g. an unreadable db)
@@ -580,7 +582,7 @@ SystemCallHandler::try_commit_transaction()
   // Add the replay-nonce consume delta to the batch before acquiring the body
   // locks, so it rides in the same subtransaction push. A duplicate or expired
   // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
-  co_await add_replay_nonce_delta();
+  add_replay_nonce_delta();
 
   auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations);
   if (!r.has_value()) {
@@ -648,13 +650,13 @@ SystemCallHandler::abort_transaction()
   co_return co_await db_proxy_.abort_transaction();
 }
 
-x23::Async<void>
+void
 SystemCallHandler::add_replay_nonce_delta()
 {
   // Only real transactions (constructed from a Transaction) carry a uniquifier;
   // the test-harness constructor leaves it empty and consumes no nonce.
   if (!tx_uniquifier_.has_value()) {
-    co_return;
+    return;
   }
   // tx_uniquifier_ and root_invoked_address_ are populated together by the
   // Transaction constructor; a uniquifier without a root address would make the
@@ -694,7 +696,7 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
   // The replay nonce rides in the same batch as the observation deltas: a
   // duplicate/expired nonce (or a forged observation) fails the reservation and
   // the transaction is not included.
-  co_await add_replay_nonce_delta();
+  add_replay_nonce_delta();
 
   auto push_res = co_await db_proxy_.try_push_current_subtransaction();
   if (!push_res.has_value()) {
@@ -1216,12 +1218,12 @@ SystemCallHandler::last_commit_conflict() const
   return db_proxy_.last_push_conflict();
 }
 
-x23::Async<void>
+void
 SystemCallHandler::report_db_conflict_diagnostic() const
 {
   auto const &conflict = db_proxy_.last_push_conflict();
   if (conflict.level() == DbDiagnosticLevel::kDbDiagnosticNone) {
-    co_return;
+    return;
   }
   trace("two-phase commit conflict diagnostics: {}", x23::show(conflict));
 
