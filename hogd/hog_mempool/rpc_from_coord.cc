@@ -373,6 +373,16 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                 ? 0
                 : static_cast<size_t>(mempool_tx_size_limit_ - scheduler_size);
 
+        // If every authenticated entry fits even when they are all distinct,
+        // there is no need to identify duplicates here. [add_txs()] already
+        // deduplicates while adding the batch, and the scheduler can grow by
+        // at most [txs->size()]. Besides avoiding unnecessary account-bucket
+        // lookups, this keeps transaction hashing in [add_txs()]'s parallel
+        // pass instead of serializing it while [commit_lock_] is held.
+        if (num_slots_left >= txs->size()) {
+          co_return;
+        }
+
         SignedTransactionBatch capacity_txs;
         x23::Vec<size_t> capacity_indices;
         capacity_txs.reserve(txs->size());
