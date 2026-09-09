@@ -223,12 +223,25 @@ stcplisten(const sockaddr_storage &bind_addr, int backlog)
 }
 
 UniqueFd
+cloexec_stream_socket(int family)
+{
+#ifdef SOCK_CLOEXEC
+  return UniqueFd(socket(family, SOCK_STREAM | SOCK_CLOEXEC, 0));
+#else  // !SOCK_CLOEXEC
+  UniqueFd fd(socket(family, SOCK_STREAM, 0));
+  if (fd)
+    set_cloexec(fd);
+  return fd;
+#endif // !SOCK_CLOEXEC
+}
+
+UniqueFd
 tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
 {
   extern bool in_thread_pool();
   x23assert(!in_thread_pool());
 
-  UniqueFd fd(socket(ss.ss_family, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  UniqueFd fd(cloexec_stream_socket(ss.ss_family));
   if (!fd)
     Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
   if (prep_fd)

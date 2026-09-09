@@ -44,6 +44,12 @@ void set_nodelay(BorrowedFd fd, bool on = true);
 // Set (on) or clear (!on) the O_NONBLOCK flag on a file descriptor
 void set_nonblock(BorrowedFd fd, bool on = true);
 
+// Create a SOCK_STREAM socket with the close-on-exec flag set.  Uses
+// SOCK_CLOEXEC where available; otherwise (e.g., macOS) sets
+// FD_CLOEXEC with fcntl after socket creation.  Returns a null
+// UniqueFd with errno set if socket creation fails.
+UniqueFd cloexec_stream_socket(int family);
+
 // After calling this function, closing fd (which must be a TCP
 // socket) will send a RST segment instead of a FIN segment, thereby
 // avoiding TIME_WAIT on the active closer.
