@@ -33,7 +33,7 @@ TEST(SrpcRegression, ProgramUnavailableReplyIsFramed)
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
 
-  UniqueFd client = tcpconnect("127.0.0.1", port);
+  UniqueFd client = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client);
 
   UniqueFd accepted(::accept(listener.get(), nullptr, nullptr));
@@ -199,7 +199,7 @@ TEST(SrpcRegression, OversizedBoundedVecReplyIsDecodeError)
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
 
-  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client_fd);
   UniqueFd peer_fd{::accept(listener.get(), nullptr, nullptr)};
   ASSERT_TRUE(peer_fd);
@@ -331,7 +331,7 @@ TEST(SrpcRegression, StopCompletesQueuedClientCallback)
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
 
-  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client_fd);
   // Accepted but intentionally idle: nothing ever replies on this stream.
   UniqueFd peer_fd{::accept(listener.get(), nullptr, nullptr)};

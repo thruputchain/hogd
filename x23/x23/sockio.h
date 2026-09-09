@@ -167,17 +167,14 @@ namespace x23 {
 std::expected<UniqueFd, Errno>
 tcpconnect(const sockaddr_storage &ss,
            std::function<void(int)> prep_fd = nullptr);
-inline UniqueFd
+inline std::expected<UniqueFd, MultiError<Errno, GaiError>>
 tcpconnect(auto host, auto port, std::function<void(int)> prep_fd = nullptr)
     requires requires { HostPort{std::move(host), std::move(port)}; }
 {
   auto addr = HostPort{host, port}.to_addr();
   if (!addr)
-    throw addr.error();
-  auto conn = tcpconnect(*addr, std::move(prep_fd));
-  if (!conn)
-    conn.error().raise("connect({})", HostPort(*addr));
-  return std::move(*conn);
+    return addr.error();
+  return tcpconnect(*addr, std::move(prep_fd));
 }
 
 } // namespace x23
