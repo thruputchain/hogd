@@ -22,6 +22,10 @@ SHELL := /bin/bash
 
 BUILD_DIR ?= build
 BUILD_TYPE ?= Release
+# make install destination; DESTDIR stages under another root for packaging.
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+DESTDIR ?=
 # 'gcc' or 'clang'; empty leaves the choice to scripts/env.sh.
 COMPILER ?=
 # Extra targets for `make build`, e.g. `make build TARGETS="hog-gateway scpd"`.
@@ -102,6 +106,9 @@ help:
 	@echo ""
 	@echo "  version       what a build here embeds, and what the tree already has"
 	@echo ""
+	@echo "Install"
+	@echo "  install       copy every built hog-* binary to $(BINDIR)"
+	@echo ""
 	@echo "Clean"
 	@echo "  clean         build system clean inside $(BUILD_DIR)"
 	@echo "  distclean     remove $(BUILD_DIR) outright"
@@ -146,13 +153,19 @@ devnode:
 # resolution (HOGD_DISTRIBUTION_VERSION, else an exact tag, else the cmake
 # project version) and re-runs on every build, so the embedded block below is
 # the authority and the source block only shows what feeds it.
+#
+# The dirty check refreshes the index first, as that cmake script does. Without
+# it a clean tree reads as dirty wherever stat data does not match the index,
+# which is every bind-mounted container and every fresh clone. The binary line
+# runs the binary rather than testing -x, so a build for another platform is
+# reported as absent instead of erroring.
 .PHONY: version
 version:
 	@echo "source tree"
 	@echo "  cmake project              $(PROJECT_VERSION)"
 	@echo "  exact tag                  $$(git describe --tags --exact-match 2>/dev/null || echo '(none)')"
 	@echo "  HOGD_DISTRIBUTION_VERSION  $${HOGD_DISTRIBUTION_VERSION:-(unset)}"
-	@echo "  commit                     $$(git rev-parse --short=12 HEAD)$$(git diff-index --quiet HEAD -- 2>/dev/null || echo '+dirty')"
+	@echo "  commit                     $$(git rev-parse --short=12 HEAD)$$(git update-index --refresh >/dev/null 2>&1; git diff-index --quiet HEAD -- 2>/dev/null || echo '+dirty')"
 	@echo "  protocol submodule         $$(git -C protocol rev-parse --short=12 HEAD 2>/dev/null || echo '(not checked out)')"
 	@if [ -f $(VERSION_C) ]; then \
 		echo "embedded in $(BUILD_DIR)"; \
@@ -160,10 +173,28 @@ version:
 	else \
 		echo "embedded in $(BUILD_DIR): nothing built yet"; \
 	fi
-	@if [ -x $(DEVNODE_BIN) ]; then \
+	@if out=$$($(DEVNODE_BIN) --version 2>/dev/null); then \
 		echo "binaries"; \
-		echo "  $$($(DEVNODE_BIN) --version)"; \
+		echo "  $$out"; \
 	fi
+
+# Installs by convention rather than from a list: every executable this repo
+# ships is named hog-*, so nothing here needs updating when one is added. The
+# repo has no cmake install() rules for these targets, so copy them directly.
+# Deliberately does not depend on build - an unbuilt tree should say so, not
+# start a half-hour compile from an install command.
+.PHONY: install
+install:
+	@bins=$$(find $(BUILD_DIR) -type f -perm -111 -name 'hog-*' -not -path '*/CMakeFiles/*' 2>/dev/null | sort); \
+	if [ -z "$$bins" ]; then \
+		echo "no hog-* binaries in $(BUILD_DIR); run 'make build' first" >&2; \
+		exit 1; \
+	fi; \
+	mkdir -p "$(DESTDIR)$(BINDIR)"; \
+	for b in $$bins; do \
+		install -m 755 "$$b" "$(DESTDIR)$(BINDIR)/" || exit 1; \
+		echo "  $(DESTDIR)$(BINDIR)/$$(basename $$b)"; \
+	done
 
 .PHONY: test
 test:
