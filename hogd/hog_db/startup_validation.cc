@@ -26,7 +26,14 @@ validate_recovered_tip(HogDbDAO &db, const DbTip &tip,
       tip.value.proposal_header.config_hash) {
     return std::unexpected(TipRejection::kConfigHashMismatch);
   }
-  if (!db.read_contract_code(tip.default_wallet.hash)) {
+  // Past genesis only. A chain may fund its accounts with its own wallet
+  // artifact and name that as its default; the genesis ceremony attaches that
+  // code in the height-1 block, so at height 0 the configured wallet has no
+  // row yet and legitimately so. From the ceremony onward it has to resolve,
+  // or a root call to an undeployed address is an unrecoverable execution
+  // error instead of a wallet invocation.
+  if (tip.value.proposal_header.block_height > 0 &&
+      !db.read_contract_code(tip.default_wallet.hash)) {
     return std::unexpected(TipRejection::kDefaultWalletMissing);
   }
   return {};

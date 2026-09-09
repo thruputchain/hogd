@@ -121,17 +121,17 @@ TEST_F(GenesisConfigValidationTest, AcceptsStockDefaultWallet)
             DbSchedResult::DbSchedResultOK);
 }
 
-// One that names any other wallet has no contract behind it: nothing writes
-// that row. Refused here rather than at the first root call to an undeployed
-// address, where it becomes an unrecoverable execution error, and rather than
-// at the next restart, where the startup check would refuse a database this
-// load had accepted. See groundhogchain/hogd#3926.
-TEST_F(GenesisConfigValidationTest, RejectsDefaultWalletWithNoContract)
+// So is one naming a wallet with no height-0 contract row. A chain may fund
+// its accounts with its own wallet artifact and name that as its default, and
+// the ceremony attaches that code in the height-1 block -- so requiring the
+// row here would refuse a supported chain. validate_recovered_tip carries the
+// requirement instead, from the ceremony onward.
+TEST_F(GenesisConfigValidationTest, AcceptsDefaultWalletTheCeremonyDeploys)
 {
-  DeployedContractHash absent = native_default_wallet_hash();
-  absent.hash.fill(0xE7);
-  EXPECT_EQ(load_with_default_wallet(absent),
-            DbSchedResult::DbSchedResultError);
+  DeployedContractHash ceremony_deployed = native_default_wallet_hash();
+  ceremony_deployed.hash.fill(0xE7);
+  EXPECT_EQ(load_with_default_wallet(ceremony_deployed),
+            DbSchedResult::DbSchedResultOK);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -39,9 +39,11 @@ and `<COSTMODEL` are global metadata, which `is_state_item` leaves out of
 `storage_long_hash` has said nothing about the configuration it carries.
 `validate_recovered_tip` re-derives the config hash from the recovered tip at
 startup and checks it against the one that tip's committed header states,
-before hog_db serves anything (#3926). It also refuses a default wallet with no
-contract row, which otherwise stays invisible until the first root call to an
-undeployed address returns an unrecoverable execution error.
+before hog_db serves anything (#3926). Past height 0 it also refuses a default
+wallet with no contract row, which otherwise stays invisible until the first
+root call to an undeployed address returns an unrecoverable execution error;
+height 0 is exempt because a chain may name a wallet artifact its own genesis
+ceremony deploys in the height-1 block.
 
 Nothing changes the configuration after genesis yet. Because it is already
 per-tip state rather than a compiled-in constant, adding that does not require

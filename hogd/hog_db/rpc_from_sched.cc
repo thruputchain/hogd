@@ -417,18 +417,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  // A genesis may name a default wallet other than the native one, which is
-  // the only wallet the prerequisites above write. Refusing it here rather
-  // than letting the absence surface at the first root call to an undeployed
-  // address, as an unrecoverable execution error -- and rather than at the
-  // next restart, where validate_recovered_tip would refuse a database this
-  // call had already accepted.
-  if (!ctx_.get_db().read_contract_code(
-          genesis_configuration.default_wallet.hash)) {
-    error("genesis names a default wallet with no contract");
-    co_return DbSchedResult::DbSchedResultError;
-  }
-
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
   }

@@ -36,6 +36,10 @@ namespace {
 constexpr std::size_t kHeapSize = 10_MiB;
 constexpr BlockTXID kBlock = 7;
 
+// Past the height-1 genesis ceremony, so the wallet-row rule is in force. The
+// height-0 case, where it is not, is its own test below.
+constexpr BlockHeight kTipHeight = 4;
+
 Contract
 native_default_wallet_contract()
 {
@@ -80,7 +84,7 @@ protected:
     ctx.set_default_wallet(native_default_wallet_hash());
     ctx.set_network_config(stock_network_config());
     ConsensusValue value{};
-    value.proposal_header.block_height = 0;
+    value.proposal_header.block_height = kTipHeight;
     value.proposal_header.config_hash = compute_config_hash(
         make_config_hash_preimage(cost_model_, stock_network_config(),
                                   native_default_wallet_hash()));
@@ -166,6 +170,7 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletWithNoContractRow)
   HogDbDAO db = reopen();
   HogDbStatus<DbTip> tip = db.read_dbtip();
   ASSERT_TRUE(tip.has_value());
+  ASSERT_GT(tip->value.proposal_header.block_height, 0);
 
   DeployedContractHash absent = native_default_wallet_hash();
   absent.hash.fill(0xE7);
@@ -177,6 +182,29 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletWithNoContractRow)
   const auto servable = validate_recovered_tip(db, *tip, cost_model_);
   ASSERT_FALSE(servable.has_value());
   EXPECT_EQ(servable.error(), TipRejection::kDefaultWalletMissing);
+}
+
+// The same tip at height 0 is served. A chain may fund its accounts with its
+// own wallet artifact and name that as its default, and the genesis ceremony
+// attaches that code in the height-1 block -- so between the genesis commit
+// and the ceremony the row is legitimately absent, and refusing there would
+// refuse a supported chain rather than a tampered one.
+TEST_F(RecoveredTipTest, AcceptsDefaultWalletTheCeremonyHasYetToDeploy)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  DeployedContractHash ceremony_deployed = native_default_wallet_hash();
+  ceremony_deployed.hash.fill(0xE7);
+  tip->value.proposal_header.block_height = 0;
+  tip->default_wallet = ceremony_deployed;
+  tip->value.proposal_header.config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model_, tip->network_config,
+                                ceremony_deployed));
+  ASSERT_FALSE(db.read_contract_code(ceremony_deployed.hash).has_value());
+
+  EXPECT_TRUE(validate_recovered_tip(db, *tip, cost_model_).has_value());
 }
 
 // A non-canonical parameter list has no single hash, so it is refused before

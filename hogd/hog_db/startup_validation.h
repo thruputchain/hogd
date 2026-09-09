@@ -24,7 +24,7 @@ enum class TipRejection : uint8_t {
   kConfigHashMismatch,
 
   // Nothing is stored under the contract hash the tip selects as its default
-  // wallet.
+  // wallet, on a tip past the genesis ceremony that may deploy it.
   kDefaultWalletMissing,
 };
 
@@ -41,9 +41,11 @@ enum class TipRejection : uint8_t {
 // committed, rather than to whatever its data directory happens to hold
 // (#3926).
 //
-// Also refuses a default wallet with no contract row. That one resolves during
-// execution rather than at lookup, so leaving it to be found later turns a
-// root call to an undeployed address into SystemErrorCode::Unrecoverable.
+// Also refuses a default wallet with no contract row, on a tip past height 0.
+// That one resolves during execution rather than at lookup, so leaving it to
+// be found later turns a root call to an undeployed address into
+// SystemErrorCode::Unrecoverable. Height 0 is exempt because a chain may name
+// a wallet artifact its own genesis ceremony deploys in the height-1 block.
 //
 // Takes the tip's configuration to be the one its own header commits to, which
 // holds while ConsensusValue::upgrades is unimplemented. A config upgrade
