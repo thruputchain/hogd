@@ -96,6 +96,28 @@ reconcile_address_hog_age_helper(const Address &address,
           from_xdr(age.num_hogs[kHogAgeGroupReceived]));
     return HogDbError(HogDbCode::kInternal);
   }
+  // average_ages are block heights since genesis, but BlockHeight is a signed
+  // hyper, so a tampered row can carry a negative average that XDR and the
+  // count checks above accept. Left in place, the mempool scheduler copies the
+  // signed to-schedule average straight into its ascending ready-account key
+  // (get_account_key), where a negative value sorts ahead of every valid
+  // nonnegative age and silently steals scheduling priority. Reject it here,
+  // at startup, against the address that carries it, rather than letting the
+  // corruption surface later in a different process (#3934).
+  for (size_t group = 0; group < kHogAgeNumGroups; ++group) {
+    if (age.average_ages[group] < 0) {
+      error("address 0x{} has a corrupt hog age row: average ages {}, {}, {} "
+            "contain a negative value. Refusing to reconcile; the durable hog "
+            "age state for this address must be repaired or the volume "
+            "replaced.",
+            encode_hex(address.as_bytes()),
+            age.average_ages[kHogAgeGroupToSchedule],
+            age.average_ages[kHogAgeGroupAlreadyScheduled],
+            age.average_ages[kHogAgeGroupReceived]);
+      return HogDbError(HogDbCode::kInternal);
+    }
+  }
+
   const uint128_t existing_total = *summed;
   if (existing_total == balance) {
     return {};
