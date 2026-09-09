@@ -54,56 +54,6 @@ static_assert('A' == 0x41 && '0' == 0x30 && '_' == 0x5F,
 constexpr std::string kGlobalTipKey = "<DBTIP";
 constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
 
-// is_canonical_state_key_length returns whether key_len is a length that a
-// legitimate writer produces for a state item with this (prefix, type).
-// Lengths are derived from the same constants/types/constructors the key
-// builders use so they can never drift. Used by recovery to reject
-// boundary-shifted keys (#3912); a mismatch means the on-disk
-// key_len/value_len split was tampered.
-bool
-is_canonical_state_key_length(Prefix prefix, uint8_t type, size_t key_len)
-{
-  switch (prefix) {
-  case Prefix::kBalance:
-  case Prefix::kAddressAuthData:
-  case Prefix::kAddressMetadata:
-    // make_address_key
-    return key_len == kAddressSize + 1;
-  case Prefix::kReplayCache:
-    // make_address_key (per-address metadata) or make_replay_cache_data_key
-    // (one row per expiry height).
-    return key_len == kAddressSize + 1 ||
-           key_len == kAddressSize + 1 + sizeof(BlockHeight);
-  case Prefix::kContractDataKey:
-    return key_len == kContractDataItemKeySize;
-  case Prefix::kRetrocausalQueueBlock:
-    return key_len == kRetrocausalQueueBlockKeySize;
-  case Prefix::kContractCode:
-  {
-    // Inline and chunked-head rows are keyed by the content-addressed hash;
-    // chunk rows append a one-byte chunk index. Pin the length per type: even
-    // though contract-code rows are immutable, a hash-preserving boundary
-    // shift (an inline row's zero type byte swapping with a leading zero value
-    // byte) could otherwise plant a longer ghost key that read_contract_code
-    // -- which only ever queries the canonical hash key -- silently misses,
-    // diverging execution.
-    const size_t head_key_size = make_contract_code_key(SHA256Hash{}).size();
-    const size_t chunk_key_size =
-        make_contract_code_chunk_key(SHA256Hash{}, 0).size();
-    return key_len ==
-           (type == kContractCodeChunk ? chunk_key_size : head_key_size);
-  }
-  case Prefix::kContractRefcount:
-  case Prefix::kHogAge:
-  case Prefix::kGlobalMetadata:
-    break;
-  }
-  // kContractRefcount currently has no writer, and kHogAge/kGlobalMetadata are
-  // not state items (is_state_item is false) so they never reach recovery here.
-  // Accept any length for these rather than pin one.
-  return true;
-}
-
 } // namespace
 
 StorageLongHash
@@ -122,33 +72,6 @@ HogDbDAO::compute_full_db_hash()
     db_hash += hash;
   });
   return db_hash_from_lthash16(db_hash);
-}
-
-HogDbStatus<void>
-HogDbDAO::validate_recovered_state()
-{
-  // for_each_state_item runs in parallel; a plain bool would race.
-  std::atomic<bool> corrupt{false};
-  for_each_state_item([&corrupt](std::span<const std::byte> key, uint8_t type,
-                                 std::span<const std::byte> value) {
-    // key is non-empty here: for_each_state_item filters on is_state_item.
-    const auto prefix = static_cast<Prefix>(key[0]);
-    if (!is_canonical_state_key_length(prefix, type, key.size())) {
-      error("recovered state key has non-canonical length {} for prefix {}",
-            key.size(), std::to_underlying(prefix));
-      corrupt.store(true, std::memory_order_relaxed);
-    }
-    // kNNInt128 values (address balances and NNInt storage) are a fixed-width
-    // int128.
-    if (type == kNNInt128 && value.size() != sizeof(int128_xdr)) {
-      error("recovered kNNInt128 value has non-canonical length {} (want {})",
-            value.size(), sizeof(int128_xdr));
-      corrupt.store(true, std::memory_order_relaxed);
-    }
-  });
-  if (corrupt.load(std::memory_order_relaxed))
-    return HogDbError(HogDbCode::kCorruption);
-  return {};
 }
 
 void

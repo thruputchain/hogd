@@ -1063,15 +1063,6 @@ HogDevnodeNode::open_db_backend() const
   }
 
   HogDbDAO db(RAMDB(std::move(*ramdb)));
-
-  // Reject semantically malformed state rows recovered from the (unkeyed-CRC)
-  // WAL before they can feed the consensus hash (#3912).
-  if (HogDbStatus<void> ok = db.validate_recovered_state(); !ok) {
-    throw std::runtime_error(
-        std::format("recovered database contains malformed state: {}",
-                    ok.error()));
-  }
-
   HogDbStatus<DbTip> recovered_tip = db.read_dbtip();
   if (!recovered_tip && recovered_tip.error().code() != HogDbCode::kNotFound) {
     throw std::runtime_error(std::format("failed to read recovered DbTip: {}",

@@ -279,6 +279,25 @@ TEST(LtHash16, AddRemoveIdentity)
   EXPECT_EQ(h, original);
 }
 
+TEST(LtHash16, PiecewiseKeyLengthFramingIsInjective)
+{
+  // key || type || value is framed with the key length, so two elements whose
+  // unframed concatenation is byte-identical but whose key/value boundary
+  // differs hash differently. Without the frame a data-directory attacker could
+  // shift an on-disk key/value boundary and preserve the consensus hash
+  // (#3912).
+  std::vector<uint8_t> key_a = {0x01};
+  std::vector<uint8_t> value_a = {0x03, 0x04};
+  std::vector<uint8_t> key_b = {0x01, 0x02};
+  std::vector<uint8_t> value_b = {0x04};
+
+  LtHash16 a;
+  a.add(key_a, 0x02, value_a); // element bytes: 01 | 02 | 03 04
+  LtHash16 b;
+  b.add(key_b, 0x03, value_b); // same 01 02 03 04, boundary shifted by one
+  EXPECT_NE(a, b);
+}
+
 TEST(LtHash16, HomomorphicProperty)
 {
   std::vector<uint8_t> a = {1, 2, 3};
