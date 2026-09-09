@@ -193,11 +193,13 @@ public:
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return (*last_frame_).get_events();
   }
-  // Called after the root invocation frame finishes (by root_invoke or
-  // the mock path) with the root frame's result. Stores it as
-  // root_invoke_result_ (rewriting it to ValidationFailure if final
-  // validation fails) and sets root_invoke_succeeded_ if appropriate.
-  void finalize_after_root_frame(InvokeResult result);
+  // Called after the root invocation completes (by root_invoke or the mock
+  // path) with the root frame's result. Stores it as root_invoke_result_
+  // (rewriting it to ValidationFailure if final validation fails), marks the
+  // root invocation finished (last_frame_finished_), and returns the
+  // finalized result -- callers must consume the return value, not the
+  // argument they passed in, or they miss the rewrite.
+  [[nodiscard]] InvokeResult finalize_after_root_frame(InvokeResult result);
 
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {
@@ -495,7 +497,6 @@ private:
   std::optional<InvocationFrame> last_frame_;
   InvokeResult root_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
-  bool root_invoke_succeeded_{false};
   // perform_initial_validation() rejected the transaction (expired replay
   // uniquifier or malformed attachment set). try_commit_transaction() asserts
   // (debug only) that every proposal-mode ValidationFailure came from here --
@@ -533,6 +534,15 @@ private:
   // check the validation data at the end of a transaction, if in validation
   // mode
   [[nodiscard]] bool check_final_validation_data() const;
+
+  // The root invocation has been finalized and its (post-rewrite) result is a
+  // success. Derived from root_invoke_result_ rather than cached: with the
+  // result stored exactly once, in finalize_after_root_frame(), a parallel
+  // bool could only ever agree with this or be stale.
+  bool root_invoke_succeeded() const
+  {
+    return finalized_ && root_invoke_result_.is_root_success();
+  }
 
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.

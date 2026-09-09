@@ -137,12 +137,13 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     // guard rather than only at the structured-error return sites so it also
     // fires when a by-value copy throws -- get_most_recent_frame_output() (the
     // root output) or copy_last_frame_events() (the root event vector, #2699)
-    // -- not just on serialize_to_ffi_data_buffer() errors. It is gated on
-    // last_frame_finished() because a proposal-mode ValidationFailure rejects
-    // before any frame runs, so there is no finalized result to hide then.
+    // -- not just on serialize_to_ffi_data_buffer() errors. root_invoke()
+    // always finalizes before returning (finalize_after_root_frame owns
+    // last_frame_finished_), so a completed root_invoke() always leaves a
+    // finalized result to hide -- no gate on last_frame_finished() is needed.
     bool result_handed_off = false;
     x23::Defer poison_handler_on_handoff_failure([&]() {
-      if (!result_handed_off && to_handler().last_frame_finished()) {
+      if (!result_handed_off) {
         mark_finish_result_handoff_failed();
       }
     });
@@ -615,7 +616,9 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   // When the root (last) mock frame finishes, run the same finalization
   // that root_invoke() does so that try_commit_transaction() can proceed.
   if (to_handler().last_frame_finished()) {
-    to_handler().finalize_after_root_frame(result);
+    // Consume the finalized result, not the local passed in: finalization may
+    // rewrite it (a failed final validation check becomes ValidationFailure).
+    result = to_handler().finalize_after_root_frame(result);
 
     // Mirror root_invoke(): a root-level system error (Unrecoverable,
     // ValidationFailure, Abandon) must surface as an FFI error, not a
