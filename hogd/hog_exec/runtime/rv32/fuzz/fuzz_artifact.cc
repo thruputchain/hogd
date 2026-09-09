@@ -23,8 +23,9 @@ namespace fuzz = hogd::rv32::fuzz;
 void
 parse_raw(std::span<const uint8_t> bytes)
 {
-  const auto image = parse_artifact(bytes);
-  const auto threaded = parse_threaded_artifact(bytes);
+  const auto image = parse_artifact(bytes, hogd::rv32::Rv32Limits::defaults());
+  const auto threaded =
+      parse_threaded_artifact(bytes, hogd::rv32::Rv32Limits::defaults());
   (void)image;
   (void)threaded;
 }
@@ -45,12 +46,14 @@ parse_fixed_up(std::span<const uint8_t> bytes)
   store_u32_le(std::span<uint8_t>(artifact), kArtifactMemoryBytesOffset,
                fixup->memory_bytes);
 
-  const auto image = parse_artifact(artifact);
+  const auto image =
+      parse_artifact(artifact, hogd::rv32::Rv32Limits::defaults());
   (void)image;
 
   // Gate threaded lowering on parse_threaded_artifact, not parse_artifact: the
   // two paths use different decoders, and disagreements are interesting input.
-  const auto threaded = parse_threaded_artifact(artifact);
+  const auto threaded =
+      parse_threaded_artifact(artifact, hogd::rv32::Rv32Limits::defaults());
   if (!threaded.has_value()) {
     return;
   }

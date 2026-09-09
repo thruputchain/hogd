@@ -9,6 +9,7 @@
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hog_db/block_tx.h"
@@ -31,12 +32,14 @@ HogDbStatus<PerThreadARC<BlockTX> *>
 RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
 {
   // create the block tx.
+  // The block runs under the configuration the tip it builds on carries.
+  const DbTip tip = get_tip();
   auto [it, inserted] = block_txes_.emplace(
       std::piecewise_construct, std::forward_as_tuple(bid),
-      std::forward_as_tuple(get_db(), get_cost_model(),
-                            background_commit_worker_,
-                            get_tip().value.proposal_header.block_height + 1,
-                            mode));
+      std::forward_as_tuple(
+          get_db(), get_cost_model(), background_commit_worker_,
+          tip.value.proposal_header.block_height + 1, mode,
+          NetworkConfigParams(tip.network_config.v0()).max_savepoint_depth));
   if (!inserted) {
     warn("Attempt to open block tx {} that already exists", bid);
     return HogDbError(HogDbCode::kExists);

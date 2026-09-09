@@ -259,7 +259,7 @@ Program::validate(std::span<const uint8_t> code)
     return ProgramResult{.ok = false,
                          .error = ProgramError::kCodeSizeNotAligned};
   }
-  if (code.size() > kMaxCodeBytes) {
+  if (code.size() > kCodeCeilingBytes) {
     return ProgramResult{.ok = false, .error = ProgramError::kCodeTooLarge};
   }
 

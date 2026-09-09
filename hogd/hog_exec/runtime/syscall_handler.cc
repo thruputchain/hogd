@@ -288,7 +288,8 @@ SystemCallHandler::perform_initial_validation()
   // since it is a genuine bug.
   try {
     auto [res, gas_consumed] =
-        NewContractSet::make(contracts_to_deploy_, runtime_context_);
+        NewContractSet::make(contracts_to_deploy_, runtime_context_,
+                             config_params());
     if (!res.has_value()) {
       return {res.error(), gas_consumed};
     }
@@ -891,7 +892,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // through the snapshot cache -- invoke() runs per frame.
   auto start_status =
       start_frame(std::move(invocation), flags, owned_auth_token_ids,
-                  config_params().max_sha256_buffers);
+                  FrameLimits::from(config_params()));
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and
@@ -937,7 +938,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
 SystemStatus<std::unique_ptr<InvocationFrameTrace>>
 SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
                                std::span<uint32_t const> owned_auth_token_ids,
-                               uint32_t max_sha256_buffers) noexcept
+                               FrameLimits limits) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -978,12 +979,12 @@ SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
   // here rather than terminating through the noexcept boundary.
   auto admitted = [&]() -> SystemStatus<void> {
     try {
-      // The frame's hash-buffer limit is fixed at admission, so a syscall
-      // enforcing it has no tip read left to fail on.
+      // The frame's limits are fixed at admission, so a syscall enforcing
+      // one has no tip read left to fail on.
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
                                                  flags, owned_auth_token_ids,
-                                                 max_sha256_buffers);
+                                                 limits);
     } catch (std::exception const &e) {
       guarded_log("frame-admission failure diagnostic", [&] {
         error("unrecoverable: frame admission threw: {}", e.what());

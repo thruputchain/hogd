@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
@@ -60,7 +61,11 @@ public:
   // `out` is built in place: the caller supplies storage at whatever scope it
   // wants the preparation to live, and the context memoizes nothing. It is
   // written only on success; on rejection it is left as the caller had it.
+  //
+  // `params` is the chain's configuration in force where the contract is
+  // attached: the bounds an rv32 artifact must fit to be admitted.
   virtual InvokeErrorCode verify_contract(Contract const &contract,
+                                          NetworkConfigParams const &params,
                                           PreparedContract &out) const = 0;
 
   // Convenience for callers that only want the verdict and would discard the
@@ -69,7 +74,8 @@ public:
   //
   // Overriders hide this overload; a class whose callers use it through the
   // derived type needs `using RuntimeContext::verify_contract;`.
-  InvokeErrorCode verify_contract(Contract const &contract) const;
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params) const;
 
   virtual x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,

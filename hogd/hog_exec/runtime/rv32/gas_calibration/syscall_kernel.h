@@ -193,7 +193,7 @@ struct SyscallKernelSpec {
 struct SyscallKernel {
   std::vector<uint8_t> code;
   std::vector<uint8_t> initial_memory;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
   // Call groups placed in the body: the denominator a saturated timing divides
   // by, and the unit its cost is quoted in (ns per host call).
   uint32_t calls_per_iteration = 0;

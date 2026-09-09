@@ -267,9 +267,10 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
       format_fingerprint_u64(digest, u8"digest_bytes", kArtifactDigestBytes);
   digest =
       format_fingerprint_u64(digest, u8"instruction_bytes", kInstructionBytes);
-  digest = format_fingerprint_u64(digest, u8"max_code_bytes", kMaxCodeBytes);
-  digest =
-      format_fingerprint_u64(digest, u8"max_memory_bytes", kMaxMemoryBytes);
+  // The code and memory bounds are a chain's configuration
+  // (kConfigParamMaxRv32CodeBytes / kConfigParamMaxRv32MemoryBytes), not part
+  // of the format: the header's fields are 32-bit either way, and what a
+  // chain admits is checked where a contract is attached.
 
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
@@ -288,7 +289,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x002a3cb88d80b403ULL);
+static_assert(kArtifactFormatFingerprint == 0x44f3a5cd6a285ecfULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
@@ -314,10 +315,11 @@ inline constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
     kAcceptedFormatFingerprints = accepted_format_fingerprints();
 static_assert(kAcceptedFormatFingerprints.front() ==
               kArtifactFormatFingerprint);
-// The v3 entry is what groundhog-cli 0.11.0 still reports. Pinning it here
-// proves this derivation reproduces a fingerprint the lowerer actually emits,
-// rather than one only this header believes in.
-static_assert(kAcceptedFormatFingerprints.back() == 0x8e5caf3e9cd23b22ULL);
+// The v3 entry is what the groundhog-rpc lowerer (still on gas table v3)
+// reports once its fingerprint likewise stops folding the code and memory
+// bounds. Pinning it here proves this derivation reproduces a fingerprint the
+// lowerer actually emits, rather than one only this header believes in.
+static_assert(kAcceptedFormatFingerprints.back() == 0xc5f00a7d4451045eULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
@@ -358,7 +360,7 @@ struct ArtifactImage {
   // zeros below the image's load VA are included so consumers can keep
   // writing it at data address 0.
   std::vector<uint8_t> initial_memory;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
 };
 
 // The ThreadedArtifactImage output from parse_threaded_artifact must not
@@ -368,7 +370,7 @@ struct ThreadedArtifactImage {
   std::span<const uint8_t> initial_memory;
   // Data-space VA where initial_memory is placed; [0, start) zero-fills.
   uint32_t initial_memory_start = 0;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
 };
 
 // Canonical SHA-256 over one artifact section. Infallible by construction:
@@ -377,12 +379,15 @@ struct ThreadedArtifactImage {
 [[nodiscard]]
 ArtifactDigest artifact_digest(std::span<const uint8_t> bytes);
 
+// `limits` bounds the code_size and memory_bytes the header may declare:
+// the chain's configured values where a contract is attached, the VM's
+// ceilings where an already-deployed one is instantiated.
 [[nodiscard]]
 std::expected<ArtifactImage, ArtifactError>
-parse_artifact(std::span<const uint8_t> bytes);
+parse_artifact(std::span<const uint8_t> bytes, Rv32Limits limits);
 
 [[nodiscard]]
 std::expected<ThreadedArtifactImage, ArtifactError>
-parse_threaded_artifact(std::span<const uint8_t> bytes);
+parse_threaded_artifact(std::span<const uint8_t> bytes, Rv32Limits limits);
 
 } // namespace hogd::rv32

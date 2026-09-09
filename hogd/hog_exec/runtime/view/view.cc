@@ -56,9 +56,9 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
         .calldata = Calldata{},
     };
 
-    auto r = syscall_handler.start_frame(
-        parent_frame_invocation, 0, {},
-        syscall_handler.config_params().max_sha256_buffers);
+    auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {},
+                                         FrameLimits::from(
+                                             syscall_handler.config_params()));
     if (!r.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }
@@ -68,8 +68,9 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
 
   try {
     for (auto const &token : query.forwarded_tokens) {
-      if (!AuthTokenRegistry::node_within_depth(token.root_node,
-                                                kAuthTokenMaxDepth)) {
+      if (!AuthTokenRegistry::node_within_depth(
+              token.root_node,
+              syscall_handler.config_params().max_auth_token_depth)) {
         ExpectedViewResult result(TransactionViewStatus::InvalidInput);
         result.error_code() =
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;

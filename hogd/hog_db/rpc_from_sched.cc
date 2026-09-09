@@ -23,6 +23,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
 #include "hogd/hog_exec/common/limits.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -389,6 +390,31 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           "message",
           count, config_params.max_contract_size_bytes, batch_bytes,
           kExecToDbMessageCap);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // Past what the VM provisions or translates, an admitted artifact would be
+  // unrunnable, so refuse the configuration up front.
+  if (const uint32_t stated = config_params.max_rv32_code_bytes;
+      stated > rv32::kCodeCeilingBytes) {
+    error("genesis max_rv32_code_bytes {} exceeds the {} this build's VM "
+          "translates",
+          stated, rv32::kCodeCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (const uint32_t stated = config_params.max_rv32_memory_bytes;
+      stated > rv32::kMemoryCeilingBytes) {
+    error("genesis max_rv32_memory_bytes {} exceeds the {} this build's VM "
+          "provisions",
+          stated, rv32::kMemoryCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // Deeper than the executor's stacks are sized for would abort a node on a
+  // transaction that merely recursed, so refuse it up front.
+  if (const uint32_t stated = config_params.max_savepoint_depth;
+      stated > kSavepointDepthCeiling) {
+    error("genesis max_savepoint_depth {} exceeds the {} this build's "
+          "executor stacks sustain",
+          stated, kSavepointDepthCeiling);
     co_return DbSchedResult::DbSchedResultError;
   }
   // The ceiling bounds the wire type, so a genesis naming more would let a

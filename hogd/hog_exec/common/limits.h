@@ -4,10 +4,21 @@
 
 #include <cstddef>
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "integration.hh"
 
 namespace hogd {
+
+// The most storage savepoints a chain may configure this build to hold
+// (kConfigParamMaxSavepointDepth), checked when a genesis is loaded. Every
+// open savepoint is a TryInvoke frame still executing, and each of those is a
+// nested VM plus its coroutine frames on one executor thread's stack, so the
+// ceiling is what those stacks are known to sustain: the depth every chain ran
+// under before it was configurable. Raising it is a stack-sizing decision for
+// the executor, not a configuration one.
+inline constexpr uint32_t kSavepointDepthCeiling =
+    static_cast<uint32_t>(kMaxSavepointDepth);
 
 // The budget the executor holds itself to on the HogDb link (pinned to
 // kBulkRpcMaxMessageSize). Raising it changes which transactions abort.

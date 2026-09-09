@@ -24,6 +24,7 @@
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -1144,7 +1145,10 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     // against (the base context only registers the real runtimes); its
     // registration is checked above via has_mock_contract().
     if (contract.contract_type() != ContractType::kMockTest) {
-      auto verify_result = (*context_cast)->verify_contract(contract);
+      // No chain is in hand here: verify under the protocol defaults, the
+      // bounds a test environment runs under unless it states otherwise.
+      auto verify_result =
+          (*context_cast)->verify_contract(contract, NetworkConfigParams{});
       if (verify_result == InvokeErrorCode::Unrecoverable) {
         return kTestFFIErrorCodeUnrecoverableError;
       }
@@ -1393,7 +1397,8 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     Contract contract;
     x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
 
-    auto result = rc->verify_contract(contract);
+    // As above: the protocol defaults stand in for a chain's configuration.
+    auto result = rc->verify_contract(contract, NetworkConfigParams{});
     if (result == InvokeErrorCode::Unrecoverable) {
       return VerifyContractResult{.success = 0,
                                   .ffi_error_code =

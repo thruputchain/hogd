@@ -283,7 +283,7 @@ build_syscall_kernel(const SyscallKernelSpec &spec)
       addi(arg_reg(0), 0, static_cast<int32_t>(kSyscallHaltSelector)));
   words.push_back(kEcallWord);
 
-  if (words.size() * kInstructionBytes > kMaxCodeBytes) {
+  if (words.size() * kInstructionBytes > kDefaultMaxCodeBytes) {
     return std::unexpected(KernelError::kCodeTooLarge);
   }
 
@@ -292,8 +292,8 @@ build_syscall_kernel(const SyscallKernelSpec &spec)
   for (const uint32_t word : words) {
     append_u32(kernel.code, word);
   }
-  kernel.memory_bytes = kMaxMemoryBytes;
-  kernel.initial_memory.assign(kMaxMemoryBytes, 0);
+  kernel.memory_bytes = kDefaultMaxMemoryBytes;
+  kernel.initial_memory.assign(kDefaultMaxMemoryBytes, 0);
   kernel.body_start_pc = body_start_index * kInstructionBytes;
   kernel.calls_per_iteration = groups;
   kernel.instructions_per_iteration = spec.body_slots + 3;

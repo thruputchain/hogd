@@ -79,7 +79,10 @@ StorageSnapshotCache::load_contract_entry(SHA256Hash hash)
     Contract contract = std::move(db_res.value()).value();
     PreparedContract prepared;
     if (contract.contract_type() == ContractType::kRv32) {
-      prepared.rv32 = Rv32Contract::create(contract.rv32_contract());
+      // Deployed under whatever bounds were in force then; the ceilings keep
+      // it runnable after the chain lowers them.
+      prepared.rv32 = Rv32Contract::create(contract.rv32_contract(),
+                                           rv32::Rv32Limits::ceiling());
     }
     entry.emplace(ContractCacheEntry{.contract = std::move(contract),
                                      .prepared = std::move(prepared)});

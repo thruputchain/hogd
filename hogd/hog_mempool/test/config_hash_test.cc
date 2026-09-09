@@ -4,6 +4,7 @@
 #include <array>
 #include <utility>
 
+#include "auth_token.hh"
 #include "contract.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -25,9 +26,9 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   // Moves whenever the stock configuration changes, which is the point: it
   // pins the preimage so a change to it is deliberate.
   const ConfigHash expected{
-      0xc1, 0xa7, 0xf8, 0xfe, 0xe4, 0x9e, 0x41, 0xa2, 0x60, 0x28, 0xef,
-      0x56, 0x7e, 0xc8, 0xd4, 0x63, 0x82, 0x2b, 0xe5, 0x2f, 0x03, 0xc3,
-      0xe4, 0x89, 0x33, 0xba, 0x22, 0x44, 0xde, 0xb0, 0xeb, 0x49,
+      0x3c, 0x80, 0xfa, 0xfe, 0x78, 0x3c, 0x2a, 0x6b, 0x2a, 0xfc, 0xa3,
+      0xc1, 0x61, 0xae, 0x26, 0x0c, 0xad, 0xba, 0x9b, 0xf5, 0xde, 0x78,
+      0xa0, 0x3c, 0xf1, 0x89, 0x0e, 0xad, 0xca, 0x0b, 0xe9, 0xa6,
   };
   EXPECT_EQ(compute_config_hash(
                 make_config_hash_preimage(model, network_config, wallet)),
@@ -63,7 +64,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       make_config_hash_preimage(model, stock_network_config(),
                                 native_default_wallet_hash()));
 
-  std::array<NetworkConfig, 5> variants;
+  std::array<NetworkConfig, 10> variants;
   variants.fill(stock_network_config());
   const NetworkConfigParams stock(stock_network_config().v0());
   NetworkConfigParams::set_param(variants[0],
@@ -81,6 +82,21 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   NetworkConfigParams::set_param(
       variants[4], ConfigParamID::kConfigParamMaxContractSizeBytes,
       stock.max_contract_size_bytes + 1);
+  NetworkConfigParams::set_param(variants[5],
+                                 ConfigParamID::kConfigParamMaxSavepointDepth,
+                                 stock.max_savepoint_depth + 1);
+  NetworkConfigParams::set_param(
+      variants[6], ConfigParamID::kConfigParamMaxSHA256BufferBytes,
+      stock.max_sha256_buffer_bytes + 1);
+  NetworkConfigParams::set_param(variants[7],
+                                 ConfigParamID::kConfigParamMaxAuthTokenDepth,
+                                 stock.max_auth_token_depth + 1);
+  NetworkConfigParams::set_param(variants[8],
+                                 ConfigParamID::kConfigParamMaxRv32CodeBytes,
+                                 stock.max_rv32_code_bytes + 1);
+  NetworkConfigParams::set_param(variants[9],
+                                 ConfigParamID::kConfigParamMaxRv32MemoryBytes,
+                                 stock.max_rv32_memory_bytes + 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
@@ -132,7 +148,7 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
                                  4);
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 5U);
+  EXPECT_EQ(config.v0().params.size(), 10U);
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);
@@ -216,6 +232,43 @@ TEST(ConfigHashTest, ShortListYieldsContractSizeDefault)
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
   EXPECT_EQ(config.v0().params.size(), 5U);
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes, 1_MiB);
+}
+
+// And for the execution limits added after it: a list stopping at the
+// contract size reads as the constants every chain ran under before they were
+// configurable, and stating one extends the prefix, default-filling the slots
+// on the way.
+TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
+{
+  NetworkConfig config;
+  config.v(0);
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxContractSizeBytes,
+      static_cast<uint32_t>(256_KiB));
+  ASSERT_EQ(config.v0().params.size(), 5U);
+  const NetworkConfigParams defaults(config.v0());
+  EXPECT_EQ(defaults.max_savepoint_depth,
+            static_cast<uint32_t>(kMaxSavepointDepth));
+  EXPECT_EQ(defaults.max_sha256_buffer_bytes,
+            static_cast<uint32_t>(kSHA256BufferMaxSize));
+  EXPECT_EQ(defaults.max_auth_token_depth,
+            static_cast<uint32_t>(kAuthTokenMaxDepth));
+  EXPECT_EQ(defaults.max_rv32_code_bytes,
+            static_cast<uint32_t>(kDefaultMaxRv32CodeBytes));
+  EXPECT_EQ(defaults.max_rv32_memory_bytes,
+            static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
+
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxRv32MemoryBytes,
+                                 static_cast<uint32_t>(1_MiB));
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
+  EXPECT_EQ(config.v0().params.size(), 10U);
+  const NetworkConfigParams stated(config.v0());
+  EXPECT_EQ(stated.max_rv32_memory_bytes, 1_MiB);
+  EXPECT_EQ(stated.max_savepoint_depth,
+            static_cast<uint32_t>(kMaxSavepointDepth));
+  EXPECT_EQ(stated.max_rv32_code_bytes,
+            static_cast<uint32_t>(kDefaultMaxRv32CodeBytes));
 }
 
 // A repeated or misordered list is refused, because it would give one

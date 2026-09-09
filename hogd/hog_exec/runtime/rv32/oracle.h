@@ -83,8 +83,8 @@ code_bytes_from_words(std::span<const uint32_t> words)
 inline bool
 valid_differential_program(const DifferentialProgram &program)
 {
-  return program.code.size() <= (kMaxCodeBytes / kInstructionBytes) &&
-         program.memory_bytes <= kMaxMemoryBytes &&
+  return program.code.size() <= (kCodeCeilingBytes / kInstructionBytes) &&
+         program.memory_bytes <= kMemoryCeilingBytes &&
          program.initial_memory.size() <= program.memory_bytes;
 }
 

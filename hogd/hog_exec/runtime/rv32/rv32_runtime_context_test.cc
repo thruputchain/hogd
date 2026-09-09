@@ -25,6 +25,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/json.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -163,7 +164,8 @@ load_lowered_sdk_smoke_artifact(std::string artifact_path)
     return std::nullopt;
   }
 
-  auto parsed = rv32::parse_artifact(artifact_bytes);
+  auto parsed =
+      rv32::parse_artifact(artifact_bytes, rv32::Rv32Limits::defaults());
   if (!parsed.has_value()) {
     ADD_FAILURE() << "parse_artifact rejected the lowered artifact (error="
                   << static_cast<int>(parsed.error()) << ")";
@@ -466,7 +468,8 @@ make_sha256_then_return_image(std::span<const uint8_t> input)
 rv32::RuntimeContractImage
 make_compiled_sha256_then_return_image()
 {
-  auto artifact = rv32::parse_artifact(compiled_sha256_return::kArtifact);
+  auto artifact = rv32::parse_artifact(compiled_sha256_return::kArtifact,
+                                       rv32::Rv32Limits::defaults());
   if (!artifact.has_value()) {
     ADD_FAILURE() << "failed to parse compiled RV32 artifact";
     return {};
@@ -484,7 +487,7 @@ make_artifact_runtime_image(std::initializer_list<uint32_t> words,
 {
   const std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact(words, initial_memory);
-  auto parsed = rv32::parse_artifact(artifact);
+  auto parsed = rv32::parse_artifact(artifact, rv32::Rv32Limits::defaults());
   if (!parsed.has_value()) {
     ADD_FAILURE() << "failed to parse synthetic RV32 artifact";
     return {};
@@ -1362,7 +1365,7 @@ TEST_F(Rv32RuntimeContextTest, VerifyRejectsUndefinedRv32MockContract)
   auto rv32_context = rv32::RuntimeContext({});
   auto contract = make_rv32_contract_xdr();
 
-  EXPECT_EQ(rv32_context.verify_contract(*contract),
+  EXPECT_EQ(rv32_context.verify_contract(*contract, NetworkConfigParams{}),
             InvokeErrorCode::Deterministic);
 }
 
@@ -1371,7 +1374,7 @@ TEST_F(Rv32RuntimeContextTest, VerifyRejectsNonMockContractWithoutAbort)
   auto rv32_context = rv32::RuntimeContext({});
   auto contract = make_non_mock_contract_xdr();
 
-  EXPECT_EQ(rv32_context.verify_contract(*contract),
+  EXPECT_EQ(rv32_context.verify_contract(*contract, NetworkConfigParams{}),
             InvokeErrorCode::Deterministic);
 }
 
@@ -1387,22 +1390,24 @@ TEST_F(Rv32RuntimeContextTest, VerifyAcceptsZeroMemoryBytesImage)
                          }}});
   auto contract = make_rv32_contract_xdr();
 
-  EXPECT_EQ(rv32_context.verify_contract(*contract), InvokeErrorCode::None);
+  EXPECT_EQ(rv32_context.verify_contract(*contract, NetworkConfigParams{}),
+            InvokeErrorCode::None);
 }
 
-// The other half of the bound: memory_bytes above kMaxMemoryBytes is rejected
-// at validation rather than deferred to a per-invocation construction trap.
+// The other half of the bound: memory_bytes above kDefaultMaxMemoryBytes is
+// rejected at validation rather than deferred to a per-invocation construction
+// trap.
 TEST_F(Rv32RuntimeContextTest, VerifyRejectsOversizedMemoryBytesImage)
 {
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, rv32::RuntimeContractImage{
                              .program = make_program({addi(1, 0, 1)}),
                              .initial_memory = {},
-                             .memory_bytes = rv32::kMaxMemoryBytes + 1,
+                             .memory_bytes = rv32::kDefaultMaxMemoryBytes + 1,
                          }}});
   auto contract = make_rv32_contract_xdr();
 
-  EXPECT_EQ(rv32_context.verify_contract(*contract),
+  EXPECT_EQ(rv32_context.verify_contract(*contract, NetworkConfigParams{}),
             InvokeErrorCode::Deterministic);
 }
 

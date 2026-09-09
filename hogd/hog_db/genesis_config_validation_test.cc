@@ -17,6 +17,7 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_sched.h"
 #include "hogd/hog_exec/common/limits.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -184,6 +185,46 @@ TEST_F(GenesisConfigValidationTest, BoundsCommitBatchByWhatATransactionCarries)
   EXPECT_EQ(load_with_contract_limits(kContractCeiling, slack_fits + 1),
             DbSchedResult::DbSchedResultError);
   EXPECT_EQ(load_with_contract_limits(1_KiB, slack_fits + 1),
+            DbSchedResult::DbSchedResultError);
+}
+
+// Savepoint depth may be lowered freely and raised up to the executor's
+// ceiling; past it the executor could not honour the configuration.
+TEST_F(GenesisConfigValidationTest, BoundsSavepointDepthByExecutorCeiling)
+{
+  auto load_with_savepoint_depth = [&](uint32_t depth) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxSavepointDepth,
+                                   depth);
+    return load(config, std::nullopt);
+  };
+  EXPECT_EQ(load_with_savepoint_depth(1), DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(load_with_savepoint_depth(kSavepointDepthCeiling),
+            DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(load_with_savepoint_depth(kSavepointDepthCeiling + 1),
+            DbSchedResult::DbSchedResultError);
+}
+
+// The RV32 bounds may be raised up to what the VM provisions and translates.
+TEST_F(GenesisConfigValidationTest, BoundsRv32LimitsByVmCeilings)
+{
+  auto load_with_rv32 = [&](ConfigParamID id, uint32_t value) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config, id, value);
+    return load(config, std::nullopt);
+  };
+  EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32CodeBytes,
+                           rv32::kCodeCeilingBytes),
+            DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32CodeBytes,
+                           rv32::kCodeCeilingBytes + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32MemoryBytes,
+                           rv32::kMemoryCeilingBytes),
+            DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32MemoryBytes,
+                           rv32::kMemoryCeilingBytes + 1),
             DbSchedResult::DbSchedResultError);
 }
 

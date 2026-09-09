@@ -131,16 +131,19 @@ TEST(Rv32UnsupportedProfileTest,
     const std::vector<uint8_t> artifact = test_artifact::build_artifact(
         std::span<const uint32_t>(words.data(), words.size()), initial_memory);
 
-    auto parsed = parse_artifact(
-        std::span<const uint8_t>(artifact.data(), artifact.size()));
+    auto parsed = parse_artifact(std::span<const uint8_t>(artifact.data(),
+                                                          artifact.size()),
+                                 Rv32Limits::defaults());
     ASSERT_FALSE(parsed.has_value());
     EXPECT_EQ(parsed.error(), ArtifactError::kInvalidProgram);
 
     // The production deploy gate (parse_threaded_artifact defers decode to
     // ThreadedMachinePreInstantiation::create) must reject the same table
     // with the same ProgramError.
-    auto threaded = parse_threaded_artifact(
-        std::span<const uint8_t>(artifact.data(), artifact.size()));
+    auto threaded =
+        parse_threaded_artifact(std::span<const uint8_t>(artifact.data(),
+                                                         artifact.size()),
+                                Rv32Limits::defaults());
     ASSERT_TRUE(threaded.has_value());
     auto created =
         ThreadedMachinePreInstantiation::create(threaded->code,

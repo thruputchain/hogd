@@ -665,10 +665,10 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
   // This case used to be written against the legacy uint16 run bound (65535),
   // which a run over that bound was formerly rejected for. That is no longer
   // constructible: the priciest instruction costs kMaxInstructionGas and
-  // kMaxCodeBytes caps a program's length, so the most gas any straight-line
-  // run can hold now falls short of the legacy bound. The reachable case is
-  // kMaxRunGas, which is where the lowering actually splits.
-  static_assert((rv32::kMaxCodeBytes / rv32::kInstructionBytes) *
+  // kDefaultMaxCodeBytes caps a program's length, so the most gas any
+  // straight-line run can hold now falls short of the legacy bound. The
+  // reachable case is kMaxRunGas, which is where the lowering actually splits.
+  static_assert((rv32::kDefaultMaxCodeBytes / rv32::kInstructionBytes) *
                         rv32::kMaxInstructionGas <
                     0xFFFFU,
                 "a straight-line run can reach the legacy uint16 bound again; "
@@ -684,7 +684,8 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
 
   ContractBlob blob;
   blob.data.append_range(artifact);
-  EXPECT_TRUE(Rv32Contract::create(blob).has_value());
+  EXPECT_TRUE(
+      Rv32Contract::create(blob, rv32::Rv32Limits::defaults()).has_value());
 
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
@@ -736,7 +737,8 @@ TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
 
   ContractBlob blob;
   blob.data.append_range(artifact);
-  EXPECT_FALSE(Rv32Contract::create(blob).has_value());
+  EXPECT_FALSE(
+      Rv32Contract::create(blob, rv32::Rv32Limits::defaults()).has_value());
 }
 
 TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)

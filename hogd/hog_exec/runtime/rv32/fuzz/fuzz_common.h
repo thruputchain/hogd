@@ -36,7 +36,7 @@ static_assert(kFuzzMinRunGasCap <= kMaxRunGas);
 // threaded TraceObserver would never produce.
 inline constexpr std::size_t kFuzzTraceMaxSteps = kFuzzGasCap + 64;
 static_assert(kFuzzGasCap < kFuzzTraceMaxSteps);
-static_assert(kFuzzMemCap <= kMaxMemoryBytes);
+static_assert(kFuzzMemCap <= kDefaultMaxMemoryBytes);
 
 // Consume-from-front little-endian reader. Reads past the end yield zero bytes
 // (never over-read), so a short fuzzer input degrades gracefully into zeros.
@@ -290,17 +290,17 @@ struct ArtifactFixup {
 };
 
 // Layout: [u32 start][u32 mem_len][u32 extra][payload...]. The payload is split
-// into initial_memory (clamped to fit both kMaxMemoryBytes and the remaining
-// bytes) followed by code. When the payload can hold at least one instruction,
-// reserve one word for code instead of letting the image consume the whole
-// tail. The empty initial-memory image has a single canonical start encoding
-// (0), and memory_bytes is floor plus fuzzer-chosen headroom to exercise the
-// zero-extended tail. nullopt if the payload is empty.
+// into initial_memory (clamped to fit both kDefaultMaxMemoryBytes and the
+// remaining bytes) followed by code. When the payload can hold at least one
+// instruction, reserve one word for code instead of letting the image consume
+// the whole tail. The empty initial-memory image has a single canonical start
+// encoding (0), and memory_bytes is floor plus fuzzer-chosen headroom to
+// exercise the zero-extended tail. nullopt if the payload is empty.
 inline std::optional<ArtifactFixup>
 carve_artifact_fixup(std::span<const uint8_t> data)
 {
   ByteReader reader(data);
-  const uint32_t start = reader.u32() % (kMaxMemoryBytes + 1);
+  const uint32_t start = reader.u32() % (kDefaultMaxMemoryBytes + 1);
   const uint32_t mem_len_knob = reader.u32();
   const uint32_t extra_knob = reader.u32();
   const std::span<const uint8_t> tail = reader.rest();
@@ -308,7 +308,7 @@ carve_artifact_fixup(std::span<const uint8_t> data)
     return std::nullopt;
   }
 
-  const uint32_t max_by_space = kMaxMemoryBytes - start;
+  const uint32_t max_by_space = kDefaultMaxMemoryBytes - start;
   const auto max_by_buffer = static_cast<uint32_t>(
       tail.size() >= kInstructionBytes ? tail.size() - kInstructionBytes
                                        : tail.size());
@@ -335,7 +335,7 @@ carve_artifact_fixup(std::span<const uint8_t> data)
   const uint32_t floor = fixup.initial_memory_start +
                          static_cast<uint32_t>(fixup.initial_memory.size());
   const uint32_t min_memory = std::max<uint32_t>(1, floor);
-  const uint32_t room = kMaxMemoryBytes - min_memory;
+  const uint32_t room = kDefaultMaxMemoryBytes - min_memory;
   fixup.memory_bytes = min_memory + (room == 0 ? 0U : extra_knob % (room + 1));
   return fixup;
 }

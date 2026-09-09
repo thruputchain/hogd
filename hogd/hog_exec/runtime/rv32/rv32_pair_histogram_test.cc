@@ -425,7 +425,7 @@ public:
       blob = &contract.value()->rv32_contract();
     }
 
-    auto image = rv32::parse_artifact(blob->data);
+    auto image = rv32::parse_artifact(blob->data, rv32::Rv32Limits::defaults());
     if (!image.has_value()) {
       co_return SystemError{SystemErrorCode::Unrecoverable};
     }

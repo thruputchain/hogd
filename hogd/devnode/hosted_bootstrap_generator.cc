@@ -223,6 +223,26 @@ build_genesis_json(GenesisConfiguration const &genesis)
                         w.field("max_contract_size_bytes",
                                 std::int64_t{param.max_contract_size_bytes()});
                         break;
+                      case ConfigParamID::kConfigParamMaxSavepointDepth:
+                        w.field("max_savepoint_depth",
+                                std::int64_t{param.max_savepoint_depth()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+                        w.field("max_sha256_buffer_bytes",
+                                std::int64_t{param.max_sha256_buffer_bytes()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+                        w.field("max_auth_token_depth",
+                                std::int64_t{param.max_auth_token_depth()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+                        w.field("max_rv32_code_bytes",
+                                std::int64_t{param.max_rv32_code_bytes()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+                        w.field("max_rv32_memory_bytes",
+                                std::int64_t{param.max_rv32_memory_bytes()});
+                        break;
                       }
                     });
               });

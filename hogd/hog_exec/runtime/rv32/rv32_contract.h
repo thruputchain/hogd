@@ -19,7 +19,10 @@ class Rv32Contract {
 public:
   // TODO(geoff): decide if we want to wire out the several different error
   // categories here.
-  static std::optional<Rv32Contract> create(ContractBlob const &contract_blob);
+  // Translates `contract_blob` under `limits`: the chain's configured bounds
+  // at attachment, the VM's ceilings for an already-deployed contract.
+  static std::optional<Rv32Contract> create(ContractBlob const &contract_blob,
+                                            rv32::Rv32Limits limits);
   Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation);
 
   rv32::ThreadedMachine instantiate(uint64_t gas) const;
@@ -65,6 +68,7 @@ private:
 class Rv32Context final : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params,
                                   PreparedContract &out) const override;
   using RuntimeContext::verify_contract;
 

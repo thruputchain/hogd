@@ -688,7 +688,7 @@ InvokeTX::assert_is_valid() const noexcept
     return;
   }
   assert(tx_depth_ >= 0);
-  assert(tx_depth_ <= kMaxSavepointDepth);
+  assert(tx_depth_ <= max_savepoint_depth());
   if constexpr (is_debug_build()) {
     try {
       std::unordered_map<Address, int128_t> balance_deltas;

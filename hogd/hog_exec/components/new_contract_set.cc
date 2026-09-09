@@ -17,7 +17,8 @@ namespace hogd {
 // TODO(geoff): gas cost calibration
 std::pair<InvokeStatus<NewContractSet>, GasAmount>
 NewContractSet::make(NewContractBatch const &contracts,
-                     RuntimeContext &runtime_context)
+                     RuntimeContext &runtime_context,
+                     NetworkConfigParams const &params)
 {
   NewContractSet new_contract_set;
   new_contract_set.new_contracts_.reserve(contracts.size());
@@ -44,7 +45,8 @@ NewContractSet::make(NewContractBatch const &contracts,
 
   for (auto const &[hash, contract] : new_contract_set.new_contracts_) {
     PreparedContract prepared_contract;
-    auto res = runtime_context.verify_contract(*contract, prepared_contract);
+    auto res =
+        runtime_context.verify_contract(*contract, params, prepared_contract);
     if (res != InvokeErrorCode::None) {
       // An unverifiable attachment makes the transaction malformed: reject it
       // as a ValidationFailure so it is dropped, never included in a block as

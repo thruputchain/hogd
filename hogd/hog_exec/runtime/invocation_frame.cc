@@ -41,10 +41,11 @@ InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  size_t event_count,
                                  std::span<uint32_t const> owned_auth_token_ids,
                                  uint32_t inherited_try_invoke_depth,
-                                 uint32_t max_sha256_buffers)
-  : hash_buffers_(max_sha256_buffers), address_(address),
-    calldata_(std::forward<Calldata>(calldata)), flags_(flags),
-    event_count_(event_count),
+                                 FrameLimits limits)
+  : limits_(limits),
+    hash_buffers_(limits.max_sha256_buffers, limits.max_sha256_buffer_bytes),
+    address_(address), calldata_(std::forward<Calldata>(calldata)),
+    flags_(flags), event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
     owned_auth_token_ids_(owned_auth_token_ids.begin(),
                           owned_auth_token_ids.end())
@@ -177,7 +178,7 @@ InvocationFrame::try_acquire_frame_locks(
   // caller (SystemCallHandler::try_commit_transaction) ignores those counters,
   // since the root frame is discarded immediately after commit.
   //
-  // The deterministic TryInvoke depth cap (kMaxSavepointDepth) is NOT enforced
+  // The deterministic TryInvoke depth cap (max_savepoint_depth) is NOT enforced
   // here; it is enforced exclusively by InvocationFrameStack::finish_frame's
   // depth-cap arm before this is called for a child TryInvoke frame. The child
   // cap reserves one slot for the root commit's subtransaction push.
@@ -266,7 +267,7 @@ InvocationFrame::collect_storage_deltas(
 SystemStatus<void>
 InvocationFrameStack::start_frame(
     ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids, uint32_t max_sha256_buffers)
+    std::span<uint32_t const> owned_auth_token_ids, FrameLimits limits)
 {
   assert(frame_stack_.empty() || check_auth_tokens_owned(owned_auth_token_ids));
 
@@ -287,7 +288,7 @@ InvocationFrameStack::start_frame(
   try {
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
                               event_count, owned_auth_token_ids, parent_depth,
-                              max_sha256_buffers);
+                              limits);
   } catch (...) {
     return SystemError{SystemErrorCode::Unrecoverable};
   }

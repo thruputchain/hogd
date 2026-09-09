@@ -85,7 +85,7 @@ store_digest_at(std::vector<uint8_t> &bytes, size_t offset,
 void
 expect_artifact_error(std::vector<uint8_t> artifact, ArtifactError expected)
 {
-  const auto parsed = parse_artifact(artifact);
+  const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_FALSE(parsed.has_value());
   EXPECT_EQ(parsed.error(), expected);
 }
@@ -298,7 +298,8 @@ TEST(Rv32ArtifactTest, computesCanonicalSha256SectionDigests)
 
 TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
 {
-  const auto parsed = parse_artifact(compiled_sha256_return::kArtifact);
+  const auto parsed =
+      parse_artifact(compiled_sha256_return::kArtifact, Rv32Limits::defaults());
 
   ASSERT_TRUE(parsed.has_value());
   ASSERT_NE(parsed->program, nullptr);
@@ -399,11 +400,69 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
   }
 }
 
+// The code and memory bounds are the caller's, not the format's: an artifact
+// past the protocol defaults is refused under them and admitted under a
+// chain's raised limits, and only the header's declaration is checked -- the
+// body still has to be what it says.
+TEST(Rv32ArtifactTest, boundsComeFromTheCallersLimits)
+{
+  constexpr Rv32Limits kRaised = {.max_code_bytes = 2 * kDefaultMaxCodeBytes,
+                                  .max_memory_bytes =
+                                      2 * kDefaultMaxMemoryBytes};
+
+  // One instruction past the default code size.
+  const std::vector<uint32_t> words((kDefaultMaxCodeBytes / kInstructionBytes) +
+                                        1,
+                                    addi(0, 0, 0));
+  auto big_code =
+      test_artifact::build_artifact(std::span<const uint32_t>(words.data(),
+                                                              words.size()),
+                                    std::span<const uint8_t>{});
+  {
+    const auto parsed = parse_artifact(big_code, Rv32Limits::defaults());
+    ASSERT_FALSE(parsed.has_value());
+    EXPECT_EQ(parsed.error(), ArtifactError::kCodeSizeInvalid);
+    EXPECT_FALSE(
+        parse_threaded_artifact(big_code, Rv32Limits::defaults()).has_value());
+  }
+  {
+    const auto parsed = parse_artifact(big_code, kRaised);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->program->instruction_count(), words.size());
+    EXPECT_TRUE(parse_threaded_artifact(big_code, kRaised).has_value());
+  }
+
+  // One byte past the default memory size, declared in the header alone: the
+  // stored image stays small and the runtime zero-extends.
+  auto big_memory = valid_artifact_bytes();
+  store_u32_at(big_memory, kArtifactMemoryBytesOffset,
+               kDefaultMaxMemoryBytes + 1);
+  {
+    const auto parsed = parse_artifact(big_memory, Rv32Limits::defaults());
+    ASSERT_FALSE(parsed.has_value());
+    EXPECT_EQ(parsed.error(), ArtifactError::kMemorySizeInvalid);
+  }
+  {
+    const auto parsed = parse_artifact(big_memory, kRaised);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->memory_bytes, kDefaultMaxMemoryBytes + 1);
+    const auto threaded = parse_threaded_artifact(big_memory, kRaised);
+    ASSERT_TRUE(threaded.has_value());
+    EXPECT_EQ(threaded->memory_bytes, kDefaultMaxMemoryBytes + 1);
+  }
+
+  // The VM's ceilings are the most any caller may pass and still be honoured.
+  auto at_ceiling = valid_artifact_bytes();
+  store_u32_at(at_ceiling, kArtifactMemoryBytesOffset, kMemoryCeilingBytes);
+  EXPECT_TRUE(parse_artifact(at_ceiling, Rv32Limits::ceiling()).has_value());
+}
+
 TEST(Rv32ArtifactTest, rejectsBoundsAndSectionLayoutErrors)
 {
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactMemoryBytesOffset, kMaxMemoryBytes + 1);
+    store_u32_at(artifact, kArtifactMemoryBytesOffset,
+                 kDefaultMaxMemoryBytes + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kMemorySizeInvalid);
   }
@@ -414,13 +473,13 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndSectionLayoutErrors)
   }
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactCodeSizeOffset, kMaxCodeBytes + 1);
+    store_u32_at(artifact, kArtifactCodeSizeOffset, kDefaultMaxCodeBytes + 1);
     expect_artifact_error(std::move(artifact), ArtifactError::kCodeSizeInvalid);
   }
   {
     auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactInitialMemorySizeOffset,
-                 kMaxMemoryBytes + 1);
+                 kDefaultMaxMemoryBytes + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kInitialMemoryTooLarge);
   }
@@ -506,7 +565,7 @@ TEST(Rv32ArtifactTest, acceptsZeroExtendedInitialMemoryPrefix)
   auto artifact =
       test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored);
   store_u32_at(artifact, kArtifactMemoryBytesOffset, 256);
-  const auto parsed = parse_artifact(artifact);
+  const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->memory_bytes, 256U);
   ASSERT_EQ(parsed->initial_memory.size(), stored.size());
@@ -520,12 +579,13 @@ TEST(Rv32ArtifactTest, acceptsZeroMemoryBytesArtifact)
   const auto artifact =
       test_artifact::build_artifact({addi(1, 0, 7), 0x00100073U},
                                     std::span<const uint8_t>{});
-  const auto parsed = parse_artifact(artifact);
+  const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->memory_bytes, 0U);
   EXPECT_TRUE(parsed->initial_memory.empty());
 
-  const auto threaded = parse_threaded_artifact(artifact);
+  const auto threaded =
+      parse_threaded_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(threaded.has_value());
   EXPECT_EQ(threaded->memory_bytes, 0U);
   EXPECT_TRUE(threaded->initial_memory.empty());
@@ -537,20 +597,23 @@ TEST(Rv32ArtifactTest, acceptsLimitBoundaryValues)
   // would reject artifacts other validators accept.
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactMemoryBytesOffset, kMaxMemoryBytes);
-    const auto parsed = parse_artifact(artifact);
+    store_u32_at(artifact, kArtifactMemoryBytesOffset, kDefaultMaxMemoryBytes);
+    const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
     ASSERT_TRUE(parsed.has_value());
-    EXPECT_EQ(parsed->memory_bytes, kMaxMemoryBytes);
-    EXPECT_TRUE(parse_threaded_artifact(artifact).has_value());
+    EXPECT_EQ(parsed->memory_bytes, kDefaultMaxMemoryBytes);
+    EXPECT_TRUE(
+        parse_threaded_artifact(artifact, Rv32Limits::defaults()).has_value());
   }
   {
-    const std::vector<uint32_t> words((kMaxCodeBytes / kInstructionBytes),
+    const std::vector<uint32_t> words((kDefaultMaxCodeBytes /
+                                       kInstructionBytes),
                                       addi(0, 0, 0));
     const std::array<uint8_t, 1> stored = {1};
     const auto artifact = test_artifact::build_artifact(words, stored);
-    const auto parsed = parse_artifact(artifact);
+    const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
     ASSERT_TRUE(parsed.has_value());
-    EXPECT_TRUE(parse_threaded_artifact(artifact).has_value());
+    EXPECT_TRUE(
+        parse_threaded_artifact(artifact, Rv32Limits::defaults()).has_value());
   }
 }
 
@@ -589,7 +652,7 @@ TEST(Rv32ArtifactTest, materializesInitialMemoryAtStartOffset)
       test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored,
                                     /*initial_memory_start=*/8);
 
-  const auto parsed = parse_artifact(artifact);
+  const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   // build_artifact stamps memory_bytes = start + size.
   EXPECT_EQ(parsed->memory_bytes, 12U);
@@ -602,7 +665,8 @@ TEST(Rv32ArtifactTest, materializesInitialMemoryAtStartOffset)
       std::span<const uint8_t>(parsed->initial_memory).subspan(8), stored));
 
   // The zero-copy path exposes the offset instead of materializing.
-  const auto threaded = parse_threaded_artifact(artifact);
+  const auto threaded =
+      parse_threaded_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(threaded.has_value());
   EXPECT_EQ(threaded->initial_memory_start, 8U);
   EXPECT_EQ(threaded->memory_bytes, 12U);
@@ -642,7 +706,7 @@ TEST(Rv32ProgramTest, reset_restores_initial_machine_state)
   EXPECT_EQ(machine.gas_remaining(), 9U);
   EXPECT_EQ(machine.trap(), Trap::kNone);
 
-  Machine bad_memory(program, kMaxMemoryBytes + 1, 5);
+  Machine bad_memory(program, kDefaultMaxMemoryBytes + 1, 5);
   EXPECT_EQ(bad_memory.trap(), Trap::kBadMemory);
   bad_memory.reset(9);
   EXPECT_EQ(bad_memory.trap(), Trap::kBadMemory);
@@ -664,7 +728,7 @@ TEST(Rv32ProgramTest, validates_code_shape_and_profile)
     EXPECT_EQ(result.error, ProgramError::kCodeSizeNotAligned);
   }
   {
-    std::vector<uint8_t> code(kMaxCodeBytes + kInstructionBytes);
+    std::vector<uint8_t> code(kDefaultMaxCodeBytes + kInstructionBytes);
     const auto result = Program::validate(code);
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.error, ProgramError::kCodeTooLarge);
@@ -705,8 +769,8 @@ TEST(Rv32ProgramTest, validates_profile_boundaries)
 {
   {
     std::vector<uint8_t> code;
-    code.reserve(kMaxCodeBytes);
-    for (uint32_t i = 0; i < kMaxCodeBytes / kInstructionBytes; ++i) {
+    code.reserve(kDefaultMaxCodeBytes);
+    for (uint32_t i = 0; i < kDefaultMaxCodeBytes / kInstructionBytes; ++i) {
       append_u32(code, addi(0, 0, 0));
     }
     const auto result = Program::validate(code);
@@ -1323,7 +1387,7 @@ TEST(Rv32ExecutionTest, fetch_and_data_memory_access_semantics)
   }
   {
     const auto program = make_program({addi(1, 0, 1)});
-    Machine machine(program, kMaxMemoryBytes + 1, 10);
+    Machine machine(program, kDefaultMaxMemoryBytes + 1, 10);
     EXPECT_EQ(machine.trap(), Trap::kBadMemory);
     EXPECT_TRUE(machine.halted());
   }

@@ -8,7 +8,9 @@
 #include <optional>
 #include <utility>
 
+#include "auth_token.hh"
 #include "contract.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "network_config.hh"
 #include "storage_item.hh"
@@ -33,6 +35,14 @@ struct NetworkConfigParams {
   uint32_t max_bytestring_len = static_cast<uint32_t>(kDefaultMaxBytestringLen);
   uint32_t max_contract_size_bytes =
       static_cast<uint32_t>(kDefaultMaxContractSizeBytes);
+  uint32_t max_savepoint_depth = static_cast<uint32_t>(kMaxSavepointDepth);
+  uint32_t max_sha256_buffer_bytes =
+      static_cast<uint32_t>(kSHA256BufferMaxSize);
+  uint32_t max_auth_token_depth = static_cast<uint32_t>(kAuthTokenMaxDepth);
+  uint32_t max_rv32_code_bytes =
+      static_cast<uint32_t>(kDefaultMaxRv32CodeBytes);
+  uint32_t max_rv32_memory_bytes =
+      static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes);
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -87,6 +97,16 @@ NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
     return param.max_bytestring_len();
   case ConfigParamID::kConfigParamMaxContractSizeBytes:
     return param.max_contract_size_bytes();
+  case ConfigParamID::kConfigParamMaxSavepointDepth:
+    return param.max_savepoint_depth();
+  case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+    return param.max_sha256_buffer_bytes();
+  case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+    return param.max_auth_token_depth();
+  case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+    return param.max_rv32_code_bytes();
+  case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+    return param.max_rv32_memory_bytes();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", index);
 }
@@ -111,6 +131,21 @@ NetworkConfigParams::make_param(ConfigParamID id, uint32_t value)
   case ConfigParamID::kConfigParamMaxContractSizeBytes:
     out.max_contract_size_bytes() = value;
     break;
+  case ConfigParamID::kConfigParamMaxSavepointDepth:
+    out.max_savepoint_depth() = value;
+    break;
+  case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+    out.max_sha256_buffer_bytes() = value;
+    break;
+  case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+    out.max_auth_token_depth() = value;
+    break;
+  case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+    out.max_rv32_code_bytes() = value;
+    break;
+  case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+    out.max_rv32_memory_bytes() = value;
+    break;
   }
   return out;
 }
@@ -129,6 +164,16 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return max_bytestring_len;
   case ConfigParamID::kConfigParamMaxContractSizeBytes:
     return max_contract_size_bytes;
+  case ConfigParamID::kConfigParamMaxSavepointDepth:
+    return max_savepoint_depth;
+  case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+    return max_sha256_buffer_bytes;
+  case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+    return max_auth_token_depth;
+  case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+    return max_rv32_code_bytes;
+  case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+    return max_rv32_memory_bytes;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -161,7 +206,22 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
             .value_or(static_cast<uint32_t>(kDefaultMaxBytestringLen))),
     max_contract_size_bytes(
         stated_param(config, ConfigParamID::kConfigParamMaxContractSizeBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxContractSizeBytes)))
+            .value_or(static_cast<uint32_t>(kDefaultMaxContractSizeBytes))),
+    max_savepoint_depth(
+        stated_param(config, ConfigParamID::kConfigParamMaxSavepointDepth)
+            .value_or(static_cast<uint32_t>(kMaxSavepointDepth))),
+    max_sha256_buffer_bytes(
+        stated_param(config, ConfigParamID::kConfigParamMaxSHA256BufferBytes)
+            .value_or(static_cast<uint32_t>(kSHA256BufferMaxSize))),
+    max_auth_token_depth(
+        stated_param(config, ConfigParamID::kConfigParamMaxAuthTokenDepth)
+            .value_or(static_cast<uint32_t>(kAuthTokenMaxDepth))),
+    max_rv32_code_bytes(
+        stated_param(config, ConfigParamID::kConfigParamMaxRv32CodeBytes)
+            .value_or(static_cast<uint32_t>(kDefaultMaxRv32CodeBytes))),
+    max_rv32_memory_bytes(
+        stated_param(config, ConfigParamID::kConfigParamMaxRv32MemoryBytes)
+            .value_or(static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes)))
 {}
 
 inline void

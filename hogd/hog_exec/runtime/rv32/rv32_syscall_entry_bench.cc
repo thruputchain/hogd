@@ -91,7 +91,7 @@ namespace hogd {
 namespace {
 
 constexpr uint64_t kPlentyOfGas = 1'000'000'000;
-constexpr uint32_t kGuestMemoryBytes = rv32::kMaxMemoryBytes;
+constexpr uint32_t kGuestMemoryBytes = rv32::kDefaultMaxMemoryBytes;
 // Output pointers the guest hands the syscall. Two, because GetCalldataLen
 // writes through two.
 constexpr uint32_t kOutputAddressA = 0x0400;
@@ -320,6 +320,7 @@ constexpr int64_t kColdIterations = 20000;
 class NoChildRuntimeContext final : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const & /*contract*/,
+                                  NetworkConfigParams const & /*params*/,
                                   PreparedContract & /*out*/) const override
   {
     std::abort();

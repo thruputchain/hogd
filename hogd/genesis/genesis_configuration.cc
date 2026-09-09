@@ -16,11 +16,13 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "auth_token.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/genesis_root.h"
 #include "built_contracts/genesis_root.hh"
 #include "contract.hh"
 #include "genesis.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -150,6 +152,23 @@ stock_network_config()
   NetworkConfigParams::set_param(
       config, ConfigParamID::kConfigParamMaxContractSizeBytes,
       static_cast<uint32_t>(kDefaultMaxContractSizeBytes));
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxSavepointDepth,
+                                 static_cast<uint32_t>(kMaxSavepointDepth));
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxSHA256BufferBytes,
+      static_cast<uint32_t>(kSHA256BufferMaxSize));
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxAuthTokenDepth,
+                                 static_cast<uint32_t>(kAuthTokenMaxDepth));
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxRv32CodeBytes,
+                                 static_cast<uint32_t>(
+                                     kDefaultMaxRv32CodeBytes));
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxRv32MemoryBytes,
+                                 static_cast<uint32_t>(
+                                     kDefaultMaxRv32MemoryBytes));
   return config;
 }
 

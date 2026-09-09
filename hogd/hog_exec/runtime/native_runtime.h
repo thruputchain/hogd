@@ -110,6 +110,7 @@ public:
   // Native contracts are registered at genesis, not translated: there is
   // nothing to prepare, so `out` is left alone.
   InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const & /*params*/,
                                   PreparedContract & /*out*/) const override
   {
     CHECK(contract.contract_type() == ContractType::kNative);

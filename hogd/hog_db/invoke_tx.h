@@ -101,6 +101,11 @@ public:
 
   // get_savepoint_head returns the depth of the most recent savepoint.
   unsigned int get_savepoint_head() const { return tx_depth_; }
+  // The chain's savepoint limit for the block this transaction runs in.
+  uint32_t max_savepoint_depth() const
+  {
+    return block_.get().max_savepoint_depth();
+  }
 
   //
   // All of the read_* methods below read the current value of an item in just
@@ -281,7 +286,7 @@ private:
 inline int
 InvokeTX::create_savepoint()
 {
-  CHECK(tx_depth_ < kMaxSavepointDepth);
+  CHECK(tx_depth_ < max_savepoint_depth());
   return ++tx_depth_;
 }
 

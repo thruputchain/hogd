@@ -52,12 +52,14 @@ host_trap_code_to_invoke_status(uint32_t code)
 bool
 runtime_contract_image_is_valid(const RuntimeContractImage &image)
 {
-  // memory_bytes is a free uint32_t on the image; cap it at kMaxMemoryBytes so
-  // an oversized host config is rejected here as invalid rather than surfacing
-  // later as a per-invocation construction trap misreported as a guest fault.
+  // memory_bytes is a free uint32_t on the image; cap it at the VM's ceiling
+  // so an oversized host config is rejected here as invalid rather than
+  // surfacing later as a per-invocation construction trap misreported as a
+  // guest fault.
   // memory_bytes == 0 is allowed (a zero-memory contract is a valid degenerate
   // image; initial_memory must then be empty, which the size check enforces).
-  return image.program != nullptr && image.memory_bytes <= kMaxMemoryBytes &&
+  return image.program != nullptr &&
+         image.memory_bytes <= kMemoryCeilingBytes &&
          image.initial_memory.size() <= image.memory_bytes;
 }
 
@@ -168,6 +170,7 @@ RuntimeContext::RuntimeContext(
 
 InvokeErrorCode
 RuntimeContext::verify_contract(Contract const &contract,
+                                NetworkConfigParams const & /*params*/,
                                 hogd::PreparedContract & /*out*/) const
 {
   // kMockTest images are prebuilt in contracts_; nothing to hand back.

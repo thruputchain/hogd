@@ -26,6 +26,7 @@
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
+#include "hogd/hog_exec/runtime/frame_limits.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "invoke_flag.hh"
@@ -47,8 +48,7 @@ public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
                   std::span<uint32_t const> owned_auth_token_ids,
-                  uint32_t inherited_try_invoke_depth,
-                  uint32_t max_sha256_buffers);
+                  uint32_t inherited_try_invoke_depth, FrameLimits limits);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -125,9 +125,11 @@ public:
 
   bool depth_cap_reached() const
   {
-    // Reserve one savepoint slot for the root commit frame, which always
-    // pushes a subtransaction through the same HogDb path.
-    return total_try_invoke_depth_ >= kMaxSavepointDepth - 1;
+    // The chain's max_savepoint_depth, less one slot reserved for the root
+    // commit frame, which always pushes a subtransaction through the same
+    // HogDb path. A depth of 0 leaves no slot for a TryInvoke at all.
+    return limits_.max_savepoint_depth == 0 ||
+           total_try_invoke_depth_ >= limits_.max_savepoint_depth - 1;
   }
 
   // returned pointer is invalidated by any call to add_item_view
@@ -219,6 +221,8 @@ public:
     }
   }
 
+  // The chain's limits in force when this frame was admitted.
+  FrameLimits limits_;
   HashBuffers hash_buffers_;
 
   void set_child_restore_auth_tokens(std::span<uint32_t const> token_ids)
@@ -316,11 +320,9 @@ public:
   // back — and an Unrecoverable SystemError is returned, so the noexcept caller
   // (SystemCallHandler::start_frame) never lets the exception terminate the
   // executor (#3058).
-  [[nodiscard]] SystemStatus<void>
-  start_frame(ContractAddress const &address, Calldata &&calldata,
-              InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids,
-              uint32_t max_sha256_buffers);
+  [[nodiscard]] SystemStatus<void> start_frame(
+      ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
+      std::span<uint32_t const> owned_auth_token_ids, FrameLimits limits);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode

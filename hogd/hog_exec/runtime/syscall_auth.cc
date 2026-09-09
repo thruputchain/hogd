@@ -11,6 +11,7 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
@@ -162,8 +163,9 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
-  if (!AuthTokenRegistry::node_within_depth(auth_token.root_node,
-                                            kAuthTokenMaxDepth)) {
+  if (!AuthTokenRegistry::node_within_depth(
+          auth_token.root_node,
+          syscall_handler.config_params().max_auth_token_depth)) {
     return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};

@@ -242,7 +242,9 @@ HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   if (!itx)
     return TryPushSubtransactionResult(RPCError::kRPCBadBlockID);
   const DbDiagnosticLevel level = diagnostic_level_for(itx->execution_mode());
-  if (itx->get_savepoint_head() >= kMaxSavepointDepth) [[unlikely]] {
+  // hog_exec enforces the chain's max_savepoint_depth before pushing, so a
+  // push past it is executor misbehavior rather than a transaction outcome.
+  if (itx->get_savepoint_head() >= itx->max_savepoint_depth()) [[unlikely]] {
     return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }
   int depth = itx->create_savepoint();

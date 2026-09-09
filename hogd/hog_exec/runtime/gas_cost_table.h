@@ -151,7 +151,7 @@ constexpr static uint64_t kEd25519HashedPrefixBytes = 64;
 static_assert(kSHA512BlockBytes == 128 && kSHA512PadBytes == 17);
 
 // The largest length a cost function may be handed. Every argument they price
-// is a guest span length, which rv32::kMaxMemoryBytes caps at 64 KiB, so
+// is a guest span length, which rv32::kMemoryCeilingBytes caps at 16 MiB, so
 // anything past this is a caller passing something that is not a length -- a
 // bug to catch, not a case to price.
 constexpr static uint64_t kMaxCostBytes = uint64_t{1} << 32;

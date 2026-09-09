@@ -35,7 +35,7 @@ word_at(std::span<const uint8_t> code, size_t index)
 // The probe's memory size is deliberately tiny: handler selection depends on
 // the decoded instruction, not on how much guest memory exists (the size is a
 // run-time argument to the load/store handlers), and sizing every probe at
-// kMaxMemoryBytes would zero 64 KiB per lookup.
+// kDefaultMaxMemoryBytes would zero 64 KiB per lookup.
 std::optional<Handler>
 isolated_handler(uint32_t word)
 {
