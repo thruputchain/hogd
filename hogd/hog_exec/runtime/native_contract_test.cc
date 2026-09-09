@@ -655,11 +655,11 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         // This would have failed if the bytestring was not loaded lazily:
         // we're getting the bytestring from the prior write, not the snapshot
         auto r2 = co_await ctx.handler().get_bytestring(kBadKey);
-        if (!r2.has_value() || !r2.value().has_value()) {
+        if (!r2.has_value() || !r2.value().result.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        assert(r2.value().value());
-        if (*r2.value().value() != bstring) {
+        assert(r2.value().result.value());
+        if (*r2.value().result.value() != bstring) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};
@@ -750,8 +750,8 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           // get_nnint() with force_load_from_snapshot=false from clean state
           // should not query db
           auto r0 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r0.has_value() || !r0.value().has_value() ||
-              r0.value().value().first.has_value()) {
+          if (!r0.has_value() || !r0.value().result.has_value() ||
+              r0.value().result.value().first.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -774,10 +774,10 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           // assert that get_nnint() without a load doesn't query db
           auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r3.has_value() || !r3.value().has_value()) {
+          if (!r3.has_value() || !r3.value().result.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r3.value().value().first.has_value()) {
+          if (r3.value().result.value().first.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
@@ -797,20 +797,20 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           // assert that get_nnint() after a set doesn't query db, even with
           // force_load_from_snapshot=true
           auto r2 = co_await ctx.handler().get_nnint(kBadKey, true);
-          if (!r2.has_value() || !r2.value().has_value()) {
+          if (!r2.has_value() || !r2.value().result.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!r2.value().value().first.has_value()) {
+          if (!r2.value().result.value().first.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // get_nnint() after a set with force_load_from_snapshot=false should
           // co_return the set value if it exists
           auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r3.has_value() || !r3.value().has_value()) {
+          if (!r3.has_value() || !r3.value().result.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!r3.value().value().first.has_value()) {
+          if (!r3.value().result.value().first.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 

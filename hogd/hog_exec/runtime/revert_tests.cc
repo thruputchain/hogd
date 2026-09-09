@@ -295,7 +295,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().has_value()) {
+        if (res.value().result.has_value()) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test1 should be "
                            "absent after revert";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -329,7 +329,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().has_value()) {
+        if (res.value().result.has_value()) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test2 should be "
                            "absent after revert";
           co_return InvokeError{InvokeErrorCode::Deterministic};

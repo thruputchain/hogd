@@ -11,10 +11,12 @@ namespace hogd {
 x23::Async<SystemStatus<SyscallStatus<int128_t>>>
 NativeSyscallContext::native_token_balance(ContractAddress const &address)
 {
-  const auto db_gas_before = handler_.db_read_gas();
-  auto result = co_await handler_.get_native_token_balance(address);
-  consume_gas(handler_.db_read_gas() - db_gas_before);
-  co_return result;
+  auto status = co_await handler_.get_native_token_balance(address);
+  if (!status.has_value()) {
+    co_return status.error();
+  }
+  consume_gas(status->load_gas);
+  co_return std::move(status->result);
 }
 
 } // namespace hogd

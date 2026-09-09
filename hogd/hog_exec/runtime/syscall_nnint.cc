@@ -26,33 +26,30 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 bool &output_current_set_opt,
                                 int128_t &output_current_add)
 {
-  // Bracket the call: any load it does adds to the transaction's running
-  // total, and the difference is what this call is charged for.
-  const auto db_gas_before = syscall_handler.db_read_gas();
   auto status =
       co_await syscall_handler.get_nnint(input_key,
                                          input_force_load_from_snapshot);
-  // Charged on the error returns too. A read of a missing key, or of one
-  // holding another type, loads before it can tell; the key is marked loaded
-  // either way, so nothing later recovers the charge and a caller could
-  // otherwise probe cold storage for the syscall base cost.
-  const auto db_gas = syscall_handler.db_read_gas() - db_gas_before;
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{db_gas}};
+                                 WrappedGasAmount{0}};
   }
-  if (!(*status).has_value()) {
-    co_return SyscallInnerResult{(*status).error().code(),
-                                 WrappedGasAmount{db_gas}};
+  // Billed on the error return too. A read of a missing key, or of one holding
+  // another type, loads before it can tell; the key is marked loaded either
+  // way, so nothing later recovers the charge and a caller could otherwise
+  // probe cold storage for the syscall base cost.
+  auto const &[result, load_gas] = *status;
+  if (!result.has_value()) {
+    co_return SyscallInnerResult{result.error().code(),
+                                 WrappedGasAmount{load_gas}};
   }
-  if ((*status)->first.has_value()) {
-    output_current_set = *((*status)->first);
+  if (result->first.has_value()) {
+    output_current_set = *(result->first);
     output_current_set_opt = true;
   }
   else {
     output_current_set_opt = false;
   }
-  output_current_add = (*status)->second;
+  output_current_add = result->second;
 
   // If we load from the snapshot, we must have a set value.
   assert(!input_force_load_from_snapshot || output_current_set_opt);
@@ -67,7 +64,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs->current_add = to_xdr(output_current_add);
   }
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost + db_gas}};
+                               WrappedGasAmount{kStorageAccessCost + load_gas}};
 }
 
 MaybeAsyncSyscallInnerResult
