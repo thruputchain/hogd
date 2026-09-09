@@ -112,13 +112,13 @@ echo 'launch coordinator and scp'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
-  --skip 20 \
   --stack \
   --config ./scripts/config-chuckd.json \
   --instance 970c9b \
   --seed 1410441218572558875 \
   --metrics :2223 \
   bench coordinator_loadgen \
+  --skip 20 \
   --in-addr "$(hog_ip hog4)":7888 \
   --debug-port 5500 \
   --num-accts 10000 \

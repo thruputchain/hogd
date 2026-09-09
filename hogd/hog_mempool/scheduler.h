@@ -177,8 +177,7 @@ public:
   // runqueue or stranded set. Callers must authenticate the submitted signed
   // encoding before treating an existing body as admitted.
   bool is_pending(const SignedTransaction &tx);
-  bool is_pending(const SignedTransaction &tx,
-                  const TransactionHash &tx_hash);
+  bool is_pending(const SignedTransaction &tx, const TransactionHash &tx_hash);
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.

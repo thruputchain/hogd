@@ -318,10 +318,8 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         handles.reserve(chunks.size());
         for (const ChunkRange &chunk : chunks) {
           handles.push_back(
-              [](const ChunkRange *chunk,
-                 const SignedTransactionBatch &txs,
-                 TransactionHashBatch &tx_hashes) noexcept
-                  -> x23::Async<void> {
+              [](const ChunkRange *chunk, const SignedTransactionBatch &txs,
+                 TransactionHashBatch &tx_hashes) noexcept -> x23::Async<void> {
                 co_await default_coropoll().pool_.bg();
                 for (size_t i = chunk->start; i < chunk->end; i++) {
                   tx_hashes[i] = sha256(txs[i].tx);
@@ -427,9 +425,9 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         size_t num_discarded = 0;
         for (size_t i = 0; i < txs->size(); i++) {
           const TransactionHash &tx_hash = (*tx_hashes)[i];
-          const bool already_pending = selected_new_hashes.contains(tx_hash) ||
-                                       scheduler_->is_pending((*txs)[i],
-                                                              tx_hash);
+          const bool already_pending =
+              selected_new_hashes.contains(tx_hash) ||
+              scheduler_->is_pending((*txs)[i], tx_hash);
           if (already_pending || num_slots_left > 0) {
             if (!already_pending) {
               num_slots_left--;

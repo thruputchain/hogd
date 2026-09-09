@@ -554,9 +554,9 @@ Scheduler::add_txs_impl(const x23::XdrVec<SignedTransaction> &txs,
                   SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
               continue;
             }
-            const TransactionHash tx_hash =
-                tx_hashes == nullptr ? sha256(txs[tx_idx].tx)
-                                     : (*tx_hashes)[tx_idx];
+            const TransactionHash tx_hash = tx_hashes == nullptr
+                                                ? sha256(txs[tx_idx].tx)
+                                                : (*tx_hashes)[tx_idx];
             if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
               num_added++;
             }
