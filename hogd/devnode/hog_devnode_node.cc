@@ -1107,6 +1107,20 @@ HogDevnodeNode::init_db_backend(
     }
     ctx_->initialize_cost_model(*cost_model);
     recovered_existing_chain_ = true;
+    // Same recovery-integrity gate hog-db's own main applies: a committed tip
+    // whose default wallet has no valid backing contract row is a tampered
+    // data directory that would otherwise surface as a maliciously-triggerable
+    // Unrecoverable root invocation (see
+    // HogDbDAO::validate_default_wallet_present).
+    if (HogDbStatus<void> wallet_ok =
+            ctx_->get_db().validate_default_wallet_present(
+                ctx_->get_tip().default_wallet);
+        !wallet_ok) {
+      throw std::runtime_error(
+          std::format("recovered DbTip default wallet has no valid contract "
+                      "row: {}",
+                      wallet_ok.error()));
+    }
     // Hog ages are scheduler-visible state derived from committed balances,
     // and nothing republishes them for blocks that committed before this
     // process started. hog-db's own main does this at startup; a composed
