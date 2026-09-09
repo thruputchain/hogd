@@ -126,10 +126,21 @@ handle_start_command(std::string const &host, std::string const &port,
       command += arg + " ";
     }
     hogd::info("Starting server: {}", command);
-    auto status = client.start_server(args[0],
-                                      std::vector<std::string>(args.begin() + 1,
-                                                               args.end()),
-                                      cpu_affinity);
+    // [try_start_server] rather than [start_server]: the latter panics, which
+    // is [std::terminate] and so a core dump and exit 134 for a failure this
+    // command can report as cleanly as every other one here. A stale control
+    // server answering [kCIServerErrorCodeVersionMismatch] is a fact about the
+    // host, not a bug in this process, and reporting it as a crash is what
+    // buried the cause of hogd issue #3945.
+    auto status =
+        client.try_start_server(args[0],
+                                std::vector<std::string>(args.begin() + 1,
+                                                         args.end()),
+                                cpu_affinity);
+    if (status.error_code() != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Error: {}", status.error_code());
+      return 1;
+    }
     hogd::info("Start command sent successfully");
     std::println("CONTROL_STDOUT_PATH={}",
                  std::string(status.paths().stdout_path.begin(),
@@ -162,7 +173,17 @@ handle_clear_work_dir_command(std::string const &host, std::string const &port)
 {
   try {
     auto client = hogd::connect_to_control_server(host, port);
-    client.clear_work_dir();
+    // The server reports refusals here -- a version mismatch, a work directory
+    // it could not clear -- and dropping that code reported every one of them
+    // as success. The benchmark scripts read this exit status as "the work
+    // directory is clean", so a discarded failure let a run proceed against a
+    // stale server and die later on the first command that did check. See
+    // hogd issue #3945.
+    auto error_code = client.clear_work_dir();
+    if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Error: {}", error_code);
+      return 1;
+    }
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
