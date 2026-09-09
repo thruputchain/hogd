@@ -80,6 +80,8 @@ contract_blob_size(Contract const &contract)
   panic("Unrecoverable; Invalid contract type: {}", contract.contract_type());
 }
 
+constexpr NewContractBatch kEmptyVec = {};
+
 ExecutionModeData
 make_execution_mode_data(ExecutionModeCtor execution_mode_ctor)
 {
@@ -212,10 +214,6 @@ SystemCallHandler::SystemCallHandler(
   // in release builds too.
   CHECK(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
 }
-
-namespace {
-constexpr NewContractBatch kEmptyVec = {};
-} // namespace
 
 SystemCallHandler::SystemCallHandler(
     StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
