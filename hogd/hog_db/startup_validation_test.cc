@@ -38,8 +38,7 @@ namespace {
 constexpr std::size_t kHeapSize = 10_MiB;
 constexpr BlockTXID kBlock = 7;
 
-// Past the height-1 genesis ceremony, so the wallet-row rule is in force. The
-// height-0 case, where it is not, is its own test below.
+// Past the height-1 ceremony, so the wallet-row rule is in force.
 constexpr BlockHeight kTipHeight = 4;
 
 Contract
@@ -52,10 +51,9 @@ native_default_wallet_contract()
   return contract;
 }
 
-// A committed database holding the default wallet's contract row, the cost
-// model, and a tip whose header states the config hash its own configuration
-// hashes to -- what an honest node leaves behind, and the state every case
-// below starts from.
+// What an honest node leaves behind: the wallet's contract row, the cost
+// model, and a tip whose header states the config hash its configuration
+// hashes to.
 class RecoveredTipTest : public testing::Test {
 protected:
   void SetUp() override
@@ -73,9 +71,8 @@ protected:
     ASSERT_TRUE(ctx.get_db().write_cost_model(cost_model_).has_value());
 
     const Contract wallet = native_default_wallet_contract();
-    // The genesis helper derives this hash from its own copy of the contract;
-    // writing the row under a hash it does not name would make every case
-    // below pass for the wrong reason.
+    // Writing the row under a hash the genesis helper does not name would
+    // make every case below pass for the wrong reason.
     ASSERT_EQ(sha256(wallet), native_default_wallet_hash().hash);
     const auto encoded = x23::serialize(wallet);
     ASSERT_TRUE(ctx.get_db()
@@ -118,12 +115,11 @@ TEST_F(RecoveredTipTest, AcceptsTheTipItsHeaderCommitsTo)
   const HogDbStatus<DbTip> tip = db.read_dbtip();
   ASSERT_TRUE(tip.has_value());
   EXPECT_EQ(tip->default_wallet, native_default_wallet_hash());
-  EXPECT_TRUE(validate_recovered_tip(db, *tip, cost_model_).has_value());
+  EXPECT_TRUE(tip_is_servable(db, *tip, cost_model_));
 }
 
-// The point of #3926: `<DBTIP` is global metadata, so rewriting the wallet
-// selector there leaves the state hash the tip carries untouched and startup
-// used to accept it. The config hash is what notices.
+// #3926: `<DBTIP` is global metadata, so rewriting the wallet selector there
+// leaves the state hash untouched. The config hash is what notices.
 TEST_F(RecoveredTipTest, RejectsRewrittenDefaultWallet)
 {
   HogDbDAO db = reopen();
@@ -143,14 +139,11 @@ TEST_F(RecoveredTipTest, RejectsRewrittenDefaultWallet)
   const HogDbStatus<DbTip> tampered = db.read_dbtip();
   ASSERT_TRUE(tampered.has_value());
   ASSERT_EQ(tampered->default_wallet, absent);
-  const auto servable = validate_recovered_tip(db, *tampered, cost_model_);
-  ASSERT_FALSE(servable.has_value());
-  EXPECT_EQ(servable.error(), TipRejection::kConfigHashMismatch);
+  EXPECT_FALSE(tip_is_servable(db, *tampered, cost_model_));
 }
 
-// `<COSTMODEL` is the other unhashed metadata row, and startup reads the model
-// it hands here straight off it. So a rewritten row reaches this function as a
-// cost model differing from the committed one, and is caught the same way.
+// `<COSTMODEL` is the other unhashed row; startup reads the model it passes
+// here straight off it, so a rewritten row arrives as a differing model.
 TEST_F(RecoveredTipTest, RejectsRewrittenCostModel)
 {
   HogDbDAO db = reopen();
@@ -159,14 +152,11 @@ TEST_F(RecoveredTipTest, RejectsRewrittenCostModel)
 
   StorageCostModelXdr xdr = cost_model_.to_xdr();
   xdr.balance_cost++;
-  const auto servable = validate_recovered_tip(db, *tip, StorageCostModel(xdr));
-  ASSERT_FALSE(servable.has_value());
-  EXPECT_EQ(servable.error(), TipRejection::kConfigHashMismatch);
+  EXPECT_FALSE(tip_is_servable(db, *tip, StorageCostModel(xdr)));
 }
 
-// A wallet the header does commit to, but whose contract row is not there.
-// Nothing before execution reads that row, so without this check the first
-// root call to an undeployed address is the one that finds out.
+// A wallet the header commits to but whose row is absent. Nothing before
+// execution reads it, so otherwise the first root call finds out.
 TEST_F(RecoveredTipTest, RejectsDefaultWalletWithNoContractRow)
 {
   HogDbDAO db = reopen();
@@ -181,16 +171,11 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletWithNoContractRow)
       make_config_hash_preimage(cost_model_, tip->network_config, absent));
   ASSERT_FALSE(db.read_contract_code(absent.hash).has_value());
 
-  const auto servable = validate_recovered_tip(db, *tip, cost_model_);
-  ASSERT_FALSE(servable.has_value());
-  EXPECT_EQ(servable.error(), TipRejection::kDefaultWalletMissing);
+  EXPECT_FALSE(tip_is_servable(db, *tip, cost_model_));
 }
 
-// The same tip at height 0 is served. A chain may fund its accounts with its
-// own wallet artifact and name that as its default, and the genesis ceremony
-// attaches that code in the height-1 block -- so between the genesis commit
-// and the ceremony the row is legitimately absent, and refusing there would
-// refuse a supported chain rather than a tampered one.
+// The same tip at height 0 is served: the genesis ceremony attaches that code
+// in the height-1 block, so the row is legitimately absent until then.
 TEST_F(RecoveredTipTest, AcceptsDefaultWalletTheCeremonyHasYetToDeploy)
 {
   HogDbDAO db = reopen();
@@ -206,11 +191,11 @@ TEST_F(RecoveredTipTest, AcceptsDefaultWalletTheCeremonyHasYetToDeploy)
                                 ceremony_deployed));
   ASSERT_FALSE(db.read_contract_code(ceremony_deployed.hash).has_value());
 
-  EXPECT_TRUE(validate_recovered_tip(db, *tip, cost_model_).has_value());
+  EXPECT_TRUE(tip_is_servable(db, *tip, cost_model_));
 }
 
-// A non-canonical parameter list has no single hash, so it is refused before
-// the hash is computed rather than aborting inside make_config_hash_preimage.
+// Refused before the hash is computed, rather than aborting inside
+// make_config_hash_preimage.
 TEST_F(RecoveredTipTest, RejectsNonCanonicalNetworkConfig)
 {
   HogDbDAO db = reopen();
@@ -224,9 +209,7 @@ TEST_F(RecoveredTipTest, RejectsNonCanonicalNetworkConfig)
   ASSERT_FALSE(NetworkConfigParams::is_canonical(gapped.v0()));
   tip->network_config = gapped;
 
-  const auto servable = validate_recovered_tip(db, *tip, cost_model_);
-  ASSERT_FALSE(servable.has_value());
-  EXPECT_EQ(servable.error(), TipRejection::kNetworkConfigNotCanonical);
+  EXPECT_FALSE(tip_is_servable(db, *tip, cost_model_));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

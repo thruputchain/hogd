@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <expected>
 #include <format>
 #include <future>
 #include <limits>
@@ -133,13 +132,8 @@ hog_db_init(std::string_view path, size_t ram_bytes,
       critical("Failed to read cost model: {}", cost_model.error());
       return EXIT_FAILURE;
     }
-    // The state hash above covers no part of the chain configuration; this is
-    // what checks it, so it has to run before any server is up.
-    if (std::expected<void, TipRejection> servable =
-            validate_recovered_tip(ctx.get_db(), *tip, *cost_model);
-        !servable) {
-      critical("Refusing to serve the recovered database: {}",
-               describe_tip_rejection(servable.error()));
+    // The state hash above covers no part of the chain configuration.
+    if (!tip_is_servable(ctx.get_db(), *tip, *cost_model)) {
       return EXIT_FAILURE;
     }
     ctx.set_tip(*tip);

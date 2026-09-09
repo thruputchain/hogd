@@ -2,61 +2,17 @@
 
 #pragma once
 
-#include <cstdint>
-#include <expected>
-#include <string_view>
-
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 
 namespace hogd {
 
-// What made a recovered tip unservable.
-enum class TipRejection : uint8_t {
-  // The tip's network config is not the gapless prefix of parameter ids that
-  // a hashable configuration is, so it has no config hash to be checked
-  // against.
-  kNetworkConfigNotCanonical,
-
-  // The chain configuration the tip carries does not hash to the config hash
-  // the tip's own committed header states.
-  kConfigHashMismatch,
-
-  // Nothing is stored under the contract hash the tip selects as its default
-  // wallet, on a tip past the genesis ceremony that may deploy it.
-  kDefaultWalletMissing,
-};
-
-// Whether a recovered `tip` may be served, given the cost model stored
-// alongside it.
-//
-// The chain configuration a node executes under -- cost model, network config,
-// default wallet -- reaches it through `<DBTIP` and `<COSTMODEL`, which are
-// global metadata: is_state_item() leaves them out of compute_full_db_hash(),
-// so a tip whose storage_long_hash matches the recomputed state hash has said
-// nothing about any of them. ProposalHeader::config_hash has: consensus agreed
-// it, and every block recomputes it. Re-deriving it here is what ties the
-// configuration this node is about to execute under to the one its peers
-// committed, rather than to whatever its data directory happens to hold
-// (#3926).
-//
-// Also refuses a default wallet with no contract row, on a tip past height 0.
-// That one resolves during execution rather than at lookup, so leaving it to
-// be found later turns a root call to an undeployed address into
-// SystemErrorCode::Unrecoverable. Height 0 is exempt because a chain may name
-// a wallet artifact its own genesis ceremony deploys in the height-1 block.
-//
-// Takes the tip's configuration to be the one its own header commits to, which
-// holds while ConsensusValue::upgrades is unimplemented. A config upgrade
-// applied during a commit would leave the post-upgrade configuration in the
-// tip against a header naming the pre-upgrade hash, so this has to learn the
-// upgrade rule when that lands.
-std::expected<void, TipRejection>
-validate_recovered_tip(HogDbDAO &db, const DbTip &tip,
-                       const StorageCostModel &cost_model);
-
-// What `rejection` found, for the startup log.
-std::string_view describe_tip_rejection(TipRejection rejection);
+// Whether a recovered `tip` may be served, logging what failed if not. The
+// `<DBTIP` and `<COSTMODEL` rows are global metadata, outside the consensus
+// state hash, so re-deriving the config hash here is the only thing binding
+// the configuration a node executes under to what consensus agreed (#3926).
+bool tip_is_servable(HogDbDAO &db, const DbTip &tip,
+                     const StorageCostModel &cost_model);
 
 } // namespace hogd
