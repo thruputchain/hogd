@@ -8,7 +8,6 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 . "$SCRIPT_DIR/bench_harness.sh"
 . "$SCRIPT_DIR/wait_port_report.sh"
-WAIT_PORT=ci_wait_port
 BUILD_ROOT=$([[ $BUILD_DIR = /* ]] && printf '%s' "$BUILD_DIR" || printf '%s' "$REPO_ROOT/$BUILD_DIR")
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REPO_ROOT/$WORK_DIR")
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
@@ -277,9 +276,8 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM
 
 echo 'make sure bench servers are running'
-for host in "${ALL_HOSTS[@]}"; do
-  "$WAIT_PORT" "$host" "$CI_CONTROL_PORT"
-done
+ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+  "${ALL_HOSTS[@]}"
 
 echo 'clear work dirs'
 for host in "${ALL_HOSTS[@]}"; do

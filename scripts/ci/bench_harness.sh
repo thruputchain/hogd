@@ -244,6 +244,89 @@ ci_wait_port_hosts() {
   return "$status"
 }
 
+# How long [ci_wait_control_server] sleeps between probes, and how long one
+# probe gets before it counts as not-ready. The overall timeout defaults to
+# whatever the caller allows a plain port wait, since this replaces one.
+#
+# The per-probe bound matters: a connect to a host that has stopped answering
+# (rather than refusing) blocks for the kernel's TCP timeout, which is longer
+# than the waits here allow in total, so an unbounded probe would let one such
+# host overrun the timeout it is supposed to be held to.
+CI_WAIT_CONTROL_POLL_SEC=${CI_WAIT_CONTROL_POLL_SEC:-1}
+CI_WAIT_CONTROL_PROBE_SEC=${CI_WAIT_CONTROL_PROBE_SEC:-10}
+
+# Waits until the control server on [$2]:[$3] answers an RPC as a server built
+# from this commit, using [$1] (a [control_cli] path) to probe.
+#
+# A bench control server outlives the run that started it often enough that
+# the schedules reap one by name before starting their own, and the reap can
+# come too late: each host reaps just before it starts its own server, while
+# the driving job starts talking to every host as soon as *its* own build
+# finishes. Waiting for the port to open does not close that window, because
+# the stale server holds the port open and answers [nc -z] immediately. The
+# benchmark then proceeds and dies on the first real RPC with
+# [kCIServerErrorCodeVersionMismatch] (hogd issue #3940).
+#
+# So wait on the thing that actually has to be true -- that the server on the
+# far end is this build's -- rather than on a port being open. A stale server
+# still holding the port now delays the wait instead of failing the run, and
+# the run recovers once the host that owns the port replaces it.
+ci_wait_control_server() {
+  local control_cli=$1
+  local host=$2
+  local port=$3
+  local timeout=${CI_WAIT_CONTROL_TIMEOUT_SEC:-$CI_WAIT_PORT_TIMEOUT_SEC}
+  local start_seconds=$SECONDS
+  local probe=""
+
+  echo "Waiting for this build's control server on $host:$port" \
+    "(timeout: ${timeout}s)..."
+  while true; do
+    if probe=$(timeout "$CI_WAIT_CONTROL_PROBE_SEC" \
+      "$control_cli" "$host" "$port" ready 2>&1); then
+      echo "Control server on $host:$port is serving this build"
+      return 0
+    fi
+
+    if [ "$timeout" != "0" ] &&
+      [ $((SECONDS - start_seconds)) -ge "$timeout" ]; then
+      # The last probe separates the two ways this wait times out -- nothing
+      # listening yet versus a stale server still holding the port -- which
+      # decide whether the host is slow or needs reaping.
+      echo "Timed out after ${timeout}s waiting for this build's control" \
+        "server on $host:$port; last probe said:" >&2
+      echo "$probe" >&2
+      return 1
+    fi
+
+    sleep "$CI_WAIT_CONTROL_POLL_SEC"
+  done
+}
+
+# [ci_wait_control_server] across several hosts at once. Every host is waited
+# on even when one fails, so a timeout report names all of the hosts that were
+# not ready rather than just the first.
+ci_wait_control_server_hosts() {
+  local control_cli=$1
+  local port=$2
+  local host
+  local wait_pid
+  local status=0
+  local -a wait_pids=()
+  shift 2
+
+  for host in "$@"; do
+    ci_wait_control_server "$control_cli" "$host" "$port" &
+    wait_pids+=("$!")
+  done
+  for wait_pid in "${wait_pids[@]}"; do
+    if ! wait "$wait_pid"; then
+      status=1
+    fi
+  done
+  return "$status"
+}
+
 ci_remote_run() {
   local host=$1
   shift

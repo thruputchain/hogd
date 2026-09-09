@@ -25,7 +25,42 @@ usage(char *argv[])
   std::println("  wait            - Wait for the most recent process to exit");
   std::println("  expect_running  - Check if a process is running");
   std::println("  clear_work_dir  - Clear the work directory");
+  std::println("  ready           - Check if this build's server is serving");
   exit(EXIT_FAILURE);
+}
+
+// Reports whether the server answering on [host]:[port] is a control server
+// built from this commit.
+//
+// A control server left over from an earlier run answers a plain TCP connect
+// exactly as readily as this run's does, so a readiness wait built on [nc -z]
+// alone lets a benchmark proceed against the stale server and only discover
+// the mismatch when the first real RPC comes back
+// [kCIServerErrorCodeVersionMismatch] -- which the benchmarks treat as fatal.
+// See hogd issue #3940.
+//
+// [query_work_dir] is the cheapest read-only RPC that runs the server's
+// version check, so it doubles as the probe: it mutates nothing on a server
+// that turns out to be the right one.
+int
+handle_ready_command(std::string const &host, std::string const &port)
+{
+  try {
+    // No retry: the caller polls, so a host whose server has not come up yet
+    // has to be reported as not-ready promptly rather than block in connect.
+    auto client = hogd::connect_to_control_server(host, port, false);
+    auto status = client.query_work_dir();
+    if (status.error_code() == hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Control server on {}:{} is serving this build", host, port);
+      return 0;
+    }
+    hogd::info("Control server on {}:{} is not ready: {}", host, port,
+               status.error_code());
+    return 1;
+  } catch (std::exception const &e) {
+    hogd::info("Error: {}", e.what());
+    return 1;
+  }
 }
 
 int
@@ -207,6 +242,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   if (command == "clear_work_dir") {
     return handle_clear_work_dir_command(host, port);
+  }
+
+  if (command == "ready") {
+    return handle_ready_command(host, port);
   }
 
   hogd::info("Unknown command: {}", command);

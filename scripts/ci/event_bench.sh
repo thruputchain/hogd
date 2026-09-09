@@ -25,7 +25,7 @@ export EVENT_MEMPOOL_PORT=8091
 export EVENT_INDEXER_PORT=8092
 
 echo 'make sure bench server is running'
-ci_wait_port hog11 11111
+ci_wait_control_server ./$BUILD_DIR/hogd/hog_exec/bench/control_cli hog11 11111
 
 echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hog_exec/bench/control_cli hog11 11111 clear_work_dir
