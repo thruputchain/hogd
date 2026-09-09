@@ -41,8 +41,9 @@ SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
     DBContext &db)
   : db_(db), open_handler_guard_(db), identifier_(db.allocate_identifier()),
-    runtime_context_owner_(std::move(context)),
-    handler_(*this, stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
+    runtime_context_owner_(std::move(context)), signed_tx_(stx),
+    handler_(*this, signed_tx_.tx, db.get_snapshot(),
+             db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
              *runtime_context_owner_),
     is_mocked_handler_(false)
@@ -136,12 +137,13 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     // guard rather than only at the structured-error return sites so it also
     // fires when a by-value copy throws -- get_most_recent_frame_output() (the
     // root output) or copy_last_frame_events() (the root event vector, #2699)
-    // -- not just on serialize_to_ffi_data_buffer() errors. It is gated on
-    // last_frame_finished() because a proposal-mode ValidationFailure rejects
-    // before any frame runs, so there is no finalized result to hide then.
+    // -- not just on serialize_to_ffi_data_buffer() errors. root_invoke()
+    // always finalizes before returning (finalize_after_root_frame owns
+    // last_frame_finished_), so a completed root_invoke() always leaves a
+    // finalized result to hide -- no gate on last_frame_finished() is needed.
     bool result_handed_off = false;
     x23::Defer poison_handler_on_handoff_failure([&]() {
-      if (!result_handed_off && to_handler().last_frame_finished()) {
+      if (!result_handed_off) {
         mark_finish_result_handoff_failed();
       }
     });
@@ -613,14 +615,14 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // When the root (last) mock frame finishes, run the same finalization
   // that root_invoke() does so that try_commit_transaction() can proceed.
-  // NOTE: mock path starts with gas_consumed_ == 0, so assignment == +=.
   if (to_handler().last_frame_finished()) {
-    to_handler().mock_set_cumulative_invoke_result(result);
-    to_handler().finalize_after_root_frame();
+    // Consume the finalized result, not the local passed in: finalization may
+    // rewrite it (a failed final validation check becomes ValidationFailure).
+    result = to_handler().finalize_after_root_frame(result);
 
     // Mirror root_invoke(): a root-level system error (Unrecoverable,
     // ValidationFailure, Abandon) must surface as an FFI error, not a
-    // serialized Fault that silently hides the cumulative root system result
+    // serialized Fault that silently hides the root system result
     // from the caller until a later try_commit_transaction(). Deterministic
     // and OutOfGas classify as Fault, so they keep flowing through as ordinary
     // serialized Fault outputs.
@@ -634,7 +636,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // The frame has been committed: finish_frame() merged a successful child into
   // its parent, and (for the root frame) finalize_after_root_frame() above made
-  // the cumulative result committable. From here until the result buffers are
+  // the root result committable. From here until the result buffers are
   // handed back to the caller, ANY failure -- a structured serialization error
   // OR a thrown copy/allocation failure -- means the caller never received the
   // result it was told to expect, so the handler must be poisoned and

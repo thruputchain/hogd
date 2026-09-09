@@ -26,7 +26,8 @@ DbSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
     DbBlockResult result(DbSchedResult::DbSchedResultOK);
     result.block().config_hash_preimage =
         make_config_hash_preimage(*block_manager_->get_cost_model(),
-                                  block_manager_->get_network_config());
+                                  block_manager_->get_network_config(),
+                                  block_manager_->get_default_wallet());
     co_return result;
   }
   DbBlockResult result(DbSchedResult::DbSchedResultError);
@@ -45,7 +46,8 @@ DbSchedRpc::dbsched_close_snapshot(BlockID id)
   DbBlockResult result(DbSchedResult::DbSchedResultOK);
   result.block().config_hash_preimage =
       make_config_hash_preimage(*block_manager_->get_cost_model(),
-                                block_manager_->get_network_config());
+                                block_manager_->get_network_config(),
+                                block_manager_->get_default_wallet());
   // TODO(geoff): Set block_hash if available
   // result.block_hash = ...; // Set block_hash if available
   co_return result;

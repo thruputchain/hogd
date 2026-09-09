@@ -35,12 +35,14 @@
 #include "hogd/hog_db/rpc_from_exec.h"
 #include "hogd/hog_db/rpc_from_gateway.h"
 #include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_db/startup_validation.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
@@ -125,16 +127,19 @@ hog_db_init(std::string_view path, size_t ram_bytes,
       critical("Root hash doesn't match DbTip");
       return EXIT_FAILURE;
     }
-    ctx.set_tip(*tip);
-    Health::instance().set_current_block_height(
-        tip->value.proposal_header.block_height)();
-    if (auto cost_model = ctx.get_db().read_cost_model(); cost_model) {
-      ctx.initialize_cost_model(*cost_model);
-    }
-    else {
+    HogDbStatus<StorageCostModel> cost_model = ctx.get_db().read_cost_model();
+    if (!cost_model) {
       critical("Failed to read cost model: {}", cost_model.error());
       return EXIT_FAILURE;
     }
+    // The state hash above covers no part of the chain configuration.
+    if (!StartupValidation::tip_is_servable(ctx.get_db(), *tip, *cost_model)) {
+      return EXIT_FAILURE;
+    }
+    ctx.set_tip(*tip);
+    Health::instance().set_current_block_height(
+        tip->value.proposal_header.block_height)();
+    ctx.initialize_cost_model(*cost_model);
   }
   else {
     CHECK_EQ(db_hash, StorageLongHash{});

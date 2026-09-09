@@ -36,6 +36,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
@@ -63,6 +64,7 @@
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_event.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
@@ -173,6 +175,79 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
   ASSERT_EQ(result.size(), hashes.size());
   EXPECT_FALSE(result[0]);
   EXPECT_FALSE(result[1]);
+}
+
+TEST(Mempool, SubmitUnvettedWithOutcomesBeforeReadyPreservesCardinality)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  MempoolGatewayRpc gateway(&coordinator);
+  SignedTransactionBatch txs;
+  txs.resize(2);
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(t_to_parallel_batch(txs)())();
+
+  ASSERT_EQ(outcomes.size(), txs.size());
+  EXPECT_EQ(outcomes[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
+  EXPECT_EQ(outcomes[1],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
+}
+
+TEST(Mempool, SubmitUnvettedWithOutcomesRejectsMalformedBatch)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  MempoolGatewayRpc gateway(&coordinator);
+  SignedTransactionBatch txs;
+  txs.resize(1);
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(txs)();
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
+  batch.segment_tokens[0]++;
+
+  EXPECT_THROW(gateway.schedgateway_submit_tx_batch(std::move(batch))(),
+               std::runtime_error);
+}
+
+TEST(Mempool, AuthenticatedPubkeyAccountMissingFromHogDbIsRecoverable)
+{
+  auto [raw_public_key, raw_secret_key] = ed25519_keygen();
+  PublicKey public_key(CryptographicScheme::Ed25519);
+  public_key.ed25519() = raw_public_key;
+  SecretKey secret_key(CryptographicScheme::Ed25519);
+  secret_key.ed25519() = raw_secret_key;
+  PubkeyAccountPreimage preimage{.pubkey = public_key, .nonce = 42};
+  const std::optional<ContractAddress> address = pubkey_auth_address(preimage);
+  if (!address.has_value()) {
+    ADD_FAILURE() << "failed to derive pubkey auth address";
+    return;
+  }
+
+  fib_client_t fib_client(*address);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  claim.pubkey_preimage() = preimage;
+  txs[0].tx.auth_claim = std::move(claim);
+  txs[0].signatures.push_back(make_signature(secret_key, txs[0].tx,
+                                             /*public_key_id=*/0,
+                                             MempoolTestInfra::kNetworkHash));
+
+  MempoolTestInfra server;
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  const ssize_t auth_failures_before =
+      MempoolMetrics::instance().auth_failed_tx_count.value();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(std::move(txs))())();
+
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError);
+  EXPECT_EQ(MempoolMetrics::instance().auth_failed_tx_count.value(),
+            auth_failures_before);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
 TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
@@ -814,9 +889,89 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
 
   ParallelSignedTransactionBatch batch =
       t_to_parallel_batch(SignedTransactionBatch{txs})();
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(std::move(batch))();
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(std::move(batch))();
+  ASSERT_EQ(outcomes.size(), txs.size());
+  for (size_t i = 0; i < mempool_tx_size_limit; i++) {
+    EXPECT_EQ(outcomes[i],
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  }
+  EXPECT_EQ(outcomes.back(),
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
             mempool_tx_size_limit);
+
+  // The legacy endpoint preserves its saturated fast path: it must reject
+  // before attempting to decode even a malformed batch.
+  ParallelSignedTransactionBatch malformed =
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})();
+  ASSERT_EQ(malformed.segment_tokens.size(), 1UL);
+  malformed.segment_tokens[0]++;
+  const ssize_t malformed_before =
+      MempoolMetrics::instance().rejected_malformed_unvetted_rpc_count.value();
+  const ssize_t capacity_before =
+      MempoolMetrics::instance().rejected_capacity_rpc_count.value();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      std::move(malformed))();
+  EXPECT_EQ(
+      MempoolMetrics::instance().rejected_malformed_unvetted_rpc_count.value(),
+      malformed_before);
+  EXPECT_EQ(MempoolMetrics::instance().rejected_capacity_rpc_count.value(),
+            capacity_before + 1);
+
+  // A valid duplicate is zero-growth and remains idempotently admitted even
+  // when no capacity slots remain.
+  const SchedGatewaySubmitOutcomeBatch duplicate =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(duplicate.size(), 1UL);
+  EXPECT_EQ(duplicate[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
+            mempool_tx_size_limit);
+}
+
+TEST(Mempool, SubmitUnvettedCapacityCountsOnlyDistinctNewBodies)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  MempoolTestInfra server(/*skip_genesis_block=*/false,
+                          /*mempool_tx_size_limit=*/2);
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  const SchedGatewaySubmitOutcomeBatch first =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(first.size(), 1UL);
+  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(t_to_parallel_batch(
+          SignedTransactionBatch{txs[0], txs[1], txs[2]})())();
+  ASSERT_EQ(outcomes.size(), 3UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(outcomes[1], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(outcomes[2],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 2UL);
+}
+
+TEST(Mempool, SubmitUnvettedCapacityCountsSameRequestDuplicateOnce)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  MempoolTestInfra server(/*skip_genesis_block=*/false,
+                          /*mempool_tx_size_limit=*/1);
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[0]})())();
+  ASSERT_EQ(outcomes.size(), 2UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(outcomes[1], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
 TEST(Mempool, SubmitVetted)
@@ -2020,6 +2175,92 @@ TEST(Mempool, ProposalUsesTransactionRoot)
             MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
 }
 
+TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent_tip = get_tip.db_tip();
+
+  // Commit a block carrying a timepoint, so the tip has one to be behind.
+  constexpr TimePoint kTipTimepoint = 1'000'000;
+  SchedulerProposalResult res_propose =
+      propose_block(server, parent_tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(res_propose.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const Proposal committed = res_propose.proposed_block().proposal;
+  ASSERT_EQ(committed.header.block_timepoint, kTipTimepoint);
+  ASSERT_EQ(commit_block(server, parent_tip, res_propose.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip tip = get_tip.db_tip();
+  ASSERT_EQ(tip.value.proposal_header.block_timepoint, kTipTimepoint);
+
+  // Nominating behind the tip is refused.
+  EXPECT_EQ(propose_block(server, tip,
+                          ProposalContext{.block_timepoint = kTipTimepoint - 1})
+                .outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+
+  // Equal is allowed: two blocks sharing a timepoint is implausible, not
+  // incoherent. This also leaves the mempool able to nominate afterwards,
+  // showing the refusal above did not wedge it.
+  SchedulerProposalResult equal_timepoint =
+      propose_block(server, tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(equal_timepoint.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  // Commit the nomination.
+  ASSERT_EQ(commit_block(server, tip, equal_timepoint.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  tip = get_tip.db_tip();
+  ASSERT_EQ(tip.value.proposal_header.block_timepoint, kTipTimepoint);
+
+  // Greater than is allowed.
+  SchedulerProposalResult greater =
+      propose_block(server, tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint + 1});
+  ASSERT_EQ(greater.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // Proposing and validating do not advance the committed tip.
+  // A peer's proposal behind the tip is invalid.
+  Proposal backwards = greater.proposed_block().proposal;
+  backwards.header.block_timepoint = kTipTimepoint - 1;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(backwards))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+
+  // A peer's proposal equal to the tip is allowed.
+  Proposal equal = greater.proposed_block().proposal;
+  equal.header.block_timepoint = kTipTimepoint;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(equal))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationOK);
+
+  // A peer's proposal greater than the tip is allowed.
+  Proposal greater2 = greater.proposed_block().proposal;
+  greater2.header.block_timepoint = kTipTimepoint + 2;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(greater2))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationOK);
+}
+
 TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -3098,7 +3339,10 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
 
-  MempoolTestInfra server;
+  // One free slot makes this a regression for capacity-before-auth prefix
+  // truncation: the invalid first signing must not starve the valid tail.
+  MempoolTestInfra server(/*skip_genesis_block=*/false,
+                          /*mempool_tx_size_limit=*/1);
 
   AddressAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
@@ -3130,18 +3374,28 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
   // ... but different signings, distinguished by their signature bytes.
   ASSERT_NE(sha256(poisoned_tx), sha256(good_tx));
 
-  // The bad signing fails authentication and is never admitted, on either
-  // submission.
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
-  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
-  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  // One request may contain both signings. Its results stay aligned to the
+  // exact signed encodings even though both entries share a transaction hash.
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  const SchedGatewaySubmitOutcomeBatch mixed_outcomes =
+      gateway.schedgateway_submit_tx_batch(t_to_parallel_batch(
+          SignedTransactionBatch{poisoned_tx, good_tx})())();
+  ASSERT_EQ(mixed_outcomes.size(), 2UL);
+  EXPECT_EQ(
+      mixed_outcomes[0],
+      SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected);
+  EXPECT_EQ(mixed_outcomes[1],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 
-  // The genuine signing of that same transaction must still be admitted.
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+  // Rejection is request-scoped rather than retained under the shared hash.
+  const SchedGatewaySubmitOutcomeBatch rejected_again =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  ASSERT_EQ(rejected_again.size(), 1UL);
+  EXPECT_EQ(
+      rejected_again[0],
+      SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
@@ -3412,7 +3666,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
   const ConfigHash expected_config_hash = compute_config_hash(
-      make_config_hash_preimage(cost_model, stock_network_config()));
+      make_config_hash_preimage(cost_model, stock_network_config(),
+                                native_default_wallet_hash()));
   EXPECT_EQ(parent.db_tip().value.proposal_header.config_hash,
             expected_config_hash);
 

@@ -260,7 +260,8 @@ HogDbSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
   result.block().storage_long_hash = tip.storage_long_hash;
   result.block().config_hash_preimage =
       make_config_hash_preimage(ctx_.get_cost_model(),
-                                ctx_.get_tip().network_config);
+                                ctx_.get_tip().network_config,
+                                ctx_.get_tip().default_wallet);
   co_return result;
 }
 
@@ -310,7 +311,8 @@ HogDbSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   ret.block().storage_long_hash = *db_hash_result;
   ret.block().config_hash_preimage =
       make_config_hash_preimage(ctx_.get_cost_model(),
-                                ctx_.get_tip().network_config);
+                                ctx_.get_tip().network_config,
+                                ctx_.get_tip().default_wallet);
   co_return ret;
 }
 

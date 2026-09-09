@@ -7,7 +7,6 @@
 #include <optional>
 #include <span>
 #include <type_traits>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -24,9 +23,9 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -89,6 +88,15 @@ public:
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context);
 
+  // The handler borrows tx.contracts_to_deploy for its whole lifetime (see
+  // contracts_to_deploy_ below), so a temporary Transaction would dangle
+  // before first use. Deleted to make that a compile error at the call site.
+  SystemCallHandler(Transaction &&tx, StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy db_proxy,
+                    PerTransactionEventServerProxy event_server_proxy,
+                    ExecutionModeCtor execution_mode_ctor,
+                    RuntimeContext &runtime_context) = delete;
+
   // Constructor for test harness, mock infrastructure
   SystemCallHandler(StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
@@ -136,12 +144,6 @@ public:
   x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>> finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
-
-  // Body of finish_frame(). Not noexcept: it is the coroutine, and its frame
-  // allocation is what finish_frame() catches on its behalf.
-  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
-  finish_frame_impl(InvokeStatus<void> result,
-                    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
 
   InvocationFrameOutput get_most_recent_frame_output() const;
   x23::Vec<TxEmittedEvent> get_most_recent_frame_events() const;
@@ -197,18 +199,13 @@ public:
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return (*last_frame_).get_events();
   }
-  // Called after the root invocation frame finishes (by root_invoke or
-  // the mock path).  Runs final validation on cumulative_invoke_result_
-  // and sets root_invoke_succeeded_ if appropriate.
-  void finalize_after_root_frame();
-
-  // Allow the mock path to set cumulative_invoke_result_ before calling
-  // finalize_after_root_frame().  Must be called before finalization.
-  void mock_set_cumulative_invoke_result(InvokeResult result)
-  {
-    assert(!finalized_);
-    cumulative_invoke_result_ = result;
-  }
+  // Called after the root invocation completes (by root_invoke or the mock
+  // path) with the root frame's result. Stores it as root_invoke_result_
+  // (rewriting it to ValidationFailure if final validation fails), marks the
+  // root invocation finished (last_frame_finished_), and returns the
+  // finalized result -- callers must consume the return value, not the
+  // argument they passed in, or they miss the rewrite.
+  [[nodiscard]] InvokeResult finalize_after_root_frame(InvokeResult result);
 
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {
@@ -260,7 +257,7 @@ public:
   // rides in the same batch/push as the surrounding deltas, so a duplicate or
   // expired nonce makes that batch's reservation fail and the transaction is
   // rejected as a replay.
-  x23::Async<void> add_replay_nonce_delta();
+  void add_replay_nonce_delta();
 
   // Commits a transaction whose body effects are discarded (a manual revert or
   // a deterministic fault). Adds validation-mode RCQ observation deltas and the
@@ -481,35 +478,36 @@ private:
   const std::optional<Uniquifier> tx_uniquifier_;
   const std::optional<ContractAddress> root_invoked_address_;
 
-  // Searchable map of contracts that are implicitly created by the current
-  // transaction.
-  const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                           SipHash24Hasher>
-      newly_created_contracts_;
-
-  // Noted at construction: the map above is keyed by hash, so a repeat leaves
-  // no trace there.
-  const bool has_duplicate_attachment_ = false;
-
-  // Images for this transaction's attachments, keyed by contract hash.
-  // perform_initial_validation keeps what it built to verify each one rather
-  // than building it again at first invocation (#3536); an already-committed
-  // contract is served from the snapshot cache instead, so nothing is added
-  // here later. Entries are node-stable and borrowed by the Runtimes built
-  // from them, so they outlive those runtimes -- they live for the whole
-  // transaction.
-  std::unordered_map<SHA256Hash, PreparedContract, SipHash24Hasher>
-      local_preparations_;
-
   ExecutionModeData execution_mode_data_;
+
+  // Borrowed, not copied (the #1538 deep copy is intentionally gone): this
+  // references the ctor tx's contracts_to_deploy (kEmptyVec for the tx-less
+  // ctor), and newly_created_contracts_ holds raw pointers into its elements.
+  // The caller must keep the element storage alive for the handler's
+  // lifetime. Moving the enclosing SignedTransaction is fine -- x23::Vec's
+  // move steals the heap buffer, so element addresses are stable, and this
+  // reference is only read in perform_initial_validation() anyway -- but
+  // destroying the elements is not. executor_context.cc relies on this: it
+  // moves signed_tx into the detached event coroutine after
+  // try_commit_transaction(), the last point the contract pointers are read.
+  NewContractBatch const &contracts_to_deploy_;
+  // Empty until perform_initial_validation() populates it; a plain value (not
+  // an optional) so pre-validation resolve_contract() calls -- e.g. a test
+  // building a runtime without running root_invoke() -- see an empty set and
+  // fall through to the snapshot cache instead of hitting UB.
+  NewContractSet newly_created_contracts_;
 
   std::unique_ptr<TransactionStats> stats_ = nullptr;
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
-  InvokeResult cumulative_invoke_result_ =
+  InvokeResult root_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
-  bool root_invoke_succeeded_{false};
+  // perform_initial_validation() rejected the transaction (expired replay
+  // uniquifier or malformed attachment set). try_commit_transaction() asserts
+  // (debug only) that every proposal-mode ValidationFailure came from here --
+  // no mid-body execution path may produce one.
+  bool initial_validation_rejected_{false};
   bool finalized_{false};
   bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
@@ -549,19 +547,34 @@ private:
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the contracts are valid, and that the replay
   // uniquifier has not already expired.
-  // Sets cumulative_invoke_result_ to the appropriate error on a deterministic
-  // validation failure; returns a system error (e.g. an unreadable db tip)
-  // through the SystemStatus so the caller can surface it rather than drop it.
-  x23::Async<SystemStatus<void>> perform_initial_validation();
+  // Returns the appropriate error on a deterministic validation failure;
+  // a system error (e.g. an unreadable db tip) comes back through the
+  // SystemStatus so the caller can surface it rather than drop it.
+  std::pair<InvokeStatus<void>, GasAmount> perform_initial_validation();
 
   // check the validation data at the end of a transaction, if in validation
   // mode
-  void check_final_validation_data();
+  [[nodiscard]] bool check_final_validation_data() const;
+
+  // The root invocation has been finalized and its (post-rewrite) result is a
+  // success. Derived from root_invoke_result_ rather than cached: with the
+  // result stored exactly once, in finalize_after_root_frame(), a parallel
+  // bool could only ever agree with this or be stale.
+  bool root_invoke_succeeded() const
+  {
+    return finalized_ && root_invoke_result_.is_root_success();
+  }
 
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.
   static InvokeStatus<void> handle_root_host_fn_status(
       SystemStatus<SyscallStatus<InvocationFrameStatusCode>> status);
+
+  // Body of finish_frame(). Not noexcept: it is the coroutine, and its frame
+  // allocation is what finish_frame() catches on its behalf.
+  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+  finish_frame_impl(InvokeStatus<void> result,
+                    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
 
   // Resolve the Runtime associated with the queried address.
   // Creates a new runtime if contract is deployed at
@@ -576,6 +589,14 @@ private:
   // transaction.
   void commit_last_call_frame_success(InvocationFrame &&frame);
 
+  // Shared failure epilogue for the two-phase-commit push/commit sites in
+  // try_commit_transaction() and commit_body_discarded(): records the 2pc
+  // failure, optionally reports the conflict diagnostic (only push sites that
+  // detected a conflict do), aborts the HogDb transaction, and returns
+  // failure_result -- unless the abort itself fails, whose error outranks it.
+  x23::Async<ExecResult> abort_after_commit_failure(ExecResult failure_result,
+                                                    bool report_diagnostic);
+
   // On a failed 2pc push: trace-logs db_proxy_'s last_push_conflict() and
   // fire-and-forgets a best-effort TxFailureDiagnostic (first conflict +
   // executing block height) to the event server, which relays it to the
@@ -585,9 +606,9 @@ private:
   // validation/viewing blocks) -- hog_db selects the level from the block's
   // execution mode, so there is no seam to configure here. Called right
   // after each 2pc push failure site sets two_phase_commit_failed_. Never
-  // fails; suspends only on the db-tip read the diagnostic's attempt height
-  // needs, and the send itself stays fire-and-forget.
-  x23::Async<void> report_db_conflict_diagnostic() const;
+  // fails and never suspends: the attempt height is a plain read off the
+  // pinned tip, and the send runs in its own detached coroutine.
+  void report_db_conflict_diagnostic() const;
 
   BlockExecutionMode get_block_execution_mode() const
   {
