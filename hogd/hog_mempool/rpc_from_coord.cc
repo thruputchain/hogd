@@ -268,6 +268,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
   auto txs = std::make_shared<SignedTransactionBatch>();
   auto original_indices = std::make_shared<x23::Vec<size_t>>();
   auto outcomes = std::make_shared<SchedGatewaySubmitOutcomeBatch>();
+  auto tx_hashes = std::make_shared<TransactionHashBatch>();
   auto commit_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag submit_dag("schedulercoord_submit_unvetted", default_threadpool());
 
@@ -307,8 +308,36 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         co_return;
       });
 
+  auto hash_node = submit_dag.async<void>(
+      "hash transactions", submit_dag.after(decode_node),
+      [&, tx_hashes]() -> x23::Async<void> {
+        tx_hashes->resize(txs->size());
+        const std::vector<ChunkRange> chunks =
+            make_chunks(txs->size(), available_parallelism());
+        std::vector<x23::Async<void>> handles;
+        handles.reserve(chunks.size());
+        for (const ChunkRange &chunk : chunks) {
+          handles.push_back(
+              [](const ChunkRange *chunk,
+                 const SignedTransactionBatch &txs,
+                 TransactionHashBatch &tx_hashes) noexcept
+                  -> x23::Async<void> {
+                co_await default_coropoll().pool_.bg();
+                for (size_t i = chunk->start; i < chunk->end; i++) {
+                  tx_hashes[i] = sha256(txs[i].tx);
+                }
+                co_return;
+              }(&chunk, *txs, *tx_hashes));
+        }
+        for (x23::Async<void> &handle : handles) {
+          co_await handle;
+        }
+        co_return;
+      });
+
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(ready_node),
+      submit_dag.async<void>("lock commit",
+                             submit_dag.after(ready_node, hash_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;
@@ -335,8 +364,10 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         }
         SignedTransactionBatch authenticated_txs;
         x23::Vec<size_t> authenticated_indices;
+        TransactionHashBatch authenticated_hashes;
         authenticated_txs.reserve(txs->size());
         authenticated_indices.reserve(txs->size());
+        authenticated_hashes.reserve(txs->size());
         size_t num_auth_failures = 0;
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
@@ -347,6 +378,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
               SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted) {
             authenticated_txs.push_back(std::move((*txs)[i]));
             authenticated_indices.push_back(original_idx);
+            authenticated_hashes.push_back((*tx_hashes)[i]);
           }
           else {
             (*outcomes)[original_idx] = outcome;
@@ -357,6 +389,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
             num_auth_failures);
         *txs = std::move(authenticated_txs);
         *original_indices = std::move(authenticated_indices);
+        *tx_hashes = std::move(authenticated_hashes);
         co_return;
       });
 
@@ -377,23 +410,26 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         // there is no need to identify duplicates here. [add_txs()] already
         // deduplicates while adding the batch, and the scheduler can grow by
         // at most [txs->size()]. Besides avoiding unnecessary account-bucket
-        // lookups, this keeps transaction hashing in [add_txs()]'s parallel
-        // pass instead of serializing it while [commit_lock_] is held.
+        // lookups, this leaves the parallel hashes above as the only hashes of
+        // these transaction bodies.
         if (num_slots_left >= txs->size()) {
           co_return;
         }
 
         SignedTransactionBatch capacity_txs;
         x23::Vec<size_t> capacity_indices;
+        TransactionHashBatch capacity_hashes;
         capacity_txs.reserve(txs->size());
         capacity_indices.reserve(txs->size());
+        capacity_hashes.reserve(txs->size());
         std::unordered_set<TransactionHash, SipHash24Hasher>
             selected_new_hashes;
         size_t num_discarded = 0;
         for (size_t i = 0; i < txs->size(); i++) {
-          const TransactionHash tx_hash = sha256((*txs)[i].tx);
+          const TransactionHash &tx_hash = (*tx_hashes)[i];
           const bool already_pending = selected_new_hashes.contains(tx_hash) ||
-                                       scheduler_->is_pending((*txs)[i]);
+                                       scheduler_->is_pending((*txs)[i],
+                                                              tx_hash);
           if (already_pending || num_slots_left > 0) {
             if (!already_pending) {
               num_slots_left--;
@@ -401,6 +437,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
             }
             capacity_txs.push_back(std::move((*txs)[i]));
             capacity_indices.push_back((*original_indices)[i]);
+            capacity_hashes.push_back(tx_hash);
           }
           else {
             (*outcomes)[(*original_indices)[i]] =
@@ -422,6 +459,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         }
         *txs = std::move(capacity_txs);
         *original_indices = std::move(capacity_indices);
+        *tx_hashes = std::move(capacity_hashes);
         co_return;
       });
 
@@ -434,7 +472,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         // from the scheduler). But this would make the txs visible to
         // nominate() and validate() before the txs have been verified.
         const SchedGatewaySubmitOutcomeBatch add_outcomes =
-            co_await scheduler_->add_txs(*txs);
+            co_await scheduler_->add_txs(*txs, *tx_hashes);
         CHECK_EQ(add_outcomes.size(), txs->size());
         CHECK_EQ(original_indices->size(), txs->size());
         SignedTransactionBatch admitted_txs;

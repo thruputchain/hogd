@@ -52,6 +52,9 @@ public:
   // tx but cycling will add enough hogs to this group to schedule it.
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   add_txs(const x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  add_txs(const x23::XdrVec<SignedTransaction> &txs,
+          const x23::XdrVec<TransactionHash> &tx_hashes);
 
   x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
@@ -174,6 +177,8 @@ public:
   // runqueue or stranded set. Callers must authenticate the submitted signed
   // encoding before treating an existing body as admitted.
   bool is_pending(const SignedTransaction &tx);
+  bool is_pending(const SignedTransaction &tx,
+                  const TransactionHash &tx_hash);
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
@@ -261,7 +266,11 @@ private:
   // single tx.
   bool insert_tx_into_runqueue(const TransactionHash &tx_hash,
                                const std::shared_ptr<TxValue> &tx_value);
-  bool add_txs_helper(const SignedTransaction &tx);
+  bool add_txs_helper(const SignedTransaction &tx,
+                      const TransactionHash &tx_hash);
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  add_txs_impl(const x23::XdrVec<SignedTransaction> &txs,
+               const x23::XdrVec<TransactionHash> *tx_hashes);
 
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
