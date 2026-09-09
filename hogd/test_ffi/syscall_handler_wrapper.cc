@@ -614,14 +614,12 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // When the root (last) mock frame finishes, run the same finalization
   // that root_invoke() does so that try_commit_transaction() can proceed.
-  // NOTE: mock path starts with gas_consumed_ == 0, so assignment == +=.
   if (to_handler().last_frame_finished()) {
-    to_handler().mock_set_cumulative_invoke_result(result);
-    to_handler().finalize_after_root_frame();
+    to_handler().finalize_after_root_frame(result);
 
     // Mirror root_invoke(): a root-level system error (Unrecoverable,
     // ValidationFailure, Abandon) must surface as an FFI error, not a
-    // serialized Fault that silently hides the cumulative root system result
+    // serialized Fault that silently hides the root system result
     // from the caller until a later try_commit_transaction(). Deterministic
     // and OutOfGas classify as Fault, so they keep flowing through as ordinary
     // serialized Fault outputs.
@@ -635,7 +633,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // The frame has been committed: finish_frame() merged a successful child into
   // its parent, and (for the root frame) finalize_after_root_frame() above made
-  // the cumulative result committable. From here until the result buffers are
+  // the root result committable. From here until the result buffers are
   // handed back to the caller, ANY failure -- a structured serialization error
   // OR a thrown copy/allocation failure -- means the caller never received the
   // result it was told to expect, so the handler must be poisoned and

@@ -270,23 +270,15 @@ SystemCallHandler::perform_initial_validation()
   }
 }
 
-void
-SystemCallHandler::check_final_validation_data()
+bool
+SystemCallHandler::check_final_validation_data() const
 {
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
-    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
-    if (!validation_data.check_all_consumed()) {
-      // Allowlist: also excludes overwriting an existing ValidationFailure.
-      if (cumulative_invoke_result_.is_root_success() ||
-          cumulative_invoke_result_.result_.error().code() ==
-              InvokeErrorCode::Deterministic ||
-          cumulative_invoke_result_.result_.error().code() ==
-              InvokeErrorCode::OutOfGas) {
-        cumulative_invoke_result_.result_ =
-            InvokeError{InvokeErrorCode::ValidationFailure};
-      }
-    }
+    const auto &validation_data =
+        std::get<ValidationModeData>(execution_mode_data_);
+    return validation_data.check_all_consumed();
   }
+  return true;
 }
 
 x23::Async<InvokeResult>
@@ -296,16 +288,13 @@ SystemCallHandler::root_invoke()
   // check) is surfaced as the corresponding invoke error rather than dropped.
   //
   // TODO(geoff): gas cost calibration -- verification gas is hardwired to 0
-  // today, and only the failure branch below records it. When calibration
-  // lands, the success path must charge it too, or verification becomes free
-  // exactly when it did the most work.
-  if (auto [res, gas_consumed] = perform_initial_validation();
-      !res.has_value()) {
+  // today. Both paths already record it: the failure branch reports it
+  // directly, and the success path deducts it from the frame's available gas
+  // and adds it back into the final gas_consumed_.
+  auto [initial_validation_res, initial_validation_gas_consumed] =
+      perform_initial_validation();
+  if (!initial_validation_res.has_value()) {
     initial_validation_rejected_ = true;
-    cumulative_invoke_result_.result_ = res.error();
-    assert(cumulative_invoke_result_.gas_consumed_ == 0);
-    cumulative_invoke_result_.gas_consumed_ = gas_consumed;
-
     // The root invocation is terminally rejected before any frame ran (e.g. an
     // expired uniquifier or a failed contract verification). Mark it
     // finished/finalized so callers treat it as a completed-but-failed root: no
@@ -313,10 +302,11 @@ SystemCallHandler::root_invoke()
     // Fault, and try_commit_transaction() runs its failure path. The test FFI
     // wrapper gates commit on last_frame_finished(), so this lets a rejected
     // transaction surface its ExecResult via try_commit().
-    check_final_validation_data();
     last_frame_finished_ = true;
-    finalized_ = true;
-    co_return cumulative_invoke_result_;
+    finalize_after_root_frame(
+        InvokeResult{.result_ = initial_validation_res.error(),
+                     .gas_consumed_ = initial_validation_gas_consumed});
+    co_return root_invoke_result_;
   }
 
   // root_invocation_ is nullopt only in the test harness
@@ -325,9 +315,16 @@ SystemCallHandler::root_invoke()
   Invocation root_invocation = std::move(root_invocation_.value());
   root_invocation_.reset();
 
+  // The frame's gas is bounded by available_gas (runtime.cc checks
+  // gas_consumed <= gas_limit), so the reported total below stays within
+  // gas_limit -- except when initial_validation_gas_consumed alone reaches
+  // gas_limit, where the total is the unclamped validation gas.
+  // TODO(geoff): when gas calibration lands, bound the work done in initial
+  // validation so its gas cannot exceed gas_limit (or reject/clamp when it
+  // does), restoring gas_consumed_ <= gas_limit unconditionally.
   GasAmount available_gas =
-      cumulative_invoke_result_.gas_consumed_ < root_invocation.gas_limit
-          ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
+      initial_validation_gas_consumed < root_invocation.gas_limit
+          ? root_invocation.gas_limit - initial_validation_gas_consumed
           : 0;
 
   auto [res, gas_consumed] =
@@ -335,25 +332,38 @@ SystemCallHandler::root_invoke()
                       sdk_method_id(root_invocation.entrypoint), available_gas,
                       std::move(root_invocation.calldata),
                       std::to_underlying(InvokeFlag::None), {});
+  auto invoke_result =
+      InvokeResult{.result_ = handle_root_host_fn_status(res),
+                   .gas_consumed_ =
+                       gas_consumed + initial_validation_gas_consumed};
 
-  cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
-  cumulative_invoke_result_.gas_consumed_ += gas_consumed;
+  finalize_after_root_frame(invoke_result);
 
-  finalize_after_root_frame();
-
-  co_return cumulative_invoke_result_;
+  co_return root_invoke_result_;
 }
 
 void
-SystemCallHandler::finalize_after_root_frame()
+SystemCallHandler::finalize_after_root_frame(InvokeResult result)
 {
   assert(!finalized_);
   assert(invocation_frame_stack_.empty());
   finalized_ = true;
 
-  check_final_validation_data();
+  root_invoke_result_ = result;
 
-  if (cumulative_invoke_result_.is_root_success()) {
+  if (!check_final_validation_data()) {
+    // don't overwrite abandon or unrecoverable errors
+    if (root_invoke_result_.is_root_success() ||
+        root_invoke_result_.result_.error().code() ==
+            InvokeErrorCode::Deterministic ||
+        root_invoke_result_.result_.error().code() ==
+            InvokeErrorCode::OutOfGas) {
+      root_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::ValidationFailure};
+    }
+  }
+
+  if (root_invoke_result_.is_root_success()) {
     root_invoke_succeeded_ = true;
   }
 }
@@ -452,8 +462,8 @@ SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
 
-  if (!cumulative_invoke_result_.is_root_success()) {
-    auto error_code = cumulative_invoke_result_.result_.error().code();
+  if (!root_invoke_result_.is_root_success()) {
+    auto error_code = root_invoke_result_.result_.error().code();
     if (error_code == InvokeErrorCode::Unrecoverable) {
       error("try_commit_transaction: received Unrecoverable");
     }
@@ -495,7 +505,7 @@ SystemCallHandler::try_commit_transaction()
   }
   assert(last_frame_.has_value());
   assert(root_invoke_succeeded_);
-  assert(cumulative_invoke_result_.result_.has_value());
+  assert(root_invoke_result_.result_.has_value());
 
   // If the last frame was set to manually revert, then we commit the
   // transaction as a no-op: body effects are discarded, but RCQ observations
@@ -597,7 +607,7 @@ SystemCallHandler::try_commit_transaction()
   // This is past the point of successful commitment;
   // now we can safely emit the events to the event server
 
-  HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
+  HogexecMetrics::mark_tx_success(root_invoke_result_,
                                   get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
   co_return ExecResult::ExecResultOK;
@@ -617,7 +627,7 @@ SystemCallHandler::abort_transaction()
   if (last_frame_.has_value()) {
     last_frame_.value().extract_events();
   }
-  HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+  HogexecMetrics::mark_tx_failed(root_invoke_result_,
                                  get_block_execution_mode());
   co_return co_await db_proxy_.abort_transaction();
 }
@@ -706,7 +716,7 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
     co_return to_exec_result(res.error().code());
   }
 
-  HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+  HogexecMetrics::mark_tx_failed(root_invoke_result_,
                                  get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
   co_return success_result;
@@ -1433,7 +1443,7 @@ SystemCallHandler::get_proposal_data() const
   // Either succeeded on the root tx (with or without a revert)
   // or deterministic error during execution.
   // Not allowed to have i.e. validation failure here, or block abort.
-  assert(cumulative_invoke_result_.has_readable_proposal_data());
+  assert(root_invoke_result_.has_readable_proposal_data());
   assert(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
   if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
     return std::get<ProposalModeData>(execution_mode_data_).proposal_data();
