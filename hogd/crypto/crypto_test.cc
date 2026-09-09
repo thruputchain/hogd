@@ -373,9 +373,9 @@ namespace {
 std::vector<uint8_t>
 le_u64(uint64_t v)
 {
-  std::vector<uint8_t> out;
-  for (size_t i = 0; i < sizeof(v); ++i)
-    out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+  std::vector<uint8_t> out(sizeof(v));
+  for (size_t i = 0; i < out.size(); ++i)
+    out[i] = static_cast<uint8_t>(v >> (8 * i));
   return out;
 }
 } // namespace
