@@ -135,6 +135,18 @@ hog_db_init(std::string_view path, size_t ram_bytes,
       critical("Failed to read cost model: {}", cost_model.error());
       return EXIT_FAILURE;
     }
+    // Reject a recovered tip whose default wallet has no backing contract row
+    // before serving executor requests: that selector rides in unhashed global
+    // metadata, so a data-directory tamper of it clears the hash gate above and
+    // would otherwise surface as a maliciously-triggerable Unrecoverable root
+    // invocation (see HogDbDAO::validate_default_wallet_present).
+    if (auto wallet_ok =
+            ctx.get_db().validate_default_wallet_present(tip->default_wallet);
+        !wallet_ok) {
+      critical("recovered DbTip default wallet has no contract row: {}",
+               wallet_ok.error());
+      return EXIT_FAILURE;
+    }
   }
   else {
     CHECK_EQ(db_hash, StorageLongHash{});

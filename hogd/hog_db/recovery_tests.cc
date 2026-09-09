@@ -20,6 +20,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "hogd/hog_db/background_commit_worker.h"
 #include "hogd/hog_db/block_tx.h"
@@ -32,12 +33,14 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -455,6 +458,49 @@ TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)
   EXPECT_EQ(recovered.get_tip().default_wallet.hash, wallet.hash);
   EXPECT_EQ(recovered.get_tip().default_wallet.contract_type,
             ContractType::kNative);
+}
+
+// A recovered DbTip::default_wallet is not covered by the consensus
+// StorageLongHash or the config hash, so a data-directory tamper that repoints
+// it can clear hog_db_init()'s recovery hash gate and only surface later as an
+// Unrecoverable root invocation. validate_default_wallet_present() closes that
+// off at startup by binding the selector to its (consensus-authenticated)
+// backing contract row.
+TEST(RecoveryTests, ValidateDefaultWalletPresentRejectsMissingRow)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), 1024 * 1024 * 1024, 0);
+  ASSERT_TRUE(db.has_value());
+  HogDbDAO dao(RAMDB(std::move(*db)));
+
+  // A genuine native default-wallet contract row, exactly as genesis writes it.
+  Contract wallet_contract;
+  wallet_contract.contract_type(ContractType::kNative);
+  wallet_contract.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+  auto const encoded = x23::serialize(wallet_contract);
+
+  DeployedContractHash genuine{};
+  genuine.hash = sha256(wallet_contract);
+  genuine.contract_size = 0;
+  genuine.contract_type = ContractType::kNative;
+  ASSERT_TRUE(
+      dao.write_contract_code(genuine.hash, std::as_bytes(std::span(encoded)))
+          .has_value());
+
+  // Present: the genuine selector is accepted.
+  EXPECT_TRUE(dao.validate_default_wallet_present(genuine).has_value());
+
+  // Tampered: a structurally valid selector with no backing row is rejected up
+  // front rather than surfacing later as an Unrecoverable root invocation.
+  DeployedContractHash tampered = genuine;
+  tampered.hash.fill(0xE7);
+  HogDbStatus<void> rejected = dao.validate_default_wallet_present(tampered);
+  ASSERT_FALSE(rejected.has_value());
+  EXPECT_EQ(rejected.error().code(), HogDbCode::kNotFound);
 }
 
 } // namespace hogd

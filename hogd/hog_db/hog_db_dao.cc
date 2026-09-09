@@ -110,6 +110,32 @@ HogDbDAO::write_dbtip(const DbTip &tip)
 }
 
 HogDbStatus<void>
+HogDbDAO::validate_default_wallet_present(
+    const DeployedContractHash &default_wallet)
+{
+  // default_wallet backs root invocations of addresses with no deployed
+  // contract (SystemCallHandler::resolve_runtime). It rides in the DbTip,
+  // which write_dbtip() persists under the <DBTIP global-metadata row -- a row
+  // is_state_item() excludes from the consensus StorageLongHash, and one whose
+  // default_wallet the config hash does not cover either. A data-directory
+  // attacker can therefore repoint default_wallet at a selector with no
+  // backing contract row while leaving storage_long_hash untouched; the tamper
+  // clears hog_db_init()'s recovery hash gate and only surfaces later as a
+  // maliciously-triggerable SystemErrorCode::Unrecoverable when the fallback
+  // resolves (NativeContext::make_new_runtime turns the missing row into
+  // Unrecoverable). The backing kContractCode row *is* consensus state, so
+  // confirming it exists at startup binds the unhashed selector to
+  // authenticated state and fail-stops instead, mirroring the other recovered-
+  // metadata guards (issues #2917, #3812).
+  HogDbStatus<OwningSpan<const std::byte>> code =
+      read_contract_code(default_wallet.hash);
+  if (!code) {
+    return code.error();
+  }
+  return {};
+}
+
+HogDbStatus<void>
 HogDbDAO::write_cost_model(const StorageCostModel &cost_model)
 {
   auto buf = x23::serialize(cost_model.to_xdr());
