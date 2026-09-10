@@ -463,10 +463,15 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     consume_delta_.emplace(std::move(*delta.consume));
   }
 
-  int64_t element_delta =
-      static_cast<int64_t>(elements_added) - change.consumed_past_entries_;
+  // Cast every operand to int64_t so the net delta is computed in signed
+  // arithmetic, rather than an unsigned subtraction that wraps and is then
+  // converted back. All counts are bounded well within the int64 domain (see
+  // the storage-cost accounting note in try_atomic_change_lock), so the casts
+  // cannot overflow.
+  int64_t element_delta = static_cast<int64_t>(elements_added) -
+                          static_cast<int64_t>(change.consumed_past_entries_);
   if (has_consume) {
-    element_delta -= current_consumed_count;
+    element_delta -= static_cast<int64_t>(current_consumed_count);
   }
   committed_element_count_delta_ += element_delta;
 
