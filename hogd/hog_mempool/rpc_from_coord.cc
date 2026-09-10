@@ -1486,9 +1486,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  if (commit_block_result_test_hook_) {
-    commit_block_result_test_hook_(result);
-  }
   co_return result;
 }
 
