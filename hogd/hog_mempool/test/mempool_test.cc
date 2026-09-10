@@ -40,6 +40,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/config_hash.h"
@@ -58,6 +59,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
+#include "integration.hh"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -3859,6 +3861,194 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->tx_cache_size(), 0UL);
   EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(included_hash));
   EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
+}
+
+namespace {
+
+// Two authenticated wrappers over one Transaction body of exactly [body_bytes]
+// serialized bytes, for an account whose kMaxSigners keys each carry weight one
+// against a required weight of one: [thin] is signed by the first key alone,
+// [fat] by every key. They share a TransactionHash and differ only in the
+// signature vector, i.e. only in the bytes the hash does not commit to.
+struct SignatureVariants {
+  AddressAuthData auth_data;
+  SignedTransaction thin;
+  SignedTransaction fat;
+  TransactionHash tx_hash;
+};
+
+SignatureVariants
+make_signature_variants(size_t body_bytes)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  SignatureVariants variants{.auth_data = get_default_account()};
+  std::vector<SecretKey> signers;
+  signers.reserve(kMaxSigners);
+  for (size_t i = 0; i < kMaxSigners; i++) {
+    SecretKey signer(CryptographicScheme::Ed25519);
+    signer.ed25519() = create_key_pair(variants.auth_data, i, /*weight=*/1);
+    signers.push_back(std::move(signer));
+  }
+  variants.auth_data.last_written_height = 1;
+  variants.auth_data.required_weight = 1;
+
+  Transaction &tx = txs[0].tx;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = (uint32_t{1} << kMaxSigners) - 1;
+  claim.source_address_claim().required_weight = 1;
+  tx.auth_claim = claim;
+  // Pad the calldata until the body is exactly [body_bytes]. XDR sizes are
+  // multiples of four, so the padding lands exactly.
+  tx.invocation.calldata.clear();
+  const size_t base = x23::xdr_size(tx);
+  CHECK_LE(base, body_bytes);
+  tx.invocation.calldata.resize(body_bytes - base, 0);
+  CHECK_EQ(x23::xdr_size(tx), body_bytes);
+
+  variants.thin = txs[0];
+  variants.thin.signatures.push_back(
+      make_signature(signers[0], tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash));
+  variants.fat = txs[0];
+  for (size_t i = 0; i < kMaxSigners; i++) {
+    variants.fat.signatures.push_back(
+        make_signature(signers[i], tx, /*public_key_id=*/i,
+                       MempoolTestInfra::kNetworkHash));
+  }
+  variants.tx_hash = sha256(tx);
+  CHECK_EQ(sha256(variants.thin.tx), variants.tx_hash);
+  CHECK_EQ(sha256(variants.fat.tx), variants.tx_hash);
+  return variants;
+}
+
+// Submits [stx] through the gateway -- the authenticated admission path a
+// client's submission takes -- and returns its admission outcome.
+SchedGatewaySubmitOutcome
+submit_through_gateway(MempoolTestInfra &server, const SignedTransaction &stx)
+{
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(SignedTransactionBatch{stx})())();
+  CHECK_EQ(outcomes.size(), 1UL);
+  return outcomes[0];
+}
+
+TransactionHashBatch
+nominated_hashes(const Proposal &proposal)
+{
+  TransactionHashBatch hashes;
+  CHECK(parallel_batch_to_t(proposal.transactions.hash, hashes,
+                            kNoBatchSizeLimit)());
+  return hashes;
+}
+
+} // namespace
+
+// #3844: TransactionHash commits to the Transaction body, not to the
+// SignedTransaction wrapper, and the scheduler retains whichever authenticated
+// wrapper for a hash arrives first. A proposer and a validator can therefore
+// hold different-sized wrappers for the same nominated hash. The executor's
+// size cap must be a function of the body alone, so that both reach the same
+// verdict: here the proposer nominates from a one-signature wrapper while the
+// validator holds the kMaxSigners-signature wrapper -- which sits exactly at
+// the protocol's kMaxBytesSignedTransaction -- and validation succeeds.
+TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
+{
+  const SignatureVariants variants =
+      make_signature_variants(kMaxBytesTransaction);
+  ASSERT_EQ(x23::xdr_size(variants.thin.tx), kMaxBytesTransaction);
+  ASSERT_LT(x23::xdr_size(variants.thin), kMaxBytesSignedTransaction);
+  // The derived body cap is tight: a body at the cap under the largest
+  // signature vector auth admits is exactly the protocol's wrapper bound.
+  ASSERT_EQ(x23::xdr_size(variants.fat), kMaxBytesSignedTransaction);
+  ASSERT_NE(sha256(variants.thin), sha256(variants.fat));
+
+  Proposal proposal;
+  {
+    MempoolTestInfra proposer;
+    proposer.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                                   variants.auth_data);
+    std::shared_ptr<Scheduler> scheduler =
+        proposer.mempool_coord_rpc().scheduler();
+
+    EXPECT_EQ(submit_through_gateway(proposer, variants.thin),
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+    submit_through_gateway(proposer, variants.fat);
+    ASSERT_EQ(scheduler->size(), 1UL);
+    const std::shared_ptr<const SignedTransaction> retained =
+        scheduler->find_tx(variants.tx_hash);
+    ASSERT_NE(retained, nullptr);
+    EXPECT_EQ(x23::xdr_size(*retained), x23::xdr_size(variants.thin));
+
+    const SchedulerGetTipResult tip =
+        proposer.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult proposed =
+        propose_block(proposer, tip.db_tip());
+    ASSERT_EQ(proposed.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    proposal = proposed.proposed_block().proposal;
+    const TransactionHashBatch nominated = nominated_hashes(proposal);
+    ASSERT_EQ(nominated.size(), 1UL);
+    EXPECT_EQ(nominated[0], variants.tx_hash);
+  }
+
+  {
+    MempoolTestInfra validator;
+    validator.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                                    variants.auth_data);
+    std::shared_ptr<Scheduler> scheduler =
+        validator.mempool_coord_rpc().scheduler();
+
+    // The dangerous order: the fat wrapper arrives first and is what this node
+    // binds to the nominated hash.
+    EXPECT_EQ(submit_through_gateway(validator, variants.fat),
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+    submit_through_gateway(validator, variants.thin);
+    ASSERT_EQ(scheduler->size(), 1UL);
+    const std::shared_ptr<const SignedTransaction> retained =
+        scheduler->find_tx(variants.tx_hash);
+    ASSERT_NE(retained, nullptr);
+    EXPECT_EQ(x23::xdr_size(*retained), x23::xdr_size(variants.fat));
+
+    const SchedulerGetTipResult tip =
+        validator.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerValidationResult validated =
+        validator.mempool_coord_rpc().schedulercoord_validate_block(
+            tip.db_tip().id, proposal)();
+    EXPECT_EQ(validated.outcome(),
+              SchedulerValidationOutcome::SchedulerValidationOK);
+  }
+}
+
+// The executor is the final gate on body size: an authenticated wrapper whose
+// body is over kMaxBytesTransaction (while the wrapper itself is well under the
+// protocol's wrapper bound, so auth admits it) is dropped from the proposal as
+// malformed rather than included.
+TEST(Mempool, OverCapBodyIsDroppedFromProposal)
+{
+  const SignatureVariants variants =
+      make_signature_variants(kMaxBytesTransaction + 4);
+  ASSERT_GT(x23::xdr_size(variants.thin.tx), kMaxBytesTransaction);
+  ASSERT_LT(x23::xdr_size(variants.thin), kMaxBytesSignedTransaction);
+
+  MempoolTestInfra server;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               variants.auth_data);
+  EXPECT_EQ(submit_through_gateway(server, variants.thin),
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  const SchedulerGetTipResult tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const SchedulerProposalResult proposed = propose_block(server, tip.db_tip());
+  ASSERT_EQ(proposed.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(nominated_hashes(proposed.proposed_block().proposal).empty());
 }
 
 } // namespace hogd

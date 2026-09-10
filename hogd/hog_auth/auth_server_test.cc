@@ -22,7 +22,9 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
+#include "integration.hh"
 #include "rpc_types.hh"
+#include "x23/serialize.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -559,6 +561,50 @@ TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
 
   auto results = auth_server().verify_transactions(0, std::span(&stx, 1))();
   ASSERT_EQ(results.size(), 1);
+}
+
+// A SignedTransaction wrapper over kMaxBytesSignedTransaction is rejected up
+// front as a critical error (kAuthInternal), before any signature work, and
+// regardless of the account's auth data (#3844). A wrapper under the cap is not
+// rejected on size grounds: it proceeds to ordinary authentication.
+TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
+{
+  const ContractAddress address = make_test_address(51);
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  // Over the cap through the wrapper alone: the body is tiny, the signature
+  // vector is not. This is the shape the executor deliberately does not look
+  // at, so auth has to.
+  SignedTransaction over_cap{};
+  over_cap.tx.invocation.invoked_address = address;
+  DecoratedSignature filler;
+  filler.public_key_id = 0;
+  filler.signature = Signature(CryptographicScheme::Ed25519);
+  over_cap.signatures.resize(
+      kMaxBytesSignedTransaction / x23::xdr_size(filler) + 1, filler);
+  ASSERT_GT(x23::xdr_size(over_cap), kMaxBytesSignedTransaction);
+
+  auto results =
+      auth_server().verify_transactions(0, std::span(&over_cap, 1))();
+  ASSERT_EQ(results.size(), 1);
+  EXPECT_EQ(results[0], AuthErrorCode::kAuthInternal);
+
+  // Trim the wrapper back under the cap: same account, same (unsigned) body.
+  // It now reaches authentication proper, which fails it as unauthenticated,
+  // never as internal.
+  SignedTransaction under_cap = over_cap;
+  while (x23::xdr_size(under_cap) > kMaxBytesSignedTransaction) {
+    under_cap.signatures.pop_back();
+  }
+  ASSERT_LE(x23::xdr_size(under_cap), kMaxBytesSignedTransaction);
+  auto under_results =
+      auth_server().verify_transactions(0, std::span(&under_cap, 1))();
+  ASSERT_EQ(under_results.size(), 1);
+  EXPECT_EQ(under_results[0], AuthErrorCode::kAuthFailed);
 }
 
 TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)
