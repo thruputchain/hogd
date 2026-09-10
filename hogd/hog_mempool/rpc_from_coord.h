@@ -426,12 +426,6 @@ public:
     propose_batch_result_test_hook_ = std::move(hook);
   }
 
-  // Outcome of the joint DB/event commit of one block.
-  struct JointCommitResult {
-    DbBlockResult db;
-    RPCError event_commit = RPCError::kRPCUnrecoverable;
-  };
-
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
@@ -464,6 +458,11 @@ private:
         transaction_nomination_chunks;
     x23::XdrVec<TransactionHash> failed_tx_hashes;
   };
+  struct JointCommitResult {
+    DbBlockResult db;
+    RPCError event_commit = RPCError::kRPCUnrecoverable;
+  };
+
   struct NominationTelemetry {
     bool succeeded = false;
     double duration = 0.0;
@@ -763,7 +762,6 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
-  std::function<void(JointCommitResult &)> commit_block_result_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
