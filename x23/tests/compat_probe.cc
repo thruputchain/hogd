@@ -161,20 +161,23 @@ TEST(CompatProbe, DefaultExceptionPolicyReturnsSyncSystemError)
   EXPECT_NO_THROW(client.ping()());
 }
 
-TEST(CompatProbe, DefaultExceptionPolicyReturnsUnknownSystemError)
+TEST(CompatProbe, DefaultExceptionPolicyCrashesOnUnknownHandlerException)
 {
-  int fds[2];
-  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-
-  ThrowingUnknownImpl impl;
-  auto server = rpc_stream(cp, fds[1]);
-  server->server(&impl, CompatProbe2{});
-  server->go();
-
-  auto client_stream = rpc_stream(cp, fds[0]);
-  auto client = client_stream->client(CompatProbe2{});
-  expect_failure([&] { client.added(1)(); }, accept_stat::SYSTEM_ERR);
-  EXPECT_NO_THROW(client.ping()());
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_DEATH(
+      {
+        int fds[2];
+        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+          std::abort();
+        }
+        ThrowingUnknownImpl impl;
+        auto server = rpc_stream(cp, fds[1]);
+        server->server(&impl, CompatProbe2{});
+        server->go();
+        auto client_stream = rpc_stream(cp, fds[0]);
+        client_stream->client(CompatProbe2{}).added(1)();
+      },
+      "CompatProbe2::added RPC handler threw an unknown exception");
 }
 
 TEST(CompatProbe, FailStopPolicyPreservesMalformedArgumentError)

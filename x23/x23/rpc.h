@@ -246,14 +246,18 @@ private:
           } catch (const std::exception &e) {
             co_return self.error(e);
           } catch (...) {
-            co_return self.unknown_error();
+            x23::panic("{}::{} RPC handler threw an unknown exception",
+                       ProcMeta::version_meta::version_name,
+                       ProcMeta::proc_name);
           }
         }(*this, std::move(awaitable));
       }
     } catch (std::exception &e) {
       return error(e);
     } catch (...) {
-      return unknown_error();
+      x23::panic("{}::{} RPC handler threw an unknown exception",
+                 ProcMeta::version_meta::version_name, ProcMeta::proc_name);
+      std::unreachable();
     }
 
     decltype(auto) dispatch(BufViewEnd argbytes)
@@ -315,32 +319,6 @@ private:
         if constexpr (!std::same_as<Logger, RpcNoLogger>)
           d_.logger_.template log_server<ProcMeta>(rmsg,
                                                    uformat(" {}", e.what()));
-      }
-      return make_record(rmsg);
-    }
-
-    Buf unknown_error() const
-    {
-      rpc_msg rmsg{.xid = xid_};
-      if (callmsg_) {
-        msg_set_reply_stat(&rmsg, GARBAGE_ARGS);
-        if constexpr (!std::same_as<Logger, RpcNoLogger>) {
-          d_.logger_.template log_server<ProcMeta>(*callmsg_);
-          d_.logger_.template log_server<ProcMeta>(
-              rmsg, " deserialization error: unknown exception");
-        }
-      }
-      else {
-        if constexpr (ExceptionPolicy == RpcExceptionPolicy::FailStop) {
-          panic("{}::{} RPC handler threw an unknown exception",
-                ProcMeta::version_meta::version_name, ProcMeta::proc_name);
-        }
-        msg_set_reply_stat(&rmsg, SYSTEM_ERR);
-        std::println(stderr, "{}::{}: unknown exception",
-                     ProcMeta::version_meta::version_name, ProcMeta::proc_name);
-        if constexpr (!std::same_as<Logger, RpcNoLogger>) {
-          d_.logger_.template log_server<ProcMeta>(rmsg, " unknown exception");
-        }
       }
       return make_record(rmsg);
     }
