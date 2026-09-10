@@ -2812,6 +2812,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   x23::DagCleanup fatal_commit_cleanup = commit_dag.cleanup(
       "fail internal commit error", [&]() -> x23::Async<void> {
         const x23::DagFailure failure = commit_dag.failure();
+        // [failure.exception] is an [std::exception_ptr] which is an opaque
+        // type, so we throw it and then catch it below so that we can log
+        // details about the exception.
         try {
           if (failure.exception) {
             std::rethrow_exception(failure.exception);
@@ -2856,7 +2859,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
           // A block with ID [block_id] was neither nominated nor validated, so
           // it cannot be committed.
           info("schedulercoord_commit_block ret");
-          // This is a caller rejection, not an internal commit failure.
+          // This is a failure caused by an external user, not an internal
+          // commit failure.
           fatal_commit_cleanup.disarm();
           commit_dag.fail(x23::DagFailureKind::Cancelled, "check block exists");
         }
@@ -3149,7 +3153,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 
   co_await commit_dag.run();
   if (!commit_dag.ok() && commit_dag.failure().exception) {
-    // An internal failure should have triggered [fatal_commit_cleanup].
+    // An internal failure should have triggered [fatal_commit_cleanup]. We have
+    // this extra check here just in case there is a bug in our logic above.
     CHECK(false);
   }
   if (const char *dot_dir = std::getenv("MEMPOOL_DAG_DOT_DIR");

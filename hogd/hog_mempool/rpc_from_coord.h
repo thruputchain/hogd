@@ -432,21 +432,6 @@ public:
     RPCError event_commit = RPCError::kRPCUnrecoverable;
   };
 
-  // Runs inside [commit_block()] once the joint DB/event commit has returned,
-  // before its result is checked by the commit DAG.
-  void set_commit_block_result_test_hook(
-      std::function<void(JointCommitResult &)> hook)
-  {
-    commit_block_result_test_hook_ = std::move(hook);
-  }
-
-  // Reads [last_committed_block_] without taking [commit_lock_], so a test
-  // hook running inside the commit DAG can observe the tip mid-commit.
-  const DbTip &test_last_committed_block() const
-  {
-    return last_committed_block_;
-  }
-
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
