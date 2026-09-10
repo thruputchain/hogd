@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -455,6 +456,57 @@ TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)
   EXPECT_EQ(recovered.get_tip().default_wallet.hash, wallet.hash);
   EXPECT_EQ(recovered.get_tip().default_wallet.contract_type,
             ContractType::kNative);
+}
+
+// Regression test for issue #3955: a CRC-valid recovered <DBTIP> row can carry
+// block_height == INT64_MAX while preserving the genuine id and state hash,
+// because <DBTIP> is global metadata excluded from the state hash and
+// read_dbtip() does not bound the recovered height. Opening the successor
+// block then evaluated block_height + 1 on signed BlockHeight -- signed
+// overflow, i.e. UB. open_block_tx_locked() now refuses a tip whose successor
+// height is not representable, returning kOverflow before inserting a BlockTX.
+TEST(RecoveryTests, RecoveredMaxBlockHeightRejectsSnapshotCreation)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+
+  constexpr BlockTXID kParentBlock = 42;
+  constexpr BlockTXID kFreshBlock = 43;
+  constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
+
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kHeapSize, 0);
+    ASSERT_TRUE(db.has_value());
+    HogDbDAO dao(RAMDB(std::move(*db)));
+
+    DbTip tip{};
+    tip.id = kParentBlock;
+    tip.storage_long_hash = dao.compute_full_db_hash();
+    tip.value.proposal_header.block_height =
+        std::numeric_limits<BlockHeight>::max();
+    ASSERT_TRUE(dao.write_dbtip(tip).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kHeapSize, 0);
+  ASSERT_TRUE(db.has_value());
+  RPCContext ctx(HogDbDAO(RAMDB(std::move(*db))), nullptr);
+
+  const DbTip recovered_tip = ctx.get_tip();
+  ASSERT_EQ(recovered_tip.id, kParentBlock);
+  ASSERT_EQ(recovered_tip.value.proposal_header.block_height,
+            std::numeric_limits<BlockHeight>::max());
+
+  // Opening the successor block must fail cleanly rather than overflow signed
+  // BlockHeight, and must not insert the fresh block.
+  auto result =
+      ctx.open_block_tx(kFreshBlock,
+                        BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), HogDbCode::kOverflow);
+  EXPECT_EQ(ctx.get_block_tx(kFreshBlock, false), nullptr);
 }
 
 } // namespace hogd
