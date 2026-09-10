@@ -116,9 +116,14 @@ bm_scheduler_add_txs(benchmark::State &state)
     auto scheduler = server.mempool_coord_rpc().scheduler();
     const SignedTransactionBatch txs =
         generate_unsigned_txs(fib_client, num_txs);
+    TransactionHashBatch tx_hashes;
+    tx_hashes.reserve(txs.size());
+    for (const SignedTransaction &tx : txs) {
+      tx_hashes.push_back(sha256(tx.tx));
+    }
 
     ElapsedTimer timer;
-    scheduler->add_txs(txs)();
+    scheduler->add_txs(txs, tx_hashes)();
     state.SetIterationTime(timer.elapsed());
     benchmark::DoNotOptimize(scheduler->size());
   }
