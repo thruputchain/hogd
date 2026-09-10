@@ -224,6 +224,166 @@ else
   echo "ok   unsendable signal makes no SIGKILL claim"
 fi
 
+## ci_wait_control_server
+
+# The gate exists because a stale control server holds the port open and
+# answers a connect probe exactly as this run's server would, so waiting on
+# the port let a benchmark proceed against the wrong build (hogd issue #3940).
+# What it has to wait on is the RPC verdict, not the port.
+control_bin="$work_dir/control_bin"
+mkdir -p "$control_bin"
+attempt_file="$work_dir/ready_attempts"
+
+# Stands in for [control_cli <host> <port> ready]: fails for the first
+# $READY_AFTER calls, then succeeds. NOT_READY_HOSTS never succeeds, standing
+# in for a host still serving a previous run's build.
+cat >"$control_bin/control_cli" <<'FAKE_CONTROL_CLI'
+#!/usr/bin/env bash
+host=$1
+if [[ " ${NOT_READY_HOSTS:-} " == *" $host "* ]]; then
+  echo "Control server on $host:$2 is not ready: kCIServerErrorCodeVersionMismatch"
+  exit 1
+fi
+seen=$(cat "$ATTEMPT_FILE.$host" 2>/dev/null || echo 0)
+echo $((seen + 1)) >"$ATTEMPT_FILE.$host"
+if ((seen < ${READY_AFTER:-0})); then
+  echo "Error: connection refused"
+  exit 1
+fi
+exit 0
+FAKE_CONTROL_CLI
+chmod +x "$control_bin/control_cli"
+
+wait_status=0
+wait_output=""
+# Waits on $@ (hosts) where every host but $NOT_READY_HOSTS becomes ready
+# after $READY_AFTER failed probes.
+run_wait_control() {
+  rm -f "$attempt_file".*
+  wait_status=0
+  wait_output=$(
+    CI_WAIT_CONTROL_TIMEOUT_SEC=1 CI_WAIT_CONTROL_POLL_SEC=0.05 \
+      ATTEMPT_FILE="$attempt_file" READY_AFTER="${READY_AFTER:-0}" \
+      NOT_READY_HOSTS="${NOT_READY_HOSTS:-}" \
+      ci_wait_control_server_hosts "$control_bin/control_cli" 11111 "$@" 2>&1
+  ) || wait_status=$?
+}
+
+run_wait_control hog4
+check_eq "a serving host passes the gate" "0" "$wait_status"
+check_contains "a serving host is named" \
+  "Control server on hog4:11111 is serving this build" "$wait_output"
+
+# A host that is merely slow to come up must be waited out, not failed: the
+# bench servers build concurrently with the job that drives them.
+READY_AFTER=3 run_wait_control hog4
+check_eq "a slow host is waited out" "0" "$wait_status"
+check_eq "a slow host is polled until ready" "4" "$(cat "$attempt_file.hog4")"
+
+# The failure this gate replaces was a version mismatch discovered by the
+# first real RPC, which aborted the benchmark. Time out here instead, and
+# carry the verdict so the log says stale server rather than absent one.
+NOT_READY_HOSTS="hog7" run_wait_control hog7
+check_eq "a stale host fails the gate" "1" "$wait_status"
+check_contains "a timeout names the host" \
+  "waiting for this build's control server on hog7:11111" "$wait_output"
+check_contains "a timeout carries the RPC verdict" \
+  "kCIServerErrorCodeVersionMismatch" "$wait_output"
+
+# Every host is waited on even after one fails, so one stale server does not
+# hide the rest and send whoever reads the log back for another run.
+NOT_READY_HOSTS="hog7 hog8" run_wait_control hog4 hog7 hog8
+check_eq "one stale host fails the whole gate" "1" "$wait_status"
+check_contains "the first stale host is named" "on hog7:11111" "$wait_output"
+check_contains "the second stale host is named" "on hog8:11111" "$wait_output"
+check_contains "a ready host is still reported" \
+  "Control server on hog4:11111 is serving this build" "$wait_output"
+
+## reap_control_server.sh
+
+# The reap has to establish that the port is free, not that no process by a
+# given name is alive: [killall control_server] reporting nothing to kill
+# while the port stayed bound is what turned the next bind into a core dump.
+reap_port_bin="$work_dir/reap_port_bin"
+mkdir -p "$reap_port_bin"
+
+# Stands in for [ss -Hltnp "sport = :<port>"]. $SS_LISTENERS is the output,
+# empty when the port is free; $SS_FAILS makes the query itself fail, the way
+# an unsupported filter or a netlink error would.
+cat >"$reap_port_bin/ss" <<'FAKE_SS'
+#!/usr/bin/env bash
+if [[ -n ${SS_FAILS:-} ]]; then
+  echo "ss: bad filter" >&2
+  exit 1
+fi
+printf '%s' "${SS_LISTENERS:-}"
+FAKE_SS
+cat >"$reap_port_bin/killall" <<'FAKE_KILLALL_PORT'
+#!/usr/bin/env bash
+echo "killall $*" >>"$KILLALL_LOG"
+FAKE_KILLALL_PORT
+chmod +x "$reap_port_bin/ss" "$reap_port_bin/killall"
+
+killall_log="$work_dir/reap_killall_log"
+reap_port_status=0
+reap_port_output=""
+# Runs the reap against a port whose listeners are $1.
+run_reap_port() {
+  : >"$killall_log"
+  reap_port_status=0
+  reap_port_output=$(
+    PATH="$reap_port_bin:$PATH" SS_LISTENERS="$1" KILLALL_LOG="$killall_log" \
+      SS_FAILS="${SS_FAILS:-}" \
+      REAP_TERM_TIMEOUT_SEC=0 REAP_KILL_TIMEOUT_SEC=0 \
+      "$CI_BENCH_HARNESS_DIR/reap_control_server.sh" 11111 2>&1
+  ) || reap_port_status=$?
+}
+
+run_reap_port ""
+check_eq "a free port reaps cleanly" "0" "$reap_port_status"
+check_eq "a free port is not signalled" "" "$(cat "$killall_log")"
+
+# A listener [ss] cannot attribute to a pid is another user's process, which
+# this host may not signal. Report the holder here, where it is still visible,
+# rather than letting the bind abort with only an errno.
+run_reap_port 'LISTEN 0 128 *:11111 *:*'
+check_eq "an unreapable holder fails the reap" "1" "$reap_port_status"
+check_contains "an unreapable holder is named" \
+  "could not free port 11111" "$reap_port_output"
+check_contains "an unreapable holder is shown" "*:11111" "$reap_port_output"
+check_contains "an unreapable holder is still signalled by name" \
+  "killall -TERM control_server" "$(cat "$killall_log")"
+
+# A query that could not run has not shown the port to be free. Reporting no
+# output as an empty port would let the bind this reap protects abort anyway,
+# which is the whole failure the script exists to prevent.
+SS_FAILS=1 run_reap_port ""
+check_eq "a failed query fails the reap" "1" "$reap_port_status"
+check_contains "a failed query says it could not establish the port is free" \
+  "cannot establish that the port is free" "$reap_port_output"
+if [[ "$reap_port_output" == *"port 11111 is free"* ]]; then
+  echo "FAIL a failed query must not report the port as free"
+  fail=1
+else
+  echo "ok   a failed query makes no free-port claim"
+fi
+
+# A host without [ss] cannot be reaped by port. Fall back to the by-name reap
+# this script replaced instead of failing: the weaker reap still serves the
+# host, where failing here would break one the old reap handled.
+: >"$killall_log"
+no_ss_status=0
+no_ss_output=$(
+  PATH="$reap_port_bin:$PATH" KILLALL_LOG="$killall_log" \
+    REAP_SS=ss_not_installed \
+    "$CI_BENCH_HARNESS_DIR/reap_control_server.sh" 11111 2>&1
+) || no_ss_status=$?
+check_eq "a host without ss still reaps" "0" "$no_ss_status"
+check_contains "a host without ss says so" "reaping by name only" \
+  "$no_ss_output"
+check_contains "a host without ss reaps by name" \
+  "killall -TERM control_server" "$(cat "$killall_log")"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

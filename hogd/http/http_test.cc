@@ -118,7 +118,7 @@ TEST(HttpServerLifetimeTest, DestructorClosesPartialRequestConnections)
       });
 
   x23::UniqueFd client =
-      x23::tcpconnect("127.0.0.1", port_ready.get_future().get());
+      x23::tcpconnect("127.0.0.1", port_ready.get_future().get()).value();
   ASSERT_TRUE(client);
   std::string_view partial_request = "GET /health HTTP/1.1\r\nHost:";
   ASSERT_EQ(::send(client.get(), partial_request.data(), partial_request.size(),

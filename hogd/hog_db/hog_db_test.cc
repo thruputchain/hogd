@@ -1035,6 +1035,28 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenGroupCountsOverflow)
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
+TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenAverageAgeIsNegative)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  // Counts sum to the balance, so an average-age-agnostic reconciliation would
+  // report this row as already reconciled and leave the negative average in
+  // place. The scheduler then orders this account ahead of every valid
+  // nonnegative age via its ascending ready-account key.
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/5,
+                   /*already_scheduled=*/3,
+                   /*received=*/2,
+                   /*to_schedule_age=*/-1,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbCode::kInternal);
+}
+
 TEST_F(HogDbTest, HogAgeValueOmitsAddressAndReconstructsFromKey)
 {
   const Address key_addr = make_address(kAddress);

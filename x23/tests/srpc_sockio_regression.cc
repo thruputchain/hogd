@@ -4,9 +4,11 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <semaphore>
 #include <string_view>
 #include <sys/socket.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 
@@ -31,7 +33,7 @@ TEST(SrpcRegression, ProgramUnavailableReplyIsFramed)
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
 
-  UniqueFd client = tcpconnect("127.0.0.1", port);
+  UniqueFd client = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client);
 
   UniqueFd accepted(::accept(listener.get(), nullptr, nullptr));
@@ -98,6 +100,43 @@ TEST(SockioRegression, BoundedStrCStr)
   bs.c_str();
 }
 
+TEST(SockioRegression, TcpConnectSockaddrReturnsFdOnSuccess)
+{
+  UniqueFd listener = stcplisten(0);
+  ASSERT_TRUE(listener);
+  uint16_t port = get_port(local_addr(listener));
+
+  auto target = HostPort{"127.0.0.1", port}.to_addr();
+  ASSERT_TRUE(target.has_value());
+
+  std::expected<UniqueFd, Errno> res = tcpconnect(*target);
+  ASSERT_TRUE(res.has_value());
+  EXPECT_TRUE(*res);
+}
+
+TEST(SockioRegression, TcpConnectSockaddrReturnsErrnoOnRefusal)
+{
+  // Bind a listener to claim a free port, then close it so nothing is
+  // listening.  Connecting to the now-vacant port must fail with an
+  // unexpected Errno rather than throwing.
+  auto bind_addr = HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(bind_addr.has_value());
+
+  uint16_t port = 0;
+  {
+    UniqueFd listener = stcplisten(*bind_addr);
+    ASSERT_TRUE(listener);
+    port = get_port(local_addr(listener));
+  }
+
+  auto target = HostPort{"127.0.0.1", port}.to_addr();
+  ASSERT_TRUE(target.has_value());
+
+  std::expected<UniqueFd, Errno> res = tcpconnect(*target);
+  ASSERT_FALSE(res.has_value());
+  EXPECT_EQ(res.error().error_code(), std::errc::connection_refused);
+}
+
 namespace {
 
 // Metadata for a synthetic non-void RPC whose result is a bounded vector
@@ -160,7 +199,7 @@ TEST(SrpcRegression, OversizedBoundedVecReplyIsDecodeError)
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
 
-  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client_fd);
   UniqueFd peer_fd{::accept(listener.get(), nullptr, nullptr)};
   ASSERT_TRUE(peer_fd);
@@ -292,7 +331,7 @@ TEST(SrpcRegression, StopCompletesQueuedClientCallback)
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
 
-  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client_fd);
   // Accepted but intentionally idle: nothing ever replies on this stream.
   UniqueFd peer_fd{::accept(listener.get(), nullptr, nullptr)};

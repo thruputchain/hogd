@@ -34,7 +34,7 @@ read_all(x23::BorrowedFd fd)
 inline std::string
 request(uint16_t port, std::string_view wire)
 {
-  x23::UniqueFd client = x23::tcpconnect("127.0.0.1", port);
+  x23::UniqueFd client = x23::tcpconnect("127.0.0.1", port).value();
   EXPECT_TRUE(client);
   EXPECT_EQ(::send(client.get(), wire.data(), wire.size(), 0),
             static_cast<ssize_t>(wire.size()));
@@ -46,7 +46,7 @@ request(uint16_t port, std::string_view wire)
 inline std::string
 request_chunked(uint16_t port, std::initializer_list<std::string_view> chunks)
 {
-  x23::UniqueFd client = x23::tcpconnect("127.0.0.1", port);
+  x23::UniqueFd client = x23::tcpconnect("127.0.0.1", port).value();
   EXPECT_TRUE(client);
   bool first = true;
   for (std::string_view chunk : chunks) {
