@@ -307,21 +307,32 @@ check_contains "a ready host is still reported" \
 reap_port_bin="$work_dir/reap_port_bin"
 mkdir -p "$reap_port_bin"
 
-# Stands in for [ss -Hltnpe "sport = :<port>"]. $SS_LISTENERS is the output,
-# empty when the port is free; $SS_FAILS makes the query itself fail, the way
-# an unsupported filter or a netlink error would; $SS_NO_E rejects [-e], the
-# way an [ss] too old to report socket details would.
+# Stands in for [ss -Hltnpe "sport = :<port>"]. $SS_LISTENERS is the output of
+# the [-e] form and $SS_LISTENERS_NOE (defaulting to it) of the plain one, both
+# empty when the port is free; $SS_FAILS makes every query fail, the way a bad
+# filter would; $SS_NO_E rejects [-e], the way an [ss] too old to report socket
+# details would; $SS_FAIL_ONCE names a marker file and fails only the first
+# invocation, the way a transient netlink error would.
 cat >"$reap_port_bin/ss" <<'FAKE_SS'
 #!/usr/bin/env bash
+if [[ -n ${SS_FAIL_ONCE:-} && ! -e $SS_FAIL_ONCE ]]; then
+  : >"$SS_FAIL_ONCE"
+  echo "ss: netlink error" >&2
+  exit 1
+fi
 if [[ -n ${SS_FAILS:-} ]]; then
   echo "ss: bad filter" >&2
   exit 1
 fi
-if [[ -n ${SS_NO_E:-} && $1 == *e* ]]; then
-  echo "ss: unrecognized option '-e'" >&2
-  exit 1
+if [[ $1 == *e* ]]; then
+  if [[ -n ${SS_NO_E:-} ]]; then
+    echo "ss: unrecognized option '-e'" >&2
+    exit 1
+  fi
+  printf '%s' "${SS_LISTENERS:-}"
+else
+  printf '%s' "${SS_LISTENERS_NOE-${SS_LISTENERS:-}}"
 fi
-printf '%s' "${SS_LISTENERS:-}"
 FAKE_SS
 cat >"$reap_port_bin/killall" <<'FAKE_KILLALL_PORT'
 #!/usr/bin/env bash
@@ -330,15 +341,19 @@ FAKE_KILLALL_PORT
 chmod +x "$reap_port_bin/ss" "$reap_port_bin/killall"
 
 killall_log="$work_dir/reap_killall_log"
+ss_fail_once_marker="$work_dir/reap_ss_failed_once"
 reap_port_status=0
 reap_port_output=""
 # Runs the reap against a port whose listeners are $1.
 run_reap_port() {
   : >"$killall_log"
+  rm -f "$ss_fail_once_marker"
   reap_port_status=0
   reap_port_output=$(
     PATH="$reap_port_bin:$PATH" SS_LISTENERS="$1" KILLALL_LOG="$killall_log" \
+      SS_LISTENERS_NOE="${SS_LISTENERS_NOE-$1}" \
       SS_FAILS="${SS_FAILS:-}" SS_NO_E="${SS_NO_E:-}" \
+      SS_FAIL_ONCE="${SS_FAIL_ONCE:-}" \
       REAP_TERM_TIMEOUT_SEC=0 REAP_KILL_TIMEOUT_SEC=0 \
       "$CI_BENCH_HARNESS_DIR/reap_control_server.sh" 11111 2>&1
   ) || reap_port_status=$?
@@ -394,6 +409,22 @@ SS_NO_E=1 run_reap_port 'LISTEN 0 128 *:11111 *:*'
 check_eq "an ss without -e still fails on a held port" "1" "$reap_port_status"
 check_contains "an ss without -e says the holder is unattributable" \
   "holder not attributable" "$reap_port_output"
+
+# The retry is decided per query, never latched. A transient netlink error on
+# one query must not be mistaken for an [ss] that cannot do [-e] and cost
+# every later query the ownership this script exists to report -- which is
+# what an up-front probe that settled the flags once would have done.
+SS_FAIL_ONCE="$ss_fail_once_marker" \
+  SS_LISTENERS_NOE='LISTEN 0 128 *:11111 *:*' \
+  run_reap_port 'LISTEN 0 128 *:11111 *:* uid:1002 ino:98765 sk:2f <->'
+check_contains "a transient query error does not latch the plain query" \
+  "owned by uid 1002" "$reap_port_output"
+if [[ "$reap_port_output" == *"cannot establish that the port is free"* ]]; then
+  echo "FAIL a transient query error must not fail the reap outright"
+  fail=1
+else
+  echo "ok   a transient query error is retried, not reported as unknowable"
+fi
 
 # A query that could not run has not shown the port to be free. Reporting no
 # output as an empty port would let the bind this reap protects abort anyway,

@@ -42,12 +42,13 @@ command -v killall >/dev/null || {
 # it at a stub, and at a name that is not installed.
 REAP_SS=${REAP_SS:-ss}
 
-# The flags [query_listeners] passes to [$REAP_SS]. [-e] adds the socket's
-# owning uid and inode, which is the only ownership this script gets for a
-# holder it cannot attribute to a pid -- and the holder it cannot attribute is
-# exactly the one it cannot reap, so it is the one whose owner the failure has
-# to name. Settled once, below, against an [ss] too old to take [-e].
+# The flags [query_listeners] asks for, and the ones it falls back to. [-e]
+# adds the socket's owning uid and inode, which is the only ownership this
+# script gets for a holder it cannot attribute to a pid -- and the holder it
+# cannot attribute is exactly the one it cannot reap, so it is the one whose
+# owner the failure has to name.
 REAP_SS_FLAGS=-Hltnpe
+REAP_SS_FLAGS_PLAIN=-Hltnp
 
 # Reaping by port needs that tool. A host without it must fall back to the
 # by-name reap this script replaced rather than fail: it is the weaker reap,
@@ -58,14 +59,6 @@ if ! command -v "$REAP_SS" >/dev/null; then
   killall -TERM control_server 2>/dev/null && sleep 3 || true
   killall -KILL control_server 2>/dev/null || true
   exit 0
-fi
-
-# [-e] is not worth failing the reap over: it only enriches the report of a
-# holder that cannot be reaped anyway. An [ss] that rejects it still answers
-# the question the reap turns on -- is the port free -- so drop back to the
-# plain query rather than treating the port as unknowable.
-if ! "$REAP_SS" "$REAP_SS_FLAGS" "sport = :$PORT" >/dev/null 2>&1; then
-  REAP_SS_FLAGS=-Hltnp
 fi
 
 # The listening sockets on $PORT from the most recent query, one raw [ss] line
@@ -82,7 +75,21 @@ REAP_LISTENERS=""
 query_listeners() {
   local status=0
 
-  REAP_LISTENERS=$("$REAP_SS" "$REAP_SS_FLAGS" "sport = :$PORT") || status=$?
+  REAP_LISTENERS=$("$REAP_SS" "$REAP_SS_FLAGS" "sport = :$PORT" 2>/dev/null) ||
+    status=$?
+  if [ "$status" -ne 0 ]; then
+    # [-e] is not worth failing the reap over: it only enriches the report of
+    # a holder that cannot be reaped anyway, and an [ss] too old to take it
+    # still answers the question the reap turns on. Retry without it -- but
+    # decided per query, never latched: a netlink error or a bad filter fails
+    # both forms, so it is reported below instead of being mistaken for an
+    # [ss] without [-e] and quietly costing every later query the ownership
+    # this script exists to report. The first attempt's stderr is dropped
+    # because it is noise when a retry follows; the retry's is the diagnostic.
+    status=0
+    REAP_LISTENERS=$("$REAP_SS" "$REAP_SS_FLAGS_PLAIN" "sport = :$PORT") ||
+      status=$?
+  fi
   if [ "$status" -ne 0 ]; then
     REAP_LISTENERS=""
     echo "$REAP_SS exited $status querying port $PORT; cannot establish" \
