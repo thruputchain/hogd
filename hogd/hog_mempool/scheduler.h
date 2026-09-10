@@ -174,7 +174,6 @@ public:
   // Returns whether this transaction body is already pending in the account's
   // runqueue or stranded set. Callers must authenticate the submitted signed
   // encoding before treating an existing body as admitted.
-  bool is_pending(const SignedTransaction &tx);
   bool is_pending(const SignedTransaction &tx, const TransactionHash &tx_hash);
 
   // The number of txs in the scheduler, including both those of the runqueue

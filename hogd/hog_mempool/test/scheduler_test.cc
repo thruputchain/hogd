@@ -112,7 +112,7 @@ TEST(Scheduler, IsPendingReturnsFalseForUncachedAccount)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  EXPECT_FALSE(scheduler->is_pending(txs[0]));
+  EXPECT_FALSE(scheduler->is_pending(txs[0], sha256(txs[0].tx)));
 }
 
 TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)

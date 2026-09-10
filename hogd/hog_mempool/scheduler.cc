@@ -477,13 +477,6 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
 }
 
 bool
-Scheduler::is_pending(const SignedTransaction &tx)
-{
-  const TransactionHash tx_hash = sha256(tx.tx);
-  return is_pending(tx, tx_hash);
-}
-
-bool
 Scheduler::is_pending(const SignedTransaction &tx,
                       const TransactionHash &tx_hash)
 {
