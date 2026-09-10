@@ -99,10 +99,10 @@ help:
 	@echo "  devnode       just $(DEVNODE_BIN)"
 	@echo ""
 	@echo "Verify"
+	@echo "  check         build, lint, and test the way CI does"
 	@echo "  test          ctest in $(BUILD_DIR)"
-	@echo "  check         scripts/check.sh, the full local CI equivalent"
-	@echo "  format        rewrite formatting; format-check reports instead"
-	@echo "  tidy          clang-tidy over hogd/"
+	@echo "  lint          clang-tidy over hogd/"
+	@echo "  fmt           rewrite formatting; fmt-check reports instead"
 	@echo ""
 	@echo "  version       what a build here embeds, and what the tree already has"
 	@echo ""
@@ -200,21 +200,23 @@ install:
 test:
 	ctest --test-dir $(BUILD_DIR) --output-on-failure
 
+# scripts/check.sh is this repo's own build-plus-tidy-plus-test run, so check
+# calls it rather than chaining fmt-check, lint and test as the sibling repos do.
 .PHONY: check
 check:
 	./scripts/check.sh
 
-.PHONY: format
-format:
+.PHONY: lint
+lint:
+	./scripts/tidy.sh -d $(BUILD_DIR)
+
+.PHONY: fmt
+fmt:
 	./scripts/format.sh
 
-.PHONY: format-check
-format-check:
+.PHONY: fmt-check
+fmt-check:
 	./scripts/format.sh --check
-
-.PHONY: tidy
-tidy:
-	./scripts/tidy.sh -d $(BUILD_DIR)
 
 .PHONY: clean
 clean:
