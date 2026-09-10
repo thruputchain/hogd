@@ -182,11 +182,12 @@ TEST(MultiError, TcpConnectRefused)
   auto addr = HostPort{"127.0.0.1", 0}.to_addr().value();
   UniqueFd reserved{socket(AF_INET, SOCK_STREAM, 0)};
   ASSERT_TRUE(reserved);
-  // Keep the port bound without listening so another process cannot take it.
   ASSERT_EQ(bind(reserved.get(), reinterpret_cast<const sockaddr *>(&addr),
                  sockaddr_len(addr)),
             0);
   auto port = get_port(local_addr(reserved));
+  // Darwin drops SYNs to bound, non-listening sockets instead of refusing.
+  reserved.reset();
   auto result = tcpconnect("127.0.0.1", port);
   ASSERT_FALSE(result);
   ASSERT_TRUE(std::holds_alternative<Errno>(result.error()));

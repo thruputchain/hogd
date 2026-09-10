@@ -313,8 +313,10 @@ trap 'cleanup 130' INT TERM
 echo 'make sure bench servers are running'
 # This gate waits on every host at once and collapses them to one status, so say
 # which gate failed rather than exiting 1 with only the per-host lines above.
-if ! ci_wait_port_hosts "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"; then
-  echo "readiness: a bench control server is not listening on $CI_CONTROL_PORT" >&2
+if ! ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+  "${ALL_HOSTS[@]}"; then
+  echo "readiness: a bench control server built from this commit is not" \
+    "serving on $CI_CONTROL_PORT" >&2
   exit 1
 fi
 
@@ -473,8 +475,8 @@ done
 echo 'launch coordinators'
 for node in "${NODE_IDS[@]}"; do
   control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" "$SLOT_A_CPUS" \
-    "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
-    --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
+    "$CHUCKD_BINARY" -l info --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
+    --metrics :2223 bench coordinator_loadgen --skip 5 --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 \
     --network-hash 0000000000000000000000000000000000000000000000000000000000000001 --storage-dir "$(node_storage_dir "$node")" \
     --out-addr :50000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \

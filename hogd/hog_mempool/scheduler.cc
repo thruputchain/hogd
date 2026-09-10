@@ -456,9 +456,9 @@ Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
-Scheduler::add_txs_helper(const SignedTransaction &tx)
+Scheduler::add_txs_helper(const SignedTransaction &tx,
+                          const TransactionHash &tx_hash)
 {
-  const TransactionHash &tx_hash = sha256(tx.tx);
   std::shared_ptr<TxValue> value;
   {
     // The tx may already exist in [txs_] because it is okay to add a tx back
@@ -477,9 +477,9 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
 }
 
 bool
-Scheduler::is_pending(const SignedTransaction &tx)
+Scheduler::is_pending(const SignedTransaction &tx,
+                      const TransactionHash &tx_hash)
 {
-  const TransactionHash tx_hash = sha256(tx.tx);
   const ContractAddress &account = tx.tx.invocation.invoked_address;
   const TxKey key{
       .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
@@ -493,8 +493,10 @@ Scheduler::is_pending(const SignedTransaction &tx)
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
-Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
+Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+                   const x23::XdrVec<TransactionHash> &tx_hashes)
 {
+  CHECK_EQ(txs.size(), tx_hashes.size());
   SchedGatewaySubmitOutcomeBatch outcomes(
       txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
 
@@ -512,6 +514,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
     handles.push_back(
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
+           const x23::XdrVec<TransactionHash> &tx_hashes,
            const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
            SchedGatewaySubmitOutcomeBatch &outcomes,
            Scheduler &scheduler) noexcept -> x23::Async<void> {
@@ -531,13 +534,14 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
                   SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
               continue;
             }
-            if (scheduler.add_txs_helper(txs[tx_idx])) {
+            const TransactionHash &tx_hash = tx_hashes[tx_idx];
+            if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
               num_added++;
             }
           }
           scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
           co_return;
-        }(&chunk, txs, missing, outcomes, *this));
+        }(&chunk, txs, tx_hashes, missing, outcomes, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
