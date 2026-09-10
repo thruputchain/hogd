@@ -116,11 +116,11 @@ TEST_F(Progname, UnsetOrEmptyPathAndMissingProgram)
 TEST_F(Progname, ExplicitAndSearchedProgramNames)
 {
   setprogpath("relative/program");
-  EXPECT_EQ(getprogname(), "program");
+  EXPECT_EQ(x23::getprogname(), "program");
   EXPECT_EQ(getprogpath(), "relative/program");
   auto program = dir_ / "second/program";
   ASSERT_TRUE(writefile(program, std::string_view("#!/bin/sh\n"), true, 0700));
   setprogpath("program");
-  EXPECT_EQ(getprogname(), "program");
+  EXPECT_EQ(x23::getprogname(), "program");
   EXPECT_EQ(getprogpath(), program.string());
 }

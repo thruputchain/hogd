@@ -26,7 +26,7 @@ TEST(DebugFormat, PercentSubstitution)
   EXPECT_EQ(replace_percent("%%%f", replacements), "%file");
   EXPECT_EQ(replace_percent("%f%f", replacements), "filefile");
   EXPECT_EQ(expand_log_path("./%f.%p.%%"),
-            std::format("./{}.{}.%", getprogname(), getpid()));
+            std::format("./{}.{}.%", x23::getprogname(), getpid()));
 }
 
 TEST(DebugFormat, ArgumentQuoting)
@@ -47,7 +47,7 @@ TEST(DebugFormat, LinesAndProgramPrefix)
             "prefix: value 42\n");
   EXPECT_EQ(vformat_logline("prefix: ", "value {}",
                             std::make_format_args(value)),
-            getprogname() + ": prefix: value 42\n");
+            x23::getprogname() + ": prefix: value 42\n");
 }
 
 TEST(DebugFormat, StacktraceHonorsIndent)
@@ -70,7 +70,7 @@ TEST(DebugFormat, StacktraceHonorsIndent)
 TEST(DebugEnvironment, OverridesAndDisable)
 {
   const char *var = "X23_TEST_DEBUG_ENV";
-  auto specific = std::format("{}_{}", var, getprogname());
+  auto specific = std::format("{}_{}", var, x23::getprogname());
   bool saved = ignore_debug_env;
   Defer cleanup([&] {
     ignore_debug_env = saved;
@@ -113,7 +113,7 @@ TEST(DebugFd, ExpandedFileAppends)
   ASSERT_NE(mkdtemp(name), nullptr);
   std::filesystem::path dir(name);
   Defer cleanup([&] { std::filesystem::remove_all(dir); });
-  auto path = dir / std::format("{}.{}.%", getprogname(), getpid());
+  auto path = dir / std::format("{}.{}.%", x23::getprogname(), getpid());
   ASSERT_TRUE(writefile(path, std::string_view("before\n")));
   UniqueFd fd(make_debug_fd("./" + dir.string() + "/%f.%p.%%"));
   ASSERT_TRUE(fd);
@@ -137,7 +137,7 @@ TEST(DebugFd, ResourceUsageOnScopeExit)
   writer.reset();
   std::string output;
   ASSERT_TRUE(readall(reader, &output));
-  EXPECT_TRUE(output.starts_with(getprogname() + " execution time:\n"));
+  EXPECT_TRUE(output.starts_with(x23::getprogname() + " execution time:\n"));
   EXPECT_TRUE(output.contains("real"));
   EXPECT_TRUE(output.contains("user"));
   EXPECT_TRUE(output.contains("sys"));
