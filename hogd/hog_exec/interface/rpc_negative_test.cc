@@ -503,6 +503,7 @@ TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
                                                       kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_db_block(propose_block_id);
+  open_event_block(propose_block_id);
   const auto proposed =
       client_.executorsched_propose_transaction(propose_block_id, thin);
   EXPECT_NE(proposed.result(), ExecResult::ExecResultMalformedTransaction);
@@ -516,6 +517,7 @@ TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
                                                       kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_db_block(fat_propose_block_id);
+  open_event_block(fat_propose_block_id);
   EXPECT_EQ(client_.executorsched_propose_transaction(fat_propose_block_id, fat)
                 .result(),
             proposed.result());
