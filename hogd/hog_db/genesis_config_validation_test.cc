@@ -207,10 +207,14 @@ TEST_F(GenesisConfigValidationTest, BoundsSavepointDepthByExecutorCeiling)
             DbSchedResult::DbSchedResultOK);
 }
 
-// Lowering it is always admissible.
-TEST_F(GenesisConfigValidationTest, AcceptsLoweredSavepointDepth)
+// Root commits need one savepoint even when child TryInvokes are disabled.
+TEST_F(GenesisConfigValidationTest, RequiresSavepointForRootCommit)
 {
   NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxSavepointDepth,
+                                 0);
+  EXPECT_EQ(load(config, std::nullopt), DbSchedResult::DbSchedResultError);
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxSavepointDepth,
                                  1);

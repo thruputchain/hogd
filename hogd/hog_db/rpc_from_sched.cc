@@ -425,6 +425,11 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, rv32::kMemoryCeilingBytes);
     co_return DbSchedResult::DbSchedResultError;
   }
+  // Every root commit pushes a savepoint, even without child TryInvokes.
+  if (config_params.max_savepoint_depth == 0) {
+    error("genesis max_savepoint_depth must be at least 1 for root commits");
+    co_return DbSchedResult::DbSchedResultError;
+  }
   // Deeper than the executor's stacks are sized for would abort a node on a
   // transaction that merely recursed, so refuse it up front.
   if (const uint32_t stated = config_params.max_savepoint_depth;
