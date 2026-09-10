@@ -140,7 +140,8 @@ TEST(SocketOptions, NoDelayAndAbortiveClose)
     int value = -1;
     socklen_t len = sizeof(value);
     ASSERT_EQ(getsockopt(fd.get(), IPPROTO_TCP, TCP_NODELAY, &value, &len), 0);
-    EXPECT_EQ(value, on);
+    // Enabled boolean socket options need not read back as exactly 1.
+    EXPECT_EQ(value != 0, on);
   }
   enable_abortive_close(fd);
   linger value{};
