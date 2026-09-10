@@ -103,8 +103,9 @@ public:
           c->max_message_size = self->max_message_size_;
           self->fdgen_->insert_or_assign(c->get_fd(),
                                          self->cp_.generation(c->get_fd()));
-          c->template server_with_exception_policy<ExceptionPolicy>(
-              ImplPtr(*self), VersMeta{});
+          c->template server_with_exception_policy<ExceptionPolicy>(ImplPtr(
+                                                                        *self),
+                                                                    VersMeta{});
         });
   }
 
