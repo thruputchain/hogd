@@ -1,0 +1,8 @@
+set(coverage_dir "@coverage_dir@")
+set(coverage_build_dir "@CMAKE_CURRENT_BINARY_DIR@")
+set(coverage_config "$<CONFIG>")
+set(coverage_ctest "@CMAKE_CTEST_COMMAND@")
+set(coverage_cov "@X23_LLVM_COV@")
+set(coverage_profdata "@X23_LLVM_PROFDATA@")
+set(coverage_objects "@coverage_objects@")
+set(coverage_sources "@coverage_sources@")

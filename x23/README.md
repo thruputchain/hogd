@@ -43,6 +43,44 @@ either `g++ -std=c++23` or `clang++ -std=c++23 -stdlib=libc++
 -fexperimental-library`.  (It does not work to use `clang++` with
 GCC's `libstdc++` or `g++` with LLVM's `libc++`.)
 
+### Test coverage
+
+Use Clang with matching `llvm-cov` and `llvm-profdata` tools to build
+with [LLVM source-based coverage](https://clang.llvm.org/docs/SourceBasedCodeCoverage.html):
+
+```sh
+cmake -S . -B local/coverage -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_BUILD_TYPE=Debug -DX23_COVERAGE=ON -DBUILD_BENCHMARKS=OFF
+cmake --build local/coverage --target coverage -j8
+```
+
+Coverage builds use `-O0`, debug symbols, enabled assertions, and
+atomic profile counters. Normal builds are unaffected. The LLVM tools
+must match the compiler's major version; set `X23_LLVM_COV` and
+`X23_LLVM_PROFDATA` to select explicit paths.
+
+The `coverage` target builds the tests, clears previous profiles, runs
+CTest, and writes `local/coverage/coverage/summary.txt` and
+`local/coverage/coverage/html/index.html`. CTest parallelism can be limited
+with `CTEST_PARALLEL_LEVEL`. Failed tests still fail the target, but a
+partial report is generated when profiles are available.
+
+Reports include maintained library and compiler sources (`x23/` and
+`x23c/`), including library code not linked into a test. Test code,
+generated files, and dependencies are excluded. Header templates are
+measured only where instantiated, and conditional code only for the
+configured platform/build. Compiler invocations during the build do not
+count as tests. Googletest tests are included when its submodule is
+available (or `GOOGLETEST_PATH` is set); long-running tests not registered
+with CTest are not run.
+
+LLVM can report [mismatched function data](https://github.com/llvm/llvm-project/issues/32849)
+for unused copies of inline functions across objects. Warnings are kept
+visible; `llvm-cov report -dump` with the same objects and profile identifies
+the affected functions. Zero-hash entries can be unused inline mappings;
+nonzero-hash mismatches in project sources should be investigated before
+relying on the report.
+
 ### Integration with cmake
 
 There are two ways to integrate X23 with a cmake-based project.
