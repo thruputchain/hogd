@@ -17,6 +17,7 @@
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
