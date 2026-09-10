@@ -120,13 +120,19 @@ static_assert(kGasScheduleDigest == 0xbd9a5e2f5bf216fdULL);
 struct AcceptedGasSchedule {
   uint32_t version;
   uint64_t digest;
+  // Whether the lowerer that stamps this schedule still folds the fixed code
+  // and memory bounds into its reported fingerprint (they became chain
+  // configuration; see format_fingerprint).
+  bool folds_fixed_bounds;
 };
 
 inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
-    {.version = kGasTableVersion, .digest = kGasScheduleDigest},
-    // groundhog-cli <= 0.11.0, which is what every deployed artifact was
+    {.version = kGasTableVersion,
+     .digest = kGasScheduleDigest,
+     .folds_fixed_bounds = false},
+    // groundhog-cli <= 0.15.1, which is what every deployed artifact was
     // stamped by. Remove once the lowerer stamps v4.
-    {.version = 3, .digest = 0x918317c21c46bb60ULL},
+    {.version = 3, .digest = 0x918317c21c46bb60ULL, .folds_fixed_bounds = true},
 }};
 
 constexpr uint64_t
@@ -307,46 +313,32 @@ static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
 // The engine fingerprints a lowerer may report while kAcceptedGasSchedules
-// still has transitional entries: two per accepted schedule, in the same order
-// -- the current fold first, then the fold of a lowerer that still treats the
-// code and memory bounds as fixed. The fingerprint folds the gas schedule, so
-// a lowerer that stamps a transitional schedule necessarily reports a
-// different value from this build's -- the same rollout skew
-// kAcceptedGasSchedules exists for, seen from the metadata side. This list is
-// derived from that one and disappears with it; the fixed-bounds half goes
-// once the lowerer that stops folding them has rolled out.
-constexpr std::array<uint64_t, 2 * kAcceptedGasSchedules.size()>
+// still has transitional entries: one per accepted schedule, in the same order.
+// The fingerprint folds the gas schedule, so a lowerer that stamps a
+// transitional schedule necessarily reports a different value from this build's
+// -- the same rollout skew kAcceptedGasSchedules exists for, seen from the
+// metadata side. This list is derived from that one and disappears with it.
+constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
 accepted_format_fingerprints()
 {
-  std::array<uint64_t, 2 * kAcceptedGasSchedules.size()> fingerprints = {};
+  std::array<uint64_t, kAcceptedGasSchedules.size()> fingerprints = {};
   for (size_t i = 0; i < kAcceptedGasSchedules.size(); ++i) {
-    fingerprints[2 * i] = format_fingerprint(kArtifactFormatVersion,
-                                             kAcceptedGasSchedules[i].version,
-                                             kAcceptedGasSchedules[i].digest);
-    fingerprints[(2 * i) + 1] =
+    fingerprints[i] =
         format_fingerprint(kArtifactFormatVersion,
                            kAcceptedGasSchedules[i].version,
                            kAcceptedGasSchedules[i].digest,
-                           /*folds_fixed_bounds=*/true);
+                           kAcceptedGasSchedules[i].folds_fixed_bounds);
   }
   return fingerprints;
 }
 
-inline constexpr std::array<uint64_t, 2 * kAcceptedGasSchedules.size()>
+inline constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
     kAcceptedFormatFingerprints = accepted_format_fingerprints();
 static_assert(kAcceptedFormatFingerprints.front() ==
               kArtifactFormatFingerprint);
-// Each pin below is a fingerprint some lowerer actually emits. Pinning them
-// proves the derivation reproduces those values rather than ones only this
-// header believes in.
-//
-// The current schedule as this build fingerprinted it before the bounds became
-// configuration.
-static_assert(kAcceptedFormatFingerprints[1] == 0x002a3cb88d80b403ULL);
-// The v3 schedule as the groundhog-rpc lowerer reports it once its fingerprint
-// likewise stops folding the bounds.
-static_assert(kAcceptedFormatFingerprints[2] == 0xc5f00a7d4451045eULL);
-// The v3 schedule as groundhog-cli <= 0.15.1 reports it.
+// The v3 entry is what groundhog-cli 0.15.1 still reports. Pinning it here
+// proves this derivation reproduces a fingerprint the lowerer actually emits,
+// rather than one only this header believes in.
 static_assert(kAcceptedFormatFingerprints.back() == 0x8e5caf3e9cd23b22ULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
