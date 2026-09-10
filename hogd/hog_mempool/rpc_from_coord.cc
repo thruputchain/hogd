@@ -3151,7 +3151,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   co_await commit_dag.run();
   if (!commit_dag.ok() && commit_dag.failure().exception) {
     // An internal failure should have triggered [fatal_commit_cleanup]. We have
-    // this extra check here just in case there is a bug in our logic above.
+    // this extra CHECK here just in case there is a bug in our logic above.
     CHECK(false);
   }
   if (const char *dot_dir = std::getenv("MEMPOOL_DAG_DOT_DIR");
