@@ -501,8 +501,9 @@ TEST(RecoveryTests, RecoveredMaxBlockHeightRejectsSnapshotCreation)
 
   // Opening the successor block must fail cleanly rather than overflow signed
   // BlockHeight, and must not insert the fresh block.
-  auto result = ctx.open_block_tx(
-      kFreshBlock, BlockExecutionMode::kBlockExecutionModeProposal);
+  auto result =
+      ctx.open_block_tx(kFreshBlock,
+                        BlockExecutionMode::kBlockExecutionModeProposal);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code(), HogDbCode::kOverflow);
   EXPECT_EQ(ctx.get_block_tx(kFreshBlock, false), nullptr);
