@@ -10,7 +10,6 @@
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hog_db/block_tx.h"
@@ -39,9 +38,14 @@ RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
   // block exists at the maximum height; reject it before constructing a
   // BlockTX (issue #3955).
   // The block also runs under the configuration the tip it builds on
-  // carries, so read the tip once for both.
-  const DbTip tip = get_tip();
-  const BlockHeight parent_height = tip.value.proposal_header.block_height;
+  // carries. Read both under the tip's lock; the tip itself is large (the
+  // storage hash and a consensus value) and is not copied.
+  BlockHeight parent_height = -1;
+  uint32_t max_savepoint_depth = 0;
+  tip_.with([&](TipState const &state) {
+    parent_height = state.tip.value.proposal_header.block_height;
+    max_savepoint_depth = state.params.max_savepoint_depth;
+  });
   if (parent_height == std::numeric_limits<BlockHeight>::max()) [[unlikely]] {
     error("Refusing to open block {}: tip height {} is the maximum "
           "representable BlockHeight, so it has no successor",
@@ -50,12 +54,12 @@ RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
   }
 
   // create the block tx.
-  auto [it, inserted] = block_txes_.emplace(
-      std::piecewise_construct, std::forward_as_tuple(bid),
-      std::forward_as_tuple(
-          get_db(), get_cost_model(), background_commit_worker_,
-          parent_height + 1, mode,
-          NetworkConfigParams(tip.network_config.v0()).max_savepoint_depth));
+  auto [it, inserted] =
+      block_txes_.emplace(std::piecewise_construct, std::forward_as_tuple(bid),
+                          std::forward_as_tuple(get_db(), get_cost_model(),
+                                                background_commit_worker_,
+                                                parent_height + 1, mode,
+                                                max_savepoint_depth));
   if (!inserted) {
     warn("Attempt to open block tx {} that already exists", bid);
     return HogDbError(HogDbCode::kExists);
@@ -268,7 +272,8 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
   DbTip new_tip;
   bool network_hash_mismatch = false;
   bool timepoint_went_backwards = false;
-  tip_.with([&](DbTip &tip) {
+  tip_.with([&](TipState &state) {
+    DbTip &tip = state.tip;
     // The network hash is fixed for the life of the chain, but it lives in
     // the consensus value, which this replaces wholesale rather than carrying
     // forward the way default_wallet and network_config are. A caller that
