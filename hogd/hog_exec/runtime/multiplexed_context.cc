@@ -1,4 +1,5 @@
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <memory>

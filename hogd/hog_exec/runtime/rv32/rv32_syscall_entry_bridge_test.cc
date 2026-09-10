@@ -15,10 +15,12 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/frame_limits.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -155,7 +157,11 @@ protected:
             .calldata = Calldata{},
         },
         std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{},
-        /*max_sha256_buffers=*/8);
+        FrameLimits{.max_sha256_buffers = 8,
+                    .max_sha256_buffer_bytes =
+                        static_cast<uint32_t>(kSHA256BufferMaxSize),
+                    .max_savepoint_depth =
+                        static_cast<uint32_t>(kMaxSavepointDepth)});
     return std::move(stashed).value();
   }
 

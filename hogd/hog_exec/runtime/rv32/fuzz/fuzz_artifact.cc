@@ -6,6 +6,7 @@
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/encoding.h"
 #include "hogd/hog_exec/runtime/rv32/fuzz/fuzz_common.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 

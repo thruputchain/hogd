@@ -6,6 +6,7 @@
 
 #include "auth_token.hh"
 #include "contract.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"

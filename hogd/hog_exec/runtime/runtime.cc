@@ -1,4 +1,5 @@
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/base/network_config_params.h"
 
 #include <exception>
 

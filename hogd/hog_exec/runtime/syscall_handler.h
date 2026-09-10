@@ -26,6 +26,7 @@
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/frame_limits.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"

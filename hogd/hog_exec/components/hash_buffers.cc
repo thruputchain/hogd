@@ -4,7 +4,6 @@
 #include <span>
 #include <utility>
 
-#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"

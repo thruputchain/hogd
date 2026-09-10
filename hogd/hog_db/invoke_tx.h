@@ -12,7 +12,6 @@
 
 #include "contract.hh"
 #include "db_conflict.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"

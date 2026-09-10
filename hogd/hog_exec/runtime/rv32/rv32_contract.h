@@ -4,8 +4,10 @@
 #include <optional>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "types.hh"
 #include "x23/async.h"

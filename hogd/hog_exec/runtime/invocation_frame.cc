@@ -1,4 +1,5 @@
 #include "hogd/hog_exec/runtime/invocation_frame.h"
+#include "hogd/hog_exec/runtime/frame_limits.h"
 
 #include <algorithm>
 #include <cassert>

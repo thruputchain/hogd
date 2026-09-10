@@ -1,4 +1,5 @@
 #include "hogd/hog_exec/runtime/view/view.h"
+#include "hogd/hog_exec/runtime/frame_limits.h"
 
 #include <cassert>
 #include <cstdint>

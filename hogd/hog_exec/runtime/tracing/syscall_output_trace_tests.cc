@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "hog_exec_constants.hh"
+#include "hogd/base/network_config_params.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 
 #include "auth_claim.hh"
 #include "auth_token.hh"

@@ -1,4 +1,5 @@
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "hogd/hog_exec/runtime/frame_limits.h"
 
 #include "auth_claim.hh"
 #include "ffi_enums.hh"

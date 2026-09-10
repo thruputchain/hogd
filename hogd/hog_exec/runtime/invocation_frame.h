@@ -17,7 +17,6 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep

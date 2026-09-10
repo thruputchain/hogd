@@ -8,6 +8,7 @@
 
 #include "contract.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/unique_function.h"
 #include "hogd/hog_exec/common/status.h"

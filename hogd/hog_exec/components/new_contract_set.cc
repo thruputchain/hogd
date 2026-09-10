@@ -1,4 +1,5 @@
 #include "new_contract_set.h"
+#include "hogd/base/network_config_params.h"
 
 #include <utility>
 

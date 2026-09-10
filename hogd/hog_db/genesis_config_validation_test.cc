@@ -137,23 +137,22 @@ TEST_F(GenesisConfigValidationTest, RejectsBytestringLimitAboveCeiling)
             DbSchedResult::DbSchedResultError);
 }
 
+// A database loads genesis once, so each case below ends in at most one
+// successful load, after any it expects refused.
+
 // The largest contract a transaction can carry is admissible, and with it the
 // stock attachment count: raising the size past the 256 KiB default is a
-// configuration choice, not a protocol change.
-TEST_F(GenesisConfigValidationTest, AcceptsContractSizeLimitAtCeiling)
+// configuration choice, not a protocol change. One byte past the ceiling is
+// refused: hog_db is only proven to store rows up to it, and no transaction
+// could carry the contract anyway.
+TEST_F(GenesisConfigValidationTest, BoundsContractSizeLimitByCeiling)
 {
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling + 1, 1),
+            DbSchedResult::DbSchedResultError);
   const uint32_t stock_count =
       NetworkConfigParams(stock_network_config().v0()).max_new_contracts_per_tx;
   EXPECT_EQ(load_with_contract_limits(kContractCeiling, stock_count),
             DbSchedResult::DbSchedResultOK);
-}
-
-// One byte past the ceiling is refused: hog_db is only proven to store rows up
-// to it, and no transaction could carry the contract anyway.
-TEST_F(GenesisConfigValidationTest, RejectsContractSizeLimitAboveCeiling)
-{
-  EXPECT_EQ(load_with_contract_limits(kContractCeiling + 1, 1),
-            DbSchedResult::DbSchedResultError);
 }
 
 // The commit-batch bound is on what a transaction can realize, not on the
@@ -163,29 +162,32 @@ TEST_F(GenesisConfigValidationTest, RejectsContractSizeLimitAboveCeiling)
 // The count only starts to matter through the per-row slack each stored row
 // adds, so the boundary sits far out. Pinned from the constants, so a change
 // to any of them moves this test.
-TEST_F(GenesisConfigValidationTest, BoundsCommitBatchByWhatATransactionCarries)
+TEST_F(GenesisConfigValidationTest, CommitBatchIsNotTheProductOfTheMaxima)
 {
   constexpr size_t kBatchOverhead = 1_KiB;
   const auto product_fits = static_cast<uint32_t>(
       (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes);
   ASSERT_GE(product_fits, 1U);
-  EXPECT_EQ(load_with_contract_limits(kContractCeiling, product_fits),
-            DbSchedResult::DbSchedResultOK);
   EXPECT_EQ(load_with_contract_limits(kContractCeiling, product_fits + 1),
             DbSchedResult::DbSchedResultOK);
+}
 
-  // Past the count whose slack alone overflows the message, the pair is
-  // refused whatever the size, and one fewer is admitted.
+// Past the count whose per-row slack alone overflows the message, the pair is
+// refused whatever the size, and one fewer is admitted.
+TEST_F(GenesisConfigValidationTest,
+       CommitBatchIsBoundedByWhatATransactionCarries)
+{
+  constexpr size_t kBatchOverhead = 1_KiB;
   const auto slack_fits = static_cast<uint32_t>(
       (kExecToDbMessageCap - kBatchOverhead - kContractSizeCeilingBytes) /
       kSerializedContractEnvelopeBytes);
-  ASSERT_GT(slack_fits, product_fits);
-  EXPECT_EQ(load_with_contract_limits(kContractCeiling, slack_fits),
-            DbSchedResult::DbSchedResultOK);
+  ASSERT_GT(slack_fits, 1U);
   EXPECT_EQ(load_with_contract_limits(kContractCeiling, slack_fits + 1),
             DbSchedResult::DbSchedResultError);
   EXPECT_EQ(load_with_contract_limits(1_KiB, slack_fits + 1),
             DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_contract_limits(kContractCeiling, slack_fits),
+            DbSchedResult::DbSchedResultOK);
 }
 
 // Savepoint depth may be lowered freely and raised up to the executor's
@@ -199,11 +201,20 @@ TEST_F(GenesisConfigValidationTest, BoundsSavepointDepthByExecutorCeiling)
                                    depth);
     return load(config, std::nullopt);
   };
-  EXPECT_EQ(load_with_savepoint_depth(1), DbSchedResult::DbSchedResultOK);
-  EXPECT_EQ(load_with_savepoint_depth(kSavepointDepthCeiling),
-            DbSchedResult::DbSchedResultOK);
   EXPECT_EQ(load_with_savepoint_depth(kSavepointDepthCeiling + 1),
             DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_savepoint_depth(kSavepointDepthCeiling),
+            DbSchedResult::DbSchedResultOK);
+}
+
+// Lowering it is always admissible.
+TEST_F(GenesisConfigValidationTest, AcceptsLoweredSavepointDepth)
+{
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxSavepointDepth,
+                                 1);
+  EXPECT_EQ(load(config, std::nullopt), DbSchedResult::DbSchedResultOK);
 }
 
 // The RV32 bounds may be raised up to what the VM provisions and translates.
@@ -215,17 +226,23 @@ TEST_F(GenesisConfigValidationTest, BoundsRv32LimitsByVmCeilings)
     return load(config, std::nullopt);
   };
   EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32CodeBytes,
-                           rv32::kCodeCeilingBytes),
-            DbSchedResult::DbSchedResultOK);
-  EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32CodeBytes,
                            rv32::kCodeCeilingBytes + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32MemoryBytes,
+                           rv32::kMemoryCeilingBytes + 1),
             DbSchedResult::DbSchedResultError);
   EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32MemoryBytes,
                            rv32::kMemoryCeilingBytes),
             DbSchedResult::DbSchedResultOK);
-  EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32MemoryBytes,
-                           rv32::kMemoryCeilingBytes + 1),
-            DbSchedResult::DbSchedResultError);
+}
+
+TEST_F(GenesisConfigValidationTest, AcceptsRv32CodeLimitAtVmCeiling)
+{
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxRv32CodeBytes,
+                                 rv32::kCodeCeilingBytes);
+  EXPECT_EQ(load(config, std::nullopt), DbSchedResult::DbSchedResultOK);
 }
 
 // The stock wallet is written among the genesis prerequisites, so a genesis

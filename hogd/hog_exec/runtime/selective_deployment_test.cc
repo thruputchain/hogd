@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <optional>
 
 #include <array>
 #include <cstddef>
@@ -31,6 +32,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
@@ -38,6 +40,7 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"

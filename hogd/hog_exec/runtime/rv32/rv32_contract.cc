@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 
 #include <cassert>
 #include <exception>
