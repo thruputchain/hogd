@@ -15,12 +15,14 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
@@ -295,7 +297,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().has_value()) {
+        if (res.value().result.has_value()) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test1 should be "
                            "absent after revert";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -329,7 +331,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().has_value()) {
+        if (res.value().result.has_value()) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test2 should be "
                            "absent after revert";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -736,6 +738,252 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   ASSERT_TRUE(validation_res.is_root_success());
   ASSERT_EQ(validation_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
+}
+
+// A key's load is charged once per transaction, even when a reverted frame
+// drops the view and a later frame has to load the key over again.
+//
+//   addr_0:0
+//     --try_invoke--> addr_1:0   reads K -- the transaction's first touch, so
+//                                it pays kDBRPCCost -- then manually reverts
+//     --try_invoke--> addr_1:1   reads K again. The reverted frame took its
+//                                view with it, so this really does load a
+//                                second time, but the block's snapshot cache
+//                                is not rolled back and serves it. That is not
+//                                a second database read and is not charged.
+//
+// Both reads live in addr_1 because a storage key is scoped to the contract
+// that reads it; the same key string in addr_0 would be a different key.
+TEST_P(RevertTest, RepeatedLoadAfterRevertChargedOnce)
+{
+  ContractAddress addr_0 = make_contract_address(0);
+  ContractAddress addr_1 = make_contract_address(1);
+  auto key = make_storage_key("cold");
+
+  // Seed the key so the loads have a real row to find.
+  write_item(make_contract_data_addrkey(addr_1, "cold"),
+             std::make_shared<const StorageItemWrapper>(
+                 make_bytestring("value"), get_default_cost_model()));
+
+  // addr_0: two try_invokes of addr_1, each of which reverts.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [addr_1](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        for (uint32_t method : {0U, 1U}) {
+          CopyableInvokeOutputs outputs{};
+          auto r =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = method,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                addr_1, std::span<const std::byte>{}, std::span<uint32_t>{},
+                inputs, outputs);
+          }();
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "RepeatedLoadAfterRevertChargedOnce: try_invoke "
+                          << method << " did not return cleanly";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (outputs.frame_status != InvocationFrameStatusCode::Abort) {
+            ADD_FAILURE() << "RepeatedLoadAfterRevertChargedOnce: method "
+                          << method << " should have reverted";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
+  auto contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+
+  // addr_1: read the key, check what the load cost, revert.
+  auto read_and_revert = [key](GasAmount expected_load_gas, char const *what) {
+    return [key, expected_load_gas,
+            what](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+      auto read = co_await ctx.handler().get_bytestring(key);
+      if (!read.has_value() || !read.value().result.has_value()) {
+        ADD_FAILURE() << "RepeatedLoadAfterRevertChargedOnce: " << what
+                      << " read failed";
+        co_return InvokeError{InvokeErrorCode::Deterministic};
+      }
+      EXPECT_EQ(read.value().load_gas, expected_load_gas)
+          << "RepeatedLoadAfterRevertChargedOnce: " << what;
+      ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+      co_return InvokeStatus<void>{};
+    };
+  };
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
+  fns_1.emplace(0, read_and_revert(kDBRPCCost, "first touch"));
+  fns_1.emplace(1, read_and_revert(0, "re-load after revert"));
+  auto contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract_0));
+  contract_map.emplace(1, std::move(contract_1));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  ContractAddress addrs[] = {addr_0, addr_1};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = addr_0,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *runtime_context);
+
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// A delete masks the key from the frame stack, so a read behind it answers
+// without reaching the database and pays no load. Reverting the frame takes
+// the delete with it, and the next read is the transaction's first real load.
+//
+//   addr_0:0
+//     --try_invoke--> addr_1:0   deletes K, then reads it: the read is served
+//                                by the DeletedItem view, so it costs nothing.
+//                                Manually reverts.
+//     --invoke------> addr_1:1   reads K: the delete is gone, so this loads
+//                                for the first time and pays kDBRPCCost.
+//
+// This is the case the charge has to get right in the other direction from
+// RepeatedLoadAfterRevertChargedOnce: an earlier touch that never reached the
+// database must not consume the transaction's one paid load.
+TEST_P(RevertTest, DeleteMasksLoadUntilFrameReverts)
+{
+  ContractAddress addr_0 = make_contract_address(0);
+  ContractAddress addr_1 = make_contract_address(1);
+  auto key = make_storage_key("cold");
+
+  write_item(make_contract_data_addrkey(addr_1, "cold"),
+             std::make_shared<const StorageItemWrapper>(
+                 make_bytestring("value"), get_default_cost_model()));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [addr_1](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        CopyableInvokeOutputs deleting{};
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_1, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, deleting);
+        }();
+        if (!r0.has_value() ||
+            r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            deleting.frame_status != InvocationFrameStatusCode::Abort) {
+          ADD_FAILURE() << "DeleteMasksLoadUntilFrameReverts: the deleting "
+                           "frame should have reverted";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 1,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_1, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
+        }();
+        if (!r1.has_value() ||
+            r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "DeleteMasksLoadUntilFrameReverts: the reading "
+                           "frame did not return cleanly";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  auto contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
+  // Method 0: delete, read behind the delete, revert.
+  fns_1.emplace(
+      0, [key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto del = co_await ctx.handler().delete_object(
+            key, std::to_underlying(StorageDeltaFlags::None));
+        if (!del.has_value() || !del.value().has_value()) {
+          ADD_FAILURE() << "DeleteMasksLoadUntilFrameReverts: delete failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto read = co_await ctx.handler().get_bytestring(key);
+        if (!read.has_value()) {
+          ADD_FAILURE() << "DeleteMasksLoadUntilFrameReverts: read behind the "
+                           "delete failed with a system error";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // The delete is what the read finds, so the key reads as absent.
+        EXPECT_FALSE(read.value().result.has_value());
+        EXPECT_EQ(read.value().load_gas, 0U)
+            << "DeleteMasksLoadUntilFrameReverts: a read served by the "
+               "DeletedItem view reaches no database";
+
+        ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+        co_return InvokeStatus<void>{};
+      });
+  // Method 1: read after the delete has been rolled back.
+  fns_1.emplace(
+      1, [key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto read = co_await ctx.handler().get_bytestring(key);
+        if (!read.has_value() || !read.value().result.has_value()) {
+          ADD_FAILURE() << "DeleteMasksLoadUntilFrameReverts: the key should "
+                           "be back after the revert";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        EXPECT_EQ(read.value().load_gas, kDBRPCCost)
+            << "DeleteMasksLoadUntilFrameReverts: the masked read did not "
+               "reach the database, so this one is the first load";
+        co_return InvokeStatus<void>{};
+      });
+  auto contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract_0));
+  contract_map.emplace(1, std::move(contract_1));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  ContractAddress addrs[] = {addr_0, addr_1};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = addr_0,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *runtime_context);
+
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

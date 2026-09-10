@@ -100,15 +100,19 @@ return_entry(GasAmount gas, std::span<const uint8_t> buffer,
                     HostFunctionStatusXdr(HostFnErrorCode::Return));
 }
 
+// [first_touch] is whether this is the transaction's first read of [key], which
+// also pays for the load out of the database.
 SyscallTrace
 bytestring_get_len_entry(GasAmount gas, StorageKeyContractData const &key,
-                         uint32_t length)
+                         uint32_t length, bool first_touch = false)
 {
   SyscallTraceBody body(SyscallNo::kBytestringGetLen);
   body.bytestring_get_len().inputs.key = key;
   body.bytestring_get_len().outputs =
       SyscallBytestringGetLenOutputs{.length = length};
-  return make_entry(gas, gas - kSyscallBaseCost - kStorageAccessCost,
+  const GasAmount load_cost = first_touch ? kDBRPCCost : 0;
+  return make_entry(gas,
+                    gas - kSyscallBaseCost - kStorageAccessCost - load_cost,
                     std::move(body), ok_status());
 }
 
@@ -526,9 +530,9 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'063, storage_key, 32));
+  expected.push_back(bytestring_get_len_entry(99'063, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(98'845, storage_key,
+      bytestring_get_entry(61'545, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -556,10 +560,10 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The kInvoke entry's gas delta is the child frame's total consumption.
     expected.push_back(
-        make_entry(98'493, 97'835, std::move(body), ok_status()));
+        make_entry(61'193, 60'535, std::move(body), ok_status()));
   }
-  expected.push_back(get_returned_buffer_entry(97'792, inner_calldata));
-  expected.push_back(return_entry(97'564, {}));
+  expected.push_back(get_returned_buffer_entry(60'492, inner_calldata));
+  expected.push_back(return_entry(60'264, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -620,9 +624,9 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'032, storage_key, 32));
+  expected.push_back(bytestring_get_len_entry(99'032, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(98'814, storage_key,
+      bytestring_get_entry(61'514, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -648,9 +652,9 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The out-of-gas child consumes its entire 1000-gas limit.
     expected.push_back(
-        make_entry(98'465, 97'415, std::move(body), ok_status()));
+        make_entry(61'165, 60'115, std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(97'300, {}));
+  expected.push_back(return_entry(60'000, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

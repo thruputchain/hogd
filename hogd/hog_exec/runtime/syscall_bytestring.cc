@@ -32,11 +32,19 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  if (!(*status).has_value()) {
-    co_return SyscallInnerResult{status->error().code(), WrappedGasAmount{0}};
+  // Both syscall-visible exits pay the access: the frame walk and item lookup
+  // happen before the read can tell whether the key exists or holds the right
+  // type, so a miss is not cheaper work than a hit. The load is billed here
+  // too -- the key is marked loaded either way, so nothing later recovers the
+  // charge and a caller could otherwise probe cold storage for the base cost.
+  auto const &[result, load_gas] = *status;
+  if (!result.has_value()) {
+    co_return SyscallInnerResult{result.error().code(),
+                                 WrappedGasAmount{kStorageAccessCost +
+                                                  load_gas}};
   }
 
-  auto const *bs = (*(*status));
+  auto const *bs = *result;
 
   output_written_len =
       copy_to_guest_buffer(output_bytestring,
@@ -46,7 +54,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
   // hands the syscall its whole scratch buffer, so pricing the buffer would
   // charge a 32-byte read out of a 4 KiB scratch for eight blocks.
   const WrappedGasAmount gas{
-      GasCost::bytestring_get(std::min(output_bytestring.size(), bs->size()))};
+      GasCost::bytestring_get(std::min(output_bytestring.size(), bs->size())) +
+      load_gas};
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
@@ -68,13 +77,15 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  auto &get_status = *status;
-  if (!get_status) {
-    co_return SyscallInnerResult{get_status.error().code(),
-                                 WrappedGasAmount{0}};
+  // Both syscall-visible exits pay the access; see syscall_BytestringGet_inner.
+  auto const &[result, load_gas] = *status;
+  if (!result) {
+    co_return SyscallInnerResult{result.error().code(),
+                                 WrappedGasAmount{kStorageAccessCost +
+                                                  load_gas}};
   }
 
-  output_length = (*get_status)->size();
+  output_length = (*result)->size();
 
   if (auto *trace_data =
           syscall_handler
@@ -87,7 +98,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
   // flat to within 0.6 ns across three decades -- so it pays the storage
   // access and no block term.
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost}};
+                               WrappedGasAmount{kStorageAccessCost + load_gas}};
 };
 
 MaybeAsyncSyscallInnerResult
