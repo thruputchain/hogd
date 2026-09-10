@@ -125,6 +125,7 @@
 #include <x23/err.h>
 #include <x23/move_only_function.h>
 #include <x23/mvar.h>
+#include <x23/refcnt.h>
 #include <x23/signal.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
@@ -203,6 +204,8 @@ public:
   const size_t nqueues_;
 
   ThreadPool(size_t nthreads = nproc());
+  // Stop independent producers before destruction.  Waits for async()
+  // helpers and the tails of external submissions before stopping workers.
   ~ThreadPool();
 
   void go(std::vector<Job> &&jobs);
@@ -261,9 +264,13 @@ public:
     auto [async, cb] = make_async<R>();
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
-    // be destroyed before they are used.  That incurs a second move
-    // into the new thread, but that's unavoidable for safety.
-    std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
+    // be destroyed before they are used.  That could incur a second
+    // move as the lambda and its captures are moved into the new
+    // thread, but this is unavoidable for safety.  It's important to
+    // keep ref first in the captures list to ensure the ThreadPool
+    // outlives the destructors of any other captures.
+    std::jthread([this, ref = RefPtr{external_users_},
+                  cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
                   ... args = std::forward<Args>(args)] {
       if constexpr (std::is_void_v<R>) {
         std::invoke(f, args...);
@@ -474,6 +481,10 @@ private:
   std::mutex qcbq_lock_;
   std::condition_variable qcbq_nonempty_;
   std::vector<move_only_function<void() noexcept>> qcbq_;
+  // Workers are protected by joining them.  External go() calls and
+  // detached async() helpers need references through their last access.
+  // Keep their counter away from the fields read by the worker hot path.
+  DestroyInhibit external_users_;
   std::jthread qcbq_service_thread_;
 
   void qcbq_service();

@@ -19,6 +19,7 @@
 #include "x23/cpumap.h"
 #include "x23/debug.h"
 #include "x23/fastclock.h"
+#include "x23/refcnt.h"
 #include "x23/signal.h"
 #include "x23/threadpool.h"
 #include "x23/utility.h"
@@ -45,6 +46,8 @@ ThreadPool::ThreadPool(size_t nthreads)
 
 ThreadPool::~ThreadPool()
 {
+  // Helpers, including their capture destructors, may still need workers.
+  external_users_.destroy_wait();
   ss_.request_stop();
   for (unsigned i = 0; i < nqueues_; ++i) {
     auto ptr = runqueues_[i].take();
@@ -111,6 +114,9 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
 void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
+  RefPtr<DestroyInhibit> submitting;
+  if (my_thread_pool != this)
+    submitting = RefPtr{external_users_};
   x23assert(!ss_.stop_requested());
 
   std::ranges::stable_sort(jobs, [](const Job &a, const Job &b) {
@@ -138,6 +144,9 @@ ThreadPool::go(std::vector<Job> &&jobs)
 void
 ThreadPool::go(Job job)
 {
+  RefPtr<DestroyInhibit> submitting;
+  if (my_thread_pool != this)
+    submitting = RefPtr{external_users_};
   x23assert(!ss_.stop_requested());
 
   uint64_t now = fastclock::get_ns();
