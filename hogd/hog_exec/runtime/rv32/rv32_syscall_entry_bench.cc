@@ -25,6 +25,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/frame_limits.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
@@ -138,9 +139,12 @@ static_assert(kMessageAddress + kMaxMessageBytes <= kInputAddress,
 // low indices are enough and stay well inside the cap.
 constexpr uint32_t kHashSlot = 0;
 constexpr uint32_t kHashSlotCopy = 1;
-// The limit start_frame() fixes on the frame it admits: passed in rather than
-// read off the db tip, so this constant does not depend on the pin.
-constexpr uint32_t kMaxSha256Buffers = 8;
+// The limits start_frame() fixes on the frame it admits: passed in rather than
+// read off the db tip, so these constants do not depend on the pin.
+constexpr FrameLimits kFrameLimits{
+    .max_sha256_buffers = 8,
+    .max_sha256_buffer_bytes = static_cast<uint32_t>(kSHA256BufferMaxSize),
+    .max_savepoint_depth = static_cast<uint32_t>(kMaxSavepointDepth)};
 
 // NNInt argument block, above VerifySignature's material and below the hashing
 // input. Every argument gets its own cache-line-sized slot so the alias guard
@@ -472,7 +476,7 @@ public:
             .calldata = Calldata{},
         },
         std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{},
-        kMaxSha256Buffers);
+        kFrameLimits);
   }
 
   // Finish the top frame. A successful child merges its modified items into
@@ -1282,7 +1286,8 @@ bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
   const std::array<std::byte, 32> data{};
   int64_t copies = 0;
   for (auto _ : state) {
-    HashBuffers buffers(occupancy + 1);
+    HashBuffers buffers(occupancy + 1,
+                        static_cast<uint32_t>(kSHA256BufferMaxSize));
     auto seeded = buffers.update(0, data, /*reset=*/true);
     benchmark::DoNotOptimize(seeded);
     for (uint32_t slot = 1; slot <= occupancy; ++slot) {
@@ -1309,7 +1314,8 @@ bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
   const std::array<std::byte, 32> data{};
   int64_t creations = 0;
   for (auto _ : state) {
-    HashBuffers buffers(occupancy + 1);
+    HashBuffers buffers(occupancy + 1,
+                        static_cast<uint32_t>(kSHA256BufferMaxSize));
     for (uint32_t slot = 0; slot < occupancy; ++slot) {
       auto created = buffers.update(slot, data, /*reset=*/true);
       benchmark::DoNotOptimize(created);
