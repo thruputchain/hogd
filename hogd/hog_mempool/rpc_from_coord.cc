@@ -85,6 +85,32 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
   remove_from.resize(write_idx);
 }
 
+x23::Async<void>
+hash_transactions(const SignedTransactionBatch &txs,
+                  TransactionHashBatch &tx_hashes)
+{
+  tx_hashes.resize(txs.size());
+  const std::vector<ChunkRange> chunks =
+      make_chunks(txs.size(), available_parallelism());
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    handles.push_back(
+        [](const ChunkRange *chunk, const SignedTransactionBatch &txs,
+           TransactionHashBatch &tx_hashes) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
+          for (size_t i = chunk->start; i < chunk->end; i++) {
+            tx_hashes[i] = sha256(txs[i].tx);
+          }
+          co_return;
+        }(&chunk, txs, tx_hashes));
+  }
+  for (x23::Async<void> &handle : handles) {
+    co_await handle;
+  }
+  co_return;
+}
+
 bool
 tx_succeeded(const ExecResult &r)
 {
@@ -308,30 +334,11 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         co_return;
       });
 
-  auto hash_node = submit_dag.async<void>(
-      "hash transactions", submit_dag.after(decode_node),
-      [&, tx_hashes]() -> x23::Async<void> {
-        tx_hashes->resize(txs->size());
-        const std::vector<ChunkRange> chunks =
-            make_chunks(txs->size(), available_parallelism());
-        std::vector<x23::Async<void>> handles;
-        handles.reserve(chunks.size());
-        for (const ChunkRange &chunk : chunks) {
-          handles.push_back(
-              [](const ChunkRange *chunk, const SignedTransactionBatch &txs,
-                 TransactionHashBatch &tx_hashes) noexcept -> x23::Async<void> {
-                co_await default_coropoll().pool_.bg();
-                for (size_t i = chunk->start; i < chunk->end; i++) {
-                  tx_hashes[i] = sha256(txs[i].tx);
-                }
-                co_return;
-              }(&chunk, *txs, *tx_hashes));
-        }
-        for (x23::Async<void> &handle : handles) {
-          co_await handle;
-        }
-        co_return;
-      });
+  auto hash_node =
+      submit_dag.async<void>("hash transactions", submit_dag.after(decode_node),
+                             [&, tx_hashes]() -> x23::Async<void> {
+                               co_await hash_transactions(*txs, *tx_hashes);
+                             });
 
   auto lock_commit_node =
       submit_dag.async<void>("lock commit",
@@ -429,6 +436,9 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
               selected_new_hashes.contains(tx_hash) ||
               scheduler_->is_pending((*txs)[i], tx_hash);
           if (already_pending || num_slots_left > 0) {
+            // Keep an already-pending duplicate in both vectors so they remain
+            // aligned and [add_txs()] can report it as admitted. It does not
+            // consume another capacity slot or get enqueued again.
             if (!already_pending) {
               num_slots_left--;
               selected_new_hashes.insert(tx_hash);
@@ -560,6 +570,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   //    unable to process and erase the currently enqueued txs, so it will never
   //    free up capacity.
   auto txs = std::make_shared<SignedTransactionBatch>();
+  auto tx_hashes = std::make_shared<TransactionHashBatch>();
   auto commit_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag submit_dag("schedulercoord_submit_vetted", default_threadpool());
 
@@ -578,8 +589,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         co_return;
       });
 
+  auto hash_node =
+      submit_dag.async<void>("hash transactions", submit_dag.after(decode_node),
+                             [&, tx_hashes]() -> x23::Async<void> {
+                               co_await hash_transactions(*txs, *tx_hashes);
+                             });
+
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
+      submit_dag.async<void>("lock commit",
+                             submit_dag.after(decode_node, hash_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;
@@ -609,13 +627,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
             to_remove_indices.size());
         if (!to_remove_indices.empty()) {
           remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
+          remove_indices(/*remove_from=*/*tx_hashes,
+                         /*indices=*/to_remove_indices);
         }
         co_return;
       });
 
   submit_dag.async<void>("add txs", submit_dag.after(prune_node),
                          [&, commit_guard]() -> x23::Async<void> {
-                           co_await scheduler_->add_txs(*txs);
+                           co_await scheduler_->add_txs(*txs, *tx_hashes);
                            MempoolMetrics::instance()
                                .accepted_vetted_tx_count.increment(txs->size());
                            // [commit_guard] is a smart pointer that has a

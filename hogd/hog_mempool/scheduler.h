@@ -51,8 +51,6 @@ public:
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
   x23::Async<SchedGatewaySubmitOutcomeBatch>
-  add_txs(const x23::XdrVec<SignedTransaction> &txs);
-  x23::Async<SchedGatewaySubmitOutcomeBatch>
   add_txs(const x23::XdrVec<SignedTransaction> &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes);
 
@@ -267,10 +265,6 @@ private:
                                const std::shared_ptr<TxValue> &tx_value);
   bool add_txs_helper(const SignedTransaction &tx,
                       const TransactionHash &tx_hash);
-  x23::Async<SchedGatewaySubmitOutcomeBatch>
-  add_txs_impl(const x23::XdrVec<SignedTransaction> &txs,
-               const x23::XdrVec<TransactionHash> *tx_hashes);
-
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,

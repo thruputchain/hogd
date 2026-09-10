@@ -500,23 +500,10 @@ Scheduler::is_pending(const SignedTransaction &tx,
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
-Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
-{
-  co_return co_await add_txs_impl(txs, nullptr);
-}
-
-x23::Async<SchedGatewaySubmitOutcomeBatch>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
                    const x23::XdrVec<TransactionHash> &tx_hashes)
 {
   CHECK_EQ(txs.size(), tx_hashes.size());
-  co_return co_await add_txs_impl(txs, &tx_hashes);
-}
-
-x23::Async<SchedGatewaySubmitOutcomeBatch>
-Scheduler::add_txs_impl(const x23::XdrVec<SignedTransaction> &txs,
-                        const x23::XdrVec<TransactionHash> *tx_hashes)
-{
   SchedGatewaySubmitOutcomeBatch outcomes(
       txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
 
@@ -534,7 +521,7 @@ Scheduler::add_txs_impl(const x23::XdrVec<SignedTransaction> &txs,
     handles.push_back(
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
-           const x23::XdrVec<TransactionHash> *tx_hashes,
+           const x23::XdrVec<TransactionHash> &tx_hashes,
            const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
            SchedGatewaySubmitOutcomeBatch &outcomes,
            Scheduler &scheduler) noexcept -> x23::Async<void> {
@@ -554,9 +541,7 @@ Scheduler::add_txs_impl(const x23::XdrVec<SignedTransaction> &txs,
                   SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
               continue;
             }
-            const TransactionHash tx_hash = tx_hashes == nullptr
-                                                ? sha256(txs[tx_idx].tx)
-                                                : (*tx_hashes)[tx_idx];
+            const TransactionHash &tx_hash = tx_hashes[tx_idx];
             if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
               num_added++;
             }
