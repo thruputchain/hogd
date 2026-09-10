@@ -6,6 +6,8 @@
 #include "types.hh"
 #include "x23/async.h"
 
+#include <utility>
+
 namespace hogd {
 
 x23::Async<SystemStatus<SyscallStatus<int128_t>>>
