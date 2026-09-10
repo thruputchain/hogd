@@ -1486,6 +1486,9 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
+  if (commit_block_result_test_hook_) {
+    commit_block_result_test_hook_(result);
+  }
   co_return result;
 }
 
@@ -2806,6 +2809,27 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   auto commit_guard = std::make_shared<x23::CoroGuard>();
   auto hog_age_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag commit_dag("schedulercoord_commit_block", default_threadpool());
+  x23::DagCleanup fatal_commit_cleanup = commit_dag.cleanup(
+      "fail internal commit error", [&]() -> x23::Async<void> {
+        const x23::DagFailure failure = commit_dag.failure();
+        try {
+          if (failure.exception) {
+            std::rethrow_exception(failure.exception);
+          }
+          error("internal block {} commit failure in DAG node '{}'",
+                block_id, failure.node);
+        } catch (const std::exception &e) {
+          error("internal block {} commit failure in DAG node '{}': {}",
+                block_id, failure.node, e.what());
+        } catch (...) {
+          error("internal block {} commit failure in DAG node '{}': unknown "
+                "exception",
+                block_id, failure.node);
+        }
+        CHECK(false);
+        co_return;
+      });
+  fatal_commit_cleanup.arm();
 
   auto lock_nominated_node = commit_dag.async<void>(
       "lock nominated block cache", [&, nominated_guard]() -> x23::Async<void> {
@@ -2832,6 +2856,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
           // A block with ID [block_id] was neither nominated nor validated, so
           // it cannot be committed.
           info("schedulercoord_commit_block ret");
+          // This is a caller rejection, not an internal commit failure.
+          fatal_commit_cleanup.disarm();
           commit_dag.fail(x23::DagFailureKind::Cancelled, "check block exists");
         }
         co_return;
@@ -2898,7 +2924,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
               SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
           co_return;
         }
-        last_committed_block_ = commit_plan.committed_cache->db_tip;
         co_return;
       });
 
@@ -3089,6 +3114,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         const JointCommitResult &joint_commit = commit_block_node.get();
         CHECK_EQ(joint_commit.db.result(), DbSchedResult::DbSchedResultOK);
         CHECK_EQ(joint_commit.event_commit, RPCError::kRPCNone);
+        // Do not publish the tip until both subsystems have committed it. Copy
+        // before clearing the caches because [committed_cache] may point into
+        // [validated_block_cache_].
+        CHECK_PTR(commit_plan.committed_cache);
+        last_committed_block_ = commit_plan.committed_cache->db_tip;
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
         // those vectors, we will experience segfaults because we will later
@@ -3113,12 +3143,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         info("schedulercoord_commit_block ret");
         last_commit_ = std::chrono::steady_clock::now();
         commit_outcome = SchedulerCommitOutcome::SchedulerCommitOK;
+        fatal_commit_cleanup.disarm();
         co_return;
       });
 
   co_await commit_dag.run();
   if (!commit_dag.ok() && commit_dag.failure().exception) {
-    std::rethrow_exception(commit_dag.failure().exception);
+    // An internal failure should have triggered [fatal_commit_cleanup].
+    CHECK(false);
   }
   if (const char *dot_dir = std::getenv("MEMPOOL_DAG_DOT_DIR");
       dot_dir != nullptr && *dot_dir != '\0') {
