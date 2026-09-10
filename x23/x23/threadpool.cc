@@ -108,6 +108,14 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
   }
 }
 
+// Both go() overloads signal nonempty under the run queue's lock, not
+// after dropping it.  Releasing first makes the job visible to a worker
+// while we still point at the condition variable, and nothing keeps the
+// ThreadPool alive in between: async() notifies from a detached thread
+// nobody joins, so the coroutine it resumes can finish and destroy the
+// pool before notify_all() returns.  Holding the lock keeps a worker from
+// dequeuing until the notify is done.  qpop() signals `consumed` the same
+// way.
 void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
@@ -119,20 +127,9 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  std::condition_variable *nonempty = nullptr;
-  for (auto &j : jobs) {
-    int affinity_queue = llc_map->bucket(j.cpuhint);
-    if (nonempty && qno(lq) != affinity_queue) {
-      lq.reset();
-      nonempty->notify_all();
-      nonempty = nullptr;
-    }
+  for (auto &j : jobs)
     if (enqueue_selected(lq, j, now))
-      nonempty = &lq->nonempty;
-  }
-  lq.reset();
-  if (nonempty)
-    nonempty->notify_all();
+      lq->nonempty.notify_all();
 }
 
 void
@@ -142,11 +139,8 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  bool wasempty = enqueue_selected(lq, job, now);
-  auto *nonempty = &lq->nonempty;
-  lq.reset();
-  if (wasempty)
-    nonempty->notify_all();
+  if (enqueue_selected(lq, job, now))
+    lq->nonempty.notify_all();
 }
 
 void
