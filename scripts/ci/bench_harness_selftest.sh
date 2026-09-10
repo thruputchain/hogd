@@ -308,13 +308,18 @@ reap_port_bin="$work_dir/reap_port_bin"
 mkdir -p "$reap_port_bin"
 
 # Stands in for [ss -Hltnp "sport = :<port>"]. $SS_LISTENERS is the output,
-# empty when the port is free; $SS_FAILS makes the query itself fail, the way
-# an unsupported filter or a netlink error would.
+# empty when the port is free; $SS_STATE_FILE, when set, is read instead so a
+# fake holder can free the port mid-run; $SS_FAILS makes the query itself
+# fail, the way an unsupported filter or a netlink error would.
 cat >"$reap_port_bin/ss" <<'FAKE_SS'
 #!/usr/bin/env bash
 if [[ -n ${SS_FAILS:-} ]]; then
   echo "ss: bad filter" >&2
   exit 1
+fi
+if [[ -n ${SS_STATE_FILE:-} ]]; then
+  cat "$SS_STATE_FILE" 2>/dev/null
+  exit 0
 fi
 printf '%s' "${SS_LISTENERS:-}"
 FAKE_SS
@@ -322,19 +327,40 @@ cat >"$reap_port_bin/killall" <<'FAKE_KILLALL_PORT'
 #!/usr/bin/env bash
 echo "killall $*" >>"$KILLALL_LOG"
 FAKE_KILLALL_PORT
-chmod +x "$reap_port_bin/ss" "$reap_port_bin/killall"
+
+# Stands in for [control_cli <host> <port> shutdown]. $RPC_SHUTDOWN_WORKS
+# frees the port the way a server honoring the RPC would; otherwise it
+# refuses the way a server predating version-blind shutdown does.
+cat >"$reap_port_bin/control_cli" <<'FAKE_REAP_CLI'
+#!/usr/bin/env bash
+echo "control_cli $*" >>"$CLI_LOG"
+if [[ -n ${RPC_SHUTDOWN_WORKS:-} ]]; then
+  : >"${SS_STATE_FILE:?}"
+  exit 0
+fi
+echo "Failed to send shutdown: kCIServerErrorCodeVersionMismatch" >&2
+exit 1
+FAKE_REAP_CLI
+chmod +x "$reap_port_bin/ss" "$reap_port_bin/killall" \
+  "$reap_port_bin/control_cli"
 
 killall_log="$work_dir/reap_killall_log"
+cli_log="$work_dir/reap_cli_log"
+ss_state="$work_dir/reap_ss_state"
 reap_port_status=0
 reap_port_output=""
 # Runs the reap against a port whose listeners are $1.
 run_reap_port() {
   : >"$killall_log"
+  : >"$cli_log"
   reap_port_status=0
   reap_port_output=$(
     PATH="$reap_port_bin:$PATH" SS_LISTENERS="$1" KILLALL_LOG="$killall_log" \
-      SS_FAILS="${SS_FAILS:-}" \
+      SS_FAILS="${SS_FAILS:-}" SS_STATE_FILE="${SS_STATE_FILE:-}" \
+      CLI_LOG="$cli_log" RPC_SHUTDOWN_WORKS="${RPC_SHUTDOWN_WORKS:-}" \
+      REAP_CONTROL_CLI="${REAP_CONTROL_CLI:-$reap_port_bin/control_cli}" \
       REAP_TERM_TIMEOUT_SEC=0 REAP_KILL_TIMEOUT_SEC=0 \
+      REAP_RPC_TIMEOUT_SEC=0 \
       "$CI_BENCH_HARNESS_DIR/reap_control_server.sh" 11111 2>&1
   ) || reap_port_status=$?
 }
@@ -382,6 +408,39 @@ check_eq "a host without ss still reaps" "0" "$no_ss_status"
 check_contains "a host without ss says so" "reaping by name only" \
   "$no_ss_output"
 check_contains "a host without ss reaps by name" \
+  "killall -TERM control_server" "$(cat "$killall_log")"
+
+# A control_server honors the shutdown RPC no matter which commit built it or
+# which user owns it, where a signal needs the holder to be this user's
+# process. So the reap asks over RPC first and signals only what refuses: a
+# stale server of any vintage exits itself, children and all, and a holder
+# this user may not signal (hogd issue #3945) comes down without root.
+printf 'LISTEN 0 128 *:11111 *:*\n' >"$ss_state"
+SS_STATE_FILE="$ss_state" RPC_SHUTDOWN_WORKS=1 run_reap_port ""
+check_eq "a holder honoring the shutdown RPC reaps cleanly" "0" \
+  "$reap_port_status"
+check_contains "the shutdown RPC is asked first" \
+  "control_cli localhost 11111 shutdown" "$(cat "$cli_log")"
+check_eq "a holder honoring the shutdown RPC is not signalled" "" \
+  "$(cat "$killall_log")"
+
+# A holder that refuses the RPC -- a server predating version-blind shutdown,
+# or something else entirely on the port -- still gets the signal reap.
+run_reap_port 'LISTEN 0 128 *:11111 *:*'
+check_contains "a refusing holder is still asked over RPC" \
+  "control_cli localhost 11111 shutdown" "$(cat "$cli_log")"
+check_contains "a refusing holder is still signalled by name" \
+  "killall -TERM control_server" "$(cat "$killall_log")"
+
+# The reap can run where control_cli was never built. That host loses the
+# RPC ask, not the reap: say so and fall through to the signals.
+REAP_CONTROL_CLI="$work_dir/control_cli_not_built" \
+  run_reap_port 'LISTEN 0 128 *:11111 *:*'
+check_eq "a missing control_cli does not break the reap" "1" \
+  "$reap_port_status"
+check_contains "a missing control_cli is reported" "reaping by signal only" \
+  "$reap_port_output"
+check_contains "a missing control_cli still signals by name" \
   "killall -TERM control_server" "$(cat "$killall_log")"
 
 if ((fail)); then

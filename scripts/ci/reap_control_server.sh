@@ -33,6 +33,12 @@ PORT=$1
 REAP_TERM_TIMEOUT_SEC=${REAP_TERM_TIMEOUT_SEC:-20}
 REAP_KILL_TIMEOUT_SEC=${REAP_KILL_TIMEOUT_SEC:-10}
 
+# The CLI that asks the holder to shut down over RPC, and how long the ask
+# (and the wait for the port to come free after it) gets. The default is
+# where every schedule's build step leaves the binary.
+REAP_CONTROL_CLI=${REAP_CONTROL_CLI:-./release/hogd/hog_exec/bench/control_cli}
+REAP_RPC_TIMEOUT_SEC=${REAP_RPC_TIMEOUT_SEC:-10}
+
 command -v killall >/dev/null || {
   echo 'killall not found (install psmisc)' >&2
   exit 1
@@ -130,6 +136,27 @@ fi
 
 echo "port $PORT is held; reaping:"
 printf '%s\n' "$REAP_LISTENERS"
+
+# Ask the holder to shut down over RPC before signalling anything: a
+# control_server honors the shutdown RPC no matter which commit built it or
+# which user owns it, where a signal needs the holder to be this user's
+# process. A stale server of any vintage then exits itself, children and
+# all, and a holder this user may not signal (hogd issue #3945) comes down
+# without root. Anything else on the port refuses the RPC and is left to
+# the signals below; [timeout] bounds a holder that accepts the connection
+# and never answers.
+if [ -x "$REAP_CONTROL_CLI" ]; then
+  echo "asking port $PORT's holder to shut down over RPC"
+  timeout "$REAP_RPC_TIMEOUT_SEC" \
+    "$REAP_CONTROL_CLI" localhost "$PORT" shutdown || true
+  if wait_port_free "$REAP_RPC_TIMEOUT_SEC"; then
+    echo "port $PORT is free"
+    exit 0
+  fi
+  echo "port $PORT still held after the shutdown RPC; signalling" >&2
+else
+  echo "warning: $REAP_CONTROL_CLI not found; reaping by signal only" >&2
+fi
 
 # Ask the previous run's server to come down the way its own shutdown would,
 # so it still gets to reap the processes it launched. [killall] covers a

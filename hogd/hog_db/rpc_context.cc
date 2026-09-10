@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <limits>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
@@ -31,14 +32,29 @@ RPCContext::open_block_tx(BlockTXID bid, BlockExecutionMode mode)
 HogDbStatus<PerThreadARC<BlockTX> *>
 RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
 {
-  // create the block tx.
-  // The block runs under the configuration the tip it builds on carries.
+  // The new block's height is the tip's height + 1. A recovered tip can carry
+  // a tampered maximum BlockHeight -- the <DBTIP> row is global metadata,
+  // excluded from the state hash, so it survives recovery unchanged -- and
+  // BlockHeight is signed, so evaluating that + 1 would be UB. No successor
+  // block exists at the maximum height; reject it before constructing a
+  // BlockTX (issue #3955).
+  // The block also runs under the configuration the tip it builds on
+  // carries, so read the tip once for both.
   const DbTip tip = get_tip();
+  const BlockHeight parent_height = tip.value.proposal_header.block_height;
+  if (parent_height == std::numeric_limits<BlockHeight>::max()) [[unlikely]] {
+    error("Refusing to open block {}: tip height {} is the maximum "
+          "representable BlockHeight, so it has no successor",
+          bid, parent_height);
+    return HogDbError(HogDbCode::kOverflow);
+  }
+
+  // create the block tx.
   auto [it, inserted] = block_txes_.emplace(
       std::piecewise_construct, std::forward_as_tuple(bid),
       std::forward_as_tuple(
           get_db(), get_cost_model(), background_commit_worker_,
-          tip.value.proposal_header.block_height + 1, mode,
+          parent_height + 1, mode,
           NetworkConfigParams(tip.network_config.v0()).max_savepoint_depth));
   if (!inserted) {
     warn("Attempt to open block tx {} that already exists", bid);
