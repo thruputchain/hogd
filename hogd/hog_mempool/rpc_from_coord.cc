@@ -2816,8 +2816,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
           if (failure.exception) {
             std::rethrow_exception(failure.exception);
           }
-          error("internal block {} commit failure in DAG node '{}'",
-                block_id, failure.node);
+          error("internal block {} commit failure in DAG node '{}'", block_id,
+                failure.node);
         } catch (const std::exception &e) {
           error("internal block {} commit failure in DAG node '{}': {}",
                 block_id, failure.node, e.what());
