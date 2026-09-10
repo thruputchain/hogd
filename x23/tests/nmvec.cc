@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <random>
 #include <ranges>
@@ -586,4 +587,196 @@ TEST(NMVec, MoveAssignDestroysOldElements)
     EXPECT_EQ(CountingT<0>::live(), 3);
   }
   EXPECT_EQ(CountingT<0>::live(), 0);
+}
+
+namespace {
+
+template<typename T> struct OwnerAllocator {
+  using value_type = T;
+  inline static int next_owner_{};
+  inline static int wrong_owner_{};
+  inline static std::map<T *, std::pair<int, size_t>> allocations_;
+  int owner_ = ++next_owner_;
+
+  T *allocate(size_t n)
+  {
+    T *p = std::allocator<T>{}.allocate(n);
+    allocations_.emplace(p, std::pair{owner_, n});
+    return p;
+  }
+  void deallocate(T *p, size_t n) noexcept
+  {
+    auto it = allocations_.find(p);
+    if (it == allocations_.end() || it->second != std::pair{owner_, n})
+      ++wrong_owner_;
+    if (it != allocations_.end())
+      allocations_.erase(it);
+    std::allocator<T>{}.deallocate(p, n);
+  }
+
+  static void release_leaks()
+  {
+    for (auto [p, owner_size] : allocations_)
+      std::allocator<T>{}.deallocate(p, owner_size.second);
+    allocations_.clear();
+  }
+};
+
+} // namespace
+
+TEST(NMVec, MoveConstructionPreservesAllocationOwnership)
+{
+  using Allocator = OwnerAllocator<int>;
+  ASSERT_TRUE(Allocator::allocations_.empty());
+  Allocator::wrong_owner_ = 0;
+  {
+    NMVec<int, Allocator> source;
+    source.emplace_back(42);
+    auto *p = &source[0];
+    NMVec<int, Allocator> moved(std::move(source));
+    EXPECT_EQ(source.size(), 0UZ);
+    EXPECT_EQ(&moved[0], p);
+    EXPECT_EQ(moved[0], 42);
+    source.emplace_back(7);
+    EXPECT_EQ(source[0], 7);
+  }
+  EXPECT_EQ(Allocator::wrong_owner_, 0);
+  EXPECT_TRUE(Allocator::allocations_.empty());
+}
+
+TEST(NMVec, MoveAssignmentPreservesAllocationOwnership)
+{
+  using Allocator = OwnerAllocator<int>;
+  ASSERT_TRUE(Allocator::allocations_.empty());
+  Allocator::wrong_owner_ = 0;
+  {
+    NMVec<int, Allocator> source, dest;
+    source.emplace_back(42);
+    dest.emplace_back(7);
+    auto *p = &source[0];
+    dest = std::move(source);
+    EXPECT_EQ(source.size(), 0UZ);
+    EXPECT_EQ(&dest[0], p);
+    EXPECT_EQ(dest[0], 42);
+    source.emplace_back(9);
+    EXPECT_EQ(source[0], 9);
+    auto &alias = dest;
+    dest = std::move(alias);
+    EXPECT_EQ(&dest[0], p);
+  }
+  EXPECT_EQ(Allocator::wrong_owner_, 0);
+  EXPECT_TRUE(Allocator::allocations_.empty());
+}
+
+TEST(NMVec, FailedFirstConstructionReleasesAllocation)
+{
+  using Allocator = OwnerAllocator<ThrowingT>;
+  ASSERT_TRUE(Allocator::allocations_.empty());
+  x23::Defer cleanup([] { Allocator::release_leaks(); });
+  for (bool resize : {false, true}) {
+    ThrowingT::reset();
+    ThrowingT::set_throw_after(0);
+    {
+      NMVec<ThrowingT, Allocator> values;
+      if (resize)
+        EXPECT_THROW(values.resize(1), std::runtime_error);
+      else
+        EXPECT_THROW(values.emplace_back(42), std::runtime_error);
+      EXPECT_EQ(values.size(), 0UZ);
+      EXPECT_EQ(ThrowingT::live(), 0);
+    }
+    EXPECT_TRUE(Allocator::allocations_.empty());
+    Allocator::release_leaks();
+  }
+}
+
+TEST(NMVec, FailedConstructionInNewChunkReleasesAllocation)
+{
+  using Allocator = OwnerAllocator<ThrowingT>;
+  ASSERT_TRUE(Allocator::allocations_.empty());
+  x23::Defer cleanup([] { Allocator::release_leaks(); });
+  ThrowingT::reset();
+  {
+    NMVec<ThrowingT, Allocator> values;
+    values.emplace_back(42);
+    ASSERT_EQ(Allocator::allocations_.size(), 1UZ);
+    // Derive the boundary from the allocation instead of fixing a chunk size.
+    auto first_chunk_size = Allocator::allocations_.begin()->second.second;
+    values.resize(first_chunk_size);
+    ThrowingT::set_throw_after(ThrowingT::ctor_count);
+    EXPECT_THROW(values.emplace_back(43), std::runtime_error);
+    EXPECT_EQ(values.size(), first_chunk_size);
+    EXPECT_EQ(values[0].value, 42);
+    EXPECT_EQ(ThrowingT::live(), int(first_chunk_size));
+  }
+  EXPECT_EQ(ThrowingT::live(), 0);
+  EXPECT_TRUE(Allocator::allocations_.empty());
+}
+
+TEST(NMVec, MoveAssignmentReleasesUnusedDestinationChunk)
+{
+  using Allocator = OwnerAllocator<ThrowingT>;
+  ASSERT_TRUE(Allocator::allocations_.empty());
+  x23::Defer cleanup([] { Allocator::release_leaks(); });
+  ThrowingT::reset();
+  {
+    NMVec<ThrowingT, Allocator> dest;
+    ThrowingT::set_throw_after(0);
+    EXPECT_THROW(dest.emplace_back(7), std::runtime_error);
+    ThrowingT::set_throw_after(-1);
+    NMVec<ThrowingT, Allocator> source;
+    source.emplace_back(42);
+    dest = std::move(source);
+    ASSERT_EQ(dest.size(), 1UZ);
+    EXPECT_EQ(dest[0].value, 42);
+  }
+  EXPECT_EQ(ThrowingT::live(), 0);
+  EXPECT_TRUE(Allocator::allocations_.empty());
+}
+
+TEST(NMVec, FailedResizeCanBeRetried)
+{
+  using Allocator = OwnerAllocator<ThrowingT>;
+  ASSERT_TRUE(Allocator::allocations_.empty());
+  x23::Defer cleanup([] { Allocator::release_leaks(); });
+  ThrowingT::reset();
+  {
+    NMVec<ThrowingT, Allocator> values;
+    values.emplace_back(42);
+    auto *first = &values[0];
+    auto first_chunk_size = Allocator::allocations_.begin()->second.second;
+    // Finish the first chunk, then fail partway through the second.
+    ThrowingT::set_throw_after(first_chunk_size + 2);
+    EXPECT_THROW(values.resize(first_chunk_size + 4), std::runtime_error);
+    EXPECT_EQ(values.size(), first_chunk_size);
+    EXPECT_EQ(ThrowingT::live(), int(first_chunk_size));
+    EXPECT_EQ(first->value, 42);
+    ThrowingT::set_throw_after(-1);
+    values.grow(first_chunk_size + 4);
+    EXPECT_EQ(values.size(), first_chunk_size + 4);
+    EXPECT_EQ(ThrowingT::live(), int(values.size()));
+    EXPECT_EQ(&values[0], first);
+    values.grow(1);
+    EXPECT_EQ(values.size(), first_chunk_size + 4);
+  }
+  EXPECT_EQ(ThrowingT::live(), 0);
+  EXPECT_TRUE(Allocator::allocations_.empty());
+}
+
+TEST(NMVec, MoveConstructionAfterFailedConstruction)
+{
+  using Allocator = OwnerAllocator<ThrowingT>;
+  ASSERT_TRUE(Allocator::allocations_.empty());
+  x23::Defer cleanup([] { Allocator::release_leaks(); });
+  ThrowingT::reset();
+  {
+    NMVec<ThrowingT, Allocator> source;
+    ThrowingT::set_throw_after(0);
+    EXPECT_THROW(source.emplace_back(42), std::runtime_error);
+    NMVec<ThrowingT, Allocator> moved(std::move(source));
+    EXPECT_EQ(moved.size(), 0UZ);
+    EXPECT_EQ(source.size(), 0UZ);
+  }
+  EXPECT_EQ(ThrowingT::live(), 0);
+  EXPECT_TRUE(Allocator::allocations_.empty());
 }
