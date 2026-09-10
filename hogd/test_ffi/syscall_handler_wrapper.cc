@@ -1,5 +1,4 @@
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
-#include "hogd/hog_exec/runtime/frame_limits.h"
 
 #include "auth_claim.hh"
 #include "ffi_enums.hh"
@@ -406,8 +405,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // closed above.
   auto stashed_parent_trace =
       to_handler().start_frame(std::move(frame_invocation), frame_flags,
-                               std::span<uint32_t const>{},
-                               FrameLimits::from(to_handler().config_params()));
+                               std::span<uint32_t const>{});
   if (!stashed_parent_trace.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back, so the handler has no new frame; skip publishing the mock-runtime

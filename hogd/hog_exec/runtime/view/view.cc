@@ -1,5 +1,4 @@
 #include "hogd/hog_exec/runtime/view/view.h"
-#include "hogd/hog_exec/runtime/frame_limits.h"
 
 #include <cassert>
 #include <cstdint>
@@ -57,9 +56,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
         .calldata = Calldata{},
     };
 
-    auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {},
-                                         FrameLimits::from(
-                                             syscall_handler.config_params()));
+    auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {});
     if (!r.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }

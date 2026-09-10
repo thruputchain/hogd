@@ -26,7 +26,6 @@
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
-#include "hogd/hog_exec/runtime/frame_limits.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
@@ -123,14 +122,12 @@ public:
   // frame admission fails under memory pressure; no child frame is pushed in
   // that case, so finish_frame must not be called (#3058).
   //
-  // limits are the frame's configured limits, read from the tip by the
-  // caller (FrameLimits::from(config_params())): that read may suspend, and
-  // this is a noexcept boundary the test FFI mock path enters directly, so it
-  // cannot be a coroutine.
+  // The frame's limits come from config_params(), which the frame stack holds
+  // for the whole transaction; nothing here reads the tip, so this stays a
+  // noexcept non-coroutine boundary the test FFI mock path enters directly.
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids,
-              FrameLimits limits) noexcept;
+              std::span<uint32_t const> owned_auth_token_ids) noexcept;
   x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>> finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;

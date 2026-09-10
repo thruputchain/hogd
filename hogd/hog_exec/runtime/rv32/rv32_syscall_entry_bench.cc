@@ -25,7 +25,6 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
-#include "hogd/hog_exec/runtime/frame_limits.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
@@ -139,13 +138,6 @@ static_assert(kMessageAddress + kMaxMessageBytes <= kInputAddress,
 // low indices are enough and stay well inside the cap.
 constexpr uint32_t kHashSlot = 0;
 constexpr uint32_t kHashSlotCopy = 1;
-// The limits start_frame() fixes on the frame it admits: passed in rather than
-// read off the db tip, so these constants do not depend on the pin.
-constexpr FrameLimits kFrameLimits{
-    .max_sha256_buffers = 8,
-    .max_sha256_buffer_bytes = static_cast<uint32_t>(kSHA256BufferMaxSize),
-    .max_savepoint_depth = static_cast<uint32_t>(kMaxSavepointDepth)};
-
 // NNInt argument block, above VerifySignature's material and below the hashing
 // input. Every argument gets its own cache-line-sized slot so the alias guard
 // never sees two of them overlap, whatever order the ABI registers them in.
@@ -475,8 +467,7 @@ public:
             .gas_limit = kPlentyOfGas,
             .calldata = Calldata{},
         },
-        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{},
-        kFrameLimits);
+        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
   }
 
   // Finish the top frame. A successful child merges its modified items into

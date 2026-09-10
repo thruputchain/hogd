@@ -7,10 +7,10 @@
 #include "auth_token.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
-#include "hogd/hog_exec/runtime/frame_limits.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
@@ -35,12 +35,9 @@ protected:
 
   static constexpr BlockID kBlockId = 1;
   static constexpr TransactionID kTxId = 0;
-  // These tests do not exercise the frame limits; any valid values admit the
+  // The chain's defaults; these tests only need parameters that admit the
   // frames they start.
-  static constexpr FrameLimits kFrameLimits = {
-      .max_sha256_buffers = 8,
-      .max_sha256_buffer_bytes = static_cast<uint32_t>(kSHA256BufferMaxSize),
-      .max_savepoint_depth = static_cast<uint32_t>(kMaxSavepointDepth)};
+  static constexpr NetworkConfigParams kConfigParams{};
 
   BlockSnapshotServer server_ = BlockSnapshotServer(kBlockId);
   std::unique_ptr<DatabaseProxy> db_proxy_;
@@ -57,10 +54,9 @@ protected:
 
 TEST_F(InvocationFrameTest, MintAuthToken)
 {
-  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
   ASSERT_TRUE(
-      stack.start_frame(make_test_address(0), Calldata{}, 0, {}, kFrameLimits)
-          .has_value());
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
   AuthToken auth_token{.mint_address = make_test_address(0),
                        .expiry_height = 100,
                        .root_node = {.consumer_address = make_test_address(1),
@@ -75,18 +71,16 @@ TEST_F(InvocationFrameTest, MintAuthToken)
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
   ASSERT_TRUE(
-      stack.start_frame(make_test_address(1), Calldata{}, 0, {}, kFrameLimits)
-          .has_value());
+      stack.start_frame(make_test_address(1), Calldata{}, 0, {}).has_value());
   ASSERT_FALSE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 }
 
 TEST_F(InvocationFrameTest, ForwardAuthToken)
 {
-  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
   ASSERT_TRUE(
-      stack.start_frame(make_test_address(0), Calldata{}, 0, {}, kFrameLimits)
-          .has_value());
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
   AuthToken auth_token{.mint_address = make_test_address(0),
                        .expiry_height = 100,
                        .root_node = {.consumer_address = make_test_address(1),
@@ -102,8 +96,7 @@ TEST_F(InvocationFrameTest, ForwardAuthToken)
 
   ASSERT_TRUE(stack
                   .start_frame(make_test_address(1), Calldata{}, 0,
-                               std::span<uint32_t>{&token_id.value(), 1},
-                               kFrameLimits)
+                               std::span<uint32_t>{&token_id.value(), 1})
                   .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
@@ -123,10 +116,9 @@ TEST_F(InvocationFrameTest, ForwardAuthToken)
 
 TEST_F(InvocationFrameTest, RevertsRestoreToken)
 {
-  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
   ASSERT_TRUE(
-      stack.start_frame(make_test_address(0), Calldata{}, 0, {}, kFrameLimits)
-          .has_value());
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
   AuthToken auth_token{.mint_address = make_test_address(0),
                        .expiry_height = 100,
                        .root_node = {.consumer_address = make_test_address(1),
@@ -142,8 +134,7 @@ TEST_F(InvocationFrameTest, RevertsRestoreToken)
 
   ASSERT_TRUE(stack
                   .start_frame(make_test_address(1), Calldata{}, 0,
-                               std::span<uint32_t>{&token_id.value(), 1},
-                               kFrameLimits)
+                               std::span<uint32_t>{&token_id.value(), 1})
                   .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
@@ -184,10 +175,9 @@ TEST_F(InvocationFrameTest, RevertsRestoreToken)
 
 TEST_F(InvocationFrameTest, ManualRevertReclaims)
 {
-  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
   ASSERT_TRUE(
-      stack.start_frame(make_test_address(0), Calldata{}, 0, {}, kFrameLimits)
-          .has_value());
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
 
   AuthToken auth_token{.mint_address = make_test_address(0),
                        .expiry_height = 100,
@@ -204,8 +194,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
   // forward token to child
   ASSERT_TRUE(stack
                   .start_frame(make_test_address(1), Calldata{}, 0,
-                               std::span<uint32_t>{&token_id.value(), 1},
-                               kFrameLimits)
+                               std::span<uint32_t>{&token_id.value(), 1})
                   .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
@@ -231,16 +220,14 @@ TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
   // kMaxSavepointDepth - 1.
   static constexpr int kChildCap = kMaxSavepointDepth - 1;
 
-  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
   ASSERT_TRUE(
-      stack.start_frame(make_test_address(0), Calldata{}, 0, {}, kFrameLimits)
-          .has_value());
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
 
   for (int i = 0; i < kChildCap; i++) {
     ASSERT_TRUE(stack
                     .start_frame(make_test_address(1), Calldata{},
-                                 std::to_underlying(InvokeFlag::TryInvoke), {},
-                                 kFrameLimits)
+                                 std::to_underlying(InvokeFlag::TryInvoke), {})
                     .has_value());
     auto result =
         stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
@@ -251,8 +238,7 @@ TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
 
   ASSERT_TRUE(stack
                   .start_frame(make_test_address(1), Calldata{},
-                               std::to_underlying(InvokeFlag::TryInvoke), {},
-                               kFrameLimits)
+                               std::to_underlying(InvokeFlag::TryInvoke), {})
                   .has_value());
   auto result =
       stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
@@ -267,10 +253,9 @@ TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
   // SystemCallHandler::start_frame()'s noexcept boundary (#3058). On the normal
   // path it reports success, including when a token is forwarded into the
   // child.
-  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
   ASSERT_TRUE(
-      stack.start_frame(make_test_address(0), Calldata{}, 0, {}, kFrameLimits)
-          .has_value());
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
 
   AuthToken auth_token{.mint_address = make_test_address(0),
                        .expiry_height = 100,
@@ -282,8 +267,7 @@ TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
 
   ASSERT_TRUE(stack
                   .start_frame(make_test_address(1), Calldata{}, 0,
-                               std::span<uint32_t>{&token_id.value(), 1},
-                               kFrameLimits)
+                               std::span<uint32_t>{&token_id.value(), 1})
                   .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
@@ -291,10 +275,9 @@ TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
 
 TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
 {
-  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
   ASSERT_TRUE(
-      stack.start_frame(make_test_address(0), Calldata{}, 0, {}, kFrameLimits)
-          .has_value());
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
 
   AuthToken auth_token{.mint_address = make_test_address(0),
                        .expiry_height = 100,
@@ -308,8 +291,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
   // forward token to child, which manually reverts
   ASSERT_TRUE(stack
                   .start_frame(make_test_address(1), Calldata{}, 0,
-                               std::span<uint32_t>{&token_id.value(), 1},
-                               kFrameLimits)
+                               std::span<uint32_t>{&token_id.value(), 1})
                   .has_value());
   stack.set_active_frame_return(
       InvocationFrameOutput(InvocationFrameStatusCode::Fault));
@@ -325,8 +307,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
   // re-forward the same token to a new child that succeeds
   ASSERT_TRUE(stack
                   .start_frame(make_test_address(2), Calldata{}, 0,
-                               std::span<uint32_t>{&token_id.value(), 1},
-                               kFrameLimits)
+                               std::span<uint32_t>{&token_id.value(), 1})
                   .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));

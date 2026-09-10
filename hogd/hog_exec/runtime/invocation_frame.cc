@@ -1,5 +1,4 @@
 #include "hogd/hog_exec/runtime/invocation_frame.h"
-#include "hogd/hog_exec/runtime/frame_limits.h"
 
 #include <algorithm>
 #include <cassert>
@@ -42,9 +41,8 @@ InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  size_t event_count,
                                  std::span<uint32_t const> owned_auth_token_ids,
                                  uint32_t inherited_try_invoke_depth,
-                                 FrameLimits limits)
-  : limits_(limits),
-    hash_buffers_(limits.max_sha256_buffers, limits.max_sha256_buffer_bytes),
+                                 NetworkConfigParams const &params)
+  : hash_buffers_(params.max_sha256_buffers, params.max_sha256_buffer_bytes),
     address_(address), calldata_(std::forward<Calldata>(calldata)),
     flags_(flags), event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
@@ -162,9 +160,10 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 } // namespace
 
 void
-InvocationFrame::note_validation_try_invoke_success()
+InvocationFrame::note_validation_try_invoke_success(
+    NetworkConfigParams const &params)
 {
-  assert(!depth_cap_reached());
+  assert(!depth_cap_reached(params));
   total_try_invoke_depth_++;
 }
 
@@ -268,7 +267,7 @@ InvocationFrame::collect_storage_deltas(
 SystemStatus<void>
 InvocationFrameStack::start_frame(
     ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids, FrameLimits limits)
+    std::span<uint32_t const> owned_auth_token_ids)
 {
   assert(frame_stack_.empty() || check_auth_tokens_owned(owned_auth_token_ids));
 
@@ -289,7 +288,7 @@ InvocationFrameStack::start_frame(
   try {
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
                               event_count, owned_auth_token_ids, parent_depth,
-                              limits);
+                              config_params_);
   } catch (...) {
     return SystemError{SystemErrorCode::Unrecoverable};
   }
@@ -337,7 +336,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     if (frame_result.is_frame_success() && !manually_reverted) {
       bool acq_success = false;
 
-      if (frame_stack_.back().depth_cap_reached()) {
+      if (frame_stack_.back().depth_cap_reached(config_params_)) {
         // Deterministic failure across both proposal and validation modes.
         // No nondeterministic bit is logged or consumed here, so the bit
         // stream represents only lock-acquisition outcomes.
@@ -396,7 +395,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
               co_return SystemError{SystemErrorCode::ValidationFailure};
             }
           }
-          frame_stack_.back().note_validation_try_invoke_success();
+          frame_stack_.back().note_validation_try_invoke_success(
+              config_params_);
         }
       }
 

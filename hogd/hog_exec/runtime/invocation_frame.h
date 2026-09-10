@@ -18,6 +18,7 @@
 #include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -25,7 +26,6 @@
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
-#include "hogd/hog_exec/runtime/frame_limits.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "invoke_flag.hh"
@@ -47,7 +47,8 @@ public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
                   std::span<uint32_t const> owned_auth_token_ids,
-                  uint32_t inherited_try_invoke_depth, FrameLimits limits);
+                  uint32_t inherited_try_invoke_depth,
+                  NetworkConfigParams const &params);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -122,13 +123,15 @@ public:
     return try_invoke_frame_count_;
   }
 
-  bool depth_cap_reached() const
+  // `params` are the chain's, held by the owning stack for the whole
+  // transaction rather than copied into every frame.
+  bool depth_cap_reached(NetworkConfigParams const &params) const
   {
     // The chain's max_savepoint_depth, less one slot reserved for the root
     // commit frame, which always pushes a subtransaction through the same
     // HogDb path. A depth of 0 leaves no slot for a TryInvoke at all.
-    return limits_.max_savepoint_depth == 0 ||
-           total_try_invoke_depth_ >= limits_.max_savepoint_depth - 1;
+    return params.max_savepoint_depth == 0 ||
+           total_try_invoke_depth_ >= params.max_savepoint_depth - 1;
   }
 
   // returned pointer is invalidated by any call to add_item_view
@@ -151,8 +154,8 @@ public:
   // Validation-mode counterpart for a successful TryInvoke. Bumps the
   // intra-transaction depth counter without pushing a HogDb subtransaction
   // (validation does not use per-frame subtransactions). Precondition:
-  // !depth_cap_reached().
-  void note_validation_try_invoke_success();
+  // !depth_cap_reached(params).
+  void note_validation_try_invoke_success(NetworkConfigParams const &params);
 
   void
   collect_storage_deltas(x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
@@ -220,8 +223,6 @@ public:
     }
   }
 
-  // The chain's limits in force when this frame was admitted.
-  FrameLimits limits_;
   HashBuffers hash_buffers_;
 
   void set_child_restore_auth_tokens(std::span<uint32_t const> token_ids)
@@ -283,10 +284,15 @@ static_assert(std::is_nothrow_move_constructible_v<InvocationFrame>);
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
+  // `config_params` are the chain's parameters in force for this transaction.
+  // The db tip they come from is pinned for the block, so one reference serves
+  // every frame the stack admits; no frame carries its own copy.
   InvocationFrameStack(
       std::function<void(InvocationFrame &&)> last_frame_action,
-      PerTransactionDatabaseProxy &db_proxy)
-    : last_frame_action_(std::move(last_frame_action)), db_proxy_(db_proxy)
+      PerTransactionDatabaseProxy &db_proxy,
+      NetworkConfigParams const &config_params)
+    : last_frame_action_(std::move(last_frame_action)), db_proxy_(db_proxy),
+      config_params_(config_params)
   {}
 
   ContractAddress const &get_current_address() const
@@ -319,9 +325,10 @@ public:
   // back — and an Unrecoverable SystemError is returned, so the noexcept caller
   // (SystemCallHandler::start_frame) never lets the exception terminate the
   // executor (#3058).
-  [[nodiscard]] SystemStatus<void> start_frame(
-      ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
-      std::span<uint32_t const> owned_auth_token_ids, FrameLimits limits);
+  [[nodiscard]] SystemStatus<void>
+  start_frame(ContractAddress const &address, Calldata &&calldata,
+              InvokeFlagSet flags,
+              std::span<uint32_t const> owned_auth_token_ids);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode
@@ -463,6 +470,7 @@ private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;
+  NetworkConfigParams const &config_params_;
   AuthTokenRegistry auth_token_registry_;
 };
 
