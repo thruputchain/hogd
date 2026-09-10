@@ -1394,7 +1394,7 @@ TEST_F(Rv32RuntimeContextTest, VerifyAcceptsZeroMemoryBytesImage)
             InvokeErrorCode::None);
 }
 
-// The other half of the bound: memory_bytes above kDefaultMaxMemoryBytes is
+// The other half of the bound: memory_bytes above the VM's ceiling is
 // rejected at validation rather than deferred to a per-invocation construction
 // trap.
 TEST_F(Rv32RuntimeContextTest, VerifyRejectsOversizedMemoryBytesImage)
@@ -1403,7 +1403,7 @@ TEST_F(Rv32RuntimeContextTest, VerifyRejectsOversizedMemoryBytesImage)
       {{kRv32ContractId, rv32::RuntimeContractImage{
                              .program = make_program({addi(1, 0, 1)}),
                              .initial_memory = {},
-                             .memory_bytes = rv32::kDefaultMaxMemoryBytes + 1,
+                             .memory_bytes = rv32::kMemoryCeilingBytes + 1,
                          }}});
   auto contract = make_rv32_contract_xdr();
 

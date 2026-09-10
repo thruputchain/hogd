@@ -202,7 +202,7 @@ TEST(Rv32Oracle, invalidDifferentialInputsRejectedConsistently)
             "");
 
   DifferentialProgram excessive_memory_bytes = diff_program({kEcall});
-  excessive_memory_bytes.memory_bytes = kDefaultMaxMemoryBytes + 1;
+  excessive_memory_bytes.memory_bytes = kMemoryCeilingBytes + 1;
   ASSERT_FALSE(valid_differential_program(excessive_memory_bytes));
   EXPECT_TRUE(machine_oracle.run(excessive_memory_bytes).steps.empty());
   EXPECT_TRUE(spec_oracle.run(excessive_memory_bytes).steps.empty());

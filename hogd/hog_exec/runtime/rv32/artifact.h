@@ -178,10 +178,16 @@ format_fingerprint_layout_field(uint64_t digest, const char8_t *offset_name,
 // (`...format.vN`) and kArtifactFormatVersion together — passing a different
 // format_version here does not produce a correct fingerprint for another
 // version on its own.
+//
+// `folds_fixed_bounds` reproduces what a lowerer from before the code and
+// memory bounds became chain configuration reports: those lowerers fold the
+// then-fixed 64 KiB bounds into the fingerprint. It exists only so
+// kAcceptedFormatFingerprints can name their value and goes with it.
 constexpr uint64_t
 format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                    uint32_t gas_version = kGasTableVersion,
-                   uint64_t gas_digest = kGasScheduleDigest)
+                   uint64_t gas_digest = kGasScheduleDigest,
+                   bool folds_fixed_bounds = false)
 {
   uint64_t digest = kFnvOffsetBasis;
   digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v5");
@@ -270,7 +276,14 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
   // The code and memory bounds are a chain's configuration
   // (kConfigParamMaxRv32CodeBytes / kConfigParamMaxRv32MemoryBytes), not part
   // of the format: the header's fields are 32-bit either way, and what a
-  // chain admits is checked where a contract is attached.
+  // chain admits is checked where a contract is attached. Older lowerers
+  // folded the bounds when they were fixed, and the defaults are those values.
+  if (folds_fixed_bounds) {
+    digest = format_fingerprint_u64(digest, u8"max_code_bytes",
+                                    kDefaultMaxCodeBytes);
+    digest = format_fingerprint_u64(digest, u8"max_memory_bytes",
+                                    kDefaultMaxMemoryBytes);
+  }
 
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
@@ -294,32 +307,47 @@ static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
 // The engine fingerprints a lowerer may report while kAcceptedGasSchedules
-// still has transitional entries: one per accepted schedule, in the same order.
-// The fingerprint folds the gas schedule, so a lowerer that stamps a
-// transitional schedule necessarily reports a different value from this build's
-// -- the same rollout skew kAcceptedGasSchedules exists for, seen from the
-// metadata side. This list is derived from that one and disappears with it.
-constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
+// still has transitional entries: two per accepted schedule, in the same order
+// -- the current fold first, then the fold of a lowerer that still treats the
+// code and memory bounds as fixed. The fingerprint folds the gas schedule, so
+// a lowerer that stamps a transitional schedule necessarily reports a
+// different value from this build's -- the same rollout skew
+// kAcceptedGasSchedules exists for, seen from the metadata side. This list is
+// derived from that one and disappears with it; the fixed-bounds half goes
+// once the lowerer that stops folding them has rolled out.
+constexpr std::array<uint64_t, 2 * kAcceptedGasSchedules.size()>
 accepted_format_fingerprints()
 {
-  std::array<uint64_t, kAcceptedGasSchedules.size()> fingerprints = {};
+  std::array<uint64_t, 2 * kAcceptedGasSchedules.size()> fingerprints = {};
   for (size_t i = 0; i < kAcceptedGasSchedules.size(); ++i) {
-    fingerprints[i] = format_fingerprint(kArtifactFormatVersion,
-                                         kAcceptedGasSchedules[i].version,
-                                         kAcceptedGasSchedules[i].digest);
+    fingerprints[2 * i] = format_fingerprint(kArtifactFormatVersion,
+                                             kAcceptedGasSchedules[i].version,
+                                             kAcceptedGasSchedules[i].digest);
+    fingerprints[(2 * i) + 1] =
+        format_fingerprint(kArtifactFormatVersion,
+                           kAcceptedGasSchedules[i].version,
+                           kAcceptedGasSchedules[i].digest,
+                           /*folds_fixed_bounds=*/true);
   }
   return fingerprints;
 }
 
-inline constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
+inline constexpr std::array<uint64_t, 2 * kAcceptedGasSchedules.size()>
     kAcceptedFormatFingerprints = accepted_format_fingerprints();
 static_assert(kAcceptedFormatFingerprints.front() ==
               kArtifactFormatFingerprint);
-// The v3 entry is what the groundhog-rpc lowerer (still on gas table v3)
-// reports once its fingerprint likewise stops folding the code and memory
-// bounds. Pinning it here proves this derivation reproduces a fingerprint the
-// lowerer actually emits, rather than one only this header believes in.
-static_assert(kAcceptedFormatFingerprints.back() == 0xc5f00a7d4451045eULL);
+// Each pin below is a fingerprint some lowerer actually emits. Pinning them
+// proves the derivation reproduces those values rather than ones only this
+// header believes in.
+//
+// The current schedule as this build fingerprinted it before the bounds became
+// configuration.
+static_assert(kAcceptedFormatFingerprints[1] == 0x002a3cb88d80b403ULL);
+// The v3 schedule as the groundhog-rpc lowerer reports it once its fingerprint
+// likewise stops folding the bounds.
+static_assert(kAcceptedFormatFingerprints[2] == 0xc5f00a7d4451045eULL);
+// The v3 schedule as groundhog-cli <= 0.15.1 reports it.
+static_assert(kAcceptedFormatFingerprints.back() == 0x8e5caf3e9cd23b22ULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 

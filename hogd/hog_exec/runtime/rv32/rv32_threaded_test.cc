@@ -1516,13 +1516,13 @@ TEST(Rv32Threaded, createRejectsTotalMemoryAboveLimitAcceptsAtLimit)
   const std::vector<uint32_t> words = {addi(1, 0, 5)};
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(
                 words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0,
-                /*total_memory_size=*/kDefaultMaxMemoryBytes + 1,
+                /*total_memory_size=*/kMemoryCeilingBytes + 1,
                 /*trace=*/false)
                 .error(),
             ProgramError::kMemoryTooLarge);
   EXPECT_TRUE(ThreadedMachinePreInstantiation::create(
                   words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0,
-                  /*total_memory_size=*/kDefaultMaxMemoryBytes, /*trace=*/false)
+                  /*total_memory_size=*/kMemoryCeilingBytes, /*trace=*/false)
                   .has_value());
 }
 
@@ -1531,7 +1531,7 @@ TEST(Rv32Threaded, createRejectsCodeTooLargeAndUnsupportedLikeCanonical)
   // The remaining two ProgramError values the production gate must report
   // identically to canonical decode (the other three are pinned above).
   const std::vector<uint32_t> oversized(
-      (kDefaultMaxCodeBytes / kInstructionBytes) + 1, addi(0, 0, 0));
+      (kCodeCeilingBytes / kInstructionBytes) + 1, addi(0, 0, 0));
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(
                 words_to_bytes(oversized), /*memory=*/{}, /*memory_start=*/0,
                 /*total_memory_size=*/256, /*trace=*/false)

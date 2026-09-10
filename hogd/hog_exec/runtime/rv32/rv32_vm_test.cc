@@ -706,7 +706,7 @@ TEST(Rv32ProgramTest, reset_restores_initial_machine_state)
   EXPECT_EQ(machine.gas_remaining(), 9U);
   EXPECT_EQ(machine.trap(), Trap::kNone);
 
-  Machine bad_memory(program, kDefaultMaxMemoryBytes + 1, 5);
+  Machine bad_memory(program, kMemoryCeilingBytes + 1, 5);
   EXPECT_EQ(bad_memory.trap(), Trap::kBadMemory);
   bad_memory.reset(9);
   EXPECT_EQ(bad_memory.trap(), Trap::kBadMemory);
@@ -728,7 +728,7 @@ TEST(Rv32ProgramTest, validates_code_shape_and_profile)
     EXPECT_EQ(result.error, ProgramError::kCodeSizeNotAligned);
   }
   {
-    std::vector<uint8_t> code(kDefaultMaxCodeBytes + kInstructionBytes);
+    std::vector<uint8_t> code(kCodeCeilingBytes + kInstructionBytes);
     const auto result = Program::validate(code);
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.error, ProgramError::kCodeTooLarge);
@@ -1387,7 +1387,7 @@ TEST(Rv32ExecutionTest, fetch_and_data_memory_access_semantics)
   }
   {
     const auto program = make_program({addi(1, 0, 1)});
-    Machine machine(program, kDefaultMaxMemoryBytes + 1, 10);
+    Machine machine(program, kMemoryCeilingBytes + 1, 10);
     EXPECT_EQ(machine.trap(), Trap::kBadMemory);
     EXPECT_TRUE(machine.halted());
   }
