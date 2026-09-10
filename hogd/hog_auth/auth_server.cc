@@ -15,7 +15,6 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_auth/status.h"
 #include "hogd/metrics/health.h"
@@ -213,17 +212,14 @@ AuthServer::verify_transactions(BlockHeight height,
     // is the one place the wrapper is examined: the executor's final gate is on
     // the Transaction body alone (kMaxBytesTransaction), since the hash commits
     // only to the body and a wrapper-dependent verdict there would let arrival
-    // order split validators (#3844). Every wrapper the executor can be handed
-    // has passed through here, so an over-cap wrapper reaching this point is a
-    // critical anomaly, not a routine authentication failure: report it as
-    // such and spend no signature-verification work on it.
+    // order split validators (#3844). An over-cap wrapper is a malformed
+    // submission, so it fails authentication like any other bad wrapper, and
+    // spends no signature-verification work.
     if (const size_t wrapper_size = x23::xdr_size(tx);
         wrapper_size > kMaxBytesSignedTransaction) {
-      error("auth: rejecting over-cap transaction wrapper ({} bytes, cap {}) "
-            "for account {}",
-            wrapper_size, kMaxBytesSignedTransaction,
-            show_byte_array(tx.tx.invocation.invoked_address));
-      results[i] = AuthErrorCode::kAuthInternal;
+      trace("auth: rejecting over-cap transaction wrapper ({} bytes, cap {})",
+            wrapper_size, kMaxBytesSignedTransaction);
+      results[i] = AuthErrorCode::kAuthFailed;
       continue;
     }
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {

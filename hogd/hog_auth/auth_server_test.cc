@@ -1,12 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <optional>
 #include <thread>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "hogd/auth_claim/signature_preimage.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_auth/auth_server_test_framework.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -563,48 +567,68 @@ TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
   ASSERT_EQ(results.size(), 1);
 }
 
-// A SignedTransaction wrapper over kMaxBytesSignedTransaction is rejected up
-// front as a critical error (kAuthInternal), before any signature work, and
-// regardless of the account's auth data (#3844). A wrapper under the cap is not
-// rejected on size grounds: it proceeds to ordinary authentication.
+// A SignedTransaction wrapper over kMaxBytesSignedTransaction fails
+// authentication (kAuthFailed) up front, before any signature work (#3844).
+// The two transactions below differ only in calldata padding: the one whose
+// wrapper lands just under the cap authenticates, the one just over it does
+// not, so size is the only thing separating the verdicts.
 TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
 {
   const ContractAddress address = make_test_address(51);
-  mock_db().set(address, make_test_auth_data(1));
+  auto [raw_pk, raw_sk] = ed25519_keygen();
+  PublicKey pk(CryptographicScheme::Ed25519);
+  pk.ed25519() = raw_pk;
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = raw_sk;
+
+  AddressAuthData auth_data{};
+  auth_data.public_keys[0] = x23::Ptr<PublicKeyConfig>(
+      new PublicKeyConfig{.key = pk, .max_weight = 100});
+  auth_data.required_weight = 1;
+  mock_db().set(address, auth_data);
   mock_db().compute_key_changes_for_current_height();
   auth_server().register_auth_data_updates(0,
                                            mock_db().get_key_changes_at_height(
                                                0))();
 
-  // Over the cap through the wrapper alone: the body is tiny, the signature
-  // vector is not. This is the shape the executor deliberately does not look
-  // at, so auth has to.
-  SignedTransaction over_cap{};
-  over_cap.tx.invocation.invoked_address = address;
-  DecoratedSignature filler;
-  filler.public_key_id = 0;
-  filler.signature = Signature(CryptographicScheme::Ed25519);
-  over_cap.signatures.resize(
-      kMaxBytesSignedTransaction / x23::xdr_size(filler) + 1, filler);
+  // Signs [tx] with the account's only key, so the wrapper is otherwise valid.
+  auto sign = [&](const Transaction &tx) {
+    SignedTransaction stx{.tx = tx};
+    DecoratedSignature sig;
+    sig.public_key_id = 0;
+    sig.signature = Signature(CryptographicScheme::Ed25519);
+    sig.signature.ed25519() =
+        ed25519_sign(sk.ed25519(),
+                     transaction_signature_preimage(kNetworkHash, tx))
+            .value();
+    stx.signatures.push_back(sig);
+    return stx;
+  };
+
+  Transaction tx{};
+  tx.invocation.invoked_address = address;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 1;
+  claim.source_address_claim().required_weight = 1;
+  tx.auth_claim = claim;
+
+  // Pad the body so the signed wrapper is exactly at the cap: admitted.
+  const size_t base = x23::xdr_size(sign(tx));
+  ASSERT_LE(base, kMaxBytesSignedTransaction);
+  tx.invocation.calldata.resize(kMaxBytesSignedTransaction - base, 0);
+  const SignedTransaction at_cap = sign(tx);
+  ASSERT_EQ(x23::xdr_size(at_cap), kMaxBytesSignedTransaction);
+
+  // Four more bytes (XDR sizes are multiples of four) and it is over the cap.
+  tx.invocation.calldata.resize(tx.invocation.calldata.size() + 4, 0);
+  const SignedTransaction over_cap = sign(tx);
   ASSERT_GT(x23::xdr_size(over_cap), kMaxBytesSignedTransaction);
 
-  auto results =
-      auth_server().verify_transactions(0, std::span(&over_cap, 1))();
-  ASSERT_EQ(results.size(), 1);
-  EXPECT_EQ(results[0], AuthErrorCode::kAuthInternal);
-
-  // Trim the wrapper back under the cap: same account, same (unsigned) body.
-  // It now reaches authentication proper, which fails it as unauthenticated,
-  // never as internal.
-  SignedTransaction under_cap = over_cap;
-  while (x23::xdr_size(under_cap) > kMaxBytesSignedTransaction) {
-    under_cap.signatures.pop_back();
-  }
-  ASSERT_LE(x23::xdr_size(under_cap), kMaxBytesSignedTransaction);
-  auto under_results =
-      auth_server().verify_transactions(0, std::span(&under_cap, 1))();
-  ASSERT_EQ(under_results.size(), 1);
-  EXPECT_EQ(under_results[0], AuthErrorCode::kAuthFailed);
+  std::array<SignedTransaction, 2> stxs{at_cap, over_cap};
+  auto results = auth_server().verify_transactions(0, std::span(stxs))();
+  ASSERT_EQ(results.size(), 2);
+  EXPECT_EQ(results[0], AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(results[1], AuthErrorCode::kAuthFailed);
 }
 
 TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)
