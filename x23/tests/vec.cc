@@ -66,7 +66,7 @@ TEST(VecBounds, OverwriteAtMaximumSize)
 {
   Vec<uint8_t, 4> bytes{1, 2};
   bytes.resize_and_overwrite(4, [](uint8_t *p, size_t count) {
-    EXPECT_EQ(count, 4);
+    EXPECT_EQ(count, 4UZ);
     EXPECT_EQ(p[0], 1);
     EXPECT_EQ(p[1], 2);
     p[2] = 3;
@@ -87,7 +87,7 @@ TEST(VecBounds, OverwriteEmptyAndShrink)
   bool called = false;
   empty.resize_and_overwrite(0, [&](uint8_t *, size_t count) {
     called = true;
-    EXPECT_EQ(count, 0);
+    EXPECT_EQ(count, 0UZ);
     return 0;
   });
   EXPECT_TRUE(called);
@@ -95,7 +95,7 @@ TEST(VecBounds, OverwriteEmptyAndShrink)
 
   Str text = "abcdef";
   text.resize_and_overwrite(8, [](char *p, size_t count) {
-    EXPECT_EQ(count, 8);
+    EXPECT_EQ(count, 8UZ);
     EXPECT_EQ(std::string_view(p, 6), "abcdef");
     p[0] = 'X';
     return 3;
@@ -125,7 +125,7 @@ TEST(VecAlias, CopyElementDuringGrowth)
   values.shrink_to_fit();
   std::string expected = values.front();
   values.push_back(values.front());
-  ASSERT_EQ(values.size(), 2);
+  ASSERT_EQ(values.size(), 2UZ);
   EXPECT_EQ(values[0], expected);
   EXPECT_EQ(values[1], expected);
 }
@@ -137,7 +137,7 @@ TEST(VecAlias, MoveElementDuringGrowth)
   values.shrink_to_fit();
   auto *ptr = values.front().get();
   values.push_back(std::move(values.front()));
-  ASSERT_EQ(values.size(), 2);
+  ASSERT_EQ(values.size(), 2UZ);
   EXPECT_FALSE(values[0]);
   ASSERT_TRUE(values[1]);
   EXPECT_EQ(values[1].get(), ptr);
@@ -150,7 +150,7 @@ TEST(VecAlias, ConstructFromElementDataDuringGrowth)
   values.emplace_back(128, 'y');
   values.shrink_to_fit();
   values.emplace_back(values.front().data() + 1, 100);
-  ASSERT_EQ(values.size(), 2);
+  ASSERT_EQ(values.size(), 2UZ);
   EXPECT_EQ(values[0], std::string(128, 'y'));
   EXPECT_EQ(values[1], std::string(100, 'y'));
 }
@@ -218,7 +218,7 @@ TEST(VecAlias, FailedConstructionPreservesElements)
   auto *data = values.data();
   EXPECT_THROW(values.emplace_back(values.front(), 129), std::out_of_range);
   EXPECT_EQ(values.data(), data);
-  ASSERT_EQ(values.size(), 1);
+  ASSERT_EQ(values.size(), 1UZ);
   EXPECT_EQ(values.front(), std::string(128, 'z'));
 }
 
@@ -228,7 +228,7 @@ TEST(VecBounds, FailedGrowthDoesNotMoveArgument)
   values.push_back(std::make_unique<int>(42));
   auto *ptr = values.front().get();
   EXPECT_THROW(values.push_back(std::move(values.front())), XdrLengthError);
-  ASSERT_EQ(values.size(), 1);
+  ASSERT_EQ(values.size(), 1UZ);
   EXPECT_EQ(values.front().get(), ptr);
   EXPECT_EQ(*values.front(), 42);
 }
@@ -304,7 +304,7 @@ TEST(VecAlias, AllocationFailureDoesNotMoveArgument)
   auto *ptr = values.front().get();
   fail = true;
   EXPECT_THROW(values.push_back(std::move(values.front())), std::bad_alloc);
-  ASSERT_EQ(values.size(), 1);
+  ASSERT_EQ(values.size(), 1UZ);
   ASSERT_EQ(values.front().get(), ptr);
   EXPECT_EQ(*values.front(), 42);
 }

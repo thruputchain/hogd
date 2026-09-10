@@ -53,7 +53,7 @@ TEST_F(FileIO, WriteReadAndTruncate)
 
   struct stat st;
   ASSERT_EQ(stat(path_.c_str(), &st), 0);
-  EXPECT_EQ(st.st_mode & 0077, 0);
+  EXPECT_EQ(st.st_mode & 0077, mode_t{0});
 
   ASSERT_TRUE(writefile(path_, std::string_view("short")));
   result = readfile(path_);
@@ -81,7 +81,7 @@ TEST_F(FileIO, SeekBoundsPreservesOffset)
   Str buf = "prefix:";
   auto result = readall(fd, &buf);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 4);
+  EXPECT_EQ(*result, 4UZ);
   EXPECT_EQ(std::string_view(buf), "prefix:cdef");
 }
 
@@ -93,15 +93,15 @@ TEST_F(FileIO, ReadAppendsAndStopsAtEof)
   Str buf = "prefix:";
   auto result = read(fd, &buf, 2);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 2);
+  EXPECT_EQ(*result, 2UZ);
   EXPECT_EQ(std::string_view(buf), "prefix:ab");
   result = read(fd, &buf, 8);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 1);
+  EXPECT_EQ(*result, 1UZ);
   EXPECT_EQ(std::string_view(buf), "prefix:abc");
   result = read(fd, &buf, 8);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 0);
+  EXPECT_EQ(*result, 0UZ);
   EXPECT_EQ(std::string_view(buf), "prefix:abc");
 }
 
@@ -120,7 +120,7 @@ TEST_F(FileIO, FullReadPrematureEof)
   buf.clear();
   result = fullread(fd, &buf, 5, true);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 3);
+  EXPECT_EQ(*result, 3UZ);
   EXPECT_EQ(std::string_view(buf), "abc");
 }
 
@@ -132,11 +132,11 @@ TEST_F(FileIO, FullReadExactAndZeroLength)
   Str buf;
   auto result = fullread(fd, &buf, 3);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 3);
+  EXPECT_EQ(*result, 3UZ);
   EXPECT_EQ(std::string_view(buf), "abc");
   result = fullread(fd, &buf, 0);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 0);
+  EXPECT_EQ(*result, 0UZ);
   EXPECT_EQ(std::string_view(buf), "abc");
 }
 
@@ -154,7 +154,7 @@ TEST_F(FileIO, ReadAllUnseekable)
   Str buf = "prefix:";
   auto result = readall(reader, &buf);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 9);
+  EXPECT_EQ(*result, 9UZ);
   EXPECT_EQ(std::string_view(buf), "prefix:pipe data");
 }
 
@@ -205,7 +205,7 @@ TEST_F(FileIO, ReadAllBeyondEof)
   Str buf = "unchanged";
   auto result = readall(fd, &buf);
   ASSERT_TRUE(result);
-  EXPECT_EQ(*result, 0);
+  EXPECT_EQ(*result, 0UZ);
   EXPECT_EQ(std::string_view(buf), "unchanged");
   EXPECT_EQ(lseek(fd.get(), 0, SEEK_CUR), 10);
 }

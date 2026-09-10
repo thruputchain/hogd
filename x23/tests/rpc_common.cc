@@ -50,7 +50,7 @@ TEST(RpcMessage, CallAndRecord)
   auto msg = call_msg<EchoMeta>();
   msg.xid = 123;
   EXPECT_EQ(msg.body.mtype(), msg_type::CALL);
-  EXPECT_EQ(msg.body.cbody().rpcvers, 2);
+  EXPECT_EQ(msg.body.cbody().rpcvers, 2U);
   EXPECT_EQ(msg.body.cbody().prog, EchoMeta::version_meta::program);
   EXPECT_EQ(msg.body.cbody().vers, EchoMeta::version_meta::version);
   EXPECT_EQ(msg.body.cbody().proc, EchoMeta::proc);
@@ -74,7 +74,7 @@ TEST(RpcMessage, AcceptedStatuses)
     auto msg = call_msg<EchoMeta>();
     msg.xid = 17;
     msg_set_reply_stat(&msg, status);
-    EXPECT_EQ(msg.xid, 17);
+    EXPECT_EQ(msg.xid, 17U);
     EXPECT_EQ(msg.body.mtype(), msg_type::REPLY);
     EXPECT_EQ(msg.body.rbody().stat(), reply_stat::MSG_ACCEPTED);
     EXPECT_EQ(msg.body.rbody().areply().reply_data.stat(), status);
@@ -88,8 +88,8 @@ TEST(RpcMessage, RejectedStatuses)
   auto msg = call_msg<EchoMeta>();
   msg_set_reply_stat(&msg, reject_stat::RPC_MISMATCH);
   EXPECT_EQ(msg.body.rbody().stat(), reply_stat::MSG_DENIED);
-  EXPECT_EQ(msg.body.rbody().rreply().mismatch_info().low, 2);
-  EXPECT_EQ(msg.body.rbody().rreply().mismatch_info().high, 2);
+  EXPECT_EQ(msg.body.rbody().rreply().mismatch_info().low, 2U);
+  EXPECT_EQ(msg.body.rbody().rreply().mismatch_info().high, 2U);
   EXPECT_FALSE(rpc_is_success(msg));
   EXPECT_EQ(msg_show_stat(msg), "RPC_MISMATCH");
 
@@ -128,12 +128,12 @@ TEST(RpcServiceMap, ExactAndMissingVersions)
   msg.body.cbody().vers = 2;
   rpc_msg error;
   EXPECT_EQ(services.lookup(msg, &error), services.at({10, 2}).get());
-  EXPECT_EQ(error.xid, 456);
+  EXPECT_EQ(error.xid, 456U);
 
   for (uint32_t version : {0U, 1U, 3U, 10U, UINT32_MAX}) {
     msg.body.cbody().vers = version;
     EXPECT_EQ(services.lookup(msg, &error), nullptr);
-    EXPECT_EQ(error.xid, 456);
+    EXPECT_EQ(error.xid, 456U);
     EXPECT_EQ(msg_show_stat(error), "PROG_MISMATCH[low=2,high=9]");
     EXPECT_EQ(msg.body.mtype(), msg_type::CALL);
   }
@@ -157,7 +157,7 @@ TEST(RpcServiceMap, UnavailableProgramAndRpcVersion)
   }
   msg.body.cbody().rpcvers = 3;
   EXPECT_EQ(services.lookup(&msg), nullptr);
-  EXPECT_EQ(msg.xid, 456);
+  EXPECT_EQ(msg.xid, 456U);
   EXPECT_EQ(msg_show_stat(msg), "RPC_MISMATCH");
 }
 

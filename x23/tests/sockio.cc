@@ -112,7 +112,7 @@ TEST(SocketAddress, OtherFamilies)
   EXPECT_THROW(show_ipaddr(addr), std::system_error);
 
   addr.ss_family = AF_UNSPEC;
-  EXPECT_EQ(sockaddr_len(addr), 0);
+  EXPECT_EQ(sockaddr_len(addr), socklen_t{0});
   EXPECT_EQ(std::string_view(show_addr(addr)), "sa_family 0");
   EXPECT_FALSE(is_loopback(addr));
   EXPECT_THROW(get_port(addr), std::system_error);
