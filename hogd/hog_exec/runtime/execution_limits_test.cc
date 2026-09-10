@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "auth_token.hh"
-#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/network_config_params.h"

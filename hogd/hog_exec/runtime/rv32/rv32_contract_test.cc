@@ -16,6 +16,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -379,7 +380,8 @@ TEST_F(Rv32ProductionMappingTest, ZeroMemoryContractVerifiesAndExecutes)
   blob.data.append_range(artifact);
   Contract verify_contract_xdr(ContractType::kRv32);
   verify_contract_xdr.rv32_contract() = blob;
-  EXPECT_EQ(runtime_context_.verify_contract(verify_contract_xdr),
+  EXPECT_EQ(runtime_context_.verify_contract(verify_contract_xdr,
+                                             NetworkConfigParams{}),
             InvokeErrorCode::None);
 
   auto contract = std::make_shared<Contract>(ContractType::kRv32);
@@ -690,7 +692,8 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
   Rv32Context context;
-  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::None);
+  EXPECT_EQ(context.verify_contract(contract, NetworkConfigParams{}),
+            InvokeErrorCode::None);
 }
 
 namespace {
@@ -703,7 +706,7 @@ verify_rv32_blob(std::vector<uint8_t> const &artifact)
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
   Rv32Context context;
-  return context.verify_contract(contract);
+  return context.verify_contract(contract, NetworkConfigParams{});
 }
 
 } // namespace
@@ -745,7 +748,8 @@ TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
 {
   Contract contract(ContractType::kNative);
   Rv32Context context;
-  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(context.verify_contract(contract, NetworkConfigParams{}),
+            InvokeErrorCode::Deterministic);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
