@@ -24,7 +24,7 @@
 namespace hogd {
 
 template<typename IMPL, typename VERSMETA = IMPL::rpc_service,
-         x23::RpcExceptionPolicy EXCEPTION_POLICY =
+         x23::RpcExceptionPolicy ExceptionPolicy =
              x23::RpcExceptionPolicy::ReturnError>
 requires x23::implements_async_rpc<IMPL *, VERSMETA>
 class RpcServer : public x23::DestroyInhibit {
@@ -103,7 +103,7 @@ public:
           c->max_message_size = self->max_message_size_;
           self->fdgen_->insert_or_assign(c->get_fd(),
                                          self->cp_.generation(c->get_fd()));
-          c->template server_with_exception_policy<EXCEPTION_POLICY>(
+          c->template server_with_exception_policy<ExceptionPolicy>(
               ImplPtr(*self), VersMeta{});
         });
   }
