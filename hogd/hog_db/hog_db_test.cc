@@ -1057,6 +1057,36 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenAverageAgeIsNegative)
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
+TEST_F(HogDbTest,
+       StartupHogAgeReconciliationFailsWhenAverageAgeExceedsRecoveredHeight)
+{
+  constexpr BlockHeight kRecoveredHeight = 42;
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = kRecoveredHeight;
+  ASSERT_TRUE(db_.write_dbtip(
+      DbTip{.id = 0, .storage_long_hash = {}, .value = std::move(tip_value)}));
+
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  // Counts sum to the balance, so an average-age-agnostic reconciliation would
+  // report this row as already reconciled and preserve the future to-schedule
+  // age. average ages are block heights, so an age past the recovered tip is
+  // impossible for an honest row; left in place, the scheduler folds it into
+  // its ascending ready-account key and starves the account of finite quota.
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/5,
+                   /*already_scheduled=*/3,
+                   /*received=*/2,
+                   /*to_schedule_age=*/kRecoveredHeight + 1'000,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbCode::kInternal);
+}
+
 TEST_F(HogDbTest, HogAgeValueOmitsAddressAndReconstructsFromKey)
 {
   const Address key_addr = make_address(kAddress);
