@@ -185,16 +185,16 @@ private:
   // ~HogDevnodeNode path instead drains DB forwards via the subscription
   // manager in [ctx_.reset()] before the coordinator disconnects the callback
   // during member destruction.)
-  std::unique_ptr<RpcServer<MempoolAuthRpc>> mempool_auth_server_ =
-      std::make_unique<RpcServer<MempoolAuthRpc>>();
-  RpcServer<MempoolDbRpc> sched_db_server_;
-  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
-      RpcServer<MempoolCoordinatorRpc>(
+  std::unique_ptr<FailStopRpcServer<MempoolAuthRpc>> mempool_auth_server_ =
+      std::make_unique<FailStopRpcServer<MempoolAuthRpc>>();
+  FailStopRpcServer<MempoolDbRpc> sched_db_server_;
+  FailStopRpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
+      FailStopRpcServer<MempoolCoordinatorRpc>(
           sched_db_server_->impl(), mempool_auth_server_->impl(), network_hash_,
           MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
   MempoolGatewayServer mempool_gateway_server_{mempool_coord_server_.impl()};
-  RpcServer<MempoolEventRpc> sched_event_server_;
-  RpcServer<MempoolExecutorRpc> sched_exec_server_;
+  FailStopRpcServer<MempoolEventRpc> sched_event_server_;
+  FailStopRpcServer<MempoolExecutorRpc> sched_exec_server_;
 
   std::unique_ptr<AuthServer> auth_server_;
   RpcServer<AuthDBRpc> auth_db_server_;

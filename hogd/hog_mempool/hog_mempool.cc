@@ -55,7 +55,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   info("PORT mempool.metrics={}", actual_metrics_port);
 
   // Wait for the db shards to connect.
-  RpcServer<MempoolDbRpc> db;
+  FailStopRpcServer<MempoolDbRpc> db;
   // HogDb sends one block-wide HogsTransferred RPC with the bulk cap (see
   // hog_db.cc create_sched_db_client); a committed block's aggregated balance
   // deltas can exceed x23's 16 MiB default, so the receiver must match it or
@@ -72,7 +72,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   // Start event registration. Activation waits for the coordinator's recovered
   // canonical tip, so construction must continue before the card is published.
-  RpcServer<MempoolEventRpc> event;
+  FailStopRpcServer<MempoolEventRpc> event;
   uint16_t actual_event_port =
       event.start_server(make_bind_host_port(bind_ip, event_port));
   CHECK(actual_event_port == event_port || event_port == 0);
@@ -80,13 +80,13 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   // Let executors begin connecting. Coordinator recovery publishes the
   // canonical tip needed to activate event before executor intro can finish.
-  RpcServer<MempoolExecutorRpc> exec;
+  FailStopRpcServer<MempoolExecutorRpc> exec;
   uint16_t actual_executor_port =
       exec.start_server(make_bind_host_port(bind_ip, executor_port));
   CHECK(actual_executor_port == executor_port || executor_port == 0);
   info("PORT mempool.executor={}", actual_executor_port);
 
-  RpcServer<MempoolAuthRpc> auth;
+  FailStopRpcServer<MempoolAuthRpc> auth;
   auth->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_auth_port =
       auth.start_server(make_bind_host_port(bind_ip, auth_port));
@@ -97,7 +97,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   }
 
   // TODO(jhumphri): Make [mempool_tx_size_limit] a command line arg.
-  RpcServer<MempoolCoordinatorRpc> coord(
+  FailStopRpcServer<MempoolCoordinatorRpc> coord(
       db->impl(), auth->impl(), std::move(network_hash),
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit, num_exec_shards);
   coord->max_message_size_ = kBulkRpcMaxMessageSize;

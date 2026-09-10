@@ -23,7 +23,9 @@
 
 namespace hogd {
 
-template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
+template<typename IMPL, typename VERSMETA = IMPL::rpc_service,
+         x23::RpcExceptionPolicy EXCEPTION_POLICY =
+             x23::RpcExceptionPolicy::ReturnError>
 requires x23::implements_async_rpc<IMPL *, VERSMETA>
 class RpcServer : public x23::DestroyInhibit {
 public:
@@ -94,15 +96,16 @@ public:
   {
     CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
     listen_fd_ = lfd.get();
-    x23::start_listening(cp_, lfd,
-                         [self = x23::RefPtr(*this),
-                          _d = x23::Defer([this] { eof(); })](auto c) {
-                           c->max_message_size = self->max_message_size_;
-                           self->fdgen_->insert_or_assign(c->get_fd(),
-                                                          self->cp_.generation(
-                                                              c->get_fd()));
-                           c->template server<VersMeta>(ImplPtr(*self));
-                         });
+    x23::start_listening(
+        cp_, lfd, [self = x23::RefPtr(*this), _d = x23::Defer([this] {
+                                                eof();
+                                              })](auto c) {
+          c->max_message_size = self->max_message_size_;
+          self->fdgen_->insert_or_assign(c->get_fd(),
+                                         self->cp_.generation(c->get_fd()));
+          c->template server_with_exception_policy<EXCEPTION_POLICY>(
+              ImplPtr(*self), VersMeta{});
+        });
   }
 
   uint16_t start_server(uint16_t port)
@@ -136,6 +139,10 @@ private:
     listen_fd_.notify_all();
   }
 };
+
+template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
+using FailStopRpcServer =
+    RpcServer<IMPL, VERSMETA, x23::RpcExceptionPolicy::FailStop>;
 
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>

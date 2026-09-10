@@ -129,7 +129,13 @@ struct RpcService {
   }
 };
 
+enum class RpcExceptionPolicy {
+  ReturnError,
+  FailStop,
+};
+
 template<typename VersMeta, typename Impl, typename Logger = RpcNoLogger,
+         RpcExceptionPolicy ExceptionPolicy = RpcExceptionPolicy::ReturnError,
          typename... ExtraArgs>
 struct RpcDispatcher : RpcService {
   using version_meta = VersMeta;
@@ -239,11 +245,15 @@ private:
             }
           } catch (const std::exception &e) {
             co_return self.error(e);
+          } catch (...) {
+            co_return self.unknown_error();
           }
         }(*this, std::move(awaitable));
       }
     } catch (std::exception &e) {
       return error(e);
+    } catch (...) {
+      return unknown_error();
     }
 
     decltype(auto) dispatch(BufViewEnd argbytes)
@@ -294,12 +304,43 @@ private:
         }
       }
       else {
+        if constexpr (ExceptionPolicy == RpcExceptionPolicy::FailStop) {
+          panic("{}::{} RPC handler threw: {}",
+                ProcMeta::version_meta::version_name, ProcMeta::proc_name,
+                e.what());
+        }
         msg_set_reply_stat(&rmsg, SYSTEM_ERR);
         std::println(stderr, "{}::{}: {}", ProcMeta::version_meta::version_name,
                      ProcMeta::proc_name, e.what());
         if constexpr (!std::same_as<Logger, RpcNoLogger>)
           d_.logger_.template log_server<ProcMeta>(rmsg,
                                                    uformat(" {}", e.what()));
+      }
+      return make_record(rmsg);
+    }
+
+    Buf unknown_error() const
+    {
+      rpc_msg rmsg{.xid = xid_};
+      if (callmsg_) {
+        msg_set_reply_stat(&rmsg, GARBAGE_ARGS);
+        if constexpr (!std::same_as<Logger, RpcNoLogger>) {
+          d_.logger_.template log_server<ProcMeta>(*callmsg_);
+          d_.logger_.template log_server<ProcMeta>(
+              rmsg, " deserialization error: unknown exception");
+        }
+      }
+      else {
+        if constexpr (ExceptionPolicy == RpcExceptionPolicy::FailStop) {
+          panic("{}::{} RPC handler threw an unknown exception",
+                ProcMeta::version_meta::version_name, ProcMeta::proc_name);
+        }
+        msg_set_reply_stat(&rmsg, SYSTEM_ERR);
+        std::println(stderr, "{}::{}: unknown exception",
+                     ProcMeta::version_meta::version_name, ProcMeta::proc_name);
+        if constexpr (!std::same_as<Logger, RpcNoLogger>) {
+          d_.logger_.template log_server<ProcMeta>(rmsg, " unknown exception");
+        }
       }
       return make_record(rmsg);
     }
@@ -397,9 +438,21 @@ struct RpcStream : public detail::RpcStreamImpl {
   RpcStream *server(Server srvr, VersMeta /*unused*/ = {},
                     ExtraArgs &&...extra_args)
   {
-    auto dispatch =
-        new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
-            std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
+    return server_with_exception_policy<RpcExceptionPolicy::ReturnError>(
+        std::move(srvr), VersMeta{}, std::forward<ExtraArgs>(extra_args)...);
+  }
+
+  template<RpcExceptionPolicy ExceptionPolicy, typename Server,
+           typename VersMeta = typename std::remove_cvref_t<
+               decltype(*declval<Server>())>::rpc_service,
+           typename... ExtraArgs>
+  requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
+  RpcStream *server_with_exception_policy(Server srvr, VersMeta /*unused*/ = {},
+                                          ExtraArgs &&...extra_args)
+  {
+    auto dispatch = new RpcDispatcher<VersMeta, Server, Logger, ExceptionPolicy,
+                                      std::decay_t<ExtraArgs>...>(
+        std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
     srvmap_.emplace(dispatch->getpv(), dispatch);
     logger_.log_message("serving {}", VersMeta::version_name);
     return this;

@@ -3424,15 +3424,18 @@ TEST(Mempool, RestartRejectsDatabaseFromAnotherNetwork)
               MempoolTestInfra::kNetworkHash);
   }
 
-  // Restart over the same database as another network. The mempool rejects
-  // the coordinator intro that recovers the tip, which fails startup.
+  // Restart over the same database as another network. Recovering a tip for a
+  // different network is an internal startup error, so the fail-stop mempool
+  // RPC server terminates instead of returning an RPC error.
   const MempoolTestInfra::Options other_network_options{
       .skip_genesis_block = true,
       .network_hash = other_network,
       .db_directory = db_dir.directory()};
-  EXPECT_THROW(
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_DEATH(
       { MempoolTestInfra rejected(other_network_options); },
-      x23::XdrCallFailed);
+      "SchedulerCoord1::schedulercoord_intro_coord RPC handler "
+      "threw: recovered chain network hash");
 
   // Restarting as the network that produced the database recovers its tip.
   MempoolTestInfra restarted(
