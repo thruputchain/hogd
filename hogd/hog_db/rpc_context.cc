@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <limits>
 #include <mutex>
 #include <tuple>
