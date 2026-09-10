@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstdint>
 #include <limits>
 #include <mutex>
 #include <tuple>
@@ -13,6 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_db/block_tx.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/status.h"
