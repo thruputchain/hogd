@@ -8,7 +8,7 @@ file(REMOVE "${coverage_dir}/summary.txt" "${coverage_dir}/coverage.profdata")
 file(MAKE_DIRECTORY "${coverage_dir}/raw")
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -E env
-    "LLVM_PROFILE_FILE=${coverage_dir}/raw/%m-%p.profraw"
+    "LLVM_PROFILE_FILE=${coverage_profile_pattern}"
     "${coverage_ctest}" --test-dir "${coverage_build_dir}"
     -C "${coverage_config}" --output-on-failure --parallel
   RESULT_VARIABLE test_result)
