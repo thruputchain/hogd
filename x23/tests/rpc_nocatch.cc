@@ -6,14 +6,19 @@
 // the handler itself is running.  The peer sees a failed call and the
 // process carries on.
 //
-// nocatch_server() suppresses that catch, so the exception unwinds into the
-// coroutine machinery instead, which prints "Unhandled exception in
-// coroutine" with a stack trace and then terminates.  The point is to fault
-// where the bug is, with a core dump, rather than to hand the caller an
-// error reply and keep running on state nobody has reasoned about.
+// nocatch_server() suppresses that catch for failures that are the
+// service's own, so the exception unwinds into the coroutine machinery
+// instead, which prints "Unhandled exception in coroutine" with a stack
+// trace and then terminates.  The point is to fault where the bug is, with
+// a core dump, rather than to hand the caller an error reply and keep
+// running on state nobody has reasoned about.
 //
-// Each behavior below is exercised against both registrations, because what
-// matters about the flag is the difference between the two.
+// It deliberately stops short of failures the peer causes: arguments that
+// will not decode still get their GARBAGE_ARGS reply, because a message
+// anyone who can connect may send must not be able to abort the process.
+//
+// Each behavior below is exercised against both registrations -- what
+// matters about the flag is which of them it changes and which it doesn't.
 
 #include <cstddef>
 #include <cstdint>
@@ -106,15 +111,23 @@ static_assert(is_blank_rpc_v1<NeverThrows *, MaybeAsync>);
 
 // A CALL record for blank_rpc_v1::echo whose argument bytes are not a
 // decodable Data: an opaque<> length prefix of 0xffffffff with nothing
-// behind it.  A typed client cannot produce this, and it is the one failure
-// the catching server answers with GARBAGE_ARGS rather than SYSTEM_ERR --
-// the failure that comes from the peer instead of from the handler.
+// behind it.  A typed client cannot produce this, which is why these tests
+// go to the wire by hand.  It is the failure that comes from the peer
+// rather than from the handler, and the one nocatch_server leaves alone.
 Buf
 undecodable_echo_record(std::uint32_t xid)
 {
   auto msg = call_msg<EchoMeta>();
   msg.xid = xid;
   return make_record(msg, std::uint32_t{0xffffffff});
+}
+
+Buf
+echo_record(std::uint32_t xid, const Data &arg)
+{
+  auto msg = call_msg<EchoMeta>();
+  msg.xid = xid;
+  return make_record(msg, arg);
 }
 
 // Fatal on the shape checks: reply_data is a union arm, so reading it on
@@ -142,6 +155,25 @@ read_reply(int fd, rpc_msg *reply)
   ssize_t n = ::read(fd, buf, sizeof buf);
   ASSERT_GT(n, 4) << "no RPC reply came back";
   deserialize_from(reply, BufView(buf + 4, static_cast<std::size_t>(n) - 4));
+}
+
+// Undecodable arguments must cost the peer its one call and nothing more:
+// a GARBAGE_ARGS reply, on a connection that goes on serving.  Both
+// registrations owe this, which is the point of running it against each.
+void
+expect_garbage_args_then_still_serving(int client_fd)
+{
+  ASSERT_NO_FATAL_FAILURE(write_record(client_fd, undecodable_echo_record(77)));
+  rpc_msg reply;
+  ASSERT_NO_FATAL_FAILURE(read_reply(client_fd, &reply));
+  EXPECT_EQ(reply.xid, 77U);
+  expect_reply_status(reply, accept_stat::GARBAGE_ARGS);
+
+  ASSERT_NO_FATAL_FAILURE(
+      write_record(client_fd, echo_record(78, Data{1, 2, 3})));
+  ASSERT_NO_FATAL_FAILURE(read_reply(client_fd, &reply));
+  EXPECT_EQ(reply.xid, 78U);
+  expect_reply_status(reply, accept_stat::SUCCESS);
 }
 
 UniqueFd
@@ -210,12 +242,25 @@ TEST(RpcNoCatch, CatchingServerReportsUndecodableArguments)
   UniqueFd client_fd = socketpair_or_raise(&server_fd);
   rpc_stream(cp, server_fd)->server(&impl);
 
-  ASSERT_NO_FATAL_FAILURE(
-      write_record(client_fd.get(), undecodable_echo_record(77)));
-  rpc_msg reply;
-  ASSERT_NO_FATAL_FAILURE(read_reply(client_fd.get(), &reply));
-  EXPECT_EQ(reply.xid, 77U);
-  expect_reply_status(reply, accept_stat::GARBAGE_ARGS);
+  expect_garbage_args_then_still_serving(client_fd.get());
+}
+
+// The one failure nocatch_server does NOT turn into a crash.  Decoding the
+// arguments happens before the handler runs, and failing it is the peer's
+// doing, not the service's -- so this stays a reply even here.  Without the
+// exemption, any stranger who can reach the port could abort the process
+// with a single malformed record.
+TEST(RpcNoCatch, NoCatchServerStillReportsUndecodableArguments)
+{
+  NeverThrows impl;
+  ThreadPool pool(2);
+  CoroPoll cp(pool);
+
+  int server_fd = kInvalidFd;
+  UniqueFd client_fd = socketpair_or_raise(&server_fd);
+  rpc_stream(cp, server_fd)->nocatch_server(&impl);
+
+  expect_garbage_args_then_still_serving(client_fd.get());
 }
 
 // nocatch_server() changes only what happens when a dispatch throws; a
@@ -308,29 +353,6 @@ run_throw_after_suspension()
   }
 }
 
-void
-run_undecodable_arguments()
-{
-  NeverThrows impl;
-  ThreadPool pool(2);
-  CoroPoll cp(pool);
-
-  int server_fd = kInvalidFd;
-  UniqueFd client_fd = socketpair_or_raise(&server_fd);
-  rpc_stream(cp, server_fd)->nocatch_server(&impl);
-
-  Buf record = undecodable_echo_record(77);
-  if (::write(client_fd.get(), record.data(), record.size()) < 0)
-    Errno{}.raise("write");
-
-  // Never returns once the server dies with the process.  A server that
-  // answered instead sends a GARBAGE_ARGS reply, and returning from here is
-  // how gtest gets to report that nothing died.
-  std::uint8_t buf[64];
-  if (::read(client_fd.get(), buf, sizeof buf) < 0)
-    Errno{}.raise("read");
-}
-
 } // namespace
 
 TEST(RpcNoCatchDeathTest, SynchronousThrowTerminatesProcess)
@@ -343,17 +365,6 @@ TEST(RpcNoCatchDeathTest, ThrowAfterSuspensionTerminatesProcess)
 {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_DEATH(run_throw_after_suspension(), kBoom);
-}
-
-// Worth stating outright: under nocatch_server a peer that sends arguments
-// the server cannot decode kills the process.  That is a much wider blast
-// radius than a handler bug -- the failure is the peer's, not the server's
-// -- and it is the reason nocatch_server belongs on links whose other end
-// is trusted, not on anything a stranger can connect to.
-TEST(RpcNoCatchDeathTest, UndecodableArgumentsTerminateProcess)
-{
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(run_undecodable_arguments(), "Unhandled exception in coroutine");
 }
 
 } // namespace x23

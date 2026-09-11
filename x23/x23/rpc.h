@@ -160,8 +160,6 @@ struct RpcDispatcher : RpcService {
   }
 
 private:
-  struct PrivateType {};
-
   Buf proc_unavail(const rpc_msg &callmsg)
   {
     using enum accept_stat;
@@ -239,26 +237,31 @@ private:
               self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
               co_return make_record(rmsg, res);
             }
-          } catch (const std::conditional_t<NoCatch, PrivateType,
-                                            std::exception> &e) {
-            // Same suppression as the synchronous catch below: a handler
-            // that throws after suspending is no less of a bug for having
-            // suspended, so NoCatch has to reach this catch too or it only
-            // covers handlers that never yield -- which is nearly none of
-            // the real ones.
+          } catch (const std::exception &e) {
+            // A handler that throws after suspending is no less of a bug for
+            // having suspended, so NoCatch has to reach this catch too or it
+            // only covers handlers that never yield -- which is nearly none
+            // of the real ones.  No bad-argument exception below: getting
+            // here means args() already decoded them.
             if constexpr (NoCatch)
-              std::unreachable();
-            else
-              co_return self.error(e);
+              throw;
+            co_return self.error(e);
           }
         }(*this, std::move(awaitable));
       }
-    } catch (
-        const std::conditional_t<NoCatch, PrivateType, std::exception> &e) {
-      if constexpr (NoCatch)
-        std::unreachable();
-      else
-        return error(e);
+    } catch (const std::exception &e) {
+      // NoCatch is about bugs in the service, not about the peer.  Arguments
+      // that will not decode are the peer's doing, and a message anyone who
+      // can connect may send must not be able to take the process down, so
+      // those keep their GARBAGE_ARGS reply either way.  callmsg_ is cleared
+      // the instant args() has decoded successfully, which makes it exactly
+      // the "the handler has started" flag this needs -- the same one error()
+      // reads to choose between GARBAGE_ARGS and SYSTEM_ERR.
+      if constexpr (NoCatch) {
+        if (!callmsg_)
+          throw;
+      }
+      return error(e);
     }
 
     decltype(auto) dispatch(BufViewEnd argbytes)
