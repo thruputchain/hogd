@@ -147,11 +147,12 @@ public:
       PerTransactionDatabaseProxy &db_proxy,
       std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
 
-  // Validation-mode counterpart for a successful TryInvoke. Bumps the
-  // intra-transaction depth counter without pushing a HogDb subtransaction
-  // (validation does not use per-frame subtransactions). Precondition:
+  // Records a successful child TryInvoke against the depth cap. finish_frame
+  // calls this once a child's success is settled in any execution mode, so
+  // the cap counts the same frames whether the mode probed locks (proposal),
+  // replayed a bit (validation), or defaulted one (viewing). Precondition:
   // !depth_cap_reached().
-  void note_validation_try_invoke_success();
+  void note_try_invoke_success();
 
   void
   collect_storage_deltas(x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;

@@ -121,7 +121,8 @@ TEST(DeserializeDeathTest, CheckDetectsDecoderOverrunWithoutReadingMemory)
 {
   std::array<uint8_t, 8> storage{};
   detail::Deserializer<false> decoder(storage.data(), storage.data() + 4,
-                                      storage.data() + 4);
+                                      storage.data() + 4,
+                                      deserialization_recursion_limit);
   decoder.p = storage.data() + 8;
   EXPECT_DEATH(decoder.check(), "buffer overrun");
 }
