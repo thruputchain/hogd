@@ -89,6 +89,12 @@ if(EXISTS "${TEST_DIR}/warning.hh")
   message(FATAL_ERROR "strict mode generated output after a warning")
 endif()
 
+# A failed write must be reported, not silently truncate the header.
+if(EXISTS "/dev/full")
+  run_compiler(1 -o /dev/full "${INPUT}")
+  require_text("${error}" "/dev/full")
+endif()
+
 file(WRITE "${TEST_DIR}/invalid.x" "struct Broken { int value };\n")
 run_compiler(1 -o invalid.hh invalid.x)
 require_text("${error}" "syntax error")
