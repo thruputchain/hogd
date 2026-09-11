@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -53,6 +54,31 @@ static_assert('A' == 0x41 && '0' == 0x30 && '_' == 0x5F,
 
 constexpr std::string kGlobalTipKey = "<DBTIP";
 constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
+
+// validate_rcq_metadata rejects metadata the RCQ lock could never have
+// written. Unchecked, it reaches fatal CHECKs, signed cost arithmetic, or
+// block-number arithmetic that wraps (#2936, #2979, #2986).
+HogDbStatus<void>
+validate_rcq_metadata(const RetrocausalQueueMetadata &meta)
+{
+  const auto &consume = meta.consume_state;
+  const bool consistent =
+      meta.live_entries <= kRetrocausalQueueLiveEntriesHardCap &&
+      consume.max_fully_consumed_block_number <= meta.max_live_block_num &&
+      meta.max_live_block_num < std::numeric_limits<uint64_t>::max() &&
+      (consume.max_fully_consumed_block_number == meta.max_live_block_num
+           ? consume.partial_consumed_number == 0
+           : consume.partial_consumed_number <=
+                 kRetrocausalQueueBlockEntriesMaxLen);
+  if (consistent)
+    return {};
+  error("corrupt RCQ metadata: live_entries {}, max_live_block_num {}, "
+        "max_fully_consumed_block_number {}, partial_consumed_number {}",
+        meta.live_entries, meta.max_live_block_num,
+        consume.max_fully_consumed_block_number,
+        consume.partial_consumed_number);
+  return HogDbError(HogDbCode::kCorruption);
+}
 
 } // namespace
 
@@ -507,12 +533,8 @@ HogDbDAO::read_retrocausal_queue_metadata(const ItemKey &key)
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
   }
-  // live_entries is persisted as an unsigned hyper, but storage-cost
-  // accounting is signed 64-bit. RetrocausalQueueLock bans inserts at
-  // kMaxRetrocausalQueueLiveEntries, so a value over the hard cap (bound
-  // plus one block of overshoot) can only come from on-disk corruption;
-  // fail-stop rather than feed it to signed cost arithmetic (issue #2917).
-  CHECK_LE(metadata.live_entries, kRetrocausalQueueLiveEntriesHardCap);
+  if (auto v = validate_rcq_metadata(metadata); !v)
+    return v.error();
   return metadata;
 }
 
@@ -704,9 +726,8 @@ HogDbDAO::get_charged_storage_cost_and_cache_data(
         error("failed to deserialize rcq metadata: {}", e.what());
         return HogDbError(HogDbCode::kInternal);
       }
-      // See read_retrocausal_queue_metadata: an over-cap live_entries is
-      // corrupt on-disk state and must not reach signed cost arithmetic.
-      CHECK_LE(meta.live_entries, kRetrocausalQueueLiveEntriesHardCap);
+      if (auto v = validate_rcq_metadata(meta); !v)
+        return v.error();
       return std::make_pair(cost_model->get_retrocausal_queue_cost(
                                 meta.live_entries),
                             ItemLockCacheData::from_rcq());

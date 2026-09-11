@@ -94,6 +94,10 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
   auto snapshot_cost =
       db_.get_charged_storage_cost_and_cache_data(key, &cost_model_);
   if (!snapshot_cost) {
+    // Corrupt persisted state: fail-stop here, with the key, rather than
+    // after the executor round trip in the mempool's Unrecoverable CHECK.
+    if (snapshot_cost.error() == HogDbCode::kCorruption)
+      panic("corrupt persisted state under key {}", key);
     if (snapshot_cost.error() != HogDbCode::kNotFound) {
       return snapshot_cost.error();
     }
