@@ -28,6 +28,7 @@
 #include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/rpc_from_sched.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -416,6 +417,40 @@ TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
         (void)recovered;
       },
       "CHECK FAILED");
+}
+
+// The write path enforces the same invariant as startup reconciliation: a
+// hog age is flushed only after its block commits, so no average age may
+// exceed the committed tip. dbsched_write_hog_ages refuses a violating row
+// rather than persisting it and leaving it for the next recovery to reject.
+TEST(RecoveryTests, WriteHogAgesRejectsAgeAboveCommittedTip)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), 1024 * 1024 * 1024, 0);
+  ASSERT_TRUE(db.has_value());
+
+  RPCContext ctx(HogDbDAO(RAMDB(std::move(*db))), nullptr);
+  constexpr BlockHeight kCommittedHeight = 42;
+  ConsensusValue value{};
+  value.proposal_header.block_height = kCommittedHeight;
+  ctx.set_tip(
+      DbTip{.id = 0, .storage_long_hash = {}, .value = std::move(value)});
+
+  HogDbSchedRpc sched_rpc(ctx);
+
+  // An age within the committed domain persists.
+  HogAgeBatch ok_ages;
+  ok_ages.push_back(make_hog_age(1U, kCommittedHeight));
+  EXPECT_EQ(sched_rpc.dbsched_write_hog_ages(ok_ages)(),
+            DbSchedResult::DbSchedResultOK);
+
+  // An age past the committed tip is refused before it reaches disk.
+  HogAgeBatch future_ages;
+  future_ages.push_back(make_hog_age(1U, kCommittedHeight + 1));
+  EXPECT_EQ(sched_rpc.dbsched_write_hog_ages(future_ages)(),
+            DbSchedResult::DbSchedResultError);
 }
 
 TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)

@@ -89,7 +89,21 @@ x23::Async<DbSchedResult>
 HogDbSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
 {
   HogDbDAO &db = ctx_.get_db();
+  // Hog ages are flushed only after the block whose height they carry commits,
+  // so no average age may exceed the committed tip. Enforce that here too, not
+  // just at recovery (hog_age_reconciliation.cc), so a violated invariant fails
+  // at the write rather than surfacing at the next startup (#3952).
+  const BlockHeight committed_height = ctx_.get_height_threadsafe();
   for (const HogAge &age : ages) {
+    for (size_t group = 0; group < kHogAgeNumGroups; ++group) {
+      if (committed_height >= 0 && age.average_ages[group] > committed_height) {
+        error("refusing to persist hog age for address {}: average age {} in "
+              "group {} exceeds the committed block height {}",
+              HexArray(age.address).str(), age.average_ages[group], group,
+              committed_height);
+        co_return DbSchedResult::DbSchedResultError;
+      }
+    }
     if (!db.write_address_average_hog_age(age)) {
       co_return DbSchedResult::DbSchedResultError;
     }
