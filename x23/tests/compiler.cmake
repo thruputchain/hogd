@@ -95,6 +95,19 @@ if(EXISTS "/dev/full")
   require_text("${error}" "/dev/full")
 endif()
 
+# A comment that shares a line with code, or a comment at end of file with
+# no trailing newline, is not a whole-line comment, so it reaches x23c as a
+# trailing comment.  Before the first token there is nothing to trail; it
+# must become a leading comment rather than crash.
+file(WRITE "${TEST_DIR}/leading_comment.x"
+  "/* leading */ struct Lead { int value; };\n")
+run_compiler(0 -o leading_comment.hh leading_comment.x)
+file(READ "${TEST_DIR}/leading_comment.hh" leading_comment)
+require_text("${leading_comment}" "/* leading */")
+require_text("${leading_comment}" "struct Lead {")
+file(WRITE "${TEST_DIR}/comment_only.x" "// nothing but a comment")
+run_compiler(0 -o comment_only.hh comment_only.x)
+
 file(WRITE "${TEST_DIR}/invalid.x" "struct Broken { int value };\n")
 run_compiler(1 -o invalid.hh invalid.x)
 require_text("${error}" "syntax error")
