@@ -71,7 +71,6 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
-#include "x23/rpc_common.h"
 #include "x23/serialize.h"
 #include "x23/tests/death_test.h"
 #include "x23/vec.h"
@@ -3433,9 +3432,9 @@ TEST(Mempool, RestartRejectsDatabaseFromAnotherNetwork)
       .network_hash = other_network,
       .db_directory = db_dir.directory()};
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(
+  X23_EXPECT_DEATH(
       { MempoolTestInfra rejected(other_network_options); },
-      "terminate called after throwing an instance of ");
+      "does not match requested network hash");
 
   // Restarting as the network that produced the database recovers its tip.
   MempoolTestInfra restarted(
