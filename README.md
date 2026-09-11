@@ -74,7 +74,7 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
 
     ~~~~ .toml
     [registry]
-    global-credential-providers = ["env", "cargo:token"]
+    global-credential-providers = ["cargo:token"]
     ~~~~
 
    Then add your token to `~/.cargo/credentials.toml`:
@@ -85,7 +85,7 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     ~~~~
 
    You can get an access token by logging in at
-   [groundhog.dev/crates](https://groundhog.dev/crates).
+   [thruput.network/crates](https://thruput.network/crates).
 
    Alternatively, you can authenticate using environment variables (this
    is how CI is configured):
