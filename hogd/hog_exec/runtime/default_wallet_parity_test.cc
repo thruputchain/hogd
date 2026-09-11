@@ -48,6 +48,7 @@
 #include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
+#include "x23/tests/death_test.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -582,8 +583,8 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationNativeChecks)
   setup_grant_storage_token(kNativeDriverAddr, 1'000'000'000);
 
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(run_capture_tx(kNativeDriverAddr, native_result_key, *ctx_),
-               "CHECK FAILED");
+  X23_EXPECT_DEATH(run_capture_tx(kNativeDriverAddr, native_result_key, *ctx_),
+                   "CHECK FAILED");
 }
 
 TEST_F(DefaultWalletParityTest, EmptyCallList)

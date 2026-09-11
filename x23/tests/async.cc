@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include "death_test.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/threadpool.h"
@@ -575,16 +576,16 @@ TEST(FinalSuspend, HandleAwaiterReturnsContinuation)
 
 TEST(AsyncDeathTest, FireAndForgetExceptionsAreFatal)
 {
-  EXPECT_DEATH(([] -> Detached {
-                 throw std::runtime_error("detached error");
-                 co_return;
-               }()),
-               "detached error");
-  EXPECT_DEATH(([] -> Suspended {
-                 throw std::runtime_error("suspended error");
-                 co_return;
-               }()
-                          .resume()),
-               "suspended error");
-  EXPECT_DEATH(callback_error(Callback{[] {}}), "callback error");
+  X23_EXPECT_DEATH(([] -> Detached {
+                     throw std::runtime_error("detached error");
+                     co_return;
+                   }()),
+                   "detached error");
+  X23_EXPECT_DEATH(([] -> Suspended {
+                     throw std::runtime_error("suspended error");
+                     co_return;
+                   }()
+                              .resume()),
+                   "suspended error");
+  X23_EXPECT_DEATH(callback_error(Callback{[] {}}), "callback error");
 }

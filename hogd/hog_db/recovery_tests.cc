@@ -39,6 +39,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd {
 
@@ -407,7 +408,7 @@ TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
     ASSERT_TRUE(dao.commit().has_value());
   }
 
-  EXPECT_DEATH(
+  X23_EXPECT_DEATH(
       {
         DBStatus<std::unique_ptr<Database>> db =
             Database::open(dir->get_path(), kDefaultHeapSize, 0);

@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include "death_test.h"
 #include "x23/nmvec.h"
 
 using x23::NMVec;
@@ -443,7 +444,7 @@ TEST(NMVec, IterComparisons)
     nocore.rlim_cur = 0;
     setrlimit(RLIMIT_CORE, &nocore);
   }
-  EXPECT_DEATH(void(v1.begin() <= v2.begin()), "");
+  X23_EXPECT_DEATH(void(v1.begin() <= v2.begin()), "");
   if (core.rlim_cur)
     setrlimit(RLIMIT_CORE, &core);
 #endif // !NDEBUG

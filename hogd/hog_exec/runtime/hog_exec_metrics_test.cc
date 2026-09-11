@@ -3,6 +3,7 @@
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd {
 
@@ -12,7 +13,7 @@ namespace hogd {
 // (#2605).
 TEST(HogexecMetricsTest, LaunchLogWorkerRequiresInitializedMetrics)
 {
-  EXPECT_DEATH(HogexecMetrics::launch_log_worker(), "not initialized");
+  X23_EXPECT_DEATH(HogexecMetrics::launch_log_worker(), "not initialized");
 
   init_hog_exec_metrics();
   HogexecMetrics::launch_log_worker();
