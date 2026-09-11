@@ -5,6 +5,7 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 
@@ -47,7 +48,7 @@ public:
   using rpc_service = EventIndexer1;
 
   static EventIndexerPullResult
-  event_indexer_pull_next(EventIndexerPullRequest /*request*/)
+  event_indexer_pull_next(const EventIndexerPullRequest & /*request*/)
   {
     throw std::runtime_error(kBoom);
   }
@@ -110,7 +111,8 @@ connect_client(x23::CoroPoll &cp, std::uint16_t port)
 {
   auto fd = cp.tcpconnect("127.0.0.1", std::to_string(port))();
   if (!fd.has_value())
-    fd.error().raise("connect to test server");
+    // The host/port overload reports failure as a std::system_error.
+    throw std::system_error(fd.error());
   return x23::rpc_stream_logged(cp, *fd, -1);
 }
 
