@@ -300,7 +300,7 @@ struct BufVec {
         if (errno == EAGAIN)
           return kAgain;
         Errno ret;
-        debug("writev(fd {}, niov {}): {}", fd.get(), ret, iov.size());
+        debug("writev(fd {}, niov {}): {}", fd.get(), iov.size(), ret);
         clear();
         return ret;
       }

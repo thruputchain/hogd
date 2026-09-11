@@ -800,6 +800,26 @@ TEST(IndexAllocator, ReusesFreedIndicesAndRestartsWhenEmpty)
   indices.free(0);
 }
 
+#ifndef NDEBUG
+// The double-free check used to sit behind "#if DEBUG", a macro the build
+// never defines, so it never ran.
+TEST(IndexAllocator, RejectsFreeingAnIndexThatIsNotAllocated)
+{
+  x23::IndexAllocator indices;
+  auto a = indices.alloc();
+  X23_EXPECT_DEATH(indices.free(a + 1), "");
+  X23_EXPECT_DEATH(
+      {
+        indices.free(a);
+        indices.free(a);
+      },
+      "");
+  // Only the forked children died; balance the parent's allocator so its
+  // destructor does not complain about a leaked index.
+  indices.free(a);
+}
+#endif // !NDEBUG
+
 TEST(AllocCache, ReusesOnlyMatchingSizesAndClears)
 {
   x23::AllocCache cache;
