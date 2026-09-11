@@ -89,6 +89,12 @@ if(EXISTS "${TEST_DIR}/warning.hh")
   message(FATAL_ERROR "strict mode generated output after a warning")
 endif()
 
+# A failed write must be reported, not silently truncate the header.
+if(EXISTS "/dev/full")
+  run_compiler(1 -o /dev/full "${INPUT}")
+  require_text("${error}" "/dev/full")
+endif()
+
 # A comment that shares a line with code, or a comment at end of file with
 # no trailing newline, is not a whole-line comment, so it reaches x23c as a
 # trailing comment.  Before the first token there is nothing to trail; it
