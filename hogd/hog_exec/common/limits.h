@@ -19,7 +19,7 @@ namespace hogd {
 // prefix plus kMaxSigners encoded signatures.
 static_assert(x23::detail::has_fixed_size<DecoratedSignature>());
 inline constexpr size_t kMaxBytesSignatureVector =
-    4 + kMaxSigners * x23::detail::xdr_size_bounds<DecoratedSignature>().max_;
+    4 + (kMaxSigners * x23::detail::xdr_size_bounds<DecoratedSignature>().max_);
 
 // Size cap on a Transaction body -- the bytes TransactionHash commits to.
 // Enforced deterministically by ExecutorContext in both proposal and
