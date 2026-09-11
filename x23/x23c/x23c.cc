@@ -135,8 +135,9 @@ usage(bool error)
   --version    print version and exit
   --rust       generate rust code
   --ts         generate TypeScript code
-  --recursive_type <typename>  generate (rust) code for a recursive type),
-  --rust-feature <feature>   force the generated code to enable a given feature (instead of cfg(feature = "<feature>")))",
+  --recursive_type <typename>  generate (rust) code for a recursive type
+  --rust-feature <feature>      force the generated code to enable a given feature (instead of cfg(feature = "<feature>"))
+  --rust-no-feature <feature>   force the generated code to disable a given feature)",
                progname.string());
   exit(error ? 2 : 0);
 }
