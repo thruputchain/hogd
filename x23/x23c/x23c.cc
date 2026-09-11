@@ -104,9 +104,20 @@ lex(XdrCtx *xc)
       continue;
     }
     else if (sym == T_LINECOMMENT) {
-      assert(!xc->syms.empty());
-      xc->syms.back().sym.eol_comment =
-          string(loc.first_column - 1, ' ') + text + '\n';
+      if (xc->syms.empty()) {
+        // The lexer only reports T_BLOCKCOMMENT for a comment that owns
+        // whole lines, so a comment sharing its line with code -- or one
+        // at end of file with no trailing newline -- arrives here.  With
+        // no preceding token to trail, it belongs to whatever comes next.
+        if (!xc->block_comment.empty())
+          xc->block_comment += '\n';
+        xc->block_comment += text;
+        xc->block_comment += '\n';
+        comment_end_line = loc.last_line;
+      }
+      else
+        xc->syms.back().sym.eol_comment =
+            string(loc.first_column - 1, ' ') + text + '\n';
       continue;
     }
     else {
