@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 
 // generated x23 headers
 #include "db_gateway.hh"
@@ -17,6 +18,22 @@
 
 namespace hogd {
 
+// Local read-service limits; these never affect consensus execution.
+struct GatewayReadLimits {
+  size_t max_items = 1024;
+  size_t max_response_bytes = 8_MiB;
+
+  // Leave room for RPC reply framing on the default-size gateway link.
+  static constexpr size_t kMaxResponseBytes =
+      x23::default_max_message_size - 1_KiB;
+
+  bool valid() const
+  {
+    return max_items > 0 && max_response_bytes >= 16 &&
+           max_response_bytes <= kMaxResponseBytes;
+  }
+};
+
 // Read-only x23 RPC server exposed from Db (hog_db) to the public RPC
 // gateway (see protocol/db_gateway.x for the XDR).  Serves
 // committed-snapshot reads.
@@ -28,7 +45,11 @@ class HogDbGatewayRpc {
 public:
   using rpc_service = DbGateway1;
 
-  explicit HogDbGatewayRpc(RPCContext &ctx) : ctx_(ctx) {}
+  explicit HogDbGatewayRpc(RPCContext &ctx, GatewayReadLimits limits = {})
+    : ctx_(ctx), limits_(limits)
+  {
+    CHECK(limits_.valid());
+  }
 
   static DbGatewayIntroOutcome dbgateway_intro(ProtocolCommit const &protocol);
 
@@ -44,6 +65,7 @@ public:
 private:
   std::atomic<bool> shutdown_flag_ = false;
   RPCContext &ctx_;
+  const GatewayReadLimits limits_;
 };
 
 // MaybeAsync rather than type_identity_t: dbgateway_get_items is a coroutine
@@ -53,7 +75,10 @@ static_assert(is_DbGateway1<HogDbGatewayRpc *, x23::MaybeAsync>);
 
 class HogDbGatewayServer : public RpcServer<HogDbGatewayRpc> {
 public:
-  explicit HogDbGatewayServer(RPCContext &ctx) : RpcServer(ctx) {}
+  explicit HogDbGatewayServer(RPCContext &ctx, GatewayReadLimits limits = {})
+    : RpcServer(ctx, limits)
+  {}
 };
 
 } // namespace hogd
+

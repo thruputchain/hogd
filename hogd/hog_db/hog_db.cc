@@ -78,7 +78,8 @@ int
 hog_db_init(std::string_view path, size_t ram_bytes,
             const std::string *coordinator_addr, std::string_view bind_ip,
             uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
-            uint16_t gateway_port, uint16_t metrics_port)
+            uint16_t gateway_port, uint16_t metrics_port,
+            GatewayReadLimits gateway_read_limits)
 {
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
@@ -184,7 +185,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
   info("PORT hog_db.auth={}", actual_auth_port);
 
   info("starting gateway server.");
-  HogDbGatewayServer gateway_server(ctx);
+  HogDbGatewayServer gateway_server(ctx, gateway_read_limits);
   const uint16_t actual_gateway_port =
       gateway_server.start_server(make_bind_host_port(bind_ip, gateway_port));
   CHECK(actual_gateway_port == gateway_port || gateway_port == 0);
@@ -231,7 +232,9 @@ print_usage(char *argv[])
                "--bind-ip <ip> [--coordinator-addr <host:port>] "
                "[--executor-port <port>] [--mempool-port <port>] "
                "[--auth-port <port>] [--gateway-port <port>] "
-               "[--metrics-port <port>] [-h|--help] [--version]",
+               "[--metrics-port <port>] [--gateway-max-items <count>] "
+               "[--gateway-max-response-bytes <bytes>] "
+               "[-h|--help] [--version]",
                argv[0]);
 }
 
@@ -268,9 +271,20 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   uint16_t auth_port = 0;
   uint16_t gateway_port = 0;
   uint16_t metrics_port = 0;
+  hogd::GatewayReadLimits gateway_read_limits;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    if (arg == "--gateway-max-items" && i + 1 < argc) {
+      gateway_read_limits.max_items = hogd::parse_integer_arg<size_t>(
+          "--gateway-max-items", argv[++i], argv, usage);
+      continue;
+    }
+    if (arg == "--gateway-max-response-bytes" && i + 1 < argc) {
+      gateway_read_limits.max_response_bytes = hogd::parse_integer_arg<size_t>(
+          "--gateway-max-response-bytes", argv[++i], argv, usage);
+      continue;
+    }
     if (arg == "--metrics-port" && i + 1 < argc) {
       metrics_port =
           hogd::parse_port_arg("--metrics-port", argv[++i], argv, usage);
@@ -319,10 +333,18 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
+  if (!gateway_read_limits.valid()) {
+    std::println(stderr, "Gateway read limits require a positive item count "
+                         "and response bytes between 16 and {}",
+                 hogd::GatewayReadLimits::kMaxResponseBytes);
+    usage(argv);
+  }
+
   const std::string *coordinator_addr =
       coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
   return hogd::hog_db_init(path, *ram_bytes, coordinator_addr, bind_ip,
                            exec_port, mempool_port, auth_port, gateway_port,
-                           metrics_port);
+                           metrics_port, gateway_read_limits);
 };
+

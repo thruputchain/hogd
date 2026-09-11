@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -33,6 +35,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -92,6 +95,83 @@ TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(result.payload().items[0].item().nnint()),
             int128_t{12345});
+}
+
+TEST(HogDbGatewayRpcTest, RejectsBatchAboveConfiguredItemLimit)
+{
+  RPCContext ctx(make_dao(), nullptr);
+  HogDbGatewayRpc gateway(ctx, {.max_items = 2});
+  AddressAndKeyBatch batch;
+  batch.push_back(make_balance_query(ContractAddress{}));
+  batch.push_back(make_balance_query(ContractAddress{}));
+  EXPECT_EQ(gateway.dbgateway_get_items(batch)().error(), RPCError::kRPCNone);
+  batch.push_back(make_balance_query(ContractAddress{}));
+  EXPECT_EQ(gateway.dbgateway_get_items(batch)().error(),
+            RPCError::kRPCUnrecoverable);
+}
+
+TEST(HogDbGatewayRpcTest, EnforcesExactSerializedResponseBudget)
+{
+  HogDbDAO dao = make_dao();
+  ContractAddress addr{};
+  ASSERT_TRUE(dao.write_address_balance(addr, int128_t{12345}));
+  RPCContext ctx(std::move(dao), nullptr);
+  AddressAndKeyBatch batch;
+  batch.push_back(make_balance_query(addr));
+  batch.push_back(make_balance_query(addr));
+
+  HogDbGatewayRpc unrestricted(ctx);
+  auto baseline = unrestricted.dbgateway_get_items(batch)();
+  ASSERT_EQ(baseline.error(), RPCError::kRPCNone);
+  const size_t bytes = x23::serialize(baseline).size();
+  ASSERT_GT(bytes, 16U);
+
+  HogDbGatewayRpc exact(ctx, {.max_response_bytes = bytes});
+  auto result = exact.dbgateway_get_items(batch)();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.payload().items.size(), 2U);
+  EXPECT_EQ(x23::serialize(result).size(), bytes);
+
+  HogDbGatewayRpc too_small(ctx, {.max_response_bytes = bytes - 1});
+  EXPECT_EQ(too_small.dbgateway_get_items(batch)().error(),
+            RPCError::kRPCUnrecoverable);
+}
+
+TEST(HogDbGatewayRpcTest, DuplicateBytestringsCountPaddingAndEachCopy)
+{
+  HogDbDAO dao = make_dao();
+  StorageKey key(StorageKeyType::ContractData);
+  key.contract_data_key()[0] = 1;
+  AddressAndKey query{.address = {}, .key = std::move(key)};
+  const auto db_key = make_contract_data_key(make_item_key(query));
+  const std::string value(1025, 'x'); // Includes three bytes of XDR padding.
+  ASSERT_TRUE(dao.get_ramdb().put(db_key, kBytes,
+                                  std::as_bytes(std::span(value))));
+  RPCContext ctx(std::move(dao), nullptr);
+  AddressAndKeyBatch batch;
+  batch.push_back(query);
+  HogDbGatewayRpc unrestricted(ctx);
+  auto single = unrestricted.dbgateway_get_items(batch)();
+  ASSERT_EQ(single.error(), RPCError::kRPCNone);
+  ASSERT_EQ(single.payload().items[0].error(), RPCError::kRPCNone);
+  const size_t one_item_bytes = x23::serialize(single).size();
+
+  HogDbGatewayRpc limited(ctx, {.max_response_bytes = one_item_bytes});
+  EXPECT_EQ(limited.dbgateway_get_items(batch)().error(), RPCError::kRPCNone);
+  batch.push_back(query);
+  EXPECT_EQ(limited.dbgateway_get_items(batch)().error(),
+            RPCError::kRPCUnrecoverable);
+}
+
+TEST(HogDbGatewayRpcTest, EmptyBatchFitsMinimumResponseBudget)
+{
+  RPCContext ctx(make_dao(), nullptr);
+  HogDbGatewayRpc gateway(ctx, {.max_response_bytes = 16});
+  const AddressAndKeyBatch batch;
+  auto result = gateway.dbgateway_get_items(batch)();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_TRUE(result.payload().items.empty());
+  EXPECT_EQ(x23::serialize(result).size(), 16U);
 }
 
 // Querying an address that was never written returns per-item
@@ -242,3 +322,4 @@ TEST(HogDbGatewayRpcTest, CommittedReadStaleDetectsTipAdvance)
 }
 
 } // namespace hogd
+

@@ -1,6 +1,7 @@
 #include "hogd/hog_db/rpc_from_gateway.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <utility>
 
@@ -155,6 +156,12 @@ HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 x23::Async<DbGatewayResult>
 HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 {
+  // Bound work before reserving the response or reading any database rows.
+  // v1 has no resource-limit error arm, so fail the whole request using its
+  // existing server-error result; never return a truncated successful batch.
+  if (batch.size() > limits_.max_items) {
+    co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+  }
   HogDbDAO &db = ctx_.get_db();
 
   // Snapshot the committed tip once up-front so every item in the response
@@ -184,8 +191,18 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
     DbGatewayPayload payload;
     payload.block_height = tip.value.proposal_header.block_height;
     payload.items.reserve(batch.size());
-    for (AddressAndKey const &k : batch)
-      payload.items.push_back(read_one_item(db, k));
+    // Outer discriminant + height + empty vector length. Each result's XDR
+    // size includes its own discriminants and variable-length padding.
+    size_t response_bytes = sizeof(uint32_t) + x23::xdr_size(payload);
+    for (AddressAndKey const &k : batch) {
+      auto item = read_one_item(db, k);
+      const size_t item_bytes = x23::xdr_size(item);
+      if (item_bytes > limits_.max_response_bytes - response_bytes) {
+        co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+      }
+      response_bytes += item_bytes;
+      payload.items.push_back(std::move(item));
+    }
 
     if (ctx_.is_committed_read_stale(tip)) [[unlikely]] {
       continue;
@@ -204,3 +221,4 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 }
 
 } // namespace hogd
+
