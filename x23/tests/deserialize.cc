@@ -53,6 +53,36 @@ TEST(Deserialize, Vector)
   EXPECT_THROW(deserialize(&vec, BufView(buf)), x23::XdrBadInput);
 }
 
+// Issue #3971: a vector of a zero-wire-size element (an empty struct decodes to
+// zero bytes) is a valid XDR construct -- the serializer emits N such elements
+// as just the 4-byte count -- so deserialize must read it back to preserve the
+// serialize/deserialize round trip.  No decode-time cap on the count can bound
+// the resulting allocation without rejecting that valid encoding, so the count
+// is intentionally *not* limited at decode; the disproportionate-allocation
+// concern for such a reply is contained at the RPC boundary instead
+// (RpcStream::send_call wraps the std::bad_alloc as an XdrException).  This
+// test pins the round trip so a future decode-time "bound" cannot silently
+// break it.
+TEST(Deserialize, ZeroWireVectorRoundTrips)
+{
+  static_assert(detail::xdr_size_bounds<VoidCheck>().max_ == 0);
+
+  XdrVec<VoidCheck> src(5);
+  x23::Buf body = serialize(src);
+  EXPECT_EQ(body.size(), 4U); // count only; the elements occupy no wire bytes
+
+  XdrVec<VoidCheck> dst;
+  ASSERT_NO_THROW(deserialize(&dst, BufView(body)));
+  EXPECT_EQ(dst.size(), 5U);
+
+  // The empty vector round-trips too.
+  XdrVec<VoidCheck> empty;
+  x23::Buf empty_body = serialize(empty);
+  XdrVec<VoidCheck> empty_dst;
+  ASSERT_NO_THROW(deserialize(&empty_dst, BufView(empty_body)));
+  EXPECT_TRUE(empty_dst.empty());
+}
+
 // CXS BoundedStr deserialization must reject input where the decoded
 // length exceeds the remaining span size (heap-buffer-overflow found
 // by fuzz_deserialize).
