@@ -75,12 +75,14 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
   return 0;
 }
 
-void
+bool
 BalanceLock::add_committed_credit(int128_t delta)
 {
   CHECK_GT(delta, 0);
-  auto ok = delta_bounds_.try_reserve_delta(0, delta, 0, delta, 0, 0);
-  CHECK(ok);
+  // try_reserve_delta bounds the credit against the add capacity seeded from
+  // the snapshot balance (INT128_MAX - snapshot), so a refund larger than that
+  // is rejected here rather than overflowing build_result's CHECK later.
+  return delta_bounds_.try_reserve_delta(0, delta, 0, delta, 0, 0);
 }
 
 int128_t

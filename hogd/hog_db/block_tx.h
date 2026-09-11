@@ -77,7 +77,10 @@ public:
   // mutated by a sibling block commit (stale block).
   HogDbStatus<int128_t> commit_change(const ItemKey &key, ItemChange change);
 
-  void release_balance(const Address &addr, int128_t delta);
+  // Credits a committed storage refund to an address balance. Returns a
+  // kConflict error (crediting nothing) when the refund cannot fit in the
+  // target balance without overflowing INT128_MAX.
+  HogDbStatus<void> release_balance(const Address &addr, int128_t delta);
 
   HogDbStatus<int128_t> read_nnint128_base(const ItemKey &key);
   HogDbStatus<int128_t> read_balance_base(const Address &addr);

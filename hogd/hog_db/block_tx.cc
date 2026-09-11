@@ -58,7 +58,7 @@ BlockTX::do_unlock_item(ItemLock &lock, const ItemChange &change,
   CHECK(r.has_value());
 }
 
-void
+HogDbStatus<void>
 BlockTX::release_balance(const Address &addr, int128_t delta)
 {
   CHECK_GT(delta, 0);
@@ -69,23 +69,37 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   });
   CHECK_PTR(lock);
 
+  // A refund that would push the committed balance past INT128_MAX cannot be
+  // credited. Under a cost model consistent with the one that charged the
+  // item, this never happens: the refund equals a cost the balance already
+  // paid. But the cost model is global metadata excluded from StorageLongHash
+  // (is_state_item), so a CRC-valid recovered <COSTMODEL row can inflate the
+  // refund past what the balance can hold. Surface a recoverable conflict
+  // rather than aborting the process on a CHECK (#3990).
   if (lock->is_finalized()) {
-    lock->add_committed_balance_credit(delta);
+    if (!lock->add_committed_balance_credit(delta)) {
+      return HogDbError{HogDbCode::kConflict};
+    }
+    return {};
   }
-  else {
-    // No prior balance lock exists in this block. This happens when
-    // lock_storage was never called for the address (marginal cost was 0)
-    // but commit_change returned a negative cost (e.g., consuming or
-    // deleting snapshot entries). Such an address must have a snapshot
-    // balance — you can't have snapshot storage items without one — so
-    // the fresh-balance guard in try_atomic_change_lock passes.
-    ItemChange change = ItemChange(Balance(delta));
-    LockContext ctx(&db_, block_height_, key, &cost_model_);
-    auto r = do_lock(*lock, change, ctx);
-    CHECK(r.has_value());
-    auto cr = lock->commit_change(std::move(change), ctx);
-    CHECK(cr.has_value());
+
+  // No prior balance lock exists in this block. This happens when
+  // lock_storage was never called for the address (marginal cost was 0)
+  // but commit_change returned a negative cost (e.g., consuming or
+  // deleting snapshot entries). Such an address must have a snapshot
+  // balance — you can't have snapshot storage items without one — so
+  // the fresh-balance guard in try_atomic_change_lock passes.
+  ItemChange change = ItemChange(Balance(delta));
+  LockContext ctx(&db_, block_height_, key, &cost_model_);
+  auto r = do_lock(*lock, change, ctx);
+  if (!r.has_value()) {
+    // do_lock rejects the credit when snapshot_balance + delta overflows
+    // (BalanceLock's committed-value bounds check); propagate that conflict.
+    return r.error();
   }
+  auto cr = lock->commit_change(std::move(change), ctx);
+  CHECK(cr.has_value());
+  return {};
 }
 
 HogDbStatus<std::pair<int128_t, ItemLockCacheData>>

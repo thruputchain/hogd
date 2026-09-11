@@ -510,4 +510,75 @@ TEST(RecoveryTests, RecoveredMaxBlockHeightRejectsSnapshotCreation)
   EXPECT_EQ(ctx.get_block_tx(kFreshBlock, false), nullptr);
 }
 
+// Regression test for issue #3990: the storage cost model lives in a
+// kGlobalMetadata row that is_state_item() excludes from StorageLongHash, so a
+// CRC-valid recovered <COSTMODEL row can disagree with the authenticated
+// state. Deleting an item then refunds a cost computed from that recovered
+// model; if the refund cannot fit in the owner's (near-maximum) balance,
+// InvokeTX::commit used to abort the process on a CHECK in
+// BlockTX::release_balance. It must now reject the transaction with a
+// recoverable conflict instead.
+//
+// The recovered cost model is modeled directly (an inflated per-item cost) --
+// the accounting path is identical however the model reached the runtime, so
+// no on-disk tampering or process death is needed to exercise the fix.
+TEST(RecoveryTests, StorageRefundOverflowingBalanceIsRecoverableConflict)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
+  constexpr std::array<std::byte, 1> kValue = {std::byte{0x41}};
+  ASSERT_TRUE(dir.has_value());
+
+  const Address owner = ContractAddress{7};
+  const ItemKey item_key(owner, StorageKeyContractData{42});
+
+  // A cost model whose per-item cost dwarfs any balance. Deleting the item
+  // below refunds get_bytestring_cost(), which cannot be credited to a
+  // near-maximum balance without exceeding INT128_MAX.
+  const StorageCostModel cost_model(StorageCostModelXdr{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = std::numeric_limits<uint64_t>::max(),
+      .bytestring_cost_per_byte = 0,
+      .base_contract_deployment_cost = 12000,
+      .contract_deployment_cost_per_byte = 10,
+      .auth_per_key_cost = 1111,
+      .rcq_cost_per_entry = 8,
+      .replay_cache_cost_per_entry = 7,
+      .balance_cost = 1234,
+  });
+  const int128_t refund = cost_model.get_bytestring_cost(kValue.size());
+  const int128_t balance = std::numeric_limits<int128_t>::max() - 1;
+  ASSERT_GT(refund, std::numeric_limits<int128_t>::max() - balance);
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kHeapSize, 0);
+  ASSERT_TRUE(db.has_value());
+  HogDbDAO dao(RAMDB(std::move(*db)));
+
+  ASSERT_TRUE(dao.write_address_balance(owner, balance).has_value());
+  ASSERT_TRUE(dao.write_bytes(item_key, kValue).has_value());
+  ASSERT_TRUE(dao.commit().has_value());
+
+  AuthChangeSubscriptionManager subscription_manager;
+  BackgroundCommitWorker background_commit_worker(subscription_manager,
+                                                  nullptr);
+  PerThreadARC<BlockTX> block_tx(
+      dao, cost_model, background_commit_worker, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+  invoke_tx.create_savepoint();
+
+  ASSERT_TRUE(invoke_tx
+                  .request_deletion(item_key,
+                                    std::to_underlying(StorageDeltaFlags::None))
+                  .has_value());
+  ASSERT_TRUE(invoke_tx.sync_balance_locks().has_value());
+
+  // The oversized refund is now a recoverable conflict, not a fatal CHECK.
+  auto result = invoke_tx.commit();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), HogDbCode::kConflict);
+}
+
 } // namespace hogd

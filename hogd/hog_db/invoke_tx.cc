@@ -256,7 +256,17 @@ InvokeTX::commit()
         CHECK_GE(released_cost, 0);
 
         if (released_cost > 0) {
-          block_.get().release_balance(key.get_address(), released_cost);
+          // release_balance rejects a refund that would overflow the target
+          // balance (reachable via a recovered, hash-excluded cost model;
+          // #3990). Treat it like any other failed commit: poison the block
+          // below and surface the recoverable error.
+          if (auto r = block_.get().release_balance(key.get_address(),
+                                                    released_cost);
+              !r.has_value()) {
+            commit_error = r.error();
+            failed = true;
+            break;
+          }
         }
       }
     }

@@ -1824,18 +1824,19 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
 }
 
 // Edge case: a native-token balance at (nearly) INT128_MAX must still be able
-// to receive a storage refund at commit. hogdb's release_balance() is
-// infallible -- it CHECK-fails rather than returning an error if the credited
-// refund exceeds the balance's remaining add-capacity (INT128_MAX - base). The
-// mint precompile no longer bounds total supply below INT128_MAX at invoke
-// (that check moved to commit for rv32 parity), so this pins the property that
-// keeps release_balance() safe even at the maximum: an address holding the
-// entire supply as balance has no storage to release, and more generally
+// to receive a storage refund at commit. If the credited refund exceeds the
+// balance's remaining add-capacity (INT128_MAX - base), hogdb's
+// release_balance() rejects the commit with a recoverable conflict rather than
+// committing an overflow (it used to CHECK-fail here; see #3990). The mint
+// precompile no longer bounds total supply below INT128_MAX at invoke (that
+// check moved to commit for rv32 parity), so this pins the property that keeps
+// the honest path clear of that rejection: an address holding the entire
+// supply as balance has no storage to release, and more generally
 // (balance + its locked storage) <= total_supply <= INT128_MAX, so any storage
 // refund it receives is always <= its add-capacity. HOG conservation is what
-// makes the unreachable state (base == INT128_MAX AND a pending refund)
-// unreachable; if that ever regressed, the block-3 delete below would abort
-// the process on the CHECK inside release_balance() rather than committing.
+// makes the state (base == INT128_MAX AND a pending refund) unreachable on
+// honest input; if that ever regressed, the block-3 delete below would fail
+// its commit with kConflict rather than committing.
 //
 // Sequence: block 1 mints INT128_MAX to the whale (the genesis root is the
 // only authorized minter); block 2 has the whale write a bytestring, locking

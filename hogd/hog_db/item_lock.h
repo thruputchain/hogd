@@ -79,7 +79,10 @@ public:
   HogDbStatus<int128_t> commit_change(ItemChange change,
                                       const LockContext &ctx) noexcept;
 
-  void add_committed_balance_credit(int128_t delta);
+  // Credits a post-commit storage refund to a finalized balance lock. Returns
+  // false (writing nothing) when the credit would overflow the committed
+  // balance, so the caller can reject it as a recoverable conflict.
+  [[nodiscard]] bool add_committed_balance_credit(int128_t delta);
 
   HogDbStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;

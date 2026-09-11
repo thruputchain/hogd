@@ -76,7 +76,11 @@ public:
     return 0;
   }
 
-  void add_committed_credit(int128_t delta);
+  // Credits a post-commit storage refund to the committed balance. Returns
+  // false (writing nothing) when the credit would push the committed value
+  // past INT128_MAX, so callers can surface a recoverable conflict instead of
+  // overflowing.
+  [[nodiscard]] bool add_committed_credit(int128_t delta);
 
   HogDbStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
