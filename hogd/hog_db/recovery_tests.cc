@@ -555,6 +555,63 @@ TEST(RecoveryTests, RecoveredOversizedRCQBlockRejectedOnLoad)
   EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
 }
 
+namespace {
+
+// Persists `hash` as the address metadata of a fixed address, reopens the
+// database, and returns what the DAO makes of the recovered row.
+HogDbStatus<DeployedContractHash>
+reopen_and_read_address_metadata(const DeployedContractHash &hash)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+  EXPECT_TRUE(dir.has_value());
+  if (!dir.has_value())
+    return HogDbError(HogDbCode::kInternal);
+
+  Address address = ContractAddress{7};
+
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kDefaultHeapSize, 0);
+    EXPECT_TRUE(db);
+    if (!db)
+      return HogDbError(HogDbCode::kInternal);
+    auto dao = HogDbDAO(RAMDB(std::move(*db)));
+    EXPECT_TRUE(dao.write_address_metadata(address, hash).has_value());
+    EXPECT_TRUE(dao.commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kDefaultHeapSize, 0);
+  EXPECT_TRUE(db);
+  if (!db)
+    return HogDbError(HogDbCode::kInternal);
+  auto dao = HogDbDAO(RAMDB(std::move(*db)));
+  return dao.read_address_metadata(address);
+}
+
+} // namespace
+
+// XDR decodes an enum by cast, so a recovered contract_type outside the enum
+// parses. The DAO rejects it as kCorruption on load (#2964).
+TEST(RecoveryTests, RecoveredKnownContractTypeAcceptedOnLoad)
+{
+  auto recovered = reopen_and_read_address_metadata(DeployedContractHash{
+      .hash = {}, .contract_size = 10, .contract_type = ContractType::kRv32});
+  ASSERT_TRUE(recovered.has_value());
+  EXPECT_EQ(recovered->contract_type, ContractType::kRv32);
+}
+
+TEST(RecoveryTests, RecoveredUnknownContractTypeRejectedOnLoad)
+{
+  auto recovered = reopen_and_read_address_metadata(
+      DeployedContractHash{.hash = {},
+                           .contract_size = 10,
+                           .contract_type = static_cast<ContractType>(0)});
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
 // First touch prices the key through the DAO; corrupt state fail-stops
 // there with the key in the message.
 TEST(RecoveryTests, RecoveredCorruptRCQMetadataDiesOnFirstTouch)
