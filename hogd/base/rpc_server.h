@@ -24,10 +24,10 @@
 namespace hogd {
 
 struct RpcNoCatch {};
-inline constexpr RpcNoCatch rpc_no_catch;
+inline constexpr RpcNoCatch kRpcNoCatch;
 
 template<typename IMPL, typename VERSMETA = IMPL::rpc_service,
-         bool NO_CATCH = false>
+         bool NoCatch = false>
 requires x23::implements_async_rpc<IMPL *, VERSMETA>
 class RpcServer : public x23::DestroyInhibit {
 public:
@@ -47,11 +47,11 @@ public:
   {}
 
   template<typename... Args> requires std::constructible_from<Impl, Args...>
-  RpcServer(RpcNoCatch, x23::CoroPoll &cp, Args &&...args)
+  RpcServer(RpcNoCatch /*unused*/, x23::CoroPoll &cp, Args &&...args)
     : cp_(cp), impl_(std::forward<Args>(args)...)
   {}
   template<typename... Args> requires std::constructible_from<Impl, Args...>
-  RpcServer(RpcNoCatch, Args &&...args)
+  RpcServer(RpcNoCatch /*unused*/, Args &&...args)
     : cp_(default_coropoll()), impl_(std::forward<Args>(args)...)
   {}
 
@@ -114,7 +114,7 @@ public:
           c->max_message_size = self->max_message_size_;
           self->fdgen_->insert_or_assign(c->get_fd(),
                                          self->cp_.generation(c->get_fd()));
-          if constexpr (NO_CATCH)
+          if constexpr (NoCatch)
             c->template nocatch_server<VersMeta>(ImplPtr(*self));
           else
             c->template server<VersMeta>(ImplPtr(*self));
