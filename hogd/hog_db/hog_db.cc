@@ -276,13 +276,15 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--gateway-max-items" && i + 1 < argc) {
-      gateway_read_limits.max_items = hogd::parse_integer_arg<size_t>(
-          "--gateway-max-items", argv[++i], argv, usage);
+      gateway_read_limits.max_items =
+          hogd::parse_integer_arg<size_t>("--gateway-max-items", argv[++i],
+                                          argv, usage);
       continue;
     }
     if (arg == "--gateway-max-response-bytes" && i + 1 < argc) {
-      gateway_read_limits.max_response_bytes = hogd::parse_integer_arg<size_t>(
-          "--gateway-max-response-bytes", argv[++i], argv, usage);
+      gateway_read_limits.max_response_bytes =
+          hogd::parse_integer_arg<size_t>("--gateway-max-response-bytes",
+                                          argv[++i], argv, usage);
       continue;
     }
     if (arg == "--metrics-port" && i + 1 < argc) {
@@ -334,8 +336,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   if (!gateway_read_limits.valid()) {
-    std::println(stderr, "Gateway read limits require a positive item count "
-                         "and response bytes between 16 and {}",
+    std::println(stderr,
+                 "Gateway read limits require a positive item count "
+                 "and response bytes between 16 and {}",
                  hogd::GatewayReadLimits::kMaxResponseBytes);
     usage(argv);
   }
@@ -347,4 +350,3 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                            exec_port, mempool_port, auth_port, gateway_port,
                            metrics_port, gateway_read_limits);
 };
-

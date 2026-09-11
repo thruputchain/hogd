@@ -145,8 +145,8 @@ TEST(HogDbGatewayRpcTest, DuplicateBytestringsCountPaddingAndEachCopy)
   AddressAndKey query{.address = {}, .key = std::move(key)};
   const auto db_key = make_contract_data_key(make_item_key(query));
   const std::string value(1025, 'x'); // Includes three bytes of XDR padding.
-  ASSERT_TRUE(dao.get_ramdb().put(db_key, kBytes,
-                                  std::as_bytes(std::span(value))));
+  ASSERT_TRUE(
+      dao.get_ramdb().put(db_key, kBytes, std::as_bytes(std::span(value))));
   RPCContext ctx(std::move(dao), nullptr);
   AddressAndKeyBatch batch;
   batch.push_back(query);
@@ -322,4 +322,3 @@ TEST(HogDbGatewayRpcTest, CommittedReadStaleDetectsTipAdvance)
 }
 
 } // namespace hogd
-

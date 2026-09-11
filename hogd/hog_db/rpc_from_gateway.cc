@@ -221,4 +221,3 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 }
 
 } // namespace hogd
-
