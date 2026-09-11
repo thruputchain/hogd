@@ -145,7 +145,6 @@ private:
   bool bound_{};
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
-  bool nocatch_{};
 
   void eof() noexcept
   {

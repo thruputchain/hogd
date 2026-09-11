@@ -132,6 +132,7 @@ add_x23_gtest(xdr)
 add_x23_gtest(refcnt)
 add_x23_gtest(vec)
 add_x23_gtest(rpc_common)
+add_x23_gtest(rpc_nocatch)
 add_x23_gtest(debug)
 add_x23_gtest(progname)
 
@@ -147,6 +148,10 @@ set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 # wakeup, which hangs rather than merely running slowly, so the larger
 # budget still catches what the test is for.
 set_tests_properties(threadpool PROPERTIES TIMEOUT 60)
+# rpc_nocatch's death tests run in the threadsafe style, so each one re-execs
+# this binary; three of those plus the RPC round trips need more than the 10s
+# the short tests get.
+set_tests_properties(rpc_nocatch PROPERTIES TIMEOUT 60)
 endif()
 
 if(BENCHMARK_PATH)

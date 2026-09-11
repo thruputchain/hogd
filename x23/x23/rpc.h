@@ -239,8 +239,17 @@ private:
               self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
               co_return make_record(rmsg, res);
             }
-          } catch (const std::exception &e) {
-            co_return self.error(e);
+          } catch (const std::conditional_t<NoCatch, PrivateType,
+                                            std::exception> &e) {
+            // Same suppression as the synchronous catch below: a handler
+            // that throws after suspending is no less of a bug for having
+            // suspended, so NoCatch has to reach this catch too or it only
+            // covers handlers that never yield -- which is nearly none of
+            // the real ones.
+            if constexpr (NoCatch)
+              std::unreachable();
+            else
+              co_return self.error(e);
           }
         }(*this, std::move(awaitable));
       }
