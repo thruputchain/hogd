@@ -45,6 +45,10 @@ make_tree(size_t depth, size_t width)
   return root;
 }
 
+// Each active entry into an is_recursive_xdr struct/union consumes one level;
+// returning releases that level. Non-recursive envelopes consume none. This
+// preserves the current classification of recursive types, including every
+// struct/union participating in a mutual-recursion cycle.
 class RecursionComposition : public testing::TestWithParam<DecodePath> {
 protected:
   static bool cxs()
@@ -265,6 +269,48 @@ TEST_P(RecursionComposition, RecursiveUnionBranchesRestoreDepth)
   expect_accepts(expression, 3);
   expect_rejects(expression, 2);
   expect_accepts(std::tuple{expression, expression}, 3);
+}
+
+TEST_P(RecursionComposition, MutualRecursionCountsActiveStructAndUnionEntries)
+{
+  static_assert(is_recursive_xdr<MutualFrame>);
+  static_assert(is_recursive_xdr<MutualBody>);
+  for (size_t frames : {1UZ, 2UZ, 4UZ}) {
+    SCOPED_TRACE(frames);
+    MutualFrame root;
+    auto *frame = &root;
+    for (size_t i = 0; i < frames; ++i) {
+      frame->body.which(0);
+      frame->body.success().x = static_cast<int>(i);
+      if (i + 1 < frames) {
+        frame->body.success().child.emplace();
+        frame = &*frame->body.success().child;
+      }
+    }
+    // Each frame enters MutualFrame, MutualBody, and its recursive success
+    // struct. These all count while active, rather than one per cycle.
+    const size_t limit = 3 * frames;
+    expect_accepts(root, limit);
+    expect_rejects(root, limit - 1);
+    expect_accepts(std::tuple{root, root}, limit);
+  }
+}
+
+TEST_P(RecursionComposition, RecursiveUnionVoidArmReleasesItsLevel)
+{
+  MutualFrame empty;
+  empty.body.which(1); // default void arm: frame + union, no success struct
+  expect_accepts(empty, 2);
+  expect_rejects(empty, 1);
+  expect_accepts(std::tuple{empty, empty}, 2);
+
+  MutualFrame populated;
+  populated.body.which(0);
+  populated.body.success().x = 42;
+  expect_accepts(populated, 3);
+  expect_rejects(populated, 2);
+  expect_accepts(std::tuple{empty, populated}, 3);
+  expect_accepts(std::tuple{populated, empty}, 3);
 }
 
 TEST_P(RecursionComposition, FailedDecodeDoesNotAffectNextCall)
