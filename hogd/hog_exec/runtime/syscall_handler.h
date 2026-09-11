@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -48,6 +49,17 @@
 namespace hogd {
 
 class StorageSnapshotCache;
+
+// What a storage read found, and what its database load cost.
+//
+// [load_gas] is nonzero only when the read was this transaction's first touch
+// of the key, and is set whether or not [result] is an error: a read of a
+// missing key, or of one holding another type, has already gone to the
+// database by the time it can tell. Callers add it to the gas they charge.
+template<typename T> struct StorageRead {
+  SyscallStatus<T> result;
+  GasAmount load_gas;
+};
 
 // TODO(geoff): root_invoke() validates any incoming contract code blobs.
 // We may later do that validation preemptively in the coordinator.
@@ -359,7 +371,7 @@ public:
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
-  x23::Async<SystemStatus<SyscallStatus<const Bytestring *>>>
+  x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
   get_bytestring(StorageKeyContractData const &storage_key);
   x23::Async<SystemStatus<SyscallStatus<void>>>
   set_bytestring(StorageKeyContractData const &storage_key,
@@ -372,7 +384,7 @@ public:
   // Otherwise, returns a tx-local written set value, if one exists,
   // or nullopt if not.
   x23::Async<
-      SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>>
+      SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
   get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
 
   x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -393,7 +405,7 @@ public:
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
-  x23::Async<SystemStatus<SyscallStatus<int128_t>>>
+  x23::Async<SystemStatus<StorageRead<int128_t>>>
   get_native_token_balance(ContractAddress const &contract_address);
   x23::Async<SystemStatus<SyscallStatus<void>>>
   modify_native_token_balance(ContractAddress const &contract_address,
@@ -503,7 +515,22 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
+  // Keys this transaction has loaded, rolled-back frames included. See
+  // note_item_load().
+  std::unordered_set<FrameItemKey, FrameItemKeyHash> loaded_keys_;
+
   inline static bool debug_force_commit_abort_{false};
+
+  // Record that this transaction is loading [key], and return what that load
+  // costs: kDBRPCCost the first time, nothing after. Nodiscard because the
+  // only correct thing to do with a load is bill it.
+  //
+  // A load is the transaction's first touch: the view is created by the frame
+  // walk and populated once, and every later touch finds it. A frame that
+  // rolls back drops its views, so a touch after that loads again -- but the
+  // block's snapshot cache is not rolled back and serves it, so that is not a
+  // second database read and must not be charged as one.
+  [[nodiscard]] GasAmount note_item_load(FrameItemKey const &key);
 
   // True if the given replay uniquifier has already expired at the executing
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.

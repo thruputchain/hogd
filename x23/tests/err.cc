@@ -4,6 +4,7 @@
 #include <format>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <variant>
@@ -14,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "x23/err.h"
+#include "x23/serialize_cxs.h"
 #include "x23/sockio.h"
 
 using namespace x23;
@@ -182,11 +184,12 @@ TEST(MultiError, TcpConnectRefused)
   auto addr = HostPort{"127.0.0.1", 0}.to_addr().value();
   UniqueFd reserved{socket(AF_INET, SOCK_STREAM, 0)};
   ASSERT_TRUE(reserved);
-  // Keep the port bound without listening so another process cannot take it.
   ASSERT_EQ(bind(reserved.get(), reinterpret_cast<const sockaddr *>(&addr),
                  sockaddr_len(addr)),
             0);
   auto port = get_port(local_addr(reserved));
+  // Darwin drops SYNs to bound, non-listening sockets instead of refusing.
+  reserved.reset();
   auto result = tcpconnect("127.0.0.1", port);
   ASSERT_FALSE(result);
   ASSERT_TRUE(std::holds_alternative<Errno>(result.error()));
@@ -208,4 +211,22 @@ TEST(MultiError, TcpConnectSuccess)
   ASSERT_TRUE(client);
   EXPECT_EQ(client.get(), prepared_fd);
   EXPECT_EQ(get_port(remote_addr(client)), port);
+}
+
+TEST(ExpectedError, CxsValueThrowsSystemError)
+{
+  using enum CxsErrorCode;
+  for (auto code : {kTruncated, kNonCanonical, kBadDiscriminant,
+                    kLengthExceeded, kRecursionLimit, kTrailingData}) {
+    CxsError error{code};
+    check_value_overloads<int>(error);
+    check_value_overloads<void>(error);
+    EXPECT_EQ(error, code);
+    EXPECT_EQ(error, error.error_code());
+    EXPECT_EQ(code, error.error_code());
+    EXPECT_NE(error, Errno{error.raw_code()}.error_code());
+    EXPECT_EQ(std::string_view(error.category().name()), "cxs");
+  }
+  EXPECT_EQ(CxsError{CxsErrorCode(999)}.error_code().message(),
+            "unknown cxs error");
 }

@@ -19,6 +19,7 @@
 #include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -606,6 +607,81 @@ TEST_F(ViewTest, ViewTryInvokeFailsWhenSuppliedFalse)
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
   EXPECT_EQ(result.result().output.status_code(),
             InvocationFrameStatusCode::Return);
+}
+
+// The child TryInvoke depth cap holds in a view exactly as it does in
+// proposal and validation: with every TryInvoke bit defaulting to true, a
+// view still admits only kMaxSavepointDepth - 1 successful children, and the
+// next one fails deterministically. The same looper runs under proposal in
+// TryInvokeTest.TryInvokeHitsSavepointDepthLimit.
+TEST_F(ViewTest, ViewTryInvokeHitsSavepointDepthLimit)
+{
+  static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
+  static constexpr ContractAddress kCallerAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(11);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
+  fns_setup.emplace(0,
+                    [](NativeSyscallContext & /*unused*/)
+                        -> x23::Async<InvokeStatus<void>> {
+                      co_return InvokeStatus<void>{};
+                    });
+  fns_setup.emplace(
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        uint32_t successes = 0;
+        for (uint32_t i = 0; i < kChildCap + 1; i++) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          CopyableInvokeOutputs outputs{};
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddr, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, outputs);
+          if (!r.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          // Every child runs (the depth-cap overflow is converted to a
+          // deterministic failure, so the syscall still returns
+          // kSyscallErrorCodeNone); a child committed only when its
+          // frame_status is Return.
+          if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+              outputs.frame_status == InvocationFrameStatusCode::Return) {
+            successes++;
+          }
+        }
+        ReturnBuffer out;
+        out.resize(sizeof(successes));
+        std::memcpy(out.data(), &successes, sizeof(successes));
+        ctx.handler().set_return_buffer(std::move(out), false);
+        co_return InvokeStatus<void>{};
+      });
+  NativeViewSetup setup(std::move(fns_setup));
+
+  deploy_native(kCallerAddr);
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCallerAddr,
+      .entrypoint = entrypoint_from_method_id(1),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto result = run_view(make_query(invocation), *setup.context);
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  ASSERT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  auto const &buf = result.result().output.return_buffer();
+  ASSERT_EQ(buf.size(), sizeof(uint32_t));
+  uint32_t successes = 0;
+  std::memcpy(&successes, buf.data(), sizeof(successes));
+  EXPECT_EQ(successes, kChildCap)
+      << "a view must admit exactly kMaxSavepointDepth - 1 child TryInvokes";
 }
 
 // WAI: view mode defaults missing TryInvoke bits to true, so a caller that

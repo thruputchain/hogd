@@ -236,6 +236,7 @@ enable_testing()
 add_subdirectory(x23c)
 add_subdirectory(x23)
 add_subdirectory(tests)
+include(cmake/coverage.cmake)
 
 set(X23_CMAKE_ECHO_COLOR_ARGS --cyan)
 if(CMAKE_GENERATOR MATCHES "Makefiles")

@@ -95,7 +95,7 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0xbd9a5e2f5bf216fdULL);
+static_assert(kGasScheduleDigest == 0x9019deb606f5759bULL);
 
 // The gas schedules an artifact is allowed to declare. The first entry is what
 // this build meters with and what a current lowerer stamps; any further entry
@@ -288,7 +288,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x002a3cb88d80b403ULL);
+static_assert(kArtifactFormatFingerprint == 0xd26fde3ac8a39141ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 

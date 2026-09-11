@@ -131,7 +131,7 @@ private:
   static void *&next(void *ptr) noexcept { return *static_cast<void **>(ptr); }
 };
 
-// A "non-movable vector", can contain up to about 30 GiB of items T
+// A "non-movable vector. " Can contain up to about 30 GiB of items T
 // indexed by an integer.  Items are never moved, so pointers and
 // references to items remain valid until the NMVec is resized below
 // their index or destroyed.  Unlike a deque, it is safe to access
@@ -199,14 +199,14 @@ public:
     size_.store(other.size_.exchange(0, std::memory_order_relaxed),
                 std::memory_order_release);
   }
-  ~NMVec() { resize(0); }
+  ~NMVec() { clear(); }
 
   // Not thread-safe with respect to resizing.
   NMVec &operator=(NMVec &&other) noexcept
   {
     if (&other == this)
       return *this;
-    resize(0);
+    clear();
     for (unsigned i = 0; i < kNumChunks; ++i)
       chunks_[i].store(other.chunks_[i].exchange(nullptr,
                                                  std::memory_order_relaxed),
@@ -403,6 +403,15 @@ private:
   static constexpr size_t chunk_start(unsigned chunkno) noexcept
   {
     return chunk_size(chunkno) - kMinChunk;
+  }
+
+  void clear() noexcept
+  {
+    resize(0);
+    // Failed construction can leave allocated chunks beyond the logical size.
+    for (unsigned i = 0; i < kNumChunks; ++i)
+      if (T *p = chunks_[i].exchange(nullptr, std::memory_order_relaxed))
+        a.deallocate(p, chunk_size(i));
   }
 
   size_t take_size() noexcept

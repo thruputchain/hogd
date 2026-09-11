@@ -266,8 +266,7 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   // Strict credit, mirroring the reference's add_to_balance: reject at
   // invoke with TooLarge when the running balance (committed base + net
   // in-tx delta) cannot absorb the credit, before staging any state.
-  auto receiver_balance =
-      co_await ctx.handler().get_native_token_balance(receiver);
+  auto receiver_balance = co_await ctx.native_token_balance(receiver);
   if (!receiver_balance) {
     co_return receiver_balance.error().to_invoke_error();
   }
@@ -334,7 +333,7 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
 
   // Match the reference ERC20's strict balance debit: reject before staging
   // any state if the requested burn exceeds the owner's running balance.
-  auto owner_balance = co_await ctx.handler().get_native_token_balance(owner);
+  auto owner_balance = co_await ctx.native_token_balance(owner);
   if (!owner_balance) {
     co_return owner_balance.error().to_invoke_error();
   }
@@ -405,7 +404,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   // non_negative_int_try_strict_inc: the running balance (committed base +
   // net in-tx delta) may not go below zero. A debit landing exactly at
   // zero is accepted -- the reference's only rejection is `total < 0`.
-  auto owner_avail = co_await ctx.handler().get_native_token_balance(*owner);
+  auto owner_avail = co_await ctx.native_token_balance(*owner);
   if (!owner_avail.has_value()) {
     co_return owner_avail.error().to_invoke_error();
   }
@@ -493,7 +492,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   // Strict per-debit balance check; see transfer_impl for the semantics
   // (fail iff amount > committed base + net in-tx delta; exact-zero
   // landings succeed).
-  auto owner_avail = co_await ctx.handler().get_native_token_balance(owner);
+  auto owner_avail = co_await ctx.native_token_balance(owner);
   if (!owner_avail.has_value()) {
     co_return owner_avail.error().to_invoke_error();
   }
@@ -718,8 +717,7 @@ make_native_token_contract()
         if (!ctx.consume_gas(1)) {
           co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
-        auto balance =
-            co_await ctx.handler().get_native_token_balance(contract_address);
+        auto balance = co_await ctx.native_token_balance(contract_address);
         if (!balance.has_value()) {
           co_return balance.error().to_invoke_error();
         }
@@ -746,8 +744,7 @@ make_native_token_contract()
           co_return caller_address.error();
         }
 
-        auto balance =
-            co_await ctx.handler().get_native_token_balance(*caller_address);
+        auto balance = co_await ctx.native_token_balance(*caller_address);
         if (!balance.has_value()) {
           co_return balance.error().to_invoke_error();
         }

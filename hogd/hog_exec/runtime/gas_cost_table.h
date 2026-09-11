@@ -121,6 +121,28 @@ constexpr static uint64_t kVerifySignatureBlockCost = 131;
 // docs/rv32/rv32-gas-calibration.md.
 constexpr static uint64_t kStorageAccessCost = 150;
 
+// One read from hog_db, charged wherever an item view loads.
+//
+// A load is the transaction's first touch of that key: the view is created
+// from the frame walk and populated once, and every later touch in the same
+// transaction finds it. Which makes this deterministic -- it depends only on
+// this transaction's own earlier syscalls, which every validator replays the
+// same way. Whether the load then finds the block's shared snapshot cache warm
+// does NOT, since that turns on which transactions the validator scheduled
+// first, so the charge is the worst case: every load pays as though it went to
+// the database.
+//
+// 55.2 us measured on hog10, +/- 5.4. This is the dear end of that rather than
+// the mean, because the spread is ~10% where a warm row's is 0.2% -- a wall
+// clock RPC varies in a way more repetitions do not remove. It lands a cold
+// NNInt read at a round 37500 with the base and the access, the way
+// kStorageAccessCost lands a warm one at 200.
+//
+// It is a floor in one respect: the measurement's hog_db is in-process over a
+// local socket, so a chain running its executor and database on different
+// hosts pays a hop this does not.
+constexpr static uint64_t kDBRPCCost = 37300;
+
 // What copying a bytestring costs, per block, on top of the storage access
 // every bytestring call already pays. A block rather than a per-byte rate
 // because the measured rate is a fraction of a gas unit, and a fraction needs
@@ -234,13 +256,14 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 11> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 12> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
     {.name = u8"VerifySignatureBase", .cost = kVerifySignatureBaseCost},
     {.name = u8"VerifySignatureBlock", .cost = kVerifySignatureBlockCost},
     {.name = u8"StorageAccess", .cost = kStorageAccessCost},
+    {.name = u8"DBRPC", .cost = kDBRPCCost},
     {.name = u8"BytestringBlockBytes", .cost = kBytestringBlockBytes},
     {.name = u8"BytestringWriteBlock", .cost = kBytestringWriteBlockCost},
     {.name = u8"BytestringReadBlock", .cost = kBytestringReadBlockCost},

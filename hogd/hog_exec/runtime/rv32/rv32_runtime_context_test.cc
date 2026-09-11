@@ -74,6 +74,10 @@ constexpr uint32_t kEffectEventDataAddress = 544;
 constexpr uint32_t kEffectMemoryBytes = 768;
 constexpr GasAmount kEnoughGas = 1000;
 constexpr GasAmount kParityGas = 10'000;
+// For the tests that read storage: a first touch of a key costs kDBRPCCost on
+// top of the access, which is several times kParityGas on its own. Separate so
+// that raising it does not move the traces the parity tests pin.
+constexpr GasAmount kStorageReadGas = 200'000;
 
 constexpr std::string_view kEffectStorageKey = "rv32_parity_key";
 constexpr std::string_view kEffectStorageValue = "rv32 parity bytes";
@@ -1491,7 +1495,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
   Calldata increment_calldata_bytes = std::move(*increment_calldata);
 
   auto increment_handler = make_new_system_call_handler(
-      make_root_transaction(kParityGas, increment_method,
+      make_root_transaction(kStorageReadGas, increment_method,
                             std::move(increment_calldata_bytes), 1),
       rv32_context);
   increment_handler.enable_tracing();
@@ -1516,10 +1520,9 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
   // NNInt deltas are visible to a later root transaction after block commit.
   advance_block();
 
-  auto get_handler =
-      make_new_system_call_handler(make_root_transaction(kParityGas, get_method,
-                                                         Calldata{}, 2),
-                                   rv32_context);
+  auto get_handler = make_new_system_call_handler(
+      make_root_transaction(kStorageReadGas, get_method, Calldata{}, 2),
+      rv32_context);
   get_handler.enable_tracing();
   const auto get_result = get_handler.root_invoke()();
   ASSERT_TRUE(get_result.is_root_success())
@@ -1586,7 +1589,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
   install_contract(contract);
 
   auto handler = make_new_system_call_handler(
-      make_root_transaction(kParityGas, smoke_method_id), rv32_context);
+      make_root_transaction(kStorageReadGas, smoke_method_id), rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
 

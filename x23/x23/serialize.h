@@ -655,19 +655,21 @@ template<typename X>
 concept contains_recursive_xdr =
     is_xdr_type<X> && detail::xdr_contains_recursive<X>();
 
-// Default number of stack frames allowed corresponding to recursive
-// structs and unions.
+// Default budget of recursive struct/union visits per decode, across all
+// branches (not maximum nesting depth). Override per call when needed; changes
+// to this process-wide default must not race with deserialization.
 extern size_t deserialization_recursion_limit;
 
 namespace detail {
 
 struct DeserializationRecursionChecker {
-  size_t recursion_limit_ = deserialization_recursion_limit;
+  size_t recursion_limit_;
+  size_t initial_recursion_limit_;
   void recurse(this auto &&self)
   {
     if (!self.recursion_limit_) [[unlikely]]
       self.raise("x23::Deserializer: exceeded recursion limit of {}",
-                 deserialization_recursion_limit);
+                 self.initial_recursion_limit_);
     --self.recursion_limit_;
   }
 };
@@ -680,13 +682,18 @@ struct Deserializer
   const uint8_t *const e;  // end of valid input (might read beyond)
   const uint8_t *const ee; // end of buffer (shouldn't read beyond)
 
-  Deserializer(BufViewEnd b) noexcept
-    : Deserializer(b.data(), b.data() + b.size(), b.bufend())
+  Deserializer(BufViewEnd b, size_t recursion_limit) noexcept
+    : Deserializer(b.data(), b.data() + b.size(), b.bufend(), recursion_limit)
   {}
-  Deserializer(const uint8_t *p0, const uint8_t *e0,
-               const uint8_t *ee0) noexcept
+  Deserializer(const uint8_t *p0, const uint8_t *e0, const uint8_t *ee0,
+               size_t recursion_limit) noexcept
     : p(p0), e(e0), ee(ee0)
-  {}
+  {
+    if constexpr (CheckRecursion) {
+      this->recursion_limit_ = recursion_limit;
+      this->initial_recursion_limit_ = recursion_limit;
+    }
+  }
 
   // Check for buffer overrun at end of deserialization--must not use
   // Deserializer without eventually calling this.  (Since it throws,
@@ -932,9 +939,10 @@ struct Deserializer
 
 template<is_xdr_type Xout>
 size_t
-deserialize_from(Xout *out, BufViewEnd buf)
+deserialize_from(Xout *out, BufViewEnd buf,
+                 size_t recursion_limit = deserialization_recursion_limit)
 {
-  detail::Deserializer<contains_recursive_xdr<Xout>> d(buf);
+  detail::Deserializer<contains_recursive_xdr<Xout>> d(buf, recursion_limit);
   d.template go<true>(*out);
   d.check();
   return d.p - buf.data();
@@ -942,12 +950,13 @@ deserialize_from(Xout *out, BufViewEnd buf)
 
 template<is_xdr_type Xout>
 inline void
-deserialize(Xout *out, BufViewEnd buf)
+deserialize(Xout *out, BufViewEnd buf,
+            size_t recursion_limit = deserialization_recursion_limit)
 {
   if (buf.size() % 4)
     throw XdrBadInput("input not multiple of 4 bytes deserializing {}",
                       xdr_type_name<Xout>());
-  if (deserialize_from(out, buf) != buf.size())
+  if (deserialize_from(out, buf, recursion_limit) != buf.size())
     throw XdrBadInput("leftover bytes deserializing {}", xdr_type_name<Xout>());
 }
 

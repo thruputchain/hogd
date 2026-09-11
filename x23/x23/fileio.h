@@ -3,6 +3,7 @@
 #pragma once
 
 #include <filesystem>
+#include <utility>
 
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -72,9 +73,11 @@ template<is_bytevec BufT>
 std::expected<size_t, Errno>
 readall(BorrowedFd fd, BufT *buf)
 {
-  if (auto sb = seek_bounds(fd); sb && sb->cur != sb->end)
-    // Some /proc files let you seek beyond the end, so set eofok
-    // Other /proc files don't let you seek to the end, so also ignore bounds
+  if (auto sb = seek_bounds(fd);
+      sb && sb->cur < sb->end &&
+      std::cmp_less_equal(sb->end - sb->cur, buf->max_size() - buf->size()))
+    // Files can shrink after seeking, so set eofok. Directory and pseudo-file
+    // offsets need not be byte counts; ignore unusable bounds.
     return fullread(fd, buf, sb->end - sb->cur, true);
 
   size_t nread{};

@@ -96,7 +96,7 @@ stacktrace(unsigned indent, std::string ret)
   if (n > 0) {
     char **syms = ::backtrace_symbols(bt, n);
     for (int i = 0; i < n; ++i) {
-      ret += "  ";
+      ret.append(indent, ' ');
       ret += syms[i];
       ret += '\n';
     }
