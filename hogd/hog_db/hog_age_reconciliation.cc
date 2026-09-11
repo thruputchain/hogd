@@ -122,16 +122,10 @@ reconcile_address_hog_age_helper(const Address &address,
       return HogDbError(HogDbCode::kInternal);
     }
   }
-  // Every group average is a mean of block heights at or before the height
-  // that produced the row, so no honest average can exceed the recovered tip.
-  // A tampered row can still carry a future to-schedule average that XDR, the
-  // count checks, and the nonnegativity check above all accept, and the
-  // reconcile below preserves it (the deficit case copies the row and rewrites
-  // only the count). The mempool scheduler then folds that future age into its
-  // ascending ready-account key (get_account_key), sorting the account behind
-  // every account with a valid in-domain age and silently starving it of
-  // finite block quota. Reject it here, against the address that carries it,
-  // rather than letting the corruption skew scheduling later (#3952).
+  // An honest average never exceeds the recovered tip, but a tampered row can
+  // carry a future to-schedule age that the checks above accept and reconcile
+  // preserves; the scheduler then sorts it ahead in its ascending ready-account
+  // key and starves the account of finite block quota (#3952).
   for (size_t group = 0; group < kHogAgeNumGroups; ++group) {
     if (age.average_ages[group] > current_height) {
       error("address 0x{} has a corrupt hog age row: average age {} in group "
@@ -223,11 +217,8 @@ reconcile_address_hog_age(HogDbDAO &db, const Address &address,
 HogDbStatus<void>
 reconcile_startup_hog_ages(HogDbDAO &db)
 {
-  // average_ages are validated against the recovered tip height (see
-  // reconcile_address_hog_age_helper). read_dbtip returns kNotFound on a fresh
-  // database that never committed a block; such a database has no committed
-  // balances to reconcile, so leave the bound unbounded there. A persisted tip
-  // always carries a committed (nonnegative) height.
+  // Upper bound for the average-age validation in the helper. A fresh database
+  // (no committed tip) has no balances to reconcile, so leave it unbounded.
   BlockHeight current_height = std::numeric_limits<BlockHeight>::max();
   HogDbStatus<DbTip> tip = db.read_dbtip();
   if (tip.has_value()) {
