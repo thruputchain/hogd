@@ -24,6 +24,10 @@
 
 namespace hogd {
 
+// Local service policy, not a consensus execution parameter. Each retry gets
+// this ceiling; a request can use at most kMaxViewAttempts such budgets.
+inline constexpr std::uint64_t kDefaultMaxViewGas = 10'000'000;
+
 // Executor-owned read-only invocation server exposed to the public RPC gateway.
 // The response height is captured from the DbTip used to construct the
 // execution snapshot for the successful attempt.
@@ -32,7 +36,8 @@ public:
   using rpc_service = ViewGateway1;
 
   ViewGatewayRpc(std::string const &db_executor_address,
-                 std::string const &event_host, std::uint16_t event_exec_port);
+                 std::string const &event_host, std::uint16_t event_exec_port,
+                 std::uint64_t max_view_gas = kDefaultMaxViewGas);
 
   static ViewGatewayIntroOutcome
   viewgateway_intro(ProtocolCommit const &protocol);
@@ -110,6 +115,7 @@ private:
 
   std::atomic<bool> shutdown_flag_ = false;
   std::atomic<bool> refresh_flag_ = false;
+  const std::uint64_t max_view_gas_;
   DatabaseProxy db_proxy_;
   EventServerProxy event_server_proxy_;
 
@@ -132,8 +138,9 @@ class ViewGatewayServer : public RpcServer<ViewGatewayRpc> {
 public:
   ViewGatewayServer(std::string const &db_executor_address,
                     std::string const &event_host,
-                    std::uint16_t event_exec_port)
-    : RpcServer(db_executor_address, event_host, event_exec_port)
+                    std::uint16_t event_exec_port,
+                    std::uint64_t max_view_gas = kDefaultMaxViewGas)
+    : RpcServer(db_executor_address, event_host, event_exec_port, max_view_gas)
   {}
 };
 
@@ -141,6 +148,9 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw);
 
-TransactionViewQuery normalize_public_view_query(TransactionViewQuery query);
+TransactionViewQuery normalize_public_view_query(
+    TransactionViewQuery query,
+    std::uint64_t max_view_gas = kDefaultMaxViewGas);
 
 } // namespace hogd
+

@@ -54,6 +54,18 @@ make_query()
   };
 }
 
+TEST(ViewGatewayRpc, CapsCallerGasWithoutIncreasingSmallerBudgets)
+{
+  for (uint64_t requested : {uint64_t{0}, uint64_t{42}, uint64_t{100},
+                             std::numeric_limits<uint64_t>::max()}) {
+    auto query = make_query();
+    query.invocation.gas_limit = requested;
+    auto normalized = normalize_public_view_query(std::move(query), 100);
+    EXPECT_EQ(normalized.invocation.gas_limit,
+              requested > 100 ? 100 : requested);
+  }
+}
+
 TEST(ViewGatewayRpc, MapsRawOkOutputs)
 {
   for (InvocationFrameStatusCode status :
@@ -210,6 +222,24 @@ public:
 
   x23::Defer<> force_commit_ = SystemCallHandler::force_commit_or_abort();
 };
+
+TEST_F(ViewGatewayRefreshTest, ConfiguredGasCeilingAppliesToExecution)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost",
+                         framework_.get_event_exec_port(), 1);
+
+  // The caller requests UINT64_MAX. One gas cannot pay for read_value's
+  // storage access, so this must fault rather than return the stored value.
+  auto result = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(result.payload().output.status_code(),
+            InvocationFrameStatusCode::Fault);
+  gateway.shut_down();
+}
 
 TEST_F(ViewGatewayRefreshTest, ViewRefreshesAfterCommittedBlock)
 {
@@ -397,3 +427,4 @@ TEST_F(ViewGatewayRefreshTest, ViewNormalizesFlagsEndToEnd)
 
 } // namespace
 } // namespace hogd
+

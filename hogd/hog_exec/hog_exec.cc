@@ -53,7 +53,7 @@ hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
               uint16_t mempool_port, uint16_t metrics_port,
               const std::optional<std::string> &db_executor_addr,
               const std::optional<std::string> &event_executor_addr,
-              std::optional<uint16_t> view_gateway_port)
+              std::optional<uint16_t> view_gateway_port, uint64_t max_view_gas)
 {
   init_hog_exec_metrics();
 
@@ -89,7 +89,7 @@ hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
     view_gateway_server =
         std::make_unique<ViewGatewayServer>(*db_executor_addr,
                                             event_executor.host,
-                                            event_executor.port);
+                                            event_executor.port, max_view_gas);
     const uint16_t actual_view_gateway_port = view_gateway_server->start_server(
         make_bind_host_port(bind_ip, *view_gateway_port));
     CHECK(actual_view_gateway_port == *view_gateway_port ||
@@ -119,7 +119,8 @@ print_usage(char *argv[])
                "[--metrics-port <port>] "
                "[--db-executor-addr <host:port> "
                "--event-executor-addr <host:port> "
-               "--view-gateway-port <port>] [-h|--help] [--version]",
+               "--view-gateway-port <port>] [--max-view-gas <gas>] "
+               "[-h|--help] [--version]",
                argv[0]);
 }
 
@@ -176,6 +177,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::optional<std::string> db_executor_addr;
   std::optional<std::string> event_executor_addr;
   std::optional<uint16_t> view_gateway_port;
+  uint64_t max_view_gas = hogd::kDefaultMaxViewGas;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -209,6 +211,14 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       event_executor_addr = argv[++i];
       continue;
     }
+    if (arg == "--max-view-gas" && i + 1 < argc) {
+      max_view_gas = hogd::parse_integer_arg<uint64_t>(
+          "--max-view-gas", argv[++i], argv, usage);
+      if (max_view_gas == 0) {
+        usage(argv);
+      }
+      continue;
+    }
     if (arg == "--view-gateway-port" && i + 1 < argc) {
       view_gateway_port =
           hogd::parse_port_arg("--view-gateway-port", argv[++i], argv, usage);
@@ -234,5 +244,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   return hogd::hog_exec_init(coord_address, bind_ip, mempool_port, metrics_port,
                              db_executor_addr, event_executor_addr,
-                             view_gateway_port);
+                             view_gateway_port, max_view_gas);
 }
+
