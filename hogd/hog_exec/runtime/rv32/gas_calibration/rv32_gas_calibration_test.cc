@@ -1,6 +1,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -12,6 +14,7 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/syscall_kernel.h"
+#include "hogd/hog_exec/runtime/rv32/gas_calibration/workloads.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
@@ -104,6 +107,74 @@ TEST(Rv32GasCalibrationKernel, TargetSlotsEncodeTheRequestedOpcode)
           << "slot at pc " << pc << " decoded as " << op_name(decoded->op)
           << " but the spec asked for " << op_name(spec.target);
     }
+  }
+}
+
+TEST(Rv32GasCalibrationKernel, FullRangeVisitsAllBanksAndCacheLines)
+{
+  for (const Op op : {Op::kLb, Op::kLh, Op::kLw, Op::kLbu, Op::kLhu,
+                      Op::kSb, Op::kSh, Op::kSw}) {
+    for (const uint32_t targets : {254U, 510U, 512U, 600U}) {
+      KernelSpec spec;
+      spec.target = op;
+      spec.working_set = WorkingSet::kFullRange;
+      spec.saturated = true;
+      spec.body_slots = targets + 2;
+      spec.target_slots = targets;
+      const auto kernel = build_kernel(spec);
+      ASSERT_TRUE(kernel.has_value());
+      const auto program = ThreadedProgram::create(kernel->code);
+      ASSERT_TRUE(program.has_value());
+      std::set<uint32_t> lines;
+      std::set<uint8_t> banks;
+      for (const uint32_t pc : kernel->target_slot_pcs) {
+        const auto instruction = program->instruction_at(pc / kInstructionBytes);
+        ASSERT_TRUE(instruction.has_value());
+        const uint8_t bank = instruction->rs1 - kAddressBankBase;
+        ASSERT_LT(bank, kAddressBankSize);
+        const int32_t address = 2048 + bank * 8192 + instruction->immediate;
+        ASSERT_GE(address, 0);
+        ASSERT_LT(static_cast<uint32_t>(address), kMaxMemoryBytes);
+        lines.insert(static_cast<uint32_t>(address) / 64);
+        banks.insert(bank);
+      }
+      EXPECT_EQ(banks.size(), 8U);
+      EXPECT_EQ(lines.size(), targets < 512 ? targets : 512U);
+    }
+  }
+}
+
+TEST(Rv32GasCalibrationMeasurement, RejectsWrongGasAndRecoversOnRemeasurement)
+{
+  KernelSpec spec;
+  spec.trip_count = 4;
+  const auto kernel = build_kernel(spec);
+  ASSERT_TRUE(kernel.has_value());
+  const auto program = ThreadedMachinePreInstantiation::create(
+      kernel->code, kernel->initial_memory, 0, kernel->memory_bytes, false);
+  ASSERT_TRUE(program.has_value());
+  HaltHost host;
+  std::vector<MeasurementPoint> points{{.program = &*program,
+                                       .trip_count = spec.trip_count,
+                                       .expected_gas = kernel->scheduled_gas + 1}};
+  measure_interleaved(points, host, {.repeats = 3, .warmup_runs = 0});
+  EXPECT_FALSE(points[0].ran_clean);
+  EXPECT_TRUE(points[0].samples.empty());
+  points[0].expected_gas = kernel->scheduled_gas;
+  measure_interleaved(points, host, {.repeats = 3, .warmup_runs = 0});
+  EXPECT_TRUE(points[0].ran_clean);
+  EXPECT_EQ(points[0].samples.size(), 3U);
+}
+
+TEST(Rv32GasCalibrationWorkloads, RequiresRepeatedSuccessfulMeasurements)
+{
+  EXPECT_THROW((void)measure_workloads(0, 0, 1000.0), std::runtime_error);
+  EXPECT_THROW((void)measure_workloads(2, 0, 1000.0), std::runtime_error);
+  const auto workloads = measure_workloads(3, 0, 1000.0);
+  ASSERT_EQ(workloads.size(), 11U);
+  for (const auto &workload : workloads) {
+    EXPECT_EQ(workload.samples, 3U);
+    EXPECT_GT(workload.scheduled_gas_per_iteration, 0U);
   }
 }
 
