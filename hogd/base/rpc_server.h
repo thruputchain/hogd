@@ -23,7 +23,11 @@
 
 namespace hogd {
 
-template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
+struct RpcNoCatch {};
+inline constexpr RpcNoCatch rpc_no_catch;
+
+template<typename IMPL, typename VERSMETA = IMPL::rpc_service,
+         bool NO_CATCH = false>
 requires x23::implements_async_rpc<IMPL *, VERSMETA>
 class RpcServer : public x23::DestroyInhibit {
 public:
@@ -39,6 +43,15 @@ public:
   {}
   template<typename... Args> requires std::constructible_from<Impl, Args...>
   RpcServer(Args &&...args)
+    : cp_(default_coropoll()), impl_(std::forward<Args>(args)...)
+  {}
+
+  template<typename... Args> requires std::constructible_from<Impl, Args...>
+  RpcServer(RpcNoCatch, x23::CoroPoll &cp, Args &&...args)
+    : cp_(cp), impl_(std::forward<Args>(args)...)
+  {}
+  template<typename... Args> requires std::constructible_from<Impl, Args...>
+  RpcServer(RpcNoCatch, Args &&...args)
     : cp_(default_coropoll()), impl_(std::forward<Args>(args)...)
   {}
 
@@ -94,15 +107,18 @@ public:
   {
     CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
     listen_fd_ = lfd.get();
-    x23::start_listening(cp_, lfd,
-                         [self = x23::RefPtr(*this),
-                          _d = x23::Defer([this] { eof(); })](auto c) {
-                           c->max_message_size = self->max_message_size_;
-                           self->fdgen_->insert_or_assign(c->get_fd(),
-                                                          self->cp_.generation(
-                                                              c->get_fd()));
-                           c->template server<VersMeta>(ImplPtr(*self));
-                         });
+    x23::start_listening(
+        cp_, lfd, [self = x23::RefPtr(*this), _d = x23::Defer([this] {
+                                                eof();
+                                              })](auto c) {
+          c->max_message_size = self->max_message_size_;
+          self->fdgen_->insert_or_assign(c->get_fd(),
+                                         self->cp_.generation(c->get_fd()));
+          if constexpr (NO_CATCH)
+            c->template nocatch_server<VersMeta>(ImplPtr(*self));
+          else
+            c->template server<VersMeta>(ImplPtr(*self));
+        });
   }
 
   uint16_t start_server(uint16_t port)
@@ -129,6 +145,7 @@ private:
   bool bound_{};
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
+  bool nocatch_{};
 
   void eof() noexcept
   {
@@ -144,6 +161,18 @@ RpcServer(x23::CoroPoll &, I &&) -> RpcServer<std::remove_cvref_t<I>>;
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>
 RpcServer(I &&) -> RpcServer<std::remove_cvref_t<I>>;
+
+template<typename I>
+requires std::constructible_from<std::remove_cvref_t<I>, I &&>
+RpcServer(RpcNoCatch, x23::CoroPoll &, I &&)
+    -> RpcServer<std::remove_cvref_t<I>,
+                 typename std::remove_cvref_t<I>::rpc_service, true>;
+
+template<typename I>
+requires std::constructible_from<std::remove_cvref_t<I>, I &&>
+RpcServer(RpcNoCatch, I &&)
+    -> RpcServer<std::remove_cvref_t<I>,
+                 typename std::remove_cvref_t<I>::rpc_service, true>;
 
 inline sockaddr_storage
 host_port_to_sockaddr(const std::string &host, uint16_t port)

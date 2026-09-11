@@ -130,7 +130,7 @@ struct RpcService {
 };
 
 template<typename VersMeta, typename Impl, typename Logger = RpcNoLogger,
-         typename... ExtraArgs>
+         bool NoCatch = false, typename... ExtraArgs>
 struct RpcDispatcher : RpcService {
   using version_meta = VersMeta;
   Impl impl_;
@@ -160,6 +160,8 @@ struct RpcDispatcher : RpcService {
   }
 
 private:
+  struct PrivateType {};
+
   Buf proc_unavail(const rpc_msg &callmsg)
   {
     using enum accept_stat;
@@ -242,8 +244,12 @@ private:
           }
         }(*this, std::move(awaitable));
       }
-    } catch (std::exception &e) {
-      return error(e);
+    } catch (
+        const std::conditional_t<NoCatch, PrivateType, std::exception> &e) {
+      if constexpr (NoCatch)
+        std::unreachable();
+      else
+        return error(e);
     }
 
     decltype(auto) dispatch(BufViewEnd argbytes)
@@ -389,6 +395,32 @@ struct RpcStream : public detail::RpcStreamImpl {
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
 
+  // Usually uncaught exceptions in RPC service routines will be
+  // transformed into an RPC SYSTEM_ERR reply, but with nocatch_server
+  // they will crash the program.
+  template<typename Server,
+           typename VersMeta = typename std::remove_cvref_t<
+               decltype(*declval<Server>())>::rpc_service,
+           typename... ExtraArgs>
+  requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
+  RpcStream *nocatch_server(Server srvr, VersMeta /*unused*/ = {},
+                            ExtraArgs &&...extra_args)
+  {
+    auto dispatch = new RpcDispatcher<VersMeta, Server, Logger, true,
+                                      std::decay_t<ExtraArgs>...>(
+        std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
+    srvmap_.emplace(dispatch->getpv(), dispatch);
+    logger_.log_message("serving {}", VersMeta::version_name);
+    return this;
+  }
+  template<typename VersMeta, typename Server, typename... ExtraArgs>
+  requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
+  RpcStream *nocatch_server(Server srvr, ExtraArgs &&...ea)
+  {
+    return nocatch_server<Server, VersMeta, ExtraArgs...>(
+        std::move(srvr), {}, std::forward<ExtraArgs>(ea)...);
+  }
+
   template<typename Server,
            typename VersMeta = typename std::remove_cvref_t<
                decltype(*declval<Server>())>::rpc_service,
@@ -397,9 +429,9 @@ struct RpcStream : public detail::RpcStreamImpl {
   RpcStream *server(Server srvr, VersMeta /*unused*/ = {},
                     ExtraArgs &&...extra_args)
   {
-    auto dispatch =
-        new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
-            std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
+    auto dispatch = new RpcDispatcher<VersMeta, Server, Logger, false,
+                                      std::decay_t<ExtraArgs>...>(
+        std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
     srvmap_.emplace(dispatch->getpv(), dispatch);
     logger_.log_message("serving {}", VersMeta::version_name);
     return this;
@@ -617,6 +649,7 @@ start_listening(CoroPoll &cp, UniqueFd &lfd, auto cb)
     }
   }();
 }
+
 // Listen on a TCP port, and for each incoming connection invoke a
 // callback with a new configurator.  Sets logging based on the
 // X23SERVER_TRACE_progname or X23SERVER_TRACE environment variable.
