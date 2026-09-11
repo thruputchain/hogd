@@ -85,7 +85,7 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     ~~~~
 
    You can get an access token by logging in at
-   [thruput.network/crates](https://thruput.network/crates).
+   [crates.thruput.network](https://crates.thruput.network).
 
    Alternatively, you can authenticate using environment variables (this
    is how CI is configured):
