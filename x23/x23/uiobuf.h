@@ -206,6 +206,8 @@ struct BufVec {
   {
     x23assert(b.size() >= offset);
     const size_t nbytes = b.size() - offset;
+    if (!nbytes)
+      return;
     if (storage_.empty())
       storage_.emplace_back().bytes_.reserve(
           std::max(2 * kCopyThreshold, nbytes));

@@ -115,6 +115,15 @@ add_x23_gtest(str_cstr)
 add_x23_gtest(cxs_serialize_test)
 add_x23_gtest(compat_probe)
 add_x23_gtest(deserialize)
+add_x23_gtest(serialize)
+add_x23_gtest(event_edges)
+if(GOOGLETEST_PATH AND USE_EPOLL)
+  add_x23_gtest(event_faults)
+  target_link_options(test_event_faults PRIVATE
+    -Wl,--wrap=epoll_create1 -Wl,--wrap=eventfd
+    -Wl,--wrap=epoll_ctl -Wl,--wrap=epoll_wait)
+  set_tests_properties(event_faults PROPERTIES TIMEOUT 30)
+endif()
 add_x23_gtest(err)
 add_x23_gtest(fileio)
 add_x23_gtest(sockio)
@@ -139,6 +148,7 @@ add_x23_gtest(progname)
 
 if(GOOGLETEST_PATH)
 set_tests_properties(async corosync PROPERTIES TIMEOUT 60)
+set_tests_properties(event_edges PROPERTIES TIMEOUT 30 ENVIRONMENT "X23SERVER_TRACE=2")
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 # threadpool gets the same budget as the stress tests above rather than
 # shutdown's 10s.  DestructionWakeupStress creates and destroys 10000
