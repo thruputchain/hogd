@@ -293,9 +293,9 @@ build_workload(const Workload &workload, uint32_t trip_count)
   if (!one_pass_gas.has_value()) {
     return std::nullopt;
   }
-  built.expected_gas = *one_pass_gas +
-                       (static_cast<uint64_t>(trip_count) - 1) *
-                           built.scheduled_gas_per_iteration;
+  built.expected_gas =
+      *one_pass_gas + ((static_cast<uint64_t>(trip_count) - 1) *
+                       built.scheduled_gas_per_iteration);
 
   std::vector<uint32_t> iteration = body;
   iteration.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));

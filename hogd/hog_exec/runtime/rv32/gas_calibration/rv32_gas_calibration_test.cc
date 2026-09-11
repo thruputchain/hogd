@@ -112,8 +112,8 @@ TEST(Rv32GasCalibrationKernel, TargetSlotsEncodeTheRequestedOpcode)
 
 TEST(Rv32GasCalibrationKernel, FullRangeVisitsAllBanksAndCacheLines)
 {
-  for (const Op op : {Op::kLb, Op::kLh, Op::kLw, Op::kLbu, Op::kLhu,
-                      Op::kSb, Op::kSh, Op::kSw}) {
+  for (const Op op : {Op::kLb, Op::kLh, Op::kLw, Op::kLbu, Op::kLhu, Op::kSb,
+                      Op::kSh, Op::kSw}) {
     for (const uint32_t targets : {254U, 510U, 512U, 600U}) {
       KernelSpec spec;
       spec.target = op;
@@ -128,11 +128,12 @@ TEST(Rv32GasCalibrationKernel, FullRangeVisitsAllBanksAndCacheLines)
       std::set<uint32_t> lines;
       std::set<uint8_t> banks;
       for (const uint32_t pc : kernel->target_slot_pcs) {
-        const auto instruction = program->instruction_at(pc / kInstructionBytes);
+        const auto instruction =
+            program->instruction_at(pc / kInstructionBytes);
         ASSERT_TRUE(instruction.has_value());
         const uint8_t bank = instruction->rs1 - kAddressBankBase;
         ASSERT_LT(bank, kAddressBankSize);
-        const int32_t address = 2048 + bank * 8192 + instruction->immediate;
+        const int32_t address = 2048 + (bank * 8192) + instruction->imm;
         ASSERT_GE(address, 0);
         ASSERT_LT(static_cast<uint32_t>(address), kMaxMemoryBytes);
         lines.insert(static_cast<uint32_t>(address) / 64);
@@ -150,13 +151,16 @@ TEST(Rv32GasCalibrationMeasurement, RejectsWrongGasAndRecoversOnRemeasurement)
   spec.trip_count = 4;
   const auto kernel = build_kernel(spec);
   ASSERT_TRUE(kernel.has_value());
-  const auto program = ThreadedMachinePreInstantiation::create(
-      kernel->code, kernel->initial_memory, 0, kernel->memory_bytes, false);
+  const auto program =
+      ThreadedMachinePreInstantiation::create(kernel->code,
+                                              kernel->initial_memory, 0,
+                                              kernel->memory_bytes, false);
   ASSERT_TRUE(program.has_value());
   HaltHost host;
-  std::vector<MeasurementPoint> points{{.program = &*program,
-                                       .trip_count = spec.trip_count,
-                                       .expected_gas = kernel->scheduled_gas + 1}};
+  std::vector<MeasurementPoint> points{
+      {.program = &*program,
+       .trip_count = spec.trip_count,
+       .expected_gas = kernel->scheduled_gas + 1}};
   measure_interleaved(points, host, {.repeats = 3, .warmup_runs = 0});
   EXPECT_FALSE(points[0].ran_clean);
   EXPECT_TRUE(points[0].samples.empty());
