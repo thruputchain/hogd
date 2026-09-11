@@ -509,11 +509,15 @@ private:
   // database-related declarations above so that it is destructed first. We want
   // the database RPC server and its backend to be running so that the mempool
   // can flush its cache.
-  RpcServer<MempoolAuthRpc> mempool_auth_server_;
-  RpcServer<MempoolDbRpc> sched_db_server_;
-  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_;
-  RpcServer<MempoolEventRpc> sched_event_server_;
-  RpcServer<MempoolExecutorRpc> sched_exec_server_;
+  RpcServer<MempoolAuthRpc, MempoolAuthRpc::rpc_service, true>
+      mempool_auth_server_;
+  RpcServer<MempoolDbRpc, MempoolDbRpc::rpc_service, true> sched_db_server_;
+  RpcServer<MempoolCoordinatorRpc, MempoolCoordinatorRpc::rpc_service, true>
+      mempool_coord_server_;
+  RpcServer<MempoolEventRpc, MempoolEventRpc::rpc_service, true>
+      sched_event_server_;
+  RpcServer<MempoolExecutorRpc, MempoolExecutorRpc::rpc_service, true>
+      sched_exec_server_;
 
   std::unique_ptr<AuthServer> auth_server_;
   RpcServer<AuthDBRpc> auth_db_server_;

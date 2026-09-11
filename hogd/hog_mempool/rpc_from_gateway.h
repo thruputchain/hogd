@@ -92,9 +92,13 @@ private:
 
 static_assert(is_SchedGateway1<MempoolGatewayRpc *, x23::Async>);
 
-class MempoolGatewayServer : public RpcServer<MempoolGatewayRpc> {
+using MempoolGatewayServerBase =
+    RpcServer<MempoolGatewayRpc, MempoolGatewayRpc::rpc_service, true>;
+
+class MempoolGatewayServer : public MempoolGatewayServerBase {
 public:
-  explicit MempoolGatewayServer(MempoolCoordinatorRpc *coord) : RpcServer(coord)
+  explicit MempoolGatewayServer(MempoolCoordinatorRpc *coord)
+    : MempoolGatewayServerBase(coord)
   {}
 };
 

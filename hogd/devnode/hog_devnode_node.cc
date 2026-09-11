@@ -708,8 +708,8 @@ HogDevnodeNode::prepare_for_failed_construction() noexcept
     // already captured coordinator state; this also clears the coordinator's
     // borrowed auth pointer before the server is destroyed. This is also safe
     // when construction failed before a callback was registered.
-    [](RpcServer<MempoolCoordinatorRpc> &mempool_coord_server)
-        -> x23::Async<void> {
+    [](RpcServer<MempoolCoordinatorRpc, MempoolCoordinatorRpc::rpc_service,
+                 true> &mempool_coord_server) -> x23::Async<void> {
       co_await default_threadpool().bg();
       co_await mempool_coord_server.impl()->disconnect_auth_callback();
     }(mempool_coord_server_)();

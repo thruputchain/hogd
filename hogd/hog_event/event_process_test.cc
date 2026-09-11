@@ -280,7 +280,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 0, .consensus_value = genesis});
 
-  RpcServer<MempoolEventRpc> mempool_event;
+  RpcServer<MempoolEventRpc, MempoolEventRpc::rpc_service, true> mempool_event;
   const std::uint16_t mempool_listen_port =
       mempool_event.start_server(x23::HostPort{"127.0.0.1", 0});
   const std::string mempool_addr =
