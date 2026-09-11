@@ -105,7 +105,7 @@ HogDbSchedRpc::write_hog_ages_locked(const HogAgeBatch &ages)
               "group {} exceeds the committed block height {}",
               HexArray(age.address).str(), age.average_ages[group], group,
               committed_height);
-        co_return DbSchedResult::DbSchedResultError;
+        return DbSchedResult::DbSchedResultError;
       }
     }
     if (!db.write_address_average_hog_age(age)) {
