@@ -489,9 +489,11 @@ struct RpcStream : public detail::RpcStreamImpl {
       throw;
     } catch (const std::exception &e) {
       // A non-XdrException here (notably std::bad_alloc from decoding a reply
-      // that contains an unbounded vector of zero-wire-size elements) is
-      // surfaced as an XdrException, the same way the reply-header decode above
-      // wraps non-XDR failures, so it can't escape as an unexpected type.
+      // whose result is a large allocation) is surfaced as an XdrException, the
+      // same way the reply-header decode above wraps non-XDR failures, so it
+      // can't escape as an unexpected type.  (An unbounded vector of
+      // zero-wire-size elements, the worst such case, is now rejected during
+      // decode before it allocates -- see Deserializer::go for kVec.)
       if constexpr (!std::same_as<Logger, RpcNoLogger>)
         logger_.template log_client<ProcMeta>(
             msg, uformat(" deserialization error in {}: {}",
