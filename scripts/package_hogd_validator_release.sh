@@ -15,7 +15,10 @@ cpu_profile=${5:-portable}
 case "$cpu_profile:$architecture:$flavor" in
 portable:*) ;;
 znver5:x86_64:release) ;;
-*) echo "error: unsupported CPU profile/architecture/flavor" >&2; exit 1 ;;
+*)
+  echo "error: unsupported CPU profile/architecture/flavor" >&2
+  exit 1
+  ;;
 esac
 
 case "$architecture" in
