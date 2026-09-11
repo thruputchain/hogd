@@ -53,34 +53,34 @@ TEST(Deserialize, Vector)
   EXPECT_THROW(deserialize(&vec, BufView(buf)), x23::XdrBadInput);
 }
 
-// Regression for issue #3971: an *unbounded* vector of a zero-wire-size element
-// (an empty struct decodes to zero bytes) has no cardinality cap, so a tiny
-// message must not be able to declare an enormous element count and force
-// count-proportional allocation.  Its count is held to the bytes remaining, so
-// a 4-byte body naming a million elements is rejected rather than materialized.
-TEST(Deserialize, ZeroWireVectorCountBoundedByInput)
+// Issue #3971: a vector of a zero-wire-size element (an empty struct decodes to
+// zero bytes) is a valid XDR construct -- the serializer emits N such elements
+// as just the 4-byte count -- so deserialize must read it back to preserve the
+// serialize/deserialize round trip.  No decode-time cap on the count can bound
+// the resulting allocation without rejecting that valid encoding, so the count
+// is intentionally *not* limited at decode; the disproportionate-allocation
+// concern for such a reply is contained at the RPC boundary instead
+// (RpcStream::send_call wraps the std::bad_alloc as an XdrException).  This
+// test pins the round trip so a future decode-time "bound" cannot silently
+// break it.
+TEST(Deserialize, ZeroWireVectorRoundTrips)
 {
   static_assert(detail::xdr_size_bounds<VoidCheck>().max_ == 0);
 
-  // Body is just the element count; no element bytes follow it.
-  x23::Buf body = serialize(std::uint32_t{1'000'000});
-  XdrVec<VoidCheck> vec;
-  EXPECT_THROW(deserialize(&vec, BufView(body)), x23::XdrBadInput);
+  XdrVec<VoidCheck> src(5);
+  x23::Buf body = serialize(src);
+  EXPECT_EQ(body.size(), 4U); // count only; the elements occupy no wire bytes
 
-  // A legitimately empty vector still decodes.
-  x23::Buf empty_body = serialize(std::uint32_t{0});
+  XdrVec<VoidCheck> dst;
+  ASSERT_NO_THROW(deserialize(&dst, BufView(body)));
+  EXPECT_EQ(dst.size(), 5U);
+
+  // The empty vector round-trips too.
   XdrVec<VoidCheck> empty;
-  EXPECT_NO_THROW(deserialize(&empty, BufView(empty_body)));
-  EXPECT_TRUE(empty.empty());
-
-  // A *bounded* zero-wire vector supplies its own cardinality cap, so a valid
-  // nonempty one still round-trips through its own serialization (the bound,
-  // not the wire length, limits the count).
-  x23::Vec<VoidCheck, 8> bounded_src(5);
-  x23::Buf bounded_body = serialize(bounded_src);
-  x23::Vec<VoidCheck, 8> bounded_dst;
-  EXPECT_NO_THROW(deserialize(&bounded_dst, BufView(bounded_body)));
-  EXPECT_EQ(bounded_dst.size(), 5U);
+  x23::Buf empty_body = serialize(empty);
+  XdrVec<VoidCheck> empty_dst;
+  ASSERT_NO_THROW(deserialize(&empty_dst, BufView(empty_body)));
+  EXPECT_TRUE(empty_dst.empty());
 }
 
 // CXS BoundedStr deserialization must reject input where the decoded
@@ -593,9 +593,10 @@ TEST(Deserialize, BufViewSerializesLikeCalldata)
 // only bound on the count is the vector's own maximum.  For a *bounded* such
 // vector the decoder's bounded reserve plus Vec::check_size still rejects a
 // count past the maximum (XdrLengthError) rather than materializing empty
-// elements until std::bad_alloc.  (An unbounded such vector -- the XDR default
-// max of 2^32-1, with no cardinality cap -- is instead held to the bytes
-// remaining at decode time; see ZeroWireVectorCountBoundedByInput.)
+// elements until std::bad_alloc.  (An unbounded such vector has no wire-derived
+// limit; that case is contained at the SRPC boundary, which converts the
+// allocator failure into an error reply instead of crossing its noexcept input
+// boundary.)
 TEST(Deserialize, ZeroWireBoundedVectorRejectsOverflow)
 {
   static_assert(detail::xdr_size_bounds<std::tuple<>>().max_ == 0,
