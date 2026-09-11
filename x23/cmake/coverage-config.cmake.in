@@ -1,4 +1,5 @@
 set(coverage_dir "@coverage_dir@")
+set(coverage_profile_pattern "@coverage_profile_pattern@")
 set(coverage_build_dir "@CMAKE_CURRENT_BINARY_DIR@")
 set(coverage_config "$<CONFIG>")
 set(coverage_ctest "@CMAKE_CTEST_COMMAND@")

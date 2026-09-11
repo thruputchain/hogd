@@ -25,10 +25,29 @@ foreach(tool X23_LLVM_COV X23_LLVM_PROFDATA)
 endforeach()
 
 set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage")
+option(X23_COVERAGE_CONTINUOUS "Preserve coverage from aborting tests" OFF)
+set(coverage_profile_pattern "${coverage_dir}/raw/%m-%p.profraw")
+set(coverage_continuous_flags)
+if(X23_COVERAGE_CONTINUOUS)
+  include(CMakePushCheckState)
+  include(CheckCXXCompilerFlag)
+  cmake_push_check_state()
+  string(APPEND CMAKE_REQUIRED_FLAGS " -fprofile-instr-generate")
+  check_cxx_compiler_flag(-fprofile-continuous X23_HAVE_PROFILE_CONTINUOUS)
+  cmake_pop_check_state()
+  if(NOT X23_HAVE_PROFILE_CONTINUOUS)
+    message(FATAL_ERROR "Continuous coverage requires -fprofile-continuous support")
+  endif()
+  set(coverage_continuous_flags -fprofile-continuous)
+  # The runtime needs %c even when LLVM_PROFILE_FILE overrides the
+  # compiler's default filename (as the test runner does below).
+  set(coverage_profile_pattern "${coverage_dir}/raw/%m-%p%c.profraw")
+endif()
 get_directory_property(coverage_tests DIRECTORY tests DEFINITION TEST_EXECUTABLES)
 set(coverage_objects)
 foreach(target x23 x23c ${coverage_tests})
   target_compile_options(${target} PRIVATE -O0 -g -UNDEBUG
+    ${coverage_continuous_flags}
     "-fprofile-instr-generate=${coverage_dir}/raw/%m-%p.profraw"
     -fcoverage-mapping -fprofile-update=atomic)
   target_link_options(${target} PRIVATE
