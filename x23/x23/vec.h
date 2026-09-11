@@ -657,12 +657,18 @@ public:
     constexpr int aadj = OVec::kExtraAlloc - kExtraAlloc;
     if constexpr (aadj > 0)
       ensure(aadj);
-    OVec ret{typename OVec::Buf{
-                 .begin = reinterpret_cast<new_type *>(b_.begin),
-                 .end = reinterpret_cast<new_type *>(b_.end),
-                 .bufend = reinterpret_cast<new_type *>(b_.bufend) - aadj,
-             },
-             std::move(a_)};
+    // An unallocated Vec has all-null pointers.  Offsetting a null bufend
+    // by a negative aadj (e.g. Str, which reserves a terminator, to
+    // Vec<uint8_t>, which doesn't) would report capacity over a null
+    // buffer, and the next insert would write through it.
+    typename OVec::Buf newb{};
+    if (b_.begin)
+      newb = {
+          .begin = reinterpret_cast<new_type *>(b_.begin),
+          .end = reinterpret_cast<new_type *>(b_.end),
+          .bufend = reinterpret_cast<new_type *>(b_.bufend) - aadj,
+      };
+    OVec ret{newb, std::move(a_)};
     // ctor calls terminate(), so no need to call it here
     b_ = {};
     return ret;
