@@ -91,6 +91,15 @@ short		|
 inline		|
 sizeof		{ yyerror(yylloc, xc, "illegal use of reserved word"); }
 
+	/* The generated code spells __xdr_-prefixed names of its own --
+	   __xdr_union_field_*, and the template parameters of the union
+	   accessors -- so an XDR identifier in that space would collide
+	   with them.  (C++ reserves any name containing __ anyway.) */
+__xdr_[a-zA-Z_0-9]*	{
+		  yyerror(yylloc, xc,
+			  "identifiers beginning with __xdr_ are reserved");
+		}
+
 {ID}		return T_ID;
 {NUM}		return T_NUM;
 

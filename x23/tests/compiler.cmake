@@ -98,6 +98,12 @@ endif()
 file(WRITE "${TEST_DIR}/invalid.x" "struct Broken { int value };\n")
 run_compiler(1 -o invalid.hh invalid.x)
 require_text("${error}" "syntax error")
+# The generated code uses __xdr_-prefixed names of its own, so that space
+# is reserved rather than left to collide.
+file(WRITE "${TEST_DIR}/reserved.x" "struct Res { int __xdr_value; };\n")
+run_compiler(1 -o reserved.hh reserved.x)
+require_text("${error}" "__xdr_ are reserved")
+
 file(WRITE "${TEST_DIR}/duplicate.x"
   "struct Same { int value; };\nstruct Same { int other; };\n")
 run_compiler(1 -o duplicate.hh duplicate.x)
