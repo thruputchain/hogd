@@ -400,7 +400,9 @@ TEST(MapAwait, DirectAdlAndMemberAwaiters)
     int a = co_await MapAwait{[](int v) { return v * 2; }, ReadyValue{3}};
     int b = co_await MapAwait{[](int v) { return v + 1; }, AdlAwaitable{4}};
     int c = co_await MapAwait{[] { return 7; }, std::suspend_never{}};
-    int d = co_await MapAwait{[](int v) { return v; }, async_return(8)};
+    // GCC 15 tries to copy Async here if the MapAwait is a temporary.
+    auto member = MapAwait{[](int v) { return v; }, async_return(8)};
+    int d = co_await member;
     co_return a + b + c + d;
   }();
   EXPECT_EQ(task(), 26);
@@ -466,8 +468,9 @@ TEST(ExpectedAwait, ValuesErrorsAndCleanup)
       else
         EXPECT_EQ(result.error(), "failed");
       // Early return destroys locals when the owning Async is destroyed.
-      if (success)
+      if (success) {
         EXPECT_EQ(destroyed, 1);
+      }
     }
     EXPECT_EQ(destroyed, 1);
   }

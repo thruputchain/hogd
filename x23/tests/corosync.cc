@@ -336,7 +336,7 @@ TEST(CoroSem, TokensFifoAndQueueReuse)
   EXPECT_TRUE(events.empty());
   for (int i = 0; i < 3; ++i) {
     sem.release();
-    EXPECT_EQ(events.size(), i + 1);
+    EXPECT_EQ(events.size(), i + 1UZ);
     EXPECT_EQ(events.back(), i);
   }
   sem.release();
