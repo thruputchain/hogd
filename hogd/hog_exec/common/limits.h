@@ -9,9 +9,7 @@
 
 namespace hogd {
 
-// Cap on the Transaction body (what TransactionHash commits to), enforced by
-// ExecutorContext in proposal and validation. Auth caps the whole wrapper at
-// kMaxBytesSignedTransaction; the executor never measures the wrapper (#3844).
+// Cap on the Transaction body, what TransactionHash commits to (#3844).
 inline constexpr size_t kMaxBytesTransaction = 1'900'000;
 static_assert(kMaxBytesTransaction < kMaxBytesSignedTransaction);
 

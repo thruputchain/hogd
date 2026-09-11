@@ -420,8 +420,8 @@ TEST_F(RpcNegativeTest, ValidateRejectsExpiredReplayUniquifier)
   client_.executorsched_finish_block(block_id);
 }
 
-// Oversized body: propose() rejects it before it runs (#2857), as malformed --
-// dropped from the proposal, not included as a failed transaction.
+// Oversized body: propose() rejects it as malformed (#2857), so it is dropped
+// from the proposal.
 TEST_F(RpcNegativeTest, ProposeRejectsOversizedTransaction)
 {
   init_executor();
@@ -466,10 +466,7 @@ TEST_F(RpcNegativeTest, ValidateRejectsOversizedTransaction)
   client_.executorsched_finish_block(block_id);
 }
 
-// The cap is on the body, not the wrapper (#3844): a body at the cap under a
-// signature vector far past kMaxBytesSignedTransaction is not a size rejection
-// on either path, and validating the fat wrapper agrees with proposing the thin
-// one.
+// The cap is on the body, not the wrapper (#3844).
 TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
 {
   init_executor();

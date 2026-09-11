@@ -3943,9 +3943,7 @@ nominated_hashes(const Proposal &proposal)
 
 } // namespace
 
-// #3844: a proposer and a validator may retain different-sized wrappers for
-// the same nominated hash. The proposer nominates from the thin wrapper, the
-// validator holds the fat one, and validation must still succeed.
+// #3844: proposer and validator may hold different-sized wrappers for one hash.
 TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
 {
   const SignatureVariants variants =

@@ -160,9 +160,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kProposing);
 
-  // Cap the body, never the wrapper: signatures are node-local and must not
-  // decide what a hash executes to (#3844). An over-cap body is malformed and
-  // dropped from the proposal before it can overflow the event RPC (#2857).
+  // Cap the body, not the wrapper: signatures are node-local (#3844).
   if (x23::xdr_size(signed_tx.tx) > kMaxBytesTransaction) {
     co_return ExecProposeResult(ExecResult::ExecResultMalformedTransaction);
   }
@@ -267,9 +265,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
 {
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kValidating);
-  // Same body cap as proposal: a deterministic reject, not a validator
-  // fail-stop (#2857), and the proposer's fault. The wrapper is not measured;
-  // this node's copy may differ from the proposer's in its signatures (#3844).
+  // Same body cap as proposal (#3844).
   if (x23::xdr_size(tx.signed_tx.tx) > kMaxBytesTransaction) {
     co_return ExecResult::ExecResultTxValidationFailure;
   }
