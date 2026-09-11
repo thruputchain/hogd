@@ -203,6 +203,13 @@ build_genesis_json(GenesisConfiguration const &genesis)
                 w.object_field(
                     std::format("{}", param.param()), [&](json::Writer &w) {
                       switch (param.param()) {
+                      case ConfigParamID::kConfigParamMaxContractSizeBytes:
+                      case ConfigParamID::kConfigParamMaxSavepointDepth:
+                      case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+                      case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+                      case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+                      case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+                        panic("unimplemented");
                       case ConfigParamID::kConfigParamMaxSHA256Buffers:
                         w.field("max_sha256_buffers",
                                 std::int64_t{param.max_sha256_buffers()});
