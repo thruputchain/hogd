@@ -4,40 +4,16 @@
 
 #include <cstddef>
 
-#include "auth_claim.hh"
 #include "hogd/base/types.h"
 #include "integration.hh"
-#include "transaction.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
-// Every signature a SignedTransaction can carry once auth has admitted it.
-// verify_auth accepts at most kMaxSigners signatures (strictly increasing key
-// ids drawn from a kMaxSigners-bit bitmap, or exactly one for a pubkey claim),
-// and a DecoratedSignature has a fixed encoded size, so this is the XDR length
-// prefix plus kMaxSigners encoded signatures.
-static_assert(x23::detail::has_fixed_size<DecoratedSignature>());
-inline constexpr size_t kMaxBytesSignatureVector =
-    4 + (kMaxSigners * x23::detail::xdr_size_bounds<DecoratedSignature>().max_);
-
-// Size cap on a Transaction body -- the bytes TransactionHash commits to.
-// Enforced deterministically by ExecutorContext in both proposal and
-// validation, before the handler is built: an over-cap body is malformed and
-// is dropped (ExecResultMalformedTransaction when proposing,
-// ExecResultTxValidationFailure when validating), never included in a block.
-//
-// The cap is deliberately on the body and not on the SignedTransaction
-// wrapper. The hash excludes the signatures, so the wrapper a node holds for a
-// given hash is node-local state: two valid signature vectors over the same
-// body can straddle any wrapper-level cap, and a proposer holding the smaller
-// wrapper would nominate a hash that a validator holding the larger one
-// rejects (#3844). Sizing the body cap so that a body at the cap plus the
-// largest signature vector auth admits is exactly kMaxBytesSignedTransaction
-// keeps the protocol's wrapper bound intact for every wrapper that can reach
-// the executor, without the executor ever examining the wrapper.
-inline constexpr size_t kMaxBytesTransaction =
-    kMaxBytesSignedTransaction - kMaxBytesSignatureVector;
+// Cap on the Transaction body (what TransactionHash commits to), enforced by
+// ExecutorContext in proposal and validation. Auth caps the whole wrapper at
+// kMaxBytesSignedTransaction; the executor never measures the wrapper (#3844).
+inline constexpr size_t kMaxBytesTransaction = 1'900'000;
+static_assert(kMaxBytesTransaction < kMaxBytesSignedTransaction);
 
 // Maximum size of a deployed contract's code blob (ContractBlob.data for
 // kRv32) -- the same quantity contract_deployment_cost_per_byte charges

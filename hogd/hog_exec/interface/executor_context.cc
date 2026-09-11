@@ -160,12 +160,9 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kProposing);
 
-  // Reject an over-cap body before execution so it can't overflow the event
-  // RPC (#2857). The cap is on the Transaction -- the bytes the hash commits
-  // to -- never on the SignedTransaction wrapper, whose signatures are
-  // node-local and must not influence what a hash executes to (#3844; see
-  // kMaxBytesTransaction). Over-cap is a structural defect of the body alone,
-  // so it is malformed: dropped from the proposal, not included as a failure.
+  // Cap the body, never the wrapper: signatures are node-local and must not
+  // decide what a hash executes to (#3844). An over-cap body is malformed and
+  // dropped from the proposal before it can overflow the event RPC (#2857).
   if (x23::xdr_size(signed_tx.tx) > kMaxBytesTransaction) {
     co_return ExecProposeResult(ExecResult::ExecResultMalformedTransaction);
   }
@@ -270,12 +267,9 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
 {
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kValidating);
-  // Same body cap as proposal, so a peer-proposed oversized tx is a
-  // deterministic reject rather than fail-stopping the validator (#2857). An
-  // honest proposer drops such a body as malformed, so meeting one here is the
-  // proposer's fault: ValidationFailure. Only the body is measured -- the
-  // wrapper this node retained for the nominated hash may differ from the
-  // proposer's in its signatures, and must validate identically (#3844).
+  // Same body cap as proposal: a deterministic reject, not a validator
+  // fail-stop (#2857), and the proposer's fault. The wrapper is not measured;
+  // this node's copy may differ from the proposer's in its signatures (#3844).
   if (x23::xdr_size(tx.signed_tx.tx) > kMaxBytesTransaction) {
     co_return ExecResult::ExecResultTxValidationFailure;
   }

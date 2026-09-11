@@ -268,9 +268,7 @@ protected:
     };
   }
 
-  // A (non-expired) tx whose serialized body is exactly kMaxBytesTransaction:
-  // the largest body the executor admits. XDR sizes are multiples of four, so
-  // padding the calldata to the difference lands exactly on the cap.
+  // A (non-expired) tx whose body is exactly kMaxBytesTransaction.
   static Transaction make_body_at_cap_tx()
   {
     Transaction tx = make_tx_with_expiry(/*expiry=*/1'000'000);
@@ -281,9 +279,7 @@ protected:
     return tx;
   }
 
-  // A filler signature: never valid, but the executor never looks at it, and
-  // it lets a test make the SignedTransaction wrapper as large as it likes
-  // without changing the Transaction (hence the TransactionHash) inside.
+  // Pads a wrapper without changing the Transaction (or its hash) inside.
   static DecoratedSignature make_filler_signature()
   {
     DecoratedSignature sig;
@@ -424,10 +420,8 @@ TEST_F(RpcNegativeTest, ValidateRejectsExpiredReplayUniquifier)
   client_.executorsched_finish_block(block_id);
 }
 
-// Oversized body: propose() rejects it before the body runs, so it can't reach
-// emit_events and overflow the event RPC (#2857). The body is malformed on its
-// contents alone, so it is dropped from the proposal (MalformedTransaction),
-// never included as a failed transaction.
+// Oversized body: propose() rejects it before it runs (#2857), as malformed --
+// dropped from the proposal, not included as a failed transaction.
 TEST_F(RpcNegativeTest, ProposeRejectsOversizedTransaction)
 {
   init_executor();
@@ -447,9 +441,8 @@ TEST_F(RpcNegativeTest, ProposeRejectsOversizedTransaction)
   client_.executorsched_finish_block(block_id);
 }
 
-// Same cap on the validation path: a peer-proposed oversized body is rejected,
-// not a validator fail-stop (#2857). An honest proposer drops such a body, so
-// meeting one in a proposal is the proposer's fault: ValidationFailure.
+// Same cap on the validation path: a deterministic ValidationFailure, not a
+// validator fail-stop (#2857).
 TEST_F(RpcNegativeTest, ValidateRejectsOversizedTransaction)
 {
   init_executor();
@@ -473,14 +466,10 @@ TEST_F(RpcNegativeTest, ValidateRejectsOversizedTransaction)
   client_.executorsched_finish_block(block_id);
 }
 
-// The size cap is on the Transaction body, never on the SignedTransaction
-// wrapper (#3844). TransactionHash excludes the signatures, so the wrapper a
-// node retains for a nominated hash is node-local: a proposer may hold a
-// one-signature wrapper while a validator holds one with many more. Both must
-// execute the hash identically, so a body at the cap wrapped in a signature
-// vector that pushes the wrapper far past kMaxBytesSignedTransaction is not a
-// size rejection on either path, and validation of the fat wrapper agrees with
-// the proposal made from the thin one.
+// The cap is on the body, not the wrapper (#3844): a body at the cap under a
+// signature vector far past kMaxBytesSignedTransaction is not a size rejection
+// on either path, and validating the fat wrapper agrees with proposing the thin
+// one.
 TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
 {
   init_executor();
@@ -488,8 +477,6 @@ TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
   const Transaction body = make_body_at_cap_tx();
   const SignedTransaction thin{.tx = body};
   SignedTransaction fat{.tx = body};
-  // Well past the protocol's wrapper bound, and past the largest signature
-  // vector auth could ever admit: neither is the executor's concern.
   while (x23::xdr_size(fat) <= kMaxBytesSignedTransaction + 64_KiB) {
     fat.signatures.push_back(make_filler_signature());
   }
@@ -497,8 +484,7 @@ TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
   ASSERT_LE(x23::xdr_size(thin), kMaxBytesSignedTransaction);
   ASSERT_GT(x23::xdr_size(fat), kMaxBytesSignedTransaction);
 
-  // Propose the thin wrapper: the body is at (not over) the cap, so it clears
-  // the size gate and executes (to whatever outcome its body has).
+  // Thin wrapper: clears the size gate and executes.
   BlockID propose_block_id = 1022;
   ASSERT_EQ(client_.executorsched_open_proposal_block(propose_block_id,
                                                       kTestBlockExecution),
@@ -511,8 +497,7 @@ TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
   EXPECT_NE(proposed.result(), ExecResult::ExecResultTxNonDeterministicError);
   client_.executorsched_finish_block(propose_block_id);
 
-  // Propose the fat wrapper too: same body, same outcome. The wrapper's size
-  // does not reach the size gate.
+  // Fat wrapper: same body, same outcome.
   BlockID fat_propose_block_id = 1023;
   ASSERT_EQ(client_.executorsched_open_proposal_block(fat_propose_block_id,
                                                       kTestBlockExecution),
@@ -524,8 +509,7 @@ TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
             proposed.result());
   client_.executorsched_finish_block(fat_propose_block_id);
 
-  // Validate the fat wrapper against the thin proposal: a validator that
-  // retained the fat wrapper must reach the same verdict the proposer did.
+  // Validate the fat wrapper against the thin proposal.
   BlockID validate_block_id = 1024;
   ASSERT_EQ(client_.executorsched_open_validation_block(validate_block_id,
                                                         kTestBlockExecution),
@@ -535,8 +519,6 @@ TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
   open_event_block(validate_block_id);
 
-  // The result union carries proposal data only for the outcomes a proposal
-  // includes; anything else validates against empty data.
   NondeterministicProposalData proposal_data;
   if (proposed.result() == ExecResult::ExecResultOK ||
       proposed.result() == ExecResult::ExecResultTxDeterministicError ||
@@ -999,13 +981,8 @@ TEST_F(RpcNegativeTest, TestConflictingModeOpenValidationFirst)
   client_.executorsched_finish_block(block_id);
 }
 
-// Check-ordering pin: the kMaxBytesTransaction size cap runs before the
-// handler's expiry validation, so a transaction that is both oversized and
-// expired reports MalformedTransaction (the size arm), not
-// TxValidationFailure. Both single arms are pinned by
-// ProposeRejectsOversizedTransaction / ProposeRejectsExpiredReplayUniquifier;
-// this pins which one wins. Also pins that the rejected result carries no
-// proposal data (the result union has no proposal_data arm for either code).
+// Check-ordering pin: the size cap runs before expiry validation, so a tx that
+// is both oversized and expired reports MalformedTransaction.
 TEST_F(RpcNegativeTest, TestOversizedBeatsExpired)
 {
   init_executor();

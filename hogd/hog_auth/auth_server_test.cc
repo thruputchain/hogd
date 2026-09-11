@@ -567,11 +567,8 @@ TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
   ASSERT_EQ(results.size(), 1);
 }
 
-// A SignedTransaction wrapper over kMaxBytesSignedTransaction fails
-// authentication (kAuthFailed) up front, before any signature work (#3844).
-// The two transactions below differ only in calldata padding: the one whose
-// wrapper lands just under the cap authenticates, the one just over it does
-// not, so size is the only thing separating the verdicts.
+// A wrapper over kMaxBytesSignedTransaction fails authentication before any
+// signature work (#3844). The two txs differ only in calldata padding.
 TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
 {
   const ContractAddress address = make_test_address(51);
@@ -591,7 +588,6 @@ TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
                                            mock_db().get_key_changes_at_height(
                                                0))();
 
-  // Signs [tx] with the account's only key, so the wrapper is otherwise valid.
   auto sign = [&](const Transaction &tx) {
     SignedTransaction stx{.tx = tx};
     DecoratedSignature sig;
@@ -612,14 +608,12 @@ TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
   claim.source_address_claim().required_weight = 1;
   tx.auth_claim = claim;
 
-  // Pad the body so the signed wrapper is exactly at the cap: admitted.
   const size_t base = x23::xdr_size(sign(tx));
   ASSERT_LE(base, kMaxBytesSignedTransaction);
   tx.invocation.calldata.resize(kMaxBytesSignedTransaction - base, 0);
   const SignedTransaction at_cap = sign(tx);
   ASSERT_EQ(x23::xdr_size(at_cap), kMaxBytesSignedTransaction);
 
-  // Four more bytes (XDR sizes are multiples of four) and it is over the cap.
   tx.invocation.calldata.resize(tx.invocation.calldata.size() + 4, 0);
   const SignedTransaction over_cap = sign(tx);
   ASSERT_GT(x23::xdr_size(over_cap), kMaxBytesSignedTransaction);
@@ -630,8 +624,7 @@ TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
   EXPECT_EQ(results[0], AuthErrorCode::kAuthSuccess);
   EXPECT_EQ(results[1], AuthErrorCode::kAuthFailed);
 
-  // The batch path applies the same gate: one over-cap wrapper fails the whole
-  // batch, and the at-cap wrapper alone still authenticates.
+  // The batch path applies the same gate.
   EXPECT_EQ(auth_server().verify_batch(0, {at_cap})(),
             AuthErrorCode::kAuthSuccess);
   EXPECT_EQ(auth_server().verify_batch(0, {at_cap, over_cap})(),

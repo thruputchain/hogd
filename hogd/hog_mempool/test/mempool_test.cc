@@ -3867,11 +3867,8 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
 
 namespace {
 
-// Two authenticated wrappers over one Transaction body of exactly [body_bytes]
-// serialized bytes, for an account whose kMaxSigners keys each carry weight one
-// against a required weight of one: [thin] is signed by the first key alone,
-// [fat] by every key. They share a TransactionHash and differ only in the
-// signature vector, i.e. only in the bytes the hash does not commit to.
+// Two authenticated wrappers over one [body_bytes]-byte Transaction: [thin]
+// carries one signature, [fat] all kMaxSigners. Same TransactionHash.
 struct SignatureVariants {
   AddressAuthData auth_data;
   SignedTransaction thin;
@@ -3901,8 +3898,6 @@ make_signature_variants(size_t body_bytes)
   claim.source_address_claim().allowed_keys = (uint32_t{1} << kMaxSigners) - 1;
   claim.source_address_claim().required_weight = 1;
   tx.auth_claim = claim;
-  // Pad the calldata until the body is exactly [body_bytes]. XDR sizes are
-  // multiples of four, so the padding lands exactly.
   tx.invocation.calldata.clear();
   const size_t base = x23::xdr_size(tx);
   CHECK_LE(base, body_bytes);
@@ -3925,8 +3920,7 @@ make_signature_variants(size_t body_bytes)
   return variants;
 }
 
-// Submits [stx] through the gateway -- the authenticated admission path a
-// client's submission takes -- and returns its admission outcome.
+// Submits [stx] through the gateway (the authenticated admission path).
 SchedGatewaySubmitOutcome
 submit_through_gateway(MempoolTestInfra &server, const SignedTransaction &stx)
 {
@@ -3949,23 +3943,16 @@ nominated_hashes(const Proposal &proposal)
 
 } // namespace
 
-// #3844: TransactionHash commits to the Transaction body, not to the
-// SignedTransaction wrapper, and the scheduler retains whichever authenticated
-// wrapper for a hash arrives first. A proposer and a validator can therefore
-// hold different-sized wrappers for the same nominated hash. The executor's
-// size cap must be a function of the body alone, so that both reach the same
-// verdict: here the proposer nominates from a one-signature wrapper while the
-// validator holds the kMaxSigners-signature wrapper -- which sits exactly at
-// the protocol's kMaxBytesSignedTransaction -- and validation succeeds.
+// #3844: a proposer and a validator may retain different-sized wrappers for
+// the same nominated hash. The proposer nominates from the thin wrapper, the
+// validator holds the fat one, and validation must still succeed.
 TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
 {
   const SignatureVariants variants =
       make_signature_variants(kMaxBytesTransaction);
   ASSERT_EQ(x23::xdr_size(variants.thin.tx), kMaxBytesTransaction);
   ASSERT_LT(x23::xdr_size(variants.thin), kMaxBytesSignedTransaction);
-  // The derived body cap is tight: a body at the cap under the largest
-  // signature vector auth admits is exactly the protocol's wrapper bound.
-  ASSERT_EQ(x23::xdr_size(variants.fat), kMaxBytesSignedTransaction);
+  ASSERT_LE(x23::xdr_size(variants.fat), kMaxBytesSignedTransaction);
   ASSERT_NE(sha256(variants.thin), sha256(variants.fat));
 
   Proposal proposal;
@@ -4005,8 +3992,7 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
     std::shared_ptr<Scheduler> scheduler =
         validator.mempool_coord_rpc().scheduler();
 
-    // The dangerous order: the fat wrapper arrives first and is what this node
-    // binds to the nominated hash.
+    // The fat wrapper arrives first and is what this node retains.
     EXPECT_EQ(submit_through_gateway(validator, variants.fat),
               SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
     submit_through_gateway(validator, variants.thin);
@@ -4027,10 +4013,8 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
   }
 }
 
-// The executor is the final gate on body size: an authenticated wrapper whose
-// body is over kMaxBytesTransaction (while the wrapper itself is well under the
-// protocol's wrapper bound, so auth admits it) is dropped from the proposal as
-// malformed rather than included.
+// An authenticated wrapper whose body is over kMaxBytesTransaction is dropped
+// from the proposal by the executor.
 TEST(Mempool, OverCapBodyIsDroppedFromProposal)
 {
   const SignatureVariants variants =

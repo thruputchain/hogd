@@ -195,14 +195,8 @@ AuthServer::populate_auth_data(BlockHeight height,
 
 namespace {
 
-// Enforce the protocol's SignedTransaction bound on the whole wrapper, on
-// every verification path. Auth is the one place the wrapper is examined: the
-// executor's final gate is on the Transaction body alone
-// (kMaxBytesTransaction), since the hash commits only to the body and a
-// wrapper-dependent verdict there would let arrival order split validators
-// (#3844). An over-cap wrapper is a malformed submission, so it fails
-// authentication like any other bad wrapper, and spends no
-// signature-verification work.
+// Auth is the one place the whole SignedTransaction is measured; the executor
+// caps only the body (#3844).
 bool
 wrapper_over_cap(const SignedTransaction &tx)
 {
