@@ -629,6 +629,13 @@ TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
   ASSERT_EQ(results.size(), 2);
   EXPECT_EQ(results[0], AuthErrorCode::kAuthSuccess);
   EXPECT_EQ(results[1], AuthErrorCode::kAuthFailed);
+
+  // The batch path applies the same gate: one over-cap wrapper fails the whole
+  // batch, and the at-cap wrapper alone still authenticates.
+  EXPECT_EQ(auth_server().verify_batch(0, {at_cap})(),
+            AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(auth_server().verify_batch(0, {at_cap, over_cap})(),
+            AuthErrorCode::kAuthFailed);
 }
 
 TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)

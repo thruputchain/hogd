@@ -193,6 +193,30 @@ AuthServer::populate_auth_data(BlockHeight height,
   co_return std::move(entry.value());
 }
 
+namespace {
+
+// Enforce the protocol's SignedTransaction bound on the whole wrapper, on
+// every verification path. Auth is the one place the wrapper is examined: the
+// executor's final gate is on the Transaction body alone
+// (kMaxBytesTransaction), since the hash commits only to the body and a
+// wrapper-dependent verdict there would let arrival order split validators
+// (#3844). An over-cap wrapper is a malformed submission, so it fails
+// authentication like any other bad wrapper, and spends no
+// signature-verification work.
+bool
+wrapper_over_cap(const SignedTransaction &tx)
+{
+  const size_t wrapper_size = x23::xdr_size(tx);
+  if (wrapper_size <= kMaxBytesSignedTransaction) {
+    return false;
+  }
+  trace("auth: rejecting over-cap transaction wrapper ({} bytes, cap {})",
+        wrapper_size, kMaxBytesSignedTransaction);
+  return true;
+}
+
+} // namespace
+
 x23::Async<AuthErrorCodeBatch>
 AuthServer::verify_transactions(BlockHeight height,
                                 std::span<const SignedTransaction> txs,
@@ -208,17 +232,7 @@ AuthServer::verify_transactions(BlockHeight height,
       auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
-    // Enforce the protocol's SignedTransaction bound on the whole wrapper. Auth
-    // is the one place the wrapper is examined: the executor's final gate is on
-    // the Transaction body alone (kMaxBytesTransaction), since the hash commits
-    // only to the body and a wrapper-dependent verdict there would let arrival
-    // order split validators (#3844). An over-cap wrapper is a malformed
-    // submission, so it fails authentication like any other bad wrapper, and
-    // spends no signature-verification work.
-    if (const size_t wrapper_size = x23::xdr_size(tx);
-        wrapper_size > kMaxBytesSignedTransaction) {
-      trace("auth: rejecting over-cap transaction wrapper ({} bytes, cap {})",
-            wrapper_size, kMaxBytesSignedTransaction);
+    if (wrapper_over_cap(tx)) {
       results[i] = AuthErrorCode::kAuthFailed;
       continue;
     }
@@ -285,6 +299,9 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
 {
   Ed25519SignatureVerifier signature_verifier;
   for (const auto &tx : txs) {
+    if (wrapper_over_cap(tx)) {
+      co_return AuthErrorCode::kAuthFailed;
+    }
     auto source_addr =
         co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
     if (!source_addr.has_value()) {

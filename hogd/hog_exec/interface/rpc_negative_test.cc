@@ -45,6 +45,7 @@
 #include "x23/cleanup.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
