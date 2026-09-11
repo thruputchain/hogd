@@ -4159,7 +4159,7 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
 // A successful TryInvoke under validation mode. The proposal's probe succeeds
 // and logs a true bit; validation consumes it, checks the child's queue
 // observations against its item views, and bumps the frame's TryInvoke depth
-// (note_validation_try_invoke_success) instead of pushing a subtransaction.
+// (note_try_invoke_success) instead of pushing a subtransaction.
 //
 // Skipped on MockDB for the same reason as TryInvokeConsumeCommits: the
 // proposal-phase commit re-pushes the consume delta the probe already pushed.
