@@ -849,6 +849,8 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
             status = this->go(field);
         },
         value);
+    if constexpr (CheckRecursion && is_recursive_xdr<T>)
+      this->remaining_++;
     return status;
   }
 
@@ -866,8 +868,11 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
     union_set_discriminant(value, d);
     if (ops::index(value) == -1) [[unlikely]]
       return CxsError{CxsErrorCode::kBadDiscriminant};
-    return union_visit_arm([this](auto &arm) { return this->go(arm); }, value,
-                           CxsStatus<void>{});
+    auto status = union_visit_arm([this](auto &arm) { return this->go(arm); },
+                                  value, CxsStatus<void>{});
+    if constexpr (CheckRecursion && is_recursive_xdr<T>)
+      this->remaining_++;
+    return status;
   }
 
   template<is_xdr_cat<XdrCategory::kArray> X> CxsStatus<void> go(X &value)
