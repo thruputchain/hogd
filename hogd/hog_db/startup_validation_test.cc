@@ -227,8 +227,8 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
     ASSERT_TRUE(db.commit().has_value());
     const auto recovered = db.read_dbtip();
     ASSERT_TRUE(recovered.has_value());
-    EXPECT_FALSE(StartupValidation::tip_is_servable(db, *recovered,
-                                                    cost_model_));
+    EXPECT_FALSE(
+        StartupValidation::tip_is_servable(db, *recovered, cost_model_));
   }
 }
 
