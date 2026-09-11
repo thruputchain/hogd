@@ -51,9 +51,7 @@ public:
   {
     lk_.acquire();
     Defer _ul([this] { lk_.release(); });
-#if DEBUG
     x23assert(i < max_ && std::ranges::find(free_, i) == free_.end());
-#endif // DEBUG
     free_.push_back(i);
     if (free_.size() == max_) {
       free_.clear();
