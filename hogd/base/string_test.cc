@@ -11,6 +11,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd {
 
@@ -69,7 +70,7 @@ TEST(StringTest, DecodeHexEvenLength)
 TEST(StringTest, DecodeHexOddLengthDeath)
 {
   // Odd-length hex string should CHECK-fail (out-of-bounds read)
-  EXPECT_DEATH(decode_hex("abc"), "");
+  X23_EXPECT_DEATH(decode_hex("abc"), "");
 }
 
 TEST(NetworkHashTest, ParsesAndFormatsCanonicalHex)

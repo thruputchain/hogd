@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "hogd/base/log.h"
+#include "x23/tests/death_test.h"
 #include "x23/x23/progname.h"
 
 namespace hogd {
@@ -47,7 +48,7 @@ TEST(ContractLoaderTest, MissingArtifactNamesSearchPathsAndOverride)
   ContractArtifactDirectoryGuard guard;
   set_contract_artifact_directories({"/tmp/groundhog-missing-contracts"});
 
-  EXPECT_DEATH(
+  X23_EXPECT_DEATH(
       {
         log_init(std::make_unique<ConsoleLogger>());
         (void)load_contract_blob("missing-contract.rv32a");
