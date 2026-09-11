@@ -161,9 +161,10 @@ public:
   constexpr PtrIterator(pointer ptr) noexcept : ptr_(ptr) {}
 
   template<typename U>
-  requires std::constructible_from<U *, T *> &&
+  requires std::constructible_from<T *, U *> &&
            std::same_as<std::remove_cv_t<U>, std::remove_cv_t<T>>
-  constexpr PtrIterator(const PtrIterator<U> &other) noexcept : ptr_(other.ptr_)
+  constexpr PtrIterator(const PtrIterator<U> &other) noexcept
+    : ptr_(other.operator->())
   {}
 
   constexpr pointer operator->() const noexcept { return ptr_; }

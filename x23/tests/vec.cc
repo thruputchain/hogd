@@ -1,7 +1,10 @@
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <new>
+#include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -308,3 +311,195 @@ TEST(VecAlias, AllocationFailureDoesNotMoveArgument)
   ASSERT_EQ(values.front().get(), ptr);
   EXPECT_EQ(*values.front(), 42);
 }
+
+static_assert(
+    std::convertible_to<Vec<int>::iterator, Vec<int>::const_iterator>);
+static_assert(
+    !std::convertible_to<Vec<int>::const_iterator, Vec<int>::iterator>);
+
+TEST(VecIterator, ConstConversionPreservesPosition)
+{
+  Vec<int> values{1, 2, 3};
+  Vec<int>::const_iterator it = values.begin() + 1;
+  EXPECT_EQ(*it, 2);
+  EXPECT_EQ(it, std::as_const(values).begin() + 1);
+  EXPECT_EQ(it.operator->(), values.data() + 1);
+  it = values.end();
+  EXPECT_EQ(it, values.cend());
+}
+
+TEST(VecIterator, RandomAccessOperations)
+{
+  Vec<int> values{10, 20, 30, 40};
+  auto it = values.begin();
+  EXPECT_EQ(*it++, 10);
+  EXPECT_EQ(*it, 20);
+  EXPECT_EQ(*it--, 20);
+  EXPECT_EQ(*it, 10);
+  EXPECT_EQ(&++it, &it);
+  EXPECT_EQ(&--it, &it);
+  EXPECT_EQ(*(2 + it), 30);
+  EXPECT_EQ(*(values.end() - 1), 40);
+  it += 3;
+  EXPECT_EQ(&(it -= 2), &it);
+  EXPECT_EQ(*it, 20);
+  EXPECT_EQ(it[2], 40);
+  EXPECT_EQ(it[-1], 10);
+  EXPECT_EQ(*(1 - it), 10);
+  EXPECT_LT(values.begin(), values.end());
+  EXPECT_EQ(values.end() - values.begin(), 4);
+  const auto &cv = values;
+  EXPECT_EQ(cv.begin()[2], 30);
+  EXPECT_EQ(*std::ranges::rbegin(cv), 40);
+}
+
+TEST(VecCopy, AssignAcrossCapacityAndBounds)
+{
+  Vec<int> source{1, 2, 3, 4};
+  Vec<int> dest{9};
+  dest = source;
+  EXPECT_EQ(dest, source);
+  source[0] = 7;
+  EXPECT_EQ(dest[0], 1);
+  source.resize(2);
+  dest = source;
+  EXPECT_EQ(dest, source);
+  auto &alias = dest;
+  dest = alias;
+  EXPECT_EQ(dest, source);
+  Vec<int, 8> bounded;
+  bounded.reserve(8);
+  bounded = source;
+  EXPECT_EQ(bounded.size(), 2UZ);
+  EXPECT_EQ(bounded[0], 7);
+  bounded.append(source.begin(), 1UZ);
+  EXPECT_EQ(bounded.back(), 7);
+  EXPECT_GT(source, (Vec<int>{1, 2}));
+  EXPECT_LT(source, (Vec<int>{7, 2, 3}));
+}
+
+namespace {
+
+struct CopyFailure {
+  inline static int live_{};
+  inline static int copies_{};
+  CopyFailure() { ++live_; }
+  CopyFailure(const CopyFailure &)
+  {
+    if (!copies_--)
+      throw std::runtime_error("copy");
+    ++live_;
+  }
+  CopyFailure(CopyFailure &&) noexcept { ++live_; }
+  ~CopyFailure() { --live_; }
+};
+
+struct HugeRange {
+  int value_{};
+  int *begin() { return &value_; }
+  int *end() { return &value_ + 1; }
+  size_t size() const { return SIZE_MAX; }
+};
+
+} // namespace
+
+TEST(VecCopy, FailedRangeConstructionDestroysPartialCopy)
+{
+  {
+    Vec<CopyFailure> source;
+    source.resize(3);
+    CopyFailure::copies_ = 1;
+    EXPECT_THROW((Vec<CopyFailure>(std::from_range, source)),
+                 std::runtime_error);
+    EXPECT_EQ(CopyFailure::live_, 3);
+  }
+  EXPECT_EQ(CopyFailure::live_, 0);
+}
+
+TEST(VecBounds, AppendSizeOverflowPreservesContents)
+{
+  Vec<int> values{1};
+  EXPECT_THROW(values.append_range(HugeRange{}), XdrLengthError);
+  EXPECT_EQ(values, (Vec<int>{1}));
+}
+
+TEST(VecViews, ByteViewAndStringUtilities)
+{
+  BufView view;
+  std::string text = "hello";
+  view = text;
+  EXPECT_EQ(view.string_view(), text);
+  EXPECT_EQ(detail::strlen(text.c_str()), 5UZ);
+  detail::outcounter counter;
+  EXPECT_EQ((counter++).n, 0UZ);
+  EXPECT_EQ(counter.n, 1UZ);
+}
+
+TEST(VecViews, SpanSlicesRetainExtentAndDerivedType)
+{
+  std::array<int, 4> values{1, 2, 3, 4};
+  span fixed(values);
+  span<int> dynamic(values);
+  EXPECT_EQ(fixed.first<2>()[1], 2);
+  EXPECT_EQ(fixed.last<2>()[0], 3);
+  EXPECT_EQ(fixed.first(2).size(), 2UZ);
+  EXPECT_EQ(fixed.last(2)[1], 4);
+  EXPECT_EQ((fixed.subspan<1, 2>()[0]), 2);
+  EXPECT_EQ(fixed.subspan(1, 2)[1], 3);
+  EXPECT_EQ(dynamic.first(2)[1], 2);
+  EXPECT_EQ(dynamic.last(2)[0], 3);
+  EXPECT_EQ(dynamic.subspan(1)[2], 4);
+  Buf bytes{1, 2, 3, 4};
+  BufView view(bytes);
+  static_assert(std::same_as<decltype(view.first(1)), BufView>);
+  static_assert(std::same_as<decltype(view.last(1)), BufView>);
+  static_assert(std::same_as<decltype(view.subspan(1)), BufView>);
+  EXPECT_EQ(view.first(1).data(), bytes.data());
+  EXPECT_EQ(view.last(1).data(), bytes.data() + 3);
+}
+
+TEST(VecViews, StringSearchesMatchStringView)
+{
+  Str text = "abcabc";
+  EXPECT_EQ(text.compare("abcabc"), 0);
+  EXPECT_TRUE(text.starts_with("abc"));
+  EXPECT_FALSE(text.starts_with("b"));
+  EXPECT_TRUE(text.ends_with("abc"));
+  EXPECT_TRUE(text.contains("bca"));
+  EXPECT_EQ(text.find("bc"), 1UZ);
+  EXPECT_EQ(text.rfind("bc"), 4UZ);
+  EXPECT_EQ(text.find_first_of("cx"), 2UZ);
+  EXPECT_EQ(text.find_last_of("ax"), 3UZ);
+  EXPECT_EQ(text.find_first_not_of("ab"), 2UZ);
+  EXPECT_EQ(text.find_last_not_of("bc"), 3UZ);
+  EXPECT_EQ(text.find("x"), Str::npos);
+  EXPECT_GT(Str("\xff"), Str("\x7f"));
+  EXPECT_EQ(hexdump(std::array{std::byte{0x01}, std::byte{0xaf}}), Str("01af"));
+}
+
+#if !BROKEN_P2564R3
+static_assert([] {
+  Vec<int> values{1, 2};
+  values.reserve(8);
+  values.resize(4, 3);
+  values.resize_uninitialized(5);
+  values[4] = 4;
+  Vec<int> copy(values);
+  values.clear();
+  values.shrink_to_fit();
+  copy.resize(2);
+  copy.shrink_to_fit();
+  return values.empty() && values.capacity() == 0 && copy == Vec<int>{1, 2} &&
+         detail::strlen("abc") == 3;
+}());
+#endif
+
+#ifndef X23_CSTRING_DEBUG
+TEST(VecViews, CStringRepairsOverwrittenTerminator)
+{
+  Str text = "abc";
+  text.data()[text.size()] = '!';
+  EXPECT_STREQ(text.c_str(), "abc");
+  EXPECT_EQ(text.data()[text.size()], '\0');
+}
+#endif

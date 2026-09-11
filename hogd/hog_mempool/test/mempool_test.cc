@@ -73,6 +73,7 @@
 #include "x23/corosync.h"
 #include "x23/rpc_common.h"
 #include "x23/serialize.h"
+#include "x23/tests/death_test.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -256,9 +257,9 @@ TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
   registration.clear();
   x23::Defer cleanup([&registration] { registration.clear(); });
 
-  ASSERT_DEATH(MempoolEventRpc::wait_for_registration_for(
-                   std::chrono::milliseconds(20)),
-               "event startup timed out waiting for canonical tip");
+  X23_ASSERT_DEATH(MempoolEventRpc::wait_for_registration_for(
+                       std::chrono::milliseconds(20)),
+                   "event startup timed out waiting for canonical tip");
 }
 
 TEST(Mempool, EventStartupTimesOutWithoutActivation)
@@ -271,9 +272,9 @@ TEST(Mempool, EventStartupTimesOutWithoutActivation)
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 70, .consensus_value = value});
 
-  ASSERT_DEATH(MempoolEventRpc::wait_for_registration_for(
-                   std::chrono::milliseconds(20)),
-               "event startup timed out waiting for activation");
+  X23_ASSERT_DEATH(MempoolEventRpc::wait_for_registration_for(
+                       std::chrono::milliseconds(20)),
+                   "event startup timed out waiting for activation");
 }
 
 TEST(Mempool, EventPreparedCardIsUnavailableBeforeActivation)

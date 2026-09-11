@@ -53,6 +53,36 @@ TEST(Deserialize, Vector)
   EXPECT_THROW(deserialize(&vec, BufView(buf)), x23::XdrBadInput);
 }
 
+// Issue #3971: a vector of a zero-wire-size element (an empty struct decodes to
+// zero bytes) is a valid XDR construct -- the serializer emits N such elements
+// as just the 4-byte count -- so deserialize must read it back to preserve the
+// serialize/deserialize round trip.  No decode-time cap on the count can bound
+// the resulting allocation without rejecting that valid encoding, so the count
+// is intentionally *not* limited at decode; the disproportionate-allocation
+// concern for such a reply is contained at the RPC boundary instead
+// (RpcStream::send_call wraps the std::bad_alloc as an XdrException).  This
+// test pins the round trip so a future decode-time "bound" cannot silently
+// break it.
+TEST(Deserialize, ZeroWireVectorRoundTrips)
+{
+  static_assert(detail::xdr_size_bounds<VoidCheck>().max_ == 0);
+
+  XdrVec<VoidCheck> src(5);
+  x23::Buf body = serialize(src);
+  EXPECT_EQ(body.size(), 4U); // count only; the elements occupy no wire bytes
+
+  XdrVec<VoidCheck> dst;
+  ASSERT_NO_THROW(deserialize(&dst, BufView(body)));
+  EXPECT_EQ(dst.size(), 5U);
+
+  // The empty vector round-trips too.
+  XdrVec<VoidCheck> empty;
+  x23::Buf empty_body = serialize(empty);
+  XdrVec<VoidCheck> empty_dst;
+  ASSERT_NO_THROW(deserialize(&empty_dst, BufView(empty_body)));
+  EXPECT_TRUE(empty_dst.empty());
+}
+
 // CXS BoundedStr deserialization must reject input where the decoded
 // length exceeds the remaining span size (heap-buffer-overflow found
 // by fuzz_deserialize).
@@ -240,6 +270,100 @@ TEST(Deserialize, XdrRecursionLimit)
     test_recursive out;
     EXPECT_THROW(deserialize(&out, BufView(buf)), XdrBadInput);
   }
+}
+
+TEST(Deserialize, ExplicitRecursionLimit)
+{
+  const size_t default_limit = deserialization_recursion_limit;
+  for (size_t limit : {0UZ, 2UZ, default_limit + 1}) {
+    auto chain = make_recursive_chain(limit + 1);
+    auto xdr_buf = serialize(chain);
+    auto cxs_buf = serialize_cxs_for_test(chain);
+    test_recursive out;
+
+    EXPECT_THROW(deserialize(&out, BufView(xdr_buf), limit), XdrBadInput);
+    EXPECT_THROW(deserialize_from(&out, BufView(xdr_buf), limit), XdrBadInput);
+    auto status = deserialize_cxs(&out, BufView(cxs_buf), limit);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error(), CxsErrorCode::kRecursionLimit);
+    auto from_status = deserialize_cxs_from(&out, BufView(cxs_buf), limit);
+    ASSERT_FALSE(from_status);
+    EXPECT_EQ(from_status.error(), CxsErrorCode::kRecursionLimit);
+
+    EXPECT_NO_THROW(deserialize(&out, BufView(xdr_buf), limit + 1));
+    EXPECT_EQ(out, chain);
+    EXPECT_EQ(deserialize_from(&out, BufView(xdr_buf), limit + 1),
+              xdr_buf.size());
+    EXPECT_EQ(out, chain);
+    ASSERT_TRUE(deserialize_cxs(&out, BufView(cxs_buf), limit + 1));
+    EXPECT_EQ(out, chain);
+    auto used = deserialize_cxs_from(&out, BufView(cxs_buf), limit + 1);
+    ASSERT_TRUE(used);
+    EXPECT_EQ(*used, cxs_buf.size());
+    EXPECT_EQ(out, chain);
+  }
+
+  // A raised per-call limit must not change subsequent default decodes.
+  EXPECT_EQ(deserialization_recursion_limit, default_limit);
+  auto chain = make_recursive_chain(default_limit + 1);
+  auto xdr_buf = serialize(chain);
+  auto cxs_buf = serialize_cxs_for_test(chain);
+  test_recursive out;
+  EXPECT_THROW(deserialize(&out, BufView(xdr_buf)), XdrBadInput);
+  auto status = deserialize_cxs(&out, BufView(cxs_buf));
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kRecursionLimit);
+}
+
+TEST(Deserialize, ExplicitRecursionLimitDiagnostic)
+{
+  auto buf = serialize(make_recursive_chain(3));
+  test_recursive out;
+  try {
+    deserialize(&out, BufView(buf), 2);
+    FAIL() << "expected the explicit limit to reject the chain";
+  } catch (const XdrBadInput &e) {
+    EXPECT_STREQ(e.what(), "x23::Deserializer: exceeded recursion limit of 2");
+  }
+}
+
+TEST(Deserialize, ExplicitRecursionLimitCountsSiblingVisits)
+{
+  contains_test_recursive value;
+  value.t.nextvec.resize(3);
+  // The non-recursive wrapper consumes no budget; root + three children do.
+  auto xdr_buf = serialize(value);
+  auto cxs_buf = serialize_cxs_for_test(value);
+  contains_test_recursive out;
+  EXPECT_THROW(deserialize(&out, BufView(xdr_buf), 3), XdrBadInput);
+  EXPECT_NO_THROW(deserialize(&out, BufView(xdr_buf), 4));
+  EXPECT_EQ(out, value);
+  auto status = deserialize_cxs(&out, BufView(cxs_buf), 3);
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kRecursionLimit);
+  ASSERT_TRUE(deserialize_cxs(&out, BufView(cxs_buf), 4));
+  EXPECT_EQ(out, value);
+}
+
+TEST(Deserialize, ZeroRecursionLimitAllowsNonRecursiveTypes)
+{
+  const uint32_t value = 123;
+  auto xdr_buf = serialize(value);
+  auto cxs_buf = serialize_cxs_for_test(value);
+  uint32_t out = 0;
+  EXPECT_NO_THROW(deserialize(&out, BufView(xdr_buf), 0));
+  EXPECT_EQ(out, value);
+  out = 0;
+  EXPECT_EQ(deserialize_from(&out, BufView(xdr_buf), 0), xdr_buf.size());
+  EXPECT_EQ(out, value);
+  out = 0;
+  ASSERT_TRUE(deserialize_cxs(&out, BufView(cxs_buf), 0));
+  EXPECT_EQ(out, value);
+  out = 0;
+  auto used = deserialize_cxs_from(&out, BufView(cxs_buf), 0);
+  ASSERT_TRUE(used);
+  EXPECT_EQ(*used, cxs_buf.size());
+  EXPECT_EQ(out, value);
 }
 
 // Non-recursive types: CxsDeserializer<false> path (no recursion checker).

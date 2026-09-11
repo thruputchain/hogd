@@ -17,6 +17,7 @@
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/rpc_common.h"
+#include "x23/tests/death_test.h"
 #include "x23/threadpool.h"
 
 // Coverage for the kRpcNoCatch form of RpcServer (hogd/base/rpc_server.h).
@@ -157,7 +158,7 @@ TEST(RpcServerNoCatch, NoCatchServerServesSuccessfulCalls)
 
 // Everything the death test touches is built inside the child: a fork would
 // not carry the coroutine thread pool's threads across.  It is a function
-// rather than an inline block so the EXPECT_DEATH macro is not handed a
+// rather than an inline block so the death-test macro is not handed a
 // statement full of commas.
 void
 run_handler_throw()
@@ -184,7 +185,9 @@ run_handler_throw()
 TEST(RpcServerNoCatchDeathTest, HandlerThrowTerminatesProcess)
 {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(run_handler_throw(), kBoom);
+  // X23_EXPECT_DEATH (#3975): this child aborts on purpose, so it should not
+  // leave a core dump behind for CI to collect.
+  X23_EXPECT_DEATH(run_handler_throw(), kBoom);
 }
 
 } // namespace

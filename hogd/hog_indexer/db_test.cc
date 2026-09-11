@@ -19,6 +19,7 @@
 #include "indexer.hh"
 #include "pagination.hh"
 #include "types.hh"
+#include "x23/tests/death_test.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -1089,7 +1090,7 @@ TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchIsFatal)
   }
 
   const std::filesystem::path dir = tmp_dir_.directory();
-  EXPECT_DEATH(
+  X23_EXPECT_DEATH(
       {
         auto db = IndexDB::open(dir);
         ASSERT_TRUE(db.has_value());

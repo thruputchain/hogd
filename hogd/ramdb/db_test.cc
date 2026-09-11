@@ -1266,6 +1266,30 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
   resizer.join();
 }
 
+TEST(Loglet, CloneZeroesNextSlot)
+{
+  auto allocator = LogletAllocator::create(2 * kLogletRegionSize, 1, [] {});
+  ASSERT_NE(allocator, nullptr);
+  UniqueLoglet ll = make_unique_loglet(*allocator, LogletMode::kDiskBuffer);
+  ASSERT_TRUE(ll);
+
+  // Recovery clones headers rebuilt from disk into the checksummed buffer
+  // (#2975). A live pointer stands in for a nullptr whose object
+  // representation is not all zero.
+  ItemHeader src(ItemStorage::kNormal, /*type=*/7, /*key_len=*/3,
+                 /*value_len=*/5);
+  src.next = &src;
+
+  ItemHeader *dst = ll->clone(&src);
+  ASSERT_NE(dst, nullptr);
+  std::span<const std::byte> next_slot =
+      std::as_bytes(std::span(dst, 1)).subspan(offsetof(ItemHeader, next));
+  EXPECT_EQ(next_slot.size(), sizeof(ItemHeader *));
+  EXPECT_TRUE(std::ranges::all_of(next_slot, [](std::byte b) {
+    return b == std::byte{0};
+  }));
+}
+
 } // namespace hogd
 
 int

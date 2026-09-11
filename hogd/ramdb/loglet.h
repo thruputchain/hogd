@@ -237,7 +237,8 @@ public:
                     size_t value_len);
 
   // clone copies an item into this loglet. It reserves space for its key and
-  // value. It returns nullptr if there is insufficient space.
+  // value and zeroes the copy's next slot (see ItemHeader::clear_next). It
+  // returns nullptr if there is insufficient space.
   ItemHeader *clone(ItemHeader *src);
 
   // free removes an item from this loglet. It doesn't directly reclaim the

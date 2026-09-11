@@ -31,6 +31,7 @@
 
 #include <gtest/gtest.h>
 
+#include "death_test.h"
 #include "tests/xdrtest.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -301,7 +302,11 @@ namespace {
 // The death-test child is where all of this has to be built: a fork would
 // not carry the thread pool's threads across, so nothing may be set up in
 // the parent.  Each scenario is a function rather than an inline block so
-// the EXPECT_DEATH macro is not handed a statement full of commas.
+// the death-test macro is not handed a statement full of commas.
+//
+// X23_EXPECT_DEATH rather than EXPECT_DEATH: these children abort on
+// purpose, and #3975 added that wrapper so an expected crash does not leave
+// a core dump behind for CI to collect.
 
 // Reached only when the server turned the failure into a reply instead of
 // dying.  Returning from the scenario is how gtest gets to report that
@@ -358,13 +363,13 @@ run_throw_after_suspension()
 TEST(RpcNoCatchDeathTest, SynchronousThrowTerminatesProcess)
 {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(run_synchronous_throw(), kBoom);
+  X23_EXPECT_DEATH(run_synchronous_throw(), kBoom);
 }
 
 TEST(RpcNoCatchDeathTest, ThrowAfterSuspensionTerminatesProcess)
 {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(run_throw_after_suspension(), kBoom);
+  X23_EXPECT_DEATH(run_throw_after_suspension(), kBoom);
 }
 
 } // namespace x23
