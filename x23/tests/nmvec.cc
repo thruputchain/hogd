@@ -781,3 +781,65 @@ TEST(NMVec, MoveConstructionAfterFailedConstruction)
   EXPECT_EQ(ThrowingT::live(), 0);
   EXPECT_TRUE(Allocator::allocations_.empty());
 }
+
+TEST(IndexAllocator, ReusesFreedIndicesAndRestartsWhenEmpty)
+{
+  x23::IndexAllocator indices;
+  auto a = indices.alloc();
+  auto b = indices.alloc();
+  auto c = indices.alloc();
+  EXPECT_EQ(a, 0UZ);
+  EXPECT_EQ(b, 1UZ);
+  EXPECT_EQ(c, 2UZ);
+  indices.free(b);
+  EXPECT_EQ(indices.alloc(), b);
+  indices.free(a);
+  indices.free(c);
+  indices.free(b);
+  EXPECT_EQ(indices.alloc(), 0UZ);
+  indices.free(0);
+}
+
+TEST(AllocCache, ReusesOnlyMatchingSizesAndClears)
+{
+  x23::AllocCache cache;
+  cache.deallocate(nullptr, 16);
+  auto *small = cache.allocate(1);
+  auto *large = cache.allocate(64);
+  cache.deallocate(large, 64);
+  cache.deallocate(small, 1);
+  auto *same = cache.allocate(sizeof(void *));
+  EXPECT_EQ(same, small);
+  auto *second = cache.allocate(1);
+  EXPECT_NE(second, same);
+  auto *middle = cache.allocate(32);
+  EXPECT_EQ(cache.allocate(64), large);
+  cache.deallocate(same, 1);
+  cache.deallocate(second, 1);
+  cache.deallocate(middle, 32);
+  cache.deallocate(large, 64);
+  EXPECT_EQ(cache.allocate(1), second);
+  cache.deallocate(second, 1);
+  cache.clear();
+  cache.clear();
+  auto *fresh = cache.allocate(64);
+  cache.deallocate(fresh, 64);
+}
+
+TEST(NMVec, ConcurrentWritersPublishUniqueIndices)
+{
+  constexpr size_t kThreads = 8, kCount = 2000;
+  NMVec<size_t> values;
+  std::vector<std::jthread> workers;
+  for (size_t thread = 0; thread < kThreads; ++thread)
+    workers.emplace_back([&, thread] {
+      for (size_t i = 0; i < kCount; ++i)
+        values.emplace_back(thread * kCount + i);
+    });
+  workers.clear();
+  ASSERT_EQ(values.size(), kThreads * kCount);
+  std::vector<size_t> sorted(values.begin(), values.end());
+  std::ranges::sort(sorted);
+  for (size_t i = 0; i < sorted.size(); ++i)
+    EXPECT_EQ(sorted[i], i);
+}
