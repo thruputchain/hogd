@@ -1057,6 +1057,43 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenAverageAgeIsNegative)
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
+TEST_F(HogDbTest,
+       StartupHogAgeReconciliationClampsFutureAverageAgeToRecoveredHeight)
+{
+  constexpr BlockHeight kRecoveredHeight = 42;
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = kRecoveredHeight;
+  ASSERT_TRUE(db_.write_dbtip(
+      DbTip{.id = 0, .storage_long_hash = {}, .value = std::move(tip_value)}));
+
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  // Counts already sum to the balance, so only the clamp forces a rewrite: the
+  // to-schedule age is past the recovered tip (a stale age from a block that
+  // never committed, or a tamper), and reconciliation normalizes it down to the
+  // tip so it cannot skew scheduler ordering. Ages already within the tip are
+  // left untouched.
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/5,
+                   /*already_scheduled=*/3,
+                   /*received=*/2,
+                   /*to_schedule_age=*/kRecoveredHeight + 1'000,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  ASSERT_TRUE(reconcile_startup_hog_ages(db_));
+
+  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(account);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], kRecoveredHeight);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 20);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 30);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 5U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 3U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 2U);
+}
+
 TEST_F(HogDbTest, HogAgeValueOmitsAddressAndReconstructsFromKey)
 {
   const Address key_addr = make_address(kAddress);
