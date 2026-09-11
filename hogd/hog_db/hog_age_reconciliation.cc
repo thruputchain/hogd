@@ -18,8 +18,6 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/status.h"
-#include "rpc_types.hh"
-#include "types.hh"
 
 namespace hogd {
 
@@ -81,13 +79,10 @@ sum_hogs(const HogAge &age)
 // tampered row while the XDR stays valid, and read_address_average_hog_age()
 // does not cross-check them, so trusting the payload could send an operator
 // to repair an address that is not the corrupt one.
-//
-// [current_height] is the recovered tip height; average ages are validated
-// against it below.
 HogDbStatus<void>
 reconcile_address_hog_age_helper(const Address &address,
                                  const uint128_t balance, const HogAge &age,
-                                 const BlockHeight current_height, HogDbDAO &db)
+                                 HogDbDAO &db)
 {
   const std::optional<uint128_t> summed = sum_hogs(age);
   if (!summed.has_value()) {
@@ -119,21 +114,6 @@ reconcile_address_hog_age_helper(const Address &address,
             age.average_ages[kHogAgeGroupToSchedule],
             age.average_ages[kHogAgeGroupAlreadyScheduled],
             age.average_ages[kHogAgeGroupReceived]);
-      return HogDbError(HogDbCode::kInternal);
-    }
-  }
-  // An honest average never exceeds the recovered tip, but a tampered row can
-  // carry a future to-schedule age that the checks above accept and reconcile
-  // preserves; the scheduler then sorts it ahead in its ascending ready-account
-  // key and starves the account of finite block quota (#3952).
-  for (size_t group = 0; group < kHogAgeNumGroups; ++group) {
-    if (age.average_ages[group] > current_height) {
-      error("address 0x{} has a corrupt hog age row: average age {} in group "
-            "{} exceeds the recovered block height {}. Refusing to reconcile; "
-            "the durable hog age state for this address must be repaired or "
-            "the volume replaced.",
-            encode_hex(address.as_bytes()), age.average_ages[group], group,
-            current_height);
       return HogDbError(HogDbCode::kInternal);
     }
   }
@@ -184,8 +164,7 @@ reconcile_address_hog_age_helper(const Address &address,
 }
 
 HogDbStatus<void>
-reconcile_address_hog_age(HogDbDAO &db, const Address &address,
-                          const BlockHeight current_height)
+reconcile_address_hog_age(HogDbDAO &db, const Address &address)
 {
   HogDbStatus<int128_t> balance = db.read_address_balance(address);
   if (!balance.has_value()) {
@@ -208,8 +187,7 @@ reconcile_address_hog_age(HogDbDAO &db, const Address &address,
     return age.error();
   }
 
-  return reconcile_address_hog_age_helper(address, *balance, *age,
-                                          current_height, db);
+  return reconcile_address_hog_age_helper(address, *balance, *age, db);
 }
 
 } // namespace
@@ -217,19 +195,6 @@ reconcile_address_hog_age(HogDbDAO &db, const Address &address,
 HogDbStatus<void>
 reconcile_startup_hog_ages(HogDbDAO &db)
 {
-  // Upper bound for the average-age validation in the helper. A fresh database
-  // (no committed tip) has no balances to reconcile, so leave it unbounded.
-  BlockHeight current_height = std::numeric_limits<BlockHeight>::max();
-  HogDbStatus<DbTip> tip = db.read_dbtip();
-  if (tip.has_value()) {
-    current_height = tip->value.proposal_header.block_height;
-  }
-  else if (tip.error().code() != HogDbCode::kNotFound) {
-    error("could not read DbTip during hog age reconciliation: {}",
-          tip.error());
-    return tip.error();
-  }
-
   // [ConcurrentSet<T>] requires [T] to be an unsigned integral type, which
   // [Address] is not. [ConcurrentMap<K, V>] places no constraints on [K], and
   // its inserts are lock-free, so the scan below can run fully parallel: the
@@ -248,15 +213,14 @@ reconcile_startup_hog_ages(HogDbDAO &db)
   // Now reconcile.
   HogDbStatus<void> ret;
   std::mutex lock;
-  addresses.for_each_parallel([&ret, &lock, &db, current_height](
-                                  std::pair<const Address &, char &> entry) {
-    HogDbStatus<void> status =
-        reconcile_address_hog_age(db, entry.first, current_height);
-    if (!status.has_value()) {
-      std::lock_guard<std::mutex> guard(lock);
-      ret = status.error();
-    }
-  });
+  addresses.for_each_parallel(
+      [&ret, &lock, &db](std::pair<const Address &, char &> entry) {
+        HogDbStatus<void> status = reconcile_address_hog_age(db, entry.first);
+        if (!status.has_value()) {
+          std::lock_guard<std::mutex> guard(lock);
+          ret = status.error();
+        }
+      });
 
   return ret;
 }
