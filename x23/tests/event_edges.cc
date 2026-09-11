@@ -202,13 +202,15 @@ TEST(EventEdges, TcpConnectSuccessAndFailures)
   ASSERT_FALSE(invalid_service);
   EXPECT_EQ(invalid_service.error().code().category(), gai_category());
 
-  // A bound TCP socket without listen reserves a port that refuses connects.
+  // Pick an unused port, then release it before testing connection refusal.
   UniqueFd refusing(socket(AF_INET, SOCK_STREAM, 0));
   ASSERT_TRUE(refusing);
   ASSERT_EQ(bind(refusing.get(), reinterpret_cast<sockaddr *>(&*address),
                  sockaddr_len(*address)),
             0);
   auto refused_address = local_addr(refusing);
+  // Darwin drops SYNs to bound, non-listening sockets instead of refusing.
+  refusing.reset();
   auto failed = cp.tcpconnect(&refused_address)();
   ASSERT_FALSE(failed);
   EXPECT_EQ(failed.error(), ECONNREFUSED);
