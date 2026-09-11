@@ -183,3 +183,17 @@ curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
 cargo install --force cbindgen
 ./scripts/fetch.sh
 ```
+
+### AMD server release artifacts
+
+Linux releases also publish `hogd-validator-linux-x86_64-znver5.tar.gz` in
+`SHA256SUMS`. Its server binaries target AMD Zen 5 explicitly in both C++ and
+embedded Rust (`BUILD_ARCHITECTURE=znver5`, `RUST_BUILD_CPU=znver5`). Use only
+on qualified Zen 5 hosts, such as EC2 C8a/M8a. Packaging must select this archive
+explicitly and qualify execution on the destination CPU before deployment.
+The regular x86_64 archives and public hog-devnode distributions retain their
+portable CPU baseline. There is no tuned standalone devnode distribution.
+
+Run `python3 scripts/test_package_hogd_validator_release.py` to check archive
+layout and profile validation. This fixture test does not validate machine code;
+the release build and a real Zen 5 runtime smoke remain required.

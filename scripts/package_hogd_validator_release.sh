@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 2 || $# -gt 4 ]]; then
-  echo "usage: $0 <build-dir> <output-dir> [flavor] [architecture]" >&2
+if [[ $# -lt 2 || $# -gt 5 ]]; then
+  echo "usage: $0 <build-dir> <output-dir> [flavor] [architecture] [cpu-profile]" >&2
   exit 1
 fi
 
@@ -10,6 +10,13 @@ build_dir=$1
 output_dir=$2
 flavor=${3:-release}
 architecture=${4:-x86_64}
+cpu_profile=${5:-portable}
+
+case "$cpu_profile:$architecture:$flavor" in
+portable:*) ;;
+znver5:x86_64:release) ;;
+*) echo "error: unsupported CPU profile/architecture/flavor" >&2; exit 1 ;;
+esac
 
 case "$architecture" in
 x86_64 | arm64) ;;
@@ -33,6 +40,10 @@ debug)
   exit 1
   ;;
 esac
+
+if [[ "$cpu_profile" != portable ]]; then
+  validator_package="$validator_package-$cpu_profile"
+fi
 
 copy_exec() {
   local src=$1
@@ -97,6 +108,10 @@ tar -C "$validator_dir" -czf "$output_dir/$validator_package.tar.gz" \
   hog-hosted-bootstrap \
   hog-indexer \
   hog-mempool
+
+if [[ "$cpu_profile" != portable ]]; then
+  exit 0
+fi
 
 tar -C "$hog_devnode_dir" -czf "$output_dir/$hog_devnode_package.tar.gz" \
   contracts/dev_wallet.rv32a \
