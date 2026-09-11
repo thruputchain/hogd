@@ -53,6 +53,27 @@ TEST(Deserialize, Vector)
   EXPECT_THROW(deserialize(&vec, BufView(buf)), x23::XdrBadInput);
 }
 
+// Regression for issue #3971: a vector of a zero-wire-size element (an empty
+// struct decodes to zero bytes) must not let a tiny message declare an
+// enormous element count and force count-proportional allocation.  The count
+// is bounded by the bytes that remain, so a 4-byte body naming a million
+// elements is rejected rather than materialized.
+TEST(Deserialize, ZeroWireVectorCountBoundedByInput)
+{
+  static_assert(detail::xdr_size_bounds<VoidCheck>().max_ == 0);
+
+  // Body is just the element count; no element bytes follow it.
+  x23::Buf body = serialize(std::uint32_t{1'000'000});
+  XdrVec<VoidCheck> vec;
+  EXPECT_THROW(deserialize(&vec, BufView(body)), x23::XdrBadInput);
+
+  // A legitimately empty vector still decodes.
+  x23::Buf empty_body = serialize(std::uint32_t{0});
+  XdrVec<VoidCheck> empty;
+  EXPECT_NO_THROW(deserialize(&empty, BufView(empty_body)));
+  EXPECT_TRUE(empty.empty());
+}
+
 // CXS BoundedStr deserialization must reject input where the decoded
 // length exceeds the remaining span size (heap-buffer-overflow found
 // by fuzz_deserialize).

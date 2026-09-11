@@ -852,6 +852,22 @@ struct Deserializer
     // if (size > X::max_size()) [[unlikely]]
     //   raise("length {} exceeds maximum deserializing {}", size,
     //         xdr_type_name<X>());
+    //
+    // A vector can never contain more elements than the input has bytes
+    // remaining: an element that consumes wire bytes is bounded by the per-
+    // element need() checks below, so an honest encoding of `size` elements is
+    // at least `size` bytes long.  The one element kind that escapes that
+    // bound is a zero-wire-size element (e.g. an empty struct), which the loop
+    // decodes without reading any input, so neither those checks nor the record
+    // byte cap limit the count -- a tiny message could otherwise force count-
+    // proportional allocation.  For such elements, reject a count that exceeds
+    // the bytes remaining, before any count-sized allocation.  A count past the
+    // vector's own maximum is left to the bounded reserve / check_size path
+    // below, so it still surfaces as XdrLengthError.
+    if constexpr (xdr_size_bounds<typename X::value_type>().max_ == 0)
+      if (size <= X::max_size() && (p > e || size > size_t(e - p))) [[unlikely]]
+        raise("vector count {} exceeds remaining input deserializing {}", size,
+              xdr_type_name<X>());
     x.resize(0);
     // Don't let bad input exhaust memory, but 64kB usually enough.
     x.reserve(
