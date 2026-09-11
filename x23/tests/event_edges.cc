@@ -196,7 +196,12 @@ TEST(EventEdges, TcpConnectSuccessAndFailures)
   UniqueFd server(*accepted);
   EXPECT_EQ(fcntl(server.get(), F_GETFD) & FD_CLOEXEC, 0);
   EXPECT_NE(fcntl(server.get(), F_GETFL) & O_NONBLOCK, 0);
+#if 0
   cp.close(server.release());
+#else
+  cp.reset(server);
+  close(server.release());
+#endif
 
   auto invalid_service = cp.tcpconnect("127.0.0.1", "x23-invalid-service")();
   ASSERT_FALSE(invalid_service);

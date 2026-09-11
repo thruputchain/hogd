@@ -306,12 +306,14 @@ public:
   // it is recycled by another socket.
   void reset(BorrowedFd fd);
 
+  /*
   // Reset and close a file descriptor
   void close(BorrowedFd fd)
   {
     reset(fd);
     ::close(fd.get());
   }
+  */
 
   // The generation number (if non-zero) changes every time a file
   // descriptor is recycled.  If a file descriptor is in a reset state
