@@ -148,9 +148,8 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw);
 
-TransactionViewQuery normalize_public_view_query(
-    TransactionViewQuery query,
-    std::uint64_t max_view_gas = kDefaultMaxViewGas);
+TransactionViewQuery
+normalize_public_view_query(TransactionViewQuery query,
+                            std::uint64_t max_view_gas = kDefaultMaxViewGas);
 
 } // namespace hogd
-

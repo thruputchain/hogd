@@ -212,8 +212,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--max-view-gas" && i + 1 < argc) {
-      max_view_gas = hogd::parse_integer_arg<uint64_t>(
-          "--max-view-gas", argv[++i], argv, usage);
+      max_view_gas = hogd::parse_integer_arg<uint64_t>("--max-view-gas",
+                                                       argv[++i], argv, usage);
       if (max_view_gas == 0) {
         usage(argv);
       }
@@ -246,4 +246,3 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                              db_executor_addr, event_executor_addr,
                              view_gateway_port, max_view_gas);
 }
-

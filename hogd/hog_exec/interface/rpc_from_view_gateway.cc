@@ -80,7 +80,8 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
                                std::string const &event_host,
                                std::uint16_t event_exec_port,
                                std::uint64_t max_view_gas)
-  : max_view_gas_(max_view_gas), db_proxy_(make_view_database_identifier(db_executor_address)),
+  : max_view_gas_(max_view_gas),
+    db_proxy_(make_view_database_identifier(db_executor_address)),
     event_server_proxy_(x23::HostPort{event_host, event_exec_port})
 {
   refresh_thread_ = std::jthread(
@@ -497,4 +498,3 @@ normalize_public_view_query(TransactionViewQuery query,
 }
 
 } // namespace hogd
-

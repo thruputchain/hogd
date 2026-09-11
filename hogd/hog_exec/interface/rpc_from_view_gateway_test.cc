@@ -229,8 +229,8 @@ TEST_F(ViewGatewayRefreshTest, ConfiguredGasCeilingAppliesToExecution)
   framework_.advance_block();
   std::string db_addr =
       std::format("localhost:{}", framework_.get_db_exec_port());
-  ViewGatewayRpc gateway(db_addr, "localhost",
-                         framework_.get_event_exec_port(), 1);
+  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
+                         1);
 
   // The caller requests UINT64_MAX. One gas cannot pay for read_value's
   // storage access, so this must fault rather than return the stored value.
@@ -427,4 +427,3 @@ TEST_F(ViewGatewayRefreshTest, ViewNormalizesFlagsEndToEnd)
 
 } // namespace
 } // namespace hogd
-
