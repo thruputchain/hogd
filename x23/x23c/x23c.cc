@@ -1,5 +1,6 @@
 
 #include <cassert>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
 #include <new>
@@ -10,7 +11,9 @@
 #include <getopt.h>
 #include <set>
 #include <string>
+#include <string_view>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 
@@ -286,8 +289,32 @@ main(int argc, char **argv)
     std::println(stderr, "{}: {}", outfile.string(), x23::Errno{});
     exit(1);
   }
-  write(outfd, res.data(), res.size());
-  if (outfd != 1)
-    close(outfd);
+  // Only a regular file we opened ourselves is ours to remove on error.
+  struct stat sb;
+  const bool remove_on_error =
+      outfd != 1 && fstat(outfd, &sb) == 0 && S_ISREG(sb.st_mode);
+
+  // Discarding a short or failed write leaves a truncated header behind
+  // with a fresh timestamp, which the build system takes for a successful
+  // run of x23c.
+  const auto fail = [&outfile, remove_on_error](const char *what) {
+    x23::Errno err;
+    if (remove_on_error)
+      unlink(outfile.c_str());
+    std::println(stderr, "{}: {}: {}", outfile.string(), what, err);
+    exit(1);
+  };
+
+  for (std::string_view rest{res}; !rest.empty();) {
+    ssize_t n = write(outfd, rest.data(), rest.size());
+    if (n < 0) {
+      if (errno != EINTR)
+        fail("write");
+      continue;
+    }
+    rest.remove_prefix(std::size_t(n));
+  }
+  if (outfd != 1 && close(outfd) == -1)
+    fail("close");
   return 0;
 }
