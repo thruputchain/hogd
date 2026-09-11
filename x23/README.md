@@ -293,7 +293,7 @@ source /path/to/x23/x23/x23_gdb.py
 If you want to debug interactions between clients and servers, you
 will want to set a log file descriptor on all your connections.  You
 can do this with the following line of code in `main`, assuming you
-also create your `RpcStreams` with `rpc_stream_logger` (see below).
+also create your `RpcStreams` with `rpc_stream_logged` (see below).
 
 ``` cpp
 x23::RpcLogger::default_logfd = 2;
@@ -460,7 +460,7 @@ do_n_things(int n)
   [n](this auto) -> Detached { // OK because this not a reference
     for (int i = 0; i < n; ++i)
       co_await thing();
-  };
+  }();
 }
 ```
 
@@ -568,7 +568,7 @@ static_assert(is_myvers<MyVersImpl*, MaybeAsync>);
 To invoke and serve RPC services over a stream socket, include the
 header file `<x23/rpc.h>`.  You hand a socket file descriptor to the
 X23 runtime by means of the functions `rpc_stream` or
-`rpc_stream_logger` (the latter of which logs a trace of all RPC calls
+`rpc_stream_logged` (the latter of which logs a trace of all RPC calls
 if you set `x23::RpcLogger::default_logfd` to an output file
 descriptor such as 1).  These functions return a `Configurator` object
 that can then be used to configure the stream, first by declaring
@@ -645,7 +645,7 @@ the tcp port number on which it is listening (useful if you passed in
 
 ``` cpp
 #include <x23/rpc.h>
-#include <x23/refcount.h>
+#include <x23/refcnt.h>
 
 x23::ThreadPool pool;
 x23::CoroPoll cp(pool);
@@ -658,7 +658,7 @@ main()
 {
   // You only need this if you want to block the main thread while
   // RPCs are being serviced.
-  x23:DestroyInhibit di;
+  x23::DestroyInhibit di;
 
   auto [port, lfd] =
       tcp_rpc_server(cp, 5665, [lk=RefPtr(di)](auto c) {
@@ -777,14 +777,14 @@ be pinned to the each LLC.  RPC calls will then be routed to the
 appropriate stream for the invoking thread's LLC.  An example:
 
 ``` cpp
-  char *server = "server.lan";
+  const char *server = "server.lan";
   uint16_t port = 5665;
 
   sockaddr_storage server_addr;
   if (auto ea = x23::HostPort{server, port}.to_addr(true))
     server_addr = *ea;
   else
-    ea->error().raise("getnameinfo({})", server);
+    ea.error().raise("getnameinfo({})", server);
 
   auto client =
     SRpcMulticlient<RpcLogger>::make(server_addr)->client(myvers{});
