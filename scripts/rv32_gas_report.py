@@ -25,6 +25,8 @@ import statistics
 import signal
 import sys
 
+from rv32_gas_units import DEFAULT_RESOLUTION, baseline_ns, gas_unit_ns
+
 # Reading the tables through `head` or `less` is the normal way to use this, so
 # a closed pipe is a normal exit, not a traceback.
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
@@ -71,7 +73,8 @@ SIGMA_THRESHOLD = 2.0
 # residue is a fused load-use pair running at 0.63 ns/instr while the schedule
 # charges it the pointer-chase rate, which per-opcode worst-case pricing cannot
 # tell apart at charge time.
-DEFAULT_RESOLUTION = 4
+# DEFAULT_RESOLUTION is shared with the syscall reporter and matches the
+# committed schedule (one gas per baseline instruction).
 
 # How far a program may exceed the sum of its opcodes' individual worst cases
 # before it counts as a bound violation rather than measurement scatter.
@@ -268,45 +271,6 @@ def cost_ns(cell):
     # is the estimator that produces negative costs, so a cell reaching here
     # is one to distrust.
     return cell["ns_per_instruction"]
-
-
-def baseline_ns(data):
-    """The cost every other cost is expressed relative to.
-
-    The median saturated cell -- the same kind of measurement as every cell it
-    normalizes, from the same run, so the two move together when the machine's
-    speed does.
-
-    The median rather than a chosen opcode's cost. This used to divide by the
-    saturated ADD body, and one cell carrying every ratio is one cell whose
-    misbehaviour is indistinguishable from the whole ISA moving. On the bench
-    host it did exactly that: between two runs every guarded ratio scaled by
-    2.015, and renormalizing the same two runs against any other cell brought
-    them back into agreement at 0.1% median and 2.4% p90. The opcodes were
-    reproducible to a tenth of a percent; the divisor had halved.
-
-    A median over ~100 cells cannot be moved by one of them, and it degrades
-    gracefully: it takes most of the ISA shifting together -- which is a real
-    change in the engine, and what the gate is for -- before it moves at all.
-
-    The recorded `baseline` is a different kind of measurement: a fit over
-    kernels of varying body size with an all-filler body. On a quiet host the
-    two agree. On a loaded one they do not, and the mismatch lands in every
-    ratio. Two bench runs three minutes apart recorded baselines of 1.1333 and
-    0.6610 ns -- the machine really was 71% faster -- and ADDI's guarded ratio
-    moved 1.68x to 4.09x purely because its kernel and the baseline's kernel
-    did not scale together. Normalizing by a measurement of the same shape
-    removes that.
-
-    Falls back to the recorded baseline for runs that predate the saturated
-    estimator.
-    """
-    costs = sorted(c["ns_saturated"] for c in data["opcodes"]
-                   if c.get("usable") and not c.get("pair")
-                   and c.get("ns_saturated", 0.0) > 0.0)
-    if costs:
-        return statistics.median(costs)
-    return data["baseline"]["ns_per_filler_instruction"]
 
 
 def pair_ops(cell):
@@ -539,7 +503,7 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
                    for data in runs)
     if baseline <= 0.0:
         return None, None
-    unit = baseline / resolution
+    unit = gas_unit_ns(baseline, resolution)
     schedule = {}
     for op, cell in sorted(worst.items()):
         # Floor every opcode at the baseline. Some opcodes measure *below* it:
@@ -868,6 +832,67 @@ def print_pair_bounds(data):
     return violations
 
 
+# Keep this inventory in sync with workload_table() in workloads.cc. Requiring
+# named workloads prevents a failed build or a partial JSON file from quietly
+# shrinking the set against which the schedule is validated.
+REQUIRED_WORKLOADS = frozenset({
+    "alu_mix", "address_math", "word_copy", "load_use", "branch_dense",
+    "multiply_mix", "divide_mix", "fibonacci", "dot_product", "hash_mix",
+    "crc_byte",
+})
+
+
+def workload_failures(data):
+    failures = []
+    workloads = data.get("workloads") or []
+    names = [w.get("name") for w in workloads]
+    missing = REQUIRED_WORKLOADS - set(names)
+    if missing:
+        failures.append("workloads not measured: " + ", ".join(sorted(missing)))
+    if len(names) != len(set(names)):
+        failures.append("duplicate validation workload names")
+    repeats = data.get("config", {}).get("repeats", 0)
+    valid_repeats = isinstance(repeats, int) and repeats >= 3
+    if not valid_repeats:
+        failures.append("validation requires at least 3 configured repeats")
+    costs = cost_model(data, worst_case=True)
+    premium = taken_branch_premium(data)
+    for workload in workloads:
+        name = workload.get("name", "unnamed")
+        if workload.get("ran_clean") is not True:
+            failures.append(f"{name}: execution/gas accounting not verified; "
+                            "run a fresh calibration")
+        if workload.get("samples", 0) != repeats or not valid_repeats:
+            failures.append(f"{name}: incomplete measurement samples")
+        fields = ("ns_per_iteration", "ns_per_gas",
+                  "scheduled_gas_per_iteration", "instructions_per_iteration")
+        if any(not isinstance(workload.get(key), (int, float))
+               or not math.isfinite(workload[key]) or workload[key] <= 0
+               for key in fields):
+            failures.append(f"{name}: invalid timing or work count")
+            continue
+        counts = workload.get("op_counts")
+        if (not isinstance(counts, dict) or not counts
+                or any(not isinstance(n, int) or n <= 0 for n in counts.values())
+                or sum(counts.values()) != workload["instructions_per_iteration"]):
+            failures.append(f"{name}: invalid opcode histogram")
+            continue
+        rate = workload["ns_per_iteration"] / workload["scheduled_gas_per_iteration"]
+        # JSON rounds ns and ns/gas independently to six decimal places.
+        if not math.isclose(rate, workload["ns_per_gas"], rel_tol=1e-5, abs_tol=1e-6):
+            failures.append(f"{name}: ns/gas disagrees with timing and gas")
+        absent = missing_ops(data, set(counts))
+        if absent:
+            failures.append(f"{name}: unmeasured opcodes: " + ", ".join(absent))
+            continue
+        ceiling = sum(costs[op] * n for op, n in counts.items()) + premium
+        if workload["ns_per_iteration"] > ceiling * (1.0 + BOUND_VIOLATION_MARGIN):
+            failures.append(f"{name}: workload bound violation: "
+                            f"{workload['ns_per_iteration']:.2f} ns exceeds "
+                            f"{ceiling:.2f} ns opcode bound")
+    return failures
+
+
 def print_prediction(data):
     """Does the sum of separately measured opcode costs equal a real program?
 
@@ -891,6 +916,11 @@ def print_prediction(data):
     So the honest additivity test is the unfused, independent workload:
     alu_mix. If the model is sound anywhere, it is sound there.
     """
+    failures = workload_failures(data)
+    if failures:
+        for failure in failures:
+            print(f"FAIL  {failure}")
+        return 1
     workloads = [w for w in data.get("workloads") or [] if w.get("op_counts")]
     if not workloads:
         print("no workload op histograms in this run (older schema)",
@@ -1220,6 +1250,11 @@ def relative_cost(cell, baseline):
 
 def emit_reference(data):
     """Write the reference a later run is checked against."""
+    failures = workload_failures(data)
+    if failures:
+        for failure in failures:
+            print(f"FAIL  {failure}", file=sys.stderr)
+        return 1
     prov = provenance(data)
     baseline = baseline_ns(data)
     print("# RV32 gas calibration reference.")
@@ -1346,6 +1381,11 @@ def check_against_reference(data, reference_path):
     baseline = baseline_ns(data)
     failures = []
     warnings = []
+
+    # This is the same mandatory check used by --predict. It must run even
+    # when relative opcode guards and workload spread have not changed.
+    workload_errors = workload_failures(data)
+    failures.extend(workload_errors)
 
     fingerprint = prov.get("engine_fingerprint")
     if reference["fingerprint"] and fingerprint != reference["fingerprint"]:
@@ -1476,8 +1516,8 @@ def check_against_reference(data, reference_path):
                 "  own baseline. Every syscall the node makes pays this."
             )
 
-    rates = [w["ns_per_gas"] for w in data.get("workloads") or []
-             if w["ns_per_gas"] > 0]
+    rates = ([] if workload_errors else
+             [w["ns_per_gas"] for w in data["workloads"]])
     if rates and reference["spread"]:
         spread = max(rates) / min(rates)
         limit = reference["spread"] * (1.0 + tolerance)
@@ -1532,6 +1572,8 @@ def main():
                         help="gas units per baseline instruction "
                              f"(default {DEFAULT_RESOLUTION})")
     args = parser.parse_args()
+    if args.resolution <= 0:
+        parser.error("--resolution must be positive")
 
     runs = [load(path) for path in args.json]
     if args.emit_reference:

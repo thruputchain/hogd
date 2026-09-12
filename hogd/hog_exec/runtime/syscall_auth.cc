@@ -13,7 +13,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
@@ -153,17 +152,13 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
+  // The wire type does not bound depth: decode under kAuthTokenMaxDepth, so
+  // an over-depth token is refused before any id is allocated.
   try {
     x23::deserialize(&auth_token.root_node,
-                     x23::BufView{input_serialized_auth_token});
+                     x23::BufView{input_serialized_auth_token},
+                     size_t{kAuthTokenMaxDepth});
   } catch (x23::XdrException &e) {
-    return SyscallInnerResult{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-        WrappedGasAmount{0}};
-  }
-
-  if (!AuthTokenRegistry::node_within_depth(auth_token.root_node,
-                                            kAuthTokenMaxDepth)) {
     return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};

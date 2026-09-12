@@ -97,6 +97,7 @@ measure_interleaved(std::span<MeasurementPoint> points, Host &host,
   }
 
   for (MeasurementPoint &point : points) {
+    point.ran_clean = true;
     point.samples.clear();
     point.samples.reserve(config.repeats);
   }
@@ -106,7 +107,9 @@ measure_interleaved(std::span<MeasurementPoint> points, Host &host,
       // A kernel that trapped or ran out of gas did a different amount of work
       // than its siblings; keep the sample out and mark the point so the
       // reporter can drop the whole sweep rather than fit a mixed line.
-      if (outcome.result != StepResult::kHalted) {
+      if (outcome.result != StepResult::kHalted ||
+          (points[i].expected_gas != 0 &&
+           outcome.gas_consumed != points[i].expected_gas)) {
         points[i].ran_clean = false;
         continue;
       }
