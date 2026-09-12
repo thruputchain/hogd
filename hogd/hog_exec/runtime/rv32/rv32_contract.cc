@@ -212,11 +212,9 @@ Rv32Context::verify_contract(Contract const &contract,
   // artifact only runs the structural artifact checks, whereas Rv32Contract::-
   // create additionally builds the threaded program (instruction decode) and
   // the pre-instantiation image, which can reject inputs that parse cleanly.
-  // Rejecting non-translatable contracts at creation time keeps the
-  // "not translatable" path in make_new_runtime unreachable for a *freshly
-  // attached* contract. It is still reachable for a row deployed before this
-  // check existed (or before the decoder was tightened); make_new_runtime
-  // treats that case as a deterministic contract failure, not Unrecoverable.
+  // Rejecting non-translatable contracts here keeps the "not translatable"
+  // path in make_new_runtime unreachable for freshly attached code, but not
+  // for a row deployed before this check existed (#4024).
   //
   // The translation is handed back rather than discarded: it is the whole
   // product of verification, and the caller reuses it for a same-transaction
@@ -246,12 +244,9 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   // Snapshot deployment: the back-pointer entry was translated eagerly when the
   // contract entered the cache. A present translation is the fast path (no
   // resolve_contract round trip, no per-invocation translation); a null
-  // translation is the cached result for a non-translatable artifact -- a row
-  // persisted before verify_contract rejected such artifacts at admission (a
-  // fresh attachment with the same bytes never deploys). That is not this
-  // transaction's fault, so resolve it like any other address with no runnable
-  // code: a null runtime, which the caller reports as a deterministic contract
-  // failure rather than an executor-level Unrecoverable (issue #4024).
+  // translation means a row persisted before admission rejected it, so resolve
+  // it like any address with no runnable code and let the caller report a
+  // deterministic fault rather than an executor-level Unrecoverable (#4024).
   if (deployed_contract.entry != nullptr) {
     if (!deployed_contract.entry->prepared.rv32.has_value()) [[unlikely]] {
       warn("rv32 contract is not translatable: {}",
