@@ -1413,9 +1413,8 @@ TEST(HogDevnode, RamdbReservationFailureReferencesFlag)
 
 TEST(HogDevnode, ReducedRamdbBytesReachesReadiness)
 {
-  // 1 GiB, below the 2 GiB every test node already gets and well under the
-  // 15 GiB default; mirrors the low-memory (e.g. WSL) configuration the flag
-  // exists for.
+  // 1 GiB, below the 2 GiB each test node gets; mirrors the low-memory
+  // (e.g. WSL) configuration the flag exists for.
   HogDevnodeProcess process =
       HogDevnodeProcess::start({"--ramdb-bytes", "1073741824"});
   process.wait_for_readiness();
