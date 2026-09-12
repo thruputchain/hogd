@@ -486,6 +486,15 @@ HogDbDAO::read_retrocausal_queue_block(const ItemKey &key,
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
   }
+  // Staging writes a block under its own number with 1 to
+  // kRetrocausalQueueBlockEntriesMaxLen entries; anything else is corrupt
+  // on-disk state (#2978).
+  if (block.block_number != block_number || block.entries.empty() ||
+      block.entries.size() > kRetrocausalQueueBlockEntriesMaxLen) {
+    error("corrupt RCQ block {}: block_number {}, {} entries", block_number,
+          block.block_number, block.entries.size());
+    return HogDbError(HogDbCode::kCorruption);
+  }
   return block;
 }
 
