@@ -101,18 +101,9 @@ constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
-// hog-devnode reserves a 15 GiB ramdb arena by default and sizes three thread
-// pools from the core count. This file boots roughly 85 nodes per run, each
-// committing a handful of blocks, so every spawned node gets a 2 GiB arena and
-// a four-thread pool size instead: far fewer threads per boot on many-core
-// hosts, and an arena that low-memory hosts can reserve. The in-process opens
-// below use the same arena size. ramdb never persists the heap size, so the
-// node and the test need not agree on it, but one constant keeps them equal.
+// 2 GiB per node instead of the 15 GiB default; this suite boots ~85 nodes.
 constexpr std::size_t kTestRamDbBytes = 2UL * 1024 * 1024 * 1024;
-// Read by available_parallelism() in every hogd binary (hogd/base/os.cc).
-// Applied only when the environment does not already set it, so a schedule
-// that pins DEFAULT_THREADPOOL_SIZE for the whole suite (see
-// scripts/schedules/singlethread_stress_test.toml) still reaches the nodes.
+// Read by available_parallelism(); set only when unset so suite-wide pins win.
 constexpr char kTestDevnodeThreadpoolSize[] = "4";
 
 // Unwraps a page-query result; a backend failure (e.g. the indexer db

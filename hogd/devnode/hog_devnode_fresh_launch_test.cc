@@ -29,9 +29,7 @@ namespace {
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
-// Same arena and thread-pool caps hog_devnode_test.cc gives every node it
-// spawns, for the same reason: this is a functional launch, not a capacity
-// test, and the 15 GiB default plus core-count-sized pools are startup cost.
+// Same caps as hog_devnode_test.cc; this is a launch test, not a capacity test.
 constexpr char kRamDbBytes[] = "2147483648";
 constexpr char kThreadpoolSize[] = "4";
 
