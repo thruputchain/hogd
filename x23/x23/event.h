@@ -27,6 +27,7 @@
 #include <x23/cpumap.h>
 #include <x23/debug.h>
 #include <x23/err.h>
+#include <x23/move_only_function.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/signal.h>
@@ -96,6 +97,7 @@ public:
     return ret;
   }
   void reset() { t_.store(nullptr); }
+  RefPtr<T> take() { return t_.exchange(nullptr); }
 
 private:
   AtomicRefPtr<T> t_;
@@ -186,8 +188,10 @@ struct WriteBuffer : RefCount {
     return write(cp, fd, std::move(buf));
   }
   inline Errno flush(CoroPoll &cp, BorrowedFd fd);
+  void close(CoroPoll &cp, UniqueFd fd);
 
 private:
+  Defer<move_only_function<void()>> close_;
   std::atomic_bool want_write_{false};
   TestLock service_lock_;
   MVar<BufVec> writer_;
@@ -306,15 +310,6 @@ public:
   // it is recycled by another socket.
   void reset(BorrowedFd fd);
 
-  /*
-  // Reset and close a file descriptor
-  void close(BorrowedFd fd)
-  {
-    reset(fd);
-    ::close(fd.get());
-  }
-  */
-
   // The generation number (if non-zero) changes every time a file
   // descriptor is recycled.  If a file descriptor is in a reset state
   // and make is true (the default), generation will activate the file
@@ -354,6 +349,7 @@ protected:
   void wake();
   RefPtr<ReadBuffer> get_reader(BorrowedFd fd);
   RefPtr<WriteBuffer> get_writer(BorrowedFd fd);
+  RefPtr<WriteBuffer> take_writer(BorrowedFd fd);
   std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>> get_rw(BorrowedFd fd);
 
 private:
@@ -522,6 +518,12 @@ public:
   // call this function simultaneously.
   Errno dwrite(BorrowedFd fd, Buf data);
 
+  // Take ownership of fd and complete pending read callbacks with EBADF.
+  // Flush buffered writes in the background, then reset and close fd.
+  // A write error or CoroPoll shutdown may discard remaining output.
+  // Callers must not start new operations on fd after handing it off.
+  void close(UniqueFd fd);
+
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
   template<typename Addr = std::nullptr_t>
@@ -547,7 +549,7 @@ public:
         try {
           set_nonblock(fd);
         } catch (...) {
-          close(fd);
+          ::close(fd);
           throw;
         }
         if (close_on_exec)

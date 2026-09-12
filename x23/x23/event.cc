@@ -30,6 +30,16 @@ namespace x23 {
 
 namespace detail {
 
+void
+WriteBuffer::close(CoroPoll &cp, UniqueFd fd)
+{
+  BorrowedFd rawfd(fd);
+  // The buffer has been detached from CoroPoll.  Readers and the write
+  // worker keep it alive until they finish using the descriptor.
+  close_.reset([cp = RefPtr{cp}, fd = std::move(fd)] { cp->reset(fd); });
+  flush(cp, rawfd);
+}
+
 Errno
 WriteBuffer::Service::write(BufVec &work)
 {
@@ -205,6 +215,19 @@ CoroPoll::dwrite(BorrowedFd fd, Buf data)
   if (w->waiting_for_read_)
     return w->flush(*this, fd);
   return 0;
+}
+
+void
+CoroPoll::close(UniqueFd fd)
+{
+  if (!fd)
+    return;
+  auto w = take_writer(fd);
+  abort(fd, false, EBADF);
+  if (w)
+    w->close(*this, std::move(fd));
+  else
+    reset(fd);
 }
 
 Async<std::expected<void, Errno>>

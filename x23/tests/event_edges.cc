@@ -113,6 +113,134 @@ TEST(EventEdges, DelayedWriteFlushesWhenReadIsWaiting)
   EXPECT_EQ(out, (Buf{'y'}));
 }
 
+TEST(EventEdges, CloseTakesOwnershipAndAbortsPendingRead)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  cp.close(UniqueFd{});
+  int fd = sockets.a.get();
+  auto pending = cp.read_wait(cp.read_clear(fd));
+  ASSERT_FALSE(pending.operator co_await().await_ready());
+  cp.close(std::move(sockets.a));
+  EXPECT_FALSE(sockets.a);
+  EXPECT_EQ(pending(), EBADF);
+  EXPECT_EQ(fcntl(fd, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+  char byte;
+  EXPECT_EQ(::read(sockets.b.get(), &byte, 1), 0);
+}
+
+TEST(EventEdges, CloseFlushesDelayedWritesAndResetsDescriptorState)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  CoroPoll cp(pool);
+  int fd = sockets.a.get();
+  EXPECT_EQ(cp.dwrite(fd, Buf{'a', 'b', 'c'}), 0);
+  char byte;
+  ASSERT_EQ(::read(sockets.b.get(), &byte, 1), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  cp.close(std::move(sockets.a));
+  Buf received;
+  ASSERT_EQ(cp.read(sockets.b, &received, 4)().value(), 3UZ);
+  EXPECT_EQ(received, (Buf{'a', 'b', 'c'}));
+  EXPECT_EQ(fcntl(fd, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+
+  SocketPair reused;
+  if (reused.a.get() != fd) {
+    ASSERT_EQ(dup2(reused.a.get(), fd), fd);
+    reused.a.reset(fd);
+  }
+  Defer reset([&] { cp.reset(reused.a); });
+  EXPECT_EQ(cp.awrite(reused.a, Buf{'z'}), 0);
+  ASSERT_EQ(::read(reused.b.get(), &byte, 1), 1);
+  EXPECT_EQ(byte, 'z');
+}
+
+TEST(EventEdges, CloseDrainsBackgroundAndDelayedWritesBeforeEof)
+{
+  for (bool sync : {false, true}) {
+    ThreadPool pool(8);
+    SocketPair sockets;
+    Buf out;
+    CoroPoll cp(pool);
+    int size = 4096;
+    ASSERT_EQ(setsockopt(sockets.a.get(), SOL_SOCKET, SO_SNDBUF, &size,
+                         sizeof(size)),
+              0);
+    auto pending = cp.read(sockets.a, &out, 1, true, sync);
+    ASSERT_FALSE(pending.operator co_await().await_ready());
+    Buf data(1024 * 1024, 'a');
+    EXPECT_EQ(cp.awrite(sockets.a, Buf(data)), 0);
+    EXPECT_EQ(cp.dwrite(sockets.a, Buf{'b', 'c'}), 0);
+    int fd = sockets.a.get();
+    cp.close(std::move(sockets.a));
+    EXPECT_FALSE(sockets.a);
+    // The peer has not drained the socket, so close must return while
+    // the descriptor is still open and the writer is suspended.
+    EXPECT_NE(fcntl(fd, F_GETFD), -1);
+    EXPECT_EQ(pending().error(), EBADF);
+    Buf received;
+    data.push_back('b');
+    data.push_back('c');
+    ASSERT_EQ(cp.read(sockets.b, &received, data.size() + 1)().value(),
+              data.size());
+    EXPECT_EQ(received, data);
+    EXPECT_EQ(fcntl(fd, F_GETFD), -1);
+    EXPECT_EQ(errno, EBADF);
+  }
+}
+
+TEST(EventEdges, CloseReleasesDescriptorOnWriteError)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  CoroPoll cp(pool);
+  int fd = sockets.a.get();
+  EXPECT_EQ(cp.dwrite(sockets.a, Buf{'a'}), 0);
+  sockets.b.reset();
+  cp.close(std::move(sockets.a));
+  EXPECT_EQ(fcntl(fd, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+}
+
+TEST(EventEdges, ClosePendingWriteIsReleasedDuringShutdown)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  int fd = sockets.a.get();
+  {
+    CoroPoll cp(pool);
+    int size = 4096;
+    ASSERT_EQ(setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size)), 0);
+    EXPECT_EQ(cp.awrite(fd, Buf(1024 * 1024, 'a')), 0);
+    cp.close(std::move(sockets.a));
+    EXPECT_NE(fcntl(fd, F_GETFD), -1);
+  }
+  EXPECT_EQ(fcntl(fd, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+}
+
+TEST(EventEdges, ClosePendingWriteIsReleasedOnPeerFailure)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  int fd = sockets.a.get();
+  int size = 4096;
+  ASSERT_EQ(setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size)), 0);
+  EXPECT_EQ(cp.awrite(fd, Buf(1024 * 1024, 'a')), 0);
+  cp.close(std::move(sockets.a));
+  EXPECT_NE(fcntl(fd, F_GETFD), -1);
+  sockets.b.reset();
+  cp.check(0);
+  pool.drain();
+  EXPECT_EQ(fcntl(fd, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+}
+
 TEST(EventEdges, WriteBackpressureCanBeAborted)
 {
   ThreadPool pool(8);
@@ -196,12 +324,7 @@ TEST(EventEdges, TcpConnectSuccessAndFailures)
   UniqueFd server(*accepted);
   EXPECT_EQ(fcntl(server.get(), F_GETFD) & FD_CLOEXEC, 0);
   EXPECT_NE(fcntl(server.get(), F_GETFL) & O_NONBLOCK, 0);
-#if 0
-  cp.close(server.release());
-#else
-  cp.reset(server);
-  close(server.release());
-#endif
+  cp.close(std::move(server));
 
   auto invalid_service = cp.tcpconnect("127.0.0.1", "x23-invalid-service")();
   ASSERT_FALSE(invalid_service);

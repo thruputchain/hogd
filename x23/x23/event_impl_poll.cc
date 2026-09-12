@@ -69,6 +69,14 @@ CoroPollImpl::get_writer(BorrowedFd fd)
   return f.writer();
 }
 
+RefPtr<WriteBuffer>
+CoroPollImpl::take_writer(BorrowedFd fd)
+{
+  auto s = state_.take();
+  auto it = s->find(fd.get());
+  return it == s->end() ? nullptr : it->second.writer_.take();
+}
+
 std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
 CoroPollImpl::get_rw(BorrowedFd fd)
 {
