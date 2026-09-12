@@ -197,9 +197,7 @@ constexpr size_t kNumThreadsForParallelBatch = 20;
 // decode that trusts its source.
 inline constexpr size_t kNoBatchSizeLimit = SIZE_MAX;
 
-// #4030: parallel_batch_to_t sums attacker-controlled 32-bit segment counts
-// into [size_t] prefix sums, which can only avoid wrapping when [size_t] is at
-// least 64 bits wide (see the overflow reasoning below).
+// #4030: parallel_batch_to_t's segment prefix sums assume a 64-bit size_t.
 static_assert(sizeof(size_t) >= sizeof(uint64_t),
               "parallel_batch_to_t segment prefix sums assume a 64-bit size_t; "
               "on ILP32 targets attacker-controlled 32-bit segment metadata "
