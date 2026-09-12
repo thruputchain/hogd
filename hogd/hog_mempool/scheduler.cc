@@ -459,21 +459,25 @@ bool
 Scheduler::add_txs_helper(const SignedTransaction &tx,
                           const TransactionHash &tx_hash)
 {
-  std::shared_ptr<TxValue> value;
-  {
-    // The tx may already exist in [txs_] because it is okay to add a tx back
-    // into the scheduler again. This can happen if the tx was originally
-    // added to the scheduler, then the tx was removed during nomination by
-    // [schedule()], then a validated block was committed rather than the
-    // nominated block, and then the tx was added back to the scheduler.
-    const auto [tx_ptr, lock] =
-        txs_.find_or_insert(tx_hash,
-                            std::make_shared<TxValue>(TxValue{.tx = tx}));
-    CHECK_PTR(tx_ptr);
-    value = *tx_ptr;
-  }
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+                  .tx_hash = tx_hash};
+  auto [account_state, account_lock] = get_account_state(account);
 
-  return insert_tx_into_runqueue(tx_hash, value);
+  // Publish the cache and runqueue entries while holding both locks in the
+  // account-then-cache order used by removal. Otherwise, removal could delete
+  // a newly published cache entry while this submission waits for the account
+  // lock, leaving the caller with an admitted outcome for an absent tx.
+  //
+  // The tx may already exist in [txs_] because it is okay to add a tx back
+  // into the scheduler again. This can happen if the tx was originally added
+  // to the scheduler, then removed during nomination by [schedule()], and a
+  // different validated block was committed instead.
+  const auto [tx_ptr, txs_lock] =
+      txs_.find_or_insert(tx_hash,
+                          std::make_shared<TxValue>(TxValue{.tx = tx}));
+  CHECK_PTR(tx_ptr);
+  return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
 bool

@@ -152,6 +152,16 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   lookup = gateway.schedgateway_lookup_tx({tx_hash})();
   ASSERT_EQ(lookup.size(), 1UL);
   EXPECT_FALSE(lookup[0]);
+
+  // A later submission must atomically restore both the cache and runqueue
+  // entries; removal and admission use the same account-then-cache lock order.
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_TRUE(scheduler->find_tx(tx_hash));
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
