@@ -1082,6 +1082,11 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // already included in the block, those txs will still be executed.
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
+          // Keep the account locked until the cache entry is gone, so a
+          // concurrent resubmit cannot restore only the runqueue entry. The
+          // runqueue's shared_ptr keeps [tx] alive while the cache entry is
+          // removed.
+          CHECK_EQ(txs_.remove(tx_hash), 1UL);
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
 

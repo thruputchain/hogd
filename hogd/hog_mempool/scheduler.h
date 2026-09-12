@@ -307,10 +307,9 @@ private:
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
-  // Tx cache.
-  // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
-  // free them automatically without too much overhead/garbage collection with
-  // smart pointers (e.g., [std::shared_ptr<>]).
+  // Tx cache. Entries are removed when transactions expire, are discarded, or
+  // appear in a committed/validated block. Shared ownership keeps an entry's
+  // transaction alive for in-flight lookups after it is removed from here.
   SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.

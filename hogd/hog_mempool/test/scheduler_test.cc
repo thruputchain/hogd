@@ -10,6 +10,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
@@ -130,6 +131,13 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
   scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  auto lookup = gateway.schedgateway_lookup_tx({tx_hash})();
+  ASSERT_EQ(lookup.size(), 1UL);
+  EXPECT_TRUE(lookup[0]);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
@@ -138,6 +146,12 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_tx(tx_hash));
+
+  lookup = gateway.schedgateway_lookup_tx({tx_hash})();
+  ASSERT_EQ(lookup.size(), 1UL);
+  EXPECT_FALSE(lookup[0]);
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
