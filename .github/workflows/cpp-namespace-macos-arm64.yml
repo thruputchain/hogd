@@ -67,6 +67,27 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cache/cargo-install
+
+      - name: Configure Build Caches
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume, so every run started cold (933 of 1010 compiles
+          # missed). Point it at the cached path, as the Linux workflows do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+          # Zero the persisted counters so "Show ccache stats" reports this run.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
+
+          # cargo install writes to ~/.cargo/bin, which the cache volume does not
+          # cover, so groundhog-cli and groundhog-rv32-lower were compiled from
+          # source on every run. Install into a cached root instead. ~/.cargo/bin
+          # itself is left alone because rustup's proxies live there.
+          echo "CARGO_INSTALL_ROOT=$HOME/.cache/cargo-install" >> "$GITHUB_ENV"
+          echo "$HOME/.cache/cargo-install/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.cache/cargo-install/bin"
+          echo "Cached cargo-install binaries:"
+          ls -l "$HOME/.cache/cargo-install/bin"
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -99,9 +120,6 @@ jobs:
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
-      - name: Cargo Fetch
-        run: ./scripts/fetch.sh
-      
       - name: Use CommandLineTools SDK
         run: |
           # Homebrew LLVM is incompatible with some Xcode SDK versions (e.g. 26.1.1).
@@ -111,6 +129,8 @@ jobs:
             echo "Switched to CommandLineTools SDK: $(xcrun --show-sdk-path)"
           fi
 
+      # macos-setup.sh ends by running scripts/fetch.sh (cargo fetch plus the
+      # groundhog tool installs), so there is no separate Cargo Fetch step here.
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
 
@@ -156,7 +176,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -p | grep -E 'cache_dir|max_size|base_dir' || true
+          ccache -s
 
       - name: Print Log Download Instructions
         if: always()
