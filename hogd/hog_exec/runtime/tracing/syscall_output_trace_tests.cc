@@ -1029,7 +1029,10 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     body.retrocausal_queue_consume().inputs.peek = false;
     body.retrocausal_queue_consume().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    // One byte reached the guest (a 1-byte buffer for a 3-byte entry), so the
+    // consume pays for one read block -- the copy charge added for #4007.
+    expected.push_back(step_entry(gas, GasCost::retrocausal_queue_consume(1),
+                                  std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);

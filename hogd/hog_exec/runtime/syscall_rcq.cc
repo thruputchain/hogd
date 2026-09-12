@@ -1,12 +1,14 @@
 
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <span>
 
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -64,6 +66,14 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
                            std::as_bytes(std::span(queue_entry.data(),
                                                    queue_entry.size())));
 
+  // Charge for the payload bytes copied into the guest, the byte-proportional
+  // work a bytestring read is billed for. Without this a contract can peek a
+  // maximum-size self entry repeatedly and copy its payload unmetered (#4007).
+  // The copy is min(buffer, entry) bytes -- the amount copy_to_guest_buffer
+  // memcpy'd -- not the full entry length it reports.
+  const std::size_t copied_len =
+      std::min<std::size_t>(output_queue_entry.size(), queue_entry.size());
+
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kRetrocausalQueueConsume>()) {
@@ -71,8 +81,9 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = queue_entry});
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  co_return SyscallInnerResult{
+      SyscallErrorCode::kSyscallErrorCodeNone,
+      WrappedGasAmount{GasCost::retrocausal_queue_consume(copied_len)}};
 }
 
 MaybeAsyncSyscallInnerResult

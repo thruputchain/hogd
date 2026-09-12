@@ -236,6 +236,19 @@ struct GasCost {
            (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
+  // Charged on the bytes a retrocausal-queue consume/peek copies into the
+  // guest, in the same read blocks as a bytestring read -- the copy is the
+  // same guest-memory memcpy. Priced on the bytes that reach the guest, not
+  // the buffer offered, so a length-probe with a short buffer pays only for
+  // what it copied and an empty buffer pays nothing. No storage-access term:
+  // unlike a bytestring read this is the entry copy alone. Reuses the read
+  // schedule rather than adding a constant, so the gas-schedule digest is
+  // unchanged.
+  static constexpr uint64_t retrocausal_queue_consume(uint64_t bytes_copied)
+  {
+    return kBytestringReadBlockCost * bytestring_blocks(bytes_copied);
+  }
+
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
     assert(message_len <= kMaxCostBytes);
