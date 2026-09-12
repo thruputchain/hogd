@@ -52,7 +52,7 @@ jobs:
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
           submodules: false
-          ref: 2ced81d979b90f8f70847581d2db965145b22865
+          ref: 6f056a2f46ad7ca23fd843fabb14ba884180c91b
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -94,24 +94,6 @@ jobs:
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
-      - name: Apply the four internal demo genesis limits
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('hogd/genesis/genesis_configuration.cc')
-          source = path.read_text()
-          for old, new in {
-              'kDefaultMaxBytestringLen': '32 * 1024',
-              'kDefaultMaxContractSizeBytes': '1024 * 1024',
-              'kDefaultMaxRv32CodeBytes': '1024 * 1024',
-              'kDefaultMaxRv32MemoryBytes': '16 * 1024 * 1024',
-          }.items():
-              assert source.count(old) == 1, old
-              source = source.replace(old, new)
-          path.write_text(source)
-          PY
-          git diff --check
-          git diff > doom-genesis.patch
       - name: Configure and build the pinned devnode
         run: |
           echo 'GCC_CC=gcc-15' > scripts/conf.sh
@@ -155,10 +137,9 @@ jobs:
               shutil.copy2(src, root / 'contracts' / src.name)
           assert (root / 'contracts/dev_wallet.rv32a').is_file()
           assert (root / 'contracts/genesis_root.rv32a').is_file()
-          shutil.copy2('doom-genesis.patch', root / 'genesis.patch')
           manifest = {'hogdRevision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
                       'groundhogVersion': subprocess.check_output(['groundhog', '--version'], text=True).strip(),
-                      'purpose': 'Fresh internal Doom demo chain; experimental raised genesis limits',
+                      'purpose': 'Local devnode with named network configuration overrides',
                       'sha256': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
                                  for p in sorted(root.rglob('*')) if p.is_file()}}
           (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
@@ -175,3 +156,4 @@ jobs:
             doom-devnode-bundle.tar.gz.sha256
           if-no-files-found: error
           retention-days: 7
+
