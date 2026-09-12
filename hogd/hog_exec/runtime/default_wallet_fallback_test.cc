@@ -638,11 +638,8 @@ TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
             ExecResult::ExecResultUnrecoverable);
 }
 
-// Same fallback with the configured kRv32 wallet's code record present but no
-// longer translatable, which only a row persisted before admission can be.
-// This reaches make_new_runtime's tx-local arm (no deployment back-pointer),
-// which hands back a null runtime, so the transaction fails deterministically
-// instead of taking the block down (#4024).
+// Wallet code record present but not translatable: make_new_runtime's tx-local
+// arm returns a null runtime, so the tx fails deterministically (#4024).
 TEST_F(CustomDefaultWalletTest, UntranslatableRv32WalletIsDeterministic)
 {
   auto wallet = std::make_shared<Contract>(ContractType::kRv32);
@@ -676,10 +673,8 @@ TEST_F(CustomDefaultWalletTest, UntranslatableRv32WalletIsDeterministic)
   auto handler = make_new_system_call_handler(stx, ctx);
   auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
-  // The classification is the point: Deterministic is a contract fault the
-  // block can carry, where Unrecoverable takes the executor down. Asserted
-  // here rather than through try_commit_transaction, whose nonce reservation
-  // needs a funded source this fixture does not set up.
+  // Deterministic is a contract fault the block can carry, Unrecoverable is
+  // not. (Not via try_commit_transaction: its nonce reservation needs funding.)
   EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::Deterministic);
   EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
             InvocationFrameStatusCode::Fault);
