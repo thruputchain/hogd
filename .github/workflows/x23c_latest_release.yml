@@ -208,6 +208,13 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
 
+      - name: Configure ccache
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume. Point it at the cached path, as the Linux jobs do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+
       - name: Configure Git for Submodule Caching
         run: |
           mkdir -p ~/.cache/hogcache/
@@ -367,6 +374,22 @@ jobs:
                 sha,
               });
             }
+
+      - name: Generate protocol synchronizer app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.PROTOCOL_SYNCHRONIZER_APP_ID }}
+          private-key: ${{ secrets.PROTOCOL_SYNCHRONIZER_SECRET_KEY }}
+          owner: groundhogchain
+          repositories: protocol-rs
+
+      - name: Trigger protocol-rs auto-update
+        run: |
+          gh workflow run auto-update.yml \
+            --repo groundhogchain/protocol-rs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - name: Upload artifacts for debugging
         if: always()

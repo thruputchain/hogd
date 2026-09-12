@@ -275,11 +275,15 @@ memory_operand(WorkingSet working_set, uint32_t index, uint32_t width)
   const auto base_reg = static_cast<uint8_t>(
       kAddressBankBase +
       (working_set == WorkingSet::kFullRange ? index % kAddressBankSize : 0));
-  // Stride by 64 bytes so successive accesses land on successive cache lines
-  // rather than repeatedly hitting one; wrap inside the +/-2048 immediate.
+  // Visit each bank at a given offset before advancing to the next line.
+  // Advancing both bank and offset on every access aliases their periods:
+  // the old pattern repeated after 64 accesses and touched only 4 KiB of
+  // cache lines, even though its addresses spanned the guest address space.
+  const uint32_t line_index =
+      working_set == WorkingSet::kFullRange ? index / kAddressBankSize : index;
   const int32_t span = 4096;
   const auto raw =
-      static_cast<int32_t>((index * 64U) % static_cast<uint32_t>(span));
+      static_cast<int32_t>((line_index * 64U) % static_cast<uint32_t>(span));
   int32_t offset = raw - 2048;
   offset -= offset % static_cast<int32_t>(width); // keep accesses aligned
   return {.base_reg = base_reg, .offset = offset};
