@@ -52,8 +52,9 @@ public:
   //
   // For RV32, verification *is* translation: Rv32Contract::create parses the
   // artifact and builds the threaded pre-instantiation, and nothing cheaper
-  // proves translatability (make_new_runtime treats a non-translatable
-  // deployed contract as Unrecoverable). Handing that image back lets the
+  // proves translatability. A deployed contract that predates this check can
+  // still fail it; make_new_runtime resolves that as a deterministic contract
+  // failure rather than Unrecoverable. Handing the image back here lets the
   // caller reuse it instead of lowering the same bytes again (#3536).
   // Runtimes with nothing to prepare leave `out` untouched.
   //

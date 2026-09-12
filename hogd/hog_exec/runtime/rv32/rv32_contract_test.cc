@@ -635,7 +635,15 @@ TEST_F(Rv32ProductionMappingTest,
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
 }
 
-TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
+// A deployed row that is structurally valid (passes parse_threaded_artifact)
+// but is no longer translatable (fails Rv32Contract::create) can only arise
+// from a contract persisted before verify_contract started rejecting such
+// artifacts at admission -- a fresh attachment with the same bytes is
+// rejected deterministically before it is ever deployed. Resolving the
+// address must not surface as an executor-level Unrecoverable: it is a
+// deterministic contract failure like any other unrunnable deployed code
+// (issue #4024).
+TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsDeterministic)
 {
   auto contract = std::make_shared<Contract>(ContractType::kRv32);
   contract->rv32_contract().data.append_range(
@@ -653,7 +661,7 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
 
   auto result = invoke_deployed(addr, 10'000);
   ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
 }
 
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
