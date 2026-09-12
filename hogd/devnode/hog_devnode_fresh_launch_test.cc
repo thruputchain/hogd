@@ -29,6 +29,11 @@ namespace {
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
+// Same arena and thread-pool caps hog_devnode_test.cc gives every node it
+// spawns, for the same reason: this is a functional launch, not a capacity
+// test, and the 15 GiB default plus core-count-sized pools are startup cost.
+constexpr char kRamDbBytes[] = "2147483648";
+constexpr char kThreadpoolSize[] = "4";
 
 std::string
 json_string_field(std::string_view json, std::string_view field)
@@ -179,6 +184,8 @@ main() // NOLINT(bugprone-exception-escape)
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
     setenv("HOGD_LOG_FORMAT", "json", /*overwrite=*/1);
+    // Leave an existing pin alone, as hog_devnode_test.cc does.
+    setenv("DEFAULT_THREADPOOL_SIZE", kThreadpoolSize, /*overwrite=*/0);
 
     char *argv[] = {
         const_cast<char *>(HOG_DEVNODE_BINARY),
@@ -188,6 +195,8 @@ main() // NOLINT(bugprone-exception-escape)
         const_cast<char *>("0"),
         const_cast<char *>("--readiness"),
         const_cast<char *>("stdout"),
+        const_cast<char *>("--ramdb-bytes"),
+        const_cast<char *>(kRamDbBytes),
         nullptr,
     };
     execv(HOG_DEVNODE_BINARY, argv);
