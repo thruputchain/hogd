@@ -197,6 +197,20 @@ constexpr size_t kNumThreadsForParallelBatch = 20;
 // decode that trusts its source.
 inline constexpr size_t kNoBatchSizeLimit = SIZE_MAX;
 
+// #4030: parallel_batch_to_t accumulates the attacker-controlled 32-bit
+// [segment_bytes] and [segment_tokens] counts into [size_t] prefix sums and
+// relies on those sums not overflowing (see the overflow reasoning below). That
+// holds only when [size_t] is at least 64 bits wide: on an ILP32 target,
+// metadata like {UINT32_MAX, 1} wraps a total back to zero, so it slips past
+// the aggregate validation while the per-segment workers still trust the
+// original nonzero metadata and index empty vectors. Pin the 64-bit-[size_t]
+// precondition so the decoder can never be built on a data model where those
+// prefix sums silently wrap.
+static_assert(sizeof(size_t) >= sizeof(uint64_t),
+              "parallel_batch_to_t segment prefix sums assume a 64-bit size_t; "
+              "on ILP32 targets attacker-controlled 32-bit segment metadata "
+              "can wrap the totals to zero and reach out-of-bounds decode");
+
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs
 // xdr.size()) as well as per-object XDR deserialization failures.
