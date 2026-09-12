@@ -14,27 +14,10 @@ set -ex
 TOOL_RUST=1.96.0
 rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 
-# The crates themselves now come from crates.thruput.network, but the published
-# groundhog-cli/groundhog-rv32-lower releases record their own dependencies
-# against the legacy registry URL, so cargo still resolves those deps from
-# groundhog.dev. That index needs auth, and cargo only finds a token for it by
-# matching the index URL against a named registry -- with no such name
-# configured the install dies with:
-#
-#   error: no token found for `sparse+https://groundhog.dev/crates/api/v1/crates/`
-#
-# Name the legacy index here and reuse the groundhog token for it (the two
-# registries share a credential), so the installs authenticate wherever this
-# script runs. The workflows export these directly for jobs that run cargo on
-# the GitHub runner; hog_sched jobs only inherit the env their schedule
-# declares, which is why deriving them here matters.
+# groundhog-cli's published deps still resolve from the legacy index, which
+# needs auth; name it so cargo can match a token to the URL.
 export CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX:-sparse+https://groundhog.dev/crates/api/v1/crates/}"
-# xtrace is on from [set -ex] above, and it prints commands *after* expansion --
-# tracing the token would write the registry credential straight into the job
-# log, which hog_sched relays and [gh run view --log] hands back. Drop tracing
-# across the credential handling only, the same way [ccache_warmup.toml] does
-# before it passes this token. The installs below stay traced: they carry the
-# token in the environment, not on their command line.
+# xtrace expands the token into the job log, so drop tracing here.
 set +x
 if [ -n "${CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN:-${CARGO_REGISTRIES_GROUNDHOG_TOKEN:-}}" ]; then
   export CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN:-${CARGO_REGISTRIES_GROUNDHOG_TOKEN}}"
