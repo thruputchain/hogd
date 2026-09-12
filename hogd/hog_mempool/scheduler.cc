@@ -424,56 +424,31 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
   return account_state.hog_age;
 }
 
-bool
-Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
-                                   const std::shared_ptr<TxValue> &tx_value)
-{
-  const ContractAddress &account = tx_value->tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height =
-                      tx_value->tx.tx.uniquifier.block_expiry_height,
-                  .tx_hash = tx_hash};
-  auto [account_state, lock] = get_account_state(account);
-  // The expiry sweep or commit may have removed the cache entry since the
-  // caller looked it up. Hold both locks in account-then-cache order so that
-  // a runqueue insertion cannot race with removal from the cache.
-  const auto [cached_value, txs_lock] = txs_.find(tx_hash);
-  if (!cached_value) {
-    return false;
-  }
-  // Check if the tx is already present in [account_state->txs]. If it is, we
-  // are adding a duplicate tx, so we do not want to increment [size_].
-  //
-  // We deliberately use [cached_value] instead of [tx_value]. [cached_value] is
-  // the current value in [txs_], whereas [tx_value] could point to a stale tx
-  // since [txs_] could have changed while we were not holding [txs_lock]. Note
-  // that even though [cached_value] and [tx_value] both point to txs with the
-  // same hash and therefore the txs are the same, the [SignedTransaction]'s
-  // that hold these inner txs could have different signatures. Thus,
-  // [cached_value] and [tx_value] could refer to different txs altogether.
-  return account_state->txs.insert({key, *cached_value}).second;
-}
-
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
 Scheduler::add_txs_helper(const SignedTransaction &tx,
                           const TransactionHash &tx_hash)
 {
-  std::shared_ptr<TxValue> value;
-  {
-    // The tx may already exist in [txs_] because it is okay to add a tx back
-    // into the scheduler again. This can happen if the tx was originally
-    // added to the scheduler, then the tx was removed during nomination by
-    // [schedule()], then a validated block was committed rather than the
-    // nominated block, and then the tx was added back to the scheduler.
-    const auto [tx_ptr, lock] =
-        txs_.find_or_insert(tx_hash,
-                            std::make_shared<TxValue>(TxValue{.tx = tx}));
-    CHECK_PTR(tx_ptr);
-    value = *tx_ptr;
-  }
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+                  .tx_hash = tx_hash};
+  auto [account_state, account_lock] = get_account_state(account);
 
-  return insert_tx_into_runqueue(tx_hash, value);
+  // Publish the cache and runqueue entries while holding both locks in the
+  // account-then-cache order used by removal. Otherwise, [schedule()] could
+  // delete a newly published cache entry while this submission waits for the
+  // account lock, leaving the caller with an admitted outcome for an absent tx.
+  //
+  // The tx may already exist in [txs_] because it is okay to add a tx back
+  // into the scheduler again. This can happen if the tx was originally added
+  // to the scheduler, then removed during nomination by [schedule()], and a
+  // different validated block was committed instead.
+  const auto [tx_ptr, txs_lock] =
+      txs_.find_or_insert(tx_hash,
+                          std::make_shared<TxValue>(TxValue{.tx = tx}));
+  CHECK_PTR(tx_ptr);
+  return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
 bool
@@ -1082,6 +1057,12 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // already included in the block, those txs will still be executed.
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
+          // -----
+          // Keep the account locked until the cache entry is gone, so a
+          // concurrent resubmit cannot restore only the runqueue entry. The
+          // runqueue's shared_ptr keeps [tx] alive while the cache entry is
+          // removed.
+          CHECK_EQ(txs_.remove(tx_hash), 1UL);
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
 
