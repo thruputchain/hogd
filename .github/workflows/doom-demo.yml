@@ -1,0 +1,177 @@
+name: Doom demo devnode
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/doom-demo.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: doom-demo-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
+  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+  CARGO_BUILD_JOBS: "6"
+jobs:
+  demo:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: namespace-profile-hogd-linux-2604
+    timeout-minutes: 60
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+            ${{ secrets.HOGD_TO_HOGX_KEY }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
+          ref: 2ced81d979b90f8f70847581d2db965145b22865
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.cache/hogcache
+            ~/.cargo
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
+            else
+              echo "HOGCACHE: Using cached mirror for $repo_path"
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: git submodule update --init --recursive
+
+      - name: Apply the four internal demo genesis limits
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('hogd/genesis/genesis_configuration.cc')
+          source = path.read_text()
+          for old, new in {
+              'kDefaultMaxBytestringLen': '32 * 1024',
+              'kDefaultMaxContractSizeBytes': '1024 * 1024',
+              'kDefaultMaxRv32CodeBytes': '1024 * 1024',
+              'kDefaultMaxRv32MemoryBytes': '16 * 1024 * 1024',
+          }.items():
+              assert source.count(old) == 1, old
+              source = source.replace(old, new)
+          path.write_text(source)
+          PY
+          git diff --check
+          git diff > doom-genesis.patch
+      - name: Configure and build the pinned devnode
+        run: |
+          echo 'GCC_CC=gcc-15' > scripts/conf.sh
+          echo 'GCC_CXX=g++-15' >> scripts/conf.sh
+          echo 'NPROC=18' >> scripts/conf.sh
+          ./scripts/fetch.sh
+          ./scripts/build.sh -d build/doom -t Release -c gcc \
+            -x -DBUILD_BENCHMARKS=OFF \
+            -x -DBUILD_ARCHITECTURE=x86-64-v2 \
+            -x -DRUST_BUILD_CPU=x86-64-v2 hog-devnode
+      - name: Package node, CLI, bootstrap contracts and runtime libraries
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, re, shutil, subprocess
+          from pathlib import Path
+          root = Path('doom-devnode-bundle')
+          for name in ('bin', 'lib', 'contracts'):
+              (root / name).mkdir(parents=True, exist_ok=True)
+          binaries = {'hog-devnode': Path('build/doom/hogd/devnode/hog-devnode'),
+                      'groundhog': Path(shutil.which('groundhog'))}
+          libraries = set()
+          for name, binary in binaries.items():
+              shutil.copy2(binary, root / 'bin' / (name + '.real'))
+              linked = subprocess.check_output(['ldd', str(binary)], text=True)
+              assert 'not found' not in linked, linked
+              libraries.update(re.findall(r'(/[^\s()]+)', linked))
+          loaders = []
+          for lib in libraries:
+              src = Path(lib)
+              shutil.copy2(src, root / 'lib' / src.name)
+              if src.name.startswith('ld-linux'):
+                  loaders.append(src.name)
+          assert len(loaders) == 1, loaders
+          for name in binaries:
+              script = '#!/bin/sh\nset -eu\nbundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\n'
+              script += 'exec "$bundle_dir/lib/' + loaders[0] + '" --library-path "$bundle_dir/lib" "$bundle_dir/bin/' + name + '.real" "$@"\n'
+              wrapper = root / 'bin' / name
+              wrapper.write_text(script)
+              wrapper.chmod(0o755)
+          for src in Path('build/doom/built_contracts').glob('*.rv32a'):
+              shutil.copy2(src, root / 'contracts' / src.name)
+          assert (root / 'contracts/dev_wallet.rv32a').is_file()
+          assert (root / 'contracts/genesis_root.rv32a').is_file()
+          shutil.copy2('doom-genesis.patch', root / 'genesis.patch')
+          manifest = {'hogdRevision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                      'groundhogVersion': subprocess.check_output(['groundhog', '--version'], text=True).strip(),
+                      'purpose': 'Fresh internal Doom demo chain; experimental raised genesis limits',
+                      'sha256': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+                                 for p in sorted(root.rglob('*')) if p.is_file()}}
+          (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+          doom-devnode-bundle/bin/hog-devnode --help > /dev/null
+          doom-devnode-bundle/bin/groundhog --version
+          tar -czf doom-devnode-bundle.tar.gz doom-devnode-bundle
+          sha256sum doom-devnode-bundle.tar.gz > doom-devnode-bundle.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doom-devnode-linux-x86_64
+          path: |
+            doom-devnode-bundle.tar.gz
+            doom-devnode-bundle.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
