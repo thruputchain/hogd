@@ -202,6 +202,11 @@ endif()
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)
+# x23c runs during the build to generate XDR bindings. The server CPU target
+# must not make this host tool require Zen 5 instructions on the CI runner.
+if(BUILD_ARCHITECTURE STREQUAL "znver5")
+  target_compile_options(x23c PRIVATE -march=x86-64-v2)
+endif()
 include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 
 option(RUST_TSAN

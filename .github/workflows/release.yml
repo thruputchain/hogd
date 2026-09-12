@@ -201,6 +201,20 @@ jobs:
             grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
           done
 
+      # Keep server code generation separate from portable developer artifacts.
+      # These binaries must be runtime-qualified on a Zen 5 host before deployment.
+      - name: Build and package Zen 5 server binaries
+        if: matrix.architecture == 'x86_64'
+        run: |
+          ./scripts/build.sh \
+            -d build/znver5 -t Release -c gcc \
+            -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DBUILD_ARCHITECTURE=znver5" \
+            -x "-DRUST_BUILD_CPU=znver5" \
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
+          ./scripts/package_hogd_validator_release.sh \
+            build/znver5 artifacts release x86_64 znver5
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -540,7 +554,7 @@ jobs:
           set -euo pipefail
           cd artifacts
           archives=(*.tar.gz)
-          test "${#archives[@]}" -eq 9
+          test "${#archives[@]}" -eq 10
           for archive in "${archives[@]}"; do
             test -s "$archive"
           done
