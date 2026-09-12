@@ -637,5 +637,49 @@ TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
             ExecResult::ExecResultUnrecoverable);
 }
 
+// Same fallback with the configured kRv32 wallet's code record present but no
+// longer translatable, which only a row persisted before admission can be.
+// This reaches make_new_runtime's tx-local arm (no deployment back-pointer),
+// which hands back a null runtime, so the transaction fails deterministically
+// instead of taking the block down (#4024).
+TEST_F(CustomDefaultWalletTest, UntranslatableRv32WalletIsDeterministic)
+{
+  auto wallet = std::make_shared<Contract>(ContractType::kRv32);
+  wallet->rv32_contract().data.append_range(
+      std::vector<uint8_t>{0xde, 0xad, 0xbe, 0xef});
+
+  GenesisConfigurationBuilder builder;
+  builder.set_default_wallet(
+      NativeContractTestFramework::make_deployed_contract_hash(wallet));
+  run_genesis_initialization(builder.build(NetworkHash{},
+                                           *get_default_cost_model(),
+                                           *load_stock_genesis_root_contract(),
+                                           stock_network_config()),
+                             BlockExecutionMode::kBlockExecutionModeProposal);
+  write_contract(wallet);
+
+  auto rv32_ctx = std::make_unique<Rv32Context>();
+  MultiplexedContext ctx(
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
+          {ContractType::kRv32, {rv32_ctx.release(), true}},
+      });
+
+  ContractAddress undeployed = make_contract_address(77);
+  ContractTraitClient<calldata_wrapper::CalldataWrapper> client(undeployed);
+  x23::Vec<uint8_t, 4294967295> payload;
+  payload.resize(8, 0xAB);
+  SignedTransaction stx;
+  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.uniquifier = make_new_uniquifier();
+
+  auto handler = make_new_system_call_handler(stx, ctx);
+  auto res = handler.root_invoke()();
+  ASSERT_FALSE(res.is_root_success());
+  EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
+            InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(handler.try_commit_transaction()(),
+            ExecResult::ExecResultTxDeterministicError);
+}
+
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
