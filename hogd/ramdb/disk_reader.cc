@@ -4,6 +4,7 @@
 #include <unistd.h> // NOLINT(misc-include-cleaner) for off_t
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
@@ -13,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -121,6 +123,30 @@ crc_valid(uint32_t commit_crc, LogletBuffer &buf, ItemHeader *commit_hdr)
     return false;
   }
   return true;
+}
+
+inline bool
+all_zero(std::span<const std::byte> bytes)
+{
+  return std::ranges::all_of(bytes,
+                             [](std::byte b) { return b == std::byte{0}; });
+}
+
+// rest_is_zero returns true if every byte from r's position to the end of the
+// file is zero. A read error counts as not zero.
+inline bool
+rest_is_zero(BufferedReader &r)
+{
+  std::array<std::byte, 4096> buf;
+  while (true) {
+    ErrnoStatus<size_t> n = r.read(std::span(buf));
+    if (!n)
+      return false;
+    if (*n == 0)
+      return true;
+    if (!all_zero(std::span(buf).first(*n)))
+      return false;
+  }
 }
 
 // SafeItemHeader is a version of ItemHeader that uses only primitive types.
@@ -324,6 +350,20 @@ load_log_file(
     }
 
     uncommitted_records = true;
+
+    // A crash mid-append can leave the file grown past the data that reached
+    // disk, and some filesystems expose that region as zeros. A zero header is
+    // never a valid record (key_len == 0), so in the last file treat it as the
+    // torn tail and truncate to the last commit, but only if nothing but
+    // zeros follows: a zeroed header ahead of live records is corruption, and
+    // so is any other invalid header.
+    if (is_last_file && all_zero(byte_view(tmp))) {
+      if (!rest_is_zero(r)) {
+        error("zeroed record ahead of later records in {}", file.path_);
+        return DBError(DBCode::kCorruption);
+      }
+      goto eof;
+    }
 
     // validate the header.
     ItemHeader hdr;
@@ -539,9 +579,9 @@ DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn,
         return apply_changes(std::move(log));
       },
       target_lsn, &lsn, max_snapshot_end_lsn);
-  // Only a torn tail (kCorruption) justifies accepting the prefix; any other
-  // error means committed data went unread, so fail closed (#1935).
-  if (!ret && (target_lsn || lsn == 0 || ret.error() != DBCode::kCorruption))
+  // Recovery is all or nothing (see load_database). Uncommitted records after
+  // the last commit are truncated by load_log_file, not reported here.
+  if (!ret)
     return ret.error();
   assert(!target_lsn || *target_lsn == lsn);
   return lsn;
@@ -555,8 +595,7 @@ DiskReader::verify(Directory &dir)
       dir,
       [](std::vector<UniqueLoglet> && /*log*/) -> DBStatus<void> { return {}; },
       std::nullopt, &lsn);
-  // kCorruption-only, as in load() (#1935).
-  if (!ret && (lsn == 0 || ret.error() != DBCode::kCorruption))
+  if (!ret)
     return ret.error();
   return lsn;
 }
@@ -656,8 +695,6 @@ DiskReader::load_database(
     return DBError{DBCode::kNotFound};
   }
 
-  DBStatus<void> prev_ret{};
-
   size_t left_to_process = files->size();
   for (FileMetadata &file : *files) {
     left_to_process--;
@@ -670,8 +707,7 @@ DiskReader::load_database(
 
       if (file.begin_lsn_ > cur_lsn) {
         warn("missing data detected: gap at LSN {}", cur_lsn);
-        ret = DBError(DBCode::kNotFound);
-        break;
+        return DBError(DBCode::kNotFound);
       }
     }
 
@@ -681,22 +717,12 @@ DiskReader::load_database(
     ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn,
                         left_to_process == 0, func);
     if (!ret) {
-      warn("couldn't completely load logfile {}: {}", file.path_, ret.error());
-      if (ret.error() == DBCode::kCorruption)
-        return ret;
-      break;
+      // Recovery is all or nothing: a record that fails validation anywhere
+      // in the stream aborts it, so the caller never sees a partial prefix.
+      warn("couldn't load logfile {} (recovered through LSN {}): {}",
+           file.path_, cur_lsn, ret.error());
+      return ret;
     }
-
-    if (!prev_ret && tmp != cur_lsn) {
-      info("prior file failed to load successfully and {} contained committed "
-           "records; database corrupted, aborting recovery",
-           file.path_);
-      ret = DBError{DBCode::kCorruption};
-      break;
-    }
-
-    prev_ret = ret;
-    ret = DBStatus<void>{};
 
     // file contained no useful records
     if (tmp == cur_lsn)
@@ -708,24 +734,17 @@ DiskReader::load_database(
   }
 
   // we reached the end; are we still missing data?
-  if (ret && target_lsn && cur_lsn != *target_lsn) {
+  if (target_lsn && cur_lsn != *target_lsn) {
     warn("missing data detected: loaded LSN {} < target LSN {}", cur_lsn,
          *target_lsn);
-    ret = DBError(DBCode::kNotFound);
-  }
-
-  if (!ret) {
-    if (cur_lsn == 0)
-      warn("unable to load any LSNs");
-    else
-      warn("able to load up to LSN {} despite encountering error", cur_lsn);
+    return DBError(DBCode::kNotFound);
   }
 
   if (loaded_lsn)
     *loaded_lsn = cur_lsn;
   if (max_snapshot_end_lsn)
     *max_snapshot_end_lsn = max_snap_end;
-  return ret;
+  return {};
 }
 
 DBStatus<void>

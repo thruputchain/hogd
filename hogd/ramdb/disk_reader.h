@@ -52,9 +52,9 @@ private:
 
   // load_database calls func with a buffer of changes for each commit record
   // in an entire database.  It extracts these changes from the log files in
-  // dir. It stops when target_lsn is reached or there is a failure.
-  // Regardless, it sets loaded_lsn to the last LSN that was loaded
-  // successfully.
+  // dir. It stops when target_lsn is reached or there is a failure. Recovery
+  // is all or nothing: on success it sets loaded_lsn to the last LSN loaded;
+  // on failure nothing is published and the database must not be used.
   DBStatus<void> load_database(
       Directory &dir,
       const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
