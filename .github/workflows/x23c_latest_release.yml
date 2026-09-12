@@ -368,6 +368,22 @@ jobs:
               });
             }
 
+      - name: Generate protocol synchronizer app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.PROTOCOL_SYNCHRONIZER_APP_ID }}
+          private-key: ${{ secrets.PROTOCOL_SYNCHRONIZER_SECRET_KEY }}
+          owner: groundhogchain
+          repositories: protocol-rs
+
+      - name: Trigger protocol-rs auto-update
+        run: |
+          gh workflow run auto-update.yml \
+            --repo groundhogchain/protocol-rs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
       - name: Upload artifacts for debugging
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
