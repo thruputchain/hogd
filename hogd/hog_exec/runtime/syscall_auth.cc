@@ -152,13 +152,8 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
-  // The wire type bounds a node's payload and its direct children but not
-  // the nesting depth, so the decoder's recursion budget is what bounds the
-  // token: each AuthTokenNode holds one level while it decodes and releases
-  // it on return, so the token decodes iff no root-to-leaf path has more
-  // than kAuthTokenMaxDepth nodes. Width never consumes budget (a full
-  // kAuthTokenMaxChildNodes-way tree of kAuthTokenMaxDepth levels decodes),
-  // and an over-depth token is refused here, before any id is allocated.
+  // The wire type does not bound depth: decode under kAuthTokenMaxDepth, so
+  // an over-depth token is refused before any id is allocated.
   try {
     x23::deserialize(&auth_token.root_node,
                      x23::BufView{input_serialized_auth_token},

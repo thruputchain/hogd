@@ -15,10 +15,7 @@ struct AuthTokenUnwrapResult {
 
 class AuthTokenRegistry {
 public:
-  // True iff every root-to-leaf path has at most max_depth nodes. For tokens
-  // that arrive already decoded (a view query's forwarded tokens); the mint
-  // syscall instead decodes under a recursion budget of kAuthTokenMaxDepth,
-  // which admits exactly the trees this accepts at that depth.
+  // True iff every root-to-leaf path has at most max_depth nodes.
   static bool node_within_depth(AuthTokenNode const &root, uint32_t max_depth);
 
   std::optional<uint32_t> register_auth_token(AuthToken auth_token);

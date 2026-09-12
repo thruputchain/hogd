@@ -1793,9 +1793,7 @@ make_auth_token_chain(ContractAddress const &consumer, uint32_t depth)
   return node;
 }
 
-// A full kAuthTokenMaxChildNodes-way tree of `depth` levels, each node
-// carrying its level as payload. At kAuthTokenMaxDepth levels this is the
-// widest and deepest token the wire type and the depth bound admit together.
+// A full kAuthTokenMaxChildNodes-way tree of `depth` levels, payload = level.
 AuthTokenNode
 make_full_auth_token_tree(ContractAddress const &consumer, uint32_t depth)
 {
@@ -1826,10 +1824,7 @@ full_tree_node_count(uint32_t width, uint32_t depth)
   return count;
 }
 
-// Decodes node bytes exactly as the MintAuthToken syscall does. Returns
-// nullopt iff the decoder refused the depth, with the diagnostic naming the
-// token bound rather than the process-wide default; any other decode failure
-// propagates and fails the test.
+// Decodes as the MintAuthToken syscall does; nullopt iff refused for depth.
 std::optional<AuthTokenNode>
 decode_under_token_depth_bound(std::span<const uint8_t> bytes)
 {
@@ -1849,12 +1844,7 @@ decode_under_token_depth_bound(std::span<const uint8_t> bytes)
 
 } // namespace
 
-// The decoder's recursion budget is the mint path's only depth check: each
-// AuthTokenNode holds one level while it decodes and releases it on return,
-// so a budget of kAuthTokenMaxDepth admits a token iff every root-to-leaf
-// path has at most kAuthTokenMaxDepth nodes, which is exactly what the
-// registry's depth walk (used for already-decoded forwarded tokens) accepts.
-// Pin both sides of that bound on the real wire type.
+// The decoder's budget is the mint path's only depth check.
 TEST(AuthTokenDepthBoundTest, ChainDecodesIffWithinMaxDepth)
 {
   constexpr ContractAddress kAddr =
@@ -1873,9 +1863,7 @@ TEST(AuthTokenDepthBoundTest, ChainDecodesIffWithinMaxDepth)
   }
 }
 
-// Width never consumes depth budget: the full tree of kAuthTokenMaxDepth
-// levels decodes, and the budget released by every earlier sibling does not
-// let the last branch go one level deeper.
+// Width never consumes budget; one node under the last leaf still exceeds it.
 TEST(AuthTokenDepthBoundTest, FullWidthTreeDecodesUnlessABranchIsTooDeep)
 {
   constexpr ContractAddress kAddr =
@@ -2130,12 +2118,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// The widest and deepest token the bounds admit together: a full
-// kAuthTokenMaxChildNodes-way tree of kAuthTokenMaxDepth levels. A decoder
-// that spent one shared budget across branches, rather than tracking the
-// active depth, could not decode it under a budget of kAuthTokenMaxDepth;
-// it must mint, and consuming it must unwrap every node with its level as
-// payload.
+// The widest and deepest token the bounds admit: mint and consume every node.
 TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsFullWidthMaxDepthTree)
 {
   constexpr ContractAddress kAddr = make_contract_address(0);
