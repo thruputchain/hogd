@@ -32,6 +32,7 @@ struct WorkloadResult {
   // ns of real work per unit of gas charged. The pricing quality metric.
   double ns_per_gas = 0.0;
   double relative_mad = 0.0;
+  size_t samples = 0;
   // Body slots the lowering fused or split; the fusion headroom, in slots.
   size_t fused_slots = 0;
   // Opcode histogram for one iteration, keyed by schedule name. Lets the
