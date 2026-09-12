@@ -199,9 +199,8 @@ inline constexpr size_t kNoBatchSizeLimit = SIZE_MAX;
 
 // #4030: parallel_batch_to_t's segment prefix sums assume a 64-bit size_t.
 static_assert(sizeof(size_t) >= sizeof(uint64_t),
-              "parallel_batch_to_t segment prefix sums assume a 64-bit size_t; "
-              "on ILP32 targets attacker-controlled 32-bit segment metadata "
-              "can wrap the totals to zero and reach out-of-bounds decode");
+              "parallel_batch_to_t segment prefix sums assume a 64-bit size_t "
+              "(#4030)");
 
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs
