@@ -12,6 +12,12 @@ bool
 StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
                                    const StorageCostModel &cost_model)
 {
+  // The -1 pre-genesis sentinel is only synthesized for a database with no
+  // persisted tip. Accepting it here reopens the genesis admission path.
+  if (tip.value.proposal_header.block_height < 0) {
+    critical("recovered tip has a negative committed block height");
+    return false;
+  }
   // Ahead of make_config_hash_preimage, which CHECKs this.
   if (!config_hashable(tip.network_config)) {
     critical("tip network config is not a gapless prefix of parameter ids");

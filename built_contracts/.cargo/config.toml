@@ -69,7 +69,7 @@ codegen-units = 1
 inherits = "release"
 
 [registries]
-groundhog = { index = "sparse+https://groundhog.dev/crates/api/v1/crates/" }
+groundhog = { index = "sparse+https://crates.thruput.network/api/v1/crates/" }
 
 [source]
-groundhog = { registry = "sparse+https://groundhog.dev/crates/api/v1/crates/" }
+groundhog = { registry = "sparse+https://crates.thruput.network/api/v1/crates/" }

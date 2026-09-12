@@ -94,6 +94,10 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
   auto snapshot_cost =
       db_.get_charged_storage_cost_and_cache_data(key, &cost_model_);
   if (!snapshot_cost) {
+    // Corrupt persisted state: fail-stop here, with the key, rather than
+    // after the executor round trip in the mempool's Unrecoverable CHECK.
+    if (snapshot_cost.error() == HogDbCode::kCorruption)
+      panic("corrupt persisted state under key {}", key);
     if (snapshot_cost.error() != HogDbCode::kNotFound) {
       return snapshot_cost.error();
     }
@@ -310,7 +314,17 @@ BlockTX::commit(WorkerPool &pool)
   // restart recovers cleanly at the parent block.
   try {
     if (auto r = db_.apply(*changeset_, pool); !r) {
-      return r.error();
+      // An error status has the same no-rollback consequence as an exception:
+      // a failure partway through a multi-key ChangeSet (e.g. an allocator
+      // kNoMemory after an earlier put is already live) leaves a prefix of this
+      // block's writes in the DAO while the published DbTip stays at the
+      // parent. Returning the error would let a later block close from that
+      // stale parent and compute a hash inconsistent with the live DAO (issue
+      // #3930). Fail stop just like the handlers below; a throw while panic()
+      // formats is caught by them and still terminates.
+      panic("BlockTX::commit(): db_.apply() failed ({}); RAMDB has no rollback "
+            "and may be ahead of the published DB tip",
+            r.error());
     }
     changeset_.reset();
 

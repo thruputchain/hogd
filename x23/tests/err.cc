@@ -4,6 +4,7 @@
 #include <format>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <variant>
@@ -14,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "x23/err.h"
+#include "x23/serialize_cxs.h"
 #include "x23/sockio.h"
 
 using namespace x23;
@@ -209,4 +211,22 @@ TEST(MultiError, TcpConnectSuccess)
   ASSERT_TRUE(client);
   EXPECT_EQ(client.get(), prepared_fd);
   EXPECT_EQ(get_port(remote_addr(client)), port);
+}
+
+TEST(ExpectedError, CxsValueThrowsSystemError)
+{
+  using enum CxsErrorCode;
+  for (auto code : {kTruncated, kNonCanonical, kBadDiscriminant,
+                    kLengthExceeded, kRecursionLimit, kTrailingData}) {
+    CxsError error{code};
+    check_value_overloads<int>(error);
+    check_value_overloads<void>(error);
+    EXPECT_EQ(error, code);
+    EXPECT_EQ(error, error.error_code());
+    EXPECT_EQ(code, error.error_code());
+    EXPECT_NE(error, Errno{error.raw_code()}.error_code());
+    EXPECT_EQ(std::string_view(error.category().name()), "cxs");
+  }
+  EXPECT_EQ(CxsError{CxsErrorCode(999)}.error_code().message(),
+            "unknown cxs error");
 }

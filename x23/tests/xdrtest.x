@@ -41,6 +41,20 @@ struct contains_test_recursive {
   test_recursive t;
 };
 
+// Non-recursive transport envelopes must not change the payload's depth bound.
+struct recursive_envelope {
+  int tag;
+  contains_test_recursive payload;
+  int trailer;
+};
+
+union recursive_union_envelope switch (bool present) {
+case TRUE:
+  recursive_envelope payload;
+case FALSE:
+  void;
+};
+
 // Mutually recursive structs (inline struct in union with forward ref)
 %struct MutualFrame;
 

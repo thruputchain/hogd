@@ -106,15 +106,15 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
           if (!res.has_value()) {
             co_return res.error().to_invoke_error();
           }
-          if (!res.value().has_value()) {
+          if (!res.value().result.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
+          auto const *bs = res.value().result.value();
 
           ReturnBuffer out;
-          out.resize(res.value().value()->size());
+          out.resize(bs->size());
           if (!out.empty()) {
-            std::memcpy(out.data(), res.value().value()->data(),
-                        res.value().value()->size());
+            std::memcpy(out.data(), bs->data(), bs->size());
           }
 
           ctx.handler().set_return_buffer(std::move(out), false);
@@ -3417,7 +3417,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().has_value()) {
+        if (res.value().result.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};

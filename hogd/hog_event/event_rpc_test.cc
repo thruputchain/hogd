@@ -56,6 +56,7 @@
 #include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/srpc.h"
+#include "x23/tests/death_test.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -1753,7 +1754,7 @@ TEST_F(EventRpcDeathTest, DuplicateCloseFailStops)
   // The whole sequence runs inside the death-test child: a fork with the
   // coroutine threadpool already spun up in the parent would not carry its
   // threads across.
-  EXPECT_DEATH(
+  X23_EXPECT_DEATH(
       {
         EventRPCContext ctx(temp_dir());
         EventMempoolRpc mempool_rpc(ctx);

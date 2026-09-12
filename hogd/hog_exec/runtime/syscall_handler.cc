@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/common/limits.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
@@ -1614,24 +1615,34 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   co_return deploy_addr;
 }
 
-x23::Async<SystemStatus<SyscallStatus<const Bytestring *>>>
+x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
+  using Read = StorageRead<const Bytestring *>;
+
   const FrameItemKey item_key =
       invocation_frame_stack_.frame_item_key(storage_key);
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
+  // Everything up to the load below answers out of the frame stack, so it
+  // reaches no database and costs no load gas.
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
-    co_return &bytestring_item->bytestring_;
+    co_return Read{&bytestring_item->bytestring_, 0};
   }
 
   if (item_view->get<DeletedItem>()) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist},
+                   0};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    // Prices the fetch ensure_loaded() is about to do. Both turn on the same
+    // is_loaded() predicate, and ensure_loaded() stays a non-coroutine so a
+    // hit still allocates no frame.
+    const GasAmount load_gas =
+        unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
     if (auto loaded =
             co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
         !loaded.has_value()) {
@@ -1640,18 +1651,21 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
     if (!type) {
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+      co_return Read{SyscallError{
+                         SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist},
+                     load_gas};
     }
     if (*type != ItemViewType::kBytestring) {
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      co_return Read{
+          SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+          load_gas};
     }
-    co_return &base_item.bytestring();
+    co_return Read{&base_item.bytestring(), load_gas};
   }
 
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return Read{SyscallError{
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                 0};
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -1688,27 +1702,43 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   co_return item_view->set(BytestringItem(std::move(new_string)), input_flags);
 }
 
+GasAmount
+SystemCallHandler::note_item_load(FrameItemKey const &key)
+{
+  return loaded_keys_.insert(key).second ? kDBRPCCost : 0;
+}
+
 x23::Async<
-    SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>>
+    SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
                              bool load_from_snapshot)
 {
+  using Value = std::pair<std::optional<int128_t>, int128_t>;
+  using Read = StorageRead<Value>;
+
   const FrameItemKey item_key =
       invocation_frame_stack_.frame_item_key(storage_key);
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
+  // A branch that answers out of the frame stack reaches no database, so it
+  // costs no load gas; only the two that read the snapshot below can.
   if (auto const *nnint_item = item_view->get<NNIntItem>()) {
     if (nnint_item->base_value_.has_value()) {
-      co_return std::make_pair(from_xdr(*nnint_item->base_value_),
-                               from_xdr(nnint_item->add_value_));
+      co_return Read{Value{from_xdr(*nnint_item->base_value_),
+                           from_xdr(nnint_item->add_value_)},
+                     0};
     }
     // If we're not loading from the snapshot, we can return nullopt for the
     // base value.
     if (!load_from_snapshot) {
-      co_return std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_));
+      co_return Read{Value{std::nullopt, from_xdr(nnint_item->add_value_)}, 0};
     }
 
+    // Reaches the database the same way UnmodifiedItem::load() does, so it
+    // is billed the same way: a staged add with no set value followed by a
+    // forced get lands here rather than in the branch below.
+    const GasAmount load_gas = note_item_load(item_key);
     auto snapshot_value =
         co_await snapshot_cache_.try_get_snapshot_item(item_key);
     if (!snapshot_value.has_value()) {
@@ -1722,25 +1752,32 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     // database. Hence we default to 0 if the snapshot value is not an NNInt.
     auto snapshot_type = snapshot_value.value()->type();
     if (!snapshot_type || snapshot_type.value() != ItemViewType::kNNInt) {
-      co_return std::make_pair(0, from_xdr(nnint_item->add_value_));
+      co_return Read{Value{0, from_xdr(nnint_item->add_value_)}, load_gas};
     }
-    co_return std::make_pair(snapshot_value.value()->nnint(),
-                             from_xdr(nnint_item->add_value_));
+    co_return Read{Value{snapshot_value.value()->nnint(),
+                         from_xdr(nnint_item->add_value_)},
+                   load_gas};
   }
 
   if (item_view->get<DeletedItem>()) {
     if (!load_from_snapshot) {
-      co_return std::make_pair(std::nullopt, 0);
+      co_return Read{Value{std::nullopt, 0}, 0};
     }
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist},
+                   0};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!load_from_snapshot) {
-      co_return std::make_pair(std::nullopt, 0);
+      co_return Read{Value{std::nullopt, 0}, 0};
     }
 
+    // Prices the fetch ensure_loaded() is about to do. Both turn on the same
+    // is_loaded() predicate, and ensure_loaded() stays a non-coroutine so a
+    // hit still allocates no frame.
+    const GasAmount load_gas =
+        unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
     if (auto loaded =
             co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
         !loaded.has_value()) {
@@ -1752,24 +1789,27 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
       assert(load_from_snapshot);
       // We are in load_from_snapshot mode, so we return KeyNotExist instead of
       // std::nullopt, mirroring the behavior above of the DeletedItem case.
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+      co_return Read{SyscallError{
+                         SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist},
+                     load_gas};
     }
     if (*type != ItemViewType::kNNInt) {
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      co_return Read{
+          SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+          load_gas};
     }
-    co_return std::make_pair(base_item.nnint(), 0);
+    co_return Read{Value{base_item.nnint(), 0}, load_gas};
   }
 
   // the value written at this key is not an NNInt, so we return an
   // InvalidSyscallInput error. This mirrors the case above, where the snapshot
   // *type != kNNInt.
   if (!load_from_snapshot) {
-    co_return std::make_pair(std::nullopt, 0);
+    co_return Read{Value{std::nullopt, 0}, 0};
   }
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return Read{SyscallError{
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                 0};
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -2102,10 +2142,14 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
 
 // == Native token syscalls ==
 
-x23::Async<SystemStatus<SyscallStatus<int128_t>>>
+x23::Async<SystemStatus<StorageRead<int128_t>>>
 SystemCallHandler::get_native_token_balance(
     ContractAddress const &contract_address)
 {
+  using Read = StorageRead<int128_t>;
+  // Set by whichever of the two snapshot reads below runs, if either does.
+  GasAmount load_gas = 0;
+
   AddressAndKey addrkey{.address = contract_address,
                         .key =
                             StorageKey(StorageKeyType::FreeNativeTokenBalance)};
@@ -2115,6 +2159,8 @@ SystemCallHandler::get_native_token_balance(
   assert(item_view);
 
   if (auto *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    // Prices the fetch ensure_loaded() is about to do; see get_bytestring().
+    load_gas = unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
     if (auto loaded =
             co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
         !loaded.has_value()) {
@@ -2130,7 +2176,7 @@ SystemCallHandler::get_native_token_balance(
     // uint128_t and hand a contract UINT128_MAX. CHECK, not assert: the
     // conversion is unguarded exactly where it matters, in NDEBUG builds.
     CHECK(base_item.native_token_balance() >= 0);
-    co_return base_item.native_token_balance();
+    co_return Read{base_item.native_token_balance(), load_gas};
   }
 
   auto const *balance_item = item_view->get<NativeTokenBalanceItem>();
@@ -2146,6 +2192,8 @@ SystemCallHandler::get_native_token_balance(
     base = from_xdr(*balance_item->base_value_);
   }
   else {
+    // Same database read as the branch above, so it is billed the same way.
+    load_gas = note_item_load(item_key);
     auto snapshot_value =
         co_await snapshot_cache_.try_get_snapshot_item(item_key);
     if (!snapshot_value.has_value()) {
@@ -2159,16 +2207,18 @@ SystemCallHandler::get_native_token_balance(
   }
 
   if (integer_add_overflow(base, from_xdr(balance_item->add_value_))) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                   load_gas};
   }
 
   int128_t balance = base + from_xdr(balance_item->add_value_);
   if (balance < 0) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                   load_gas};
   }
-  co_return balance;
+  co_return Read{balance, load_gas};
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>

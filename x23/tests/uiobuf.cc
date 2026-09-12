@@ -311,3 +311,72 @@ TEST(uiobuf, Swap)
     EXPECT_TRUE(buf_eq(flatview, v.to_vec()));
   }
 }
+
+TEST(VecQ, CompactsConsumedPrefixBeforeGrowing)
+{
+  x23::VecQ<int> q;
+  q.reserve(32);
+  auto *original = q.data();
+  auto capacity = q.capacity();
+  q.resize(capacity);
+  for (size_t i = 0; i < capacity; ++i)
+    q.data()[i] = int(i);
+  q.pop_front(capacity - 2);
+  q.reserve(4);
+  EXPECT_EQ(q.data(), original);
+  ASSERT_EQ(q.size(), 2UZ);
+  EXPECT_EQ(q.data()[0], int(capacity - 2));
+  EXPECT_EQ(q.data()[1], int(capacity - 1));
+  q.emplace_back(99);
+  EXPECT_EQ(q.back(), 99);
+}
+
+TEST(VecQ, SwapPreservesOffsets)
+{
+  x23::VecQ<int> a, b;
+  for (int n : {1, 2, 3})
+    a.emplace_back(n);
+  for (int n : {4, 5})
+    b.emplace_back(n);
+  a.pop_front(2);
+  b.pop_front(1);
+  auto *ap = a.data();
+  auto *bp = b.data();
+  a.swap(b);
+  EXPECT_EQ(a.data(), bp);
+  EXPECT_EQ(b.data(), ap);
+  EXPECT_EQ(a.size(), 1UZ);
+  EXPECT_EQ(b.size(), 1UZ);
+  EXPECT_EQ(*a.begin(), 5);
+  EXPECT_EQ(a.front(), 5);
+  EXPECT_EQ(a.at(0), 5);
+  EXPECT_EQ(std::as_const(a)[0], 5);
+  EXPECT_THROW(a.at(1), std::out_of_range);
+  EXPECT_EQ(*b.begin(), 3);
+}
+
+TEST(uiobuf, EmptyAppendsDoNotQueueWrites)
+{
+  x23::BufVec buffers;
+  buffers.append(x23::BufView{});
+  ASSERT_TRUE(buffers.empty());
+  buffers.append(x23::Buf{});
+  ASSERT_TRUE(buffers.empty());
+  x23::Buf data{1, 2};
+  buffers.append(data, data.size());
+  ASSERT_TRUE(buffers.empty());
+  EXPECT_EQ(buffers.write(-1).value(), x23::IoResult::kComplete);
+}
+
+TEST(uiobuf, SelfMovePreservesQueuedData)
+{
+  x23::BufVec buffers;
+  x23::Buf data{1, 2, 3};
+  buffers.append(data);
+  auto &alias = buffers;
+  buffers = std::move(alias);
+  EXPECT_EQ(buffers.nbytes(), 3UZ);
+  auto iov = buffers.to_vec();
+  ASSERT_EQ(iov.size(), 1UZ);
+  EXPECT_EQ(std::memcmp(iov[0].iov_base, data.data(), data.size()), 0);
+}

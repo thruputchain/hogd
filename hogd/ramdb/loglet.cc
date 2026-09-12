@@ -111,8 +111,11 @@ Loglet::clone(ItemHeader *src)
   if (unlikely(pos_ + len >= len_))
     return nullptr;
 
-  // copy and return the new item header.
+  // copy and return the new item header. The copy's next link is meaningless
+  // (it points into src's chain), and recovery checksums the slot as bytes,
+  // so leave it canonical zero rather than the host's nullptr representation.
   auto *dst = new (start_ + pos_) ItemHeader(*src);
+  dst->clear_next();
   assert(item_is_within(dst));
   pos_ += len;
   return dst;

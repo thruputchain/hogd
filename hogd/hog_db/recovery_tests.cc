@@ -8,13 +8,13 @@
 #include <span>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "db_sched.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -39,6 +39,8 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/serialize.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd {
 
@@ -263,9 +265,9 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 //    kMaxRetrocausalQueueLiveEntries; live_entries may overshoot by at most
 //    one block, and a static_assert keeps the overshoot inside the signed
 //    domain. No legitimate history can exceed the hard cap.
-// 2. Loading RCQ metadata CHECKs live_entries against
-//    kRetrocausalQueueLiveEntriesHardCap, so corrupt on-disk state
-//    fail-stops instead of reaching cost arithmetic.
+// 2. Loading RCQ metadata rejects live_entries above
+//    kRetrocausalQueueLiveEntriesHardCap as kCorruption, so corrupt on-disk
+//    state never reaches cost arithmetic.
 
 namespace {
 
@@ -374,22 +376,189 @@ TEST(RecoveryTests, RCQInsertAdmittedJustBelowMaxLiveEntries)
   ASSERT_TRUE(result.has_value());
 }
 
-// Guard 2: an over-cap live_entries value (only producible by on-disk
-// corruption, since guard 1 bounds all legitimate growth) fail-stops the
-// moment the metadata is loaded, before any signed cost arithmetic.
-TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
-{
-  if constexpr (!is_debug_build()) {
-    // The "CHECK FAILED" panic message this death test matches is only
-    // produced in debug builds (x23::panic is std::unreachable() under
-    // NDEBUG).
-    GTEST_SKIP();
-  }
+namespace {
 
+// Persists `metadata` under a fixed RCQ key, reopens the database, and
+// returns what the DAO makes of the recovered row.
+HogDbStatus<RetrocausalQueueMetadata>
+reopen_and_read_rcq_metadata(const RetrocausalQueueMetadata &metadata)
+{
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
-  constexpr uint64_t kHighBitLiveEntries = uint64_t{1} << 63;
+  EXPECT_TRUE(dir.has_value());
 
+  ItemKey rcq_key(ContractAddress{7}, StorageKeyContractData{42});
+
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kDefaultHeapSize, 0);
+    EXPECT_TRUE(db);
+    auto dao = HogDbDAO(RAMDB(std::move(*db)));
+    EXPECT_TRUE(
+        dao.write_retrocausal_queue_metadata(rcq_key, metadata).has_value());
+    EXPECT_TRUE(dao.commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kDefaultHeapSize, 0);
+  EXPECT_TRUE(db);
+  auto dao = HogDbDAO(RAMDB(std::move(*db)));
+  return dao.read_retrocausal_queue_metadata(rcq_key);
+}
+
+} // namespace
+
+// Guard 2: metadata the RCQ lock could never have written is rejected as
+// kCorruption on load, in every build (#2917, #2936, #2979, #2986).
+TEST(RecoveryTests, RecoveredConsistentRCQMetadataAcceptedOnLoad)
+{
+  RetrocausalQueueMetadata metadata{};
+  metadata.live_entries = 5;
+  metadata.max_live_block_num = 3;
+  metadata.consume_state.max_fully_consumed_block_number = 1;
+  metadata.consume_state.partial_consumed_number = 2;
+  auto recovered = reopen_and_read_rcq_metadata(metadata);
+  ASSERT_TRUE(recovered.has_value());
+  EXPECT_EQ(recovered->live_entries, 5);
+  EXPECT_EQ(recovered->max_live_block_num, 3);
+}
+
+TEST(RecoveryTests, RecoveredOverCapRCQLiveEntriesRejectedOnLoad)
+{
+  RetrocausalQueueMetadata metadata{};
+  metadata.live_entries = uint64_t{1} << 63;
+  auto recovered = reopen_and_read_rcq_metadata(metadata);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
+TEST(RecoveryTests, RecoveredInvertedRCQHeadTailRejectedOnLoad)
+{
+  RetrocausalQueueMetadata metadata{};
+  metadata.live_entries = 1;
+  metadata.max_live_block_num = 0;
+  metadata.consume_state.max_fully_consumed_block_number = 1;
+  auto recovered = reopen_and_read_rcq_metadata(metadata);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
+TEST(RecoveryTests, RecoveredMaxRCQTailRejectedOnLoad)
+{
+  RetrocausalQueueMetadata metadata{};
+  metadata.live_entries = 1;
+  metadata.max_live_block_num = std::numeric_limits<uint64_t>::max();
+  metadata.consume_state.max_fully_consumed_block_number = 1;
+  auto recovered = reopen_and_read_rcq_metadata(metadata);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
+TEST(RecoveryTests, RecoveredDanglingRCQPartialCursorRejectedOnLoad)
+{
+  RetrocausalQueueMetadata metadata{};
+  metadata.live_entries = 1;
+  metadata.max_live_block_num = 1;
+  metadata.consume_state.max_fully_consumed_block_number = 1;
+  metadata.consume_state.partial_consumed_number = 1;
+  auto recovered = reopen_and_read_rcq_metadata(metadata);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
+namespace {
+
+// Persists `block` under the row key for `stored_as`, reopens the database,
+// and returns what the DAO makes of the recovered row when asked for
+// `stored_as`.
+HogDbStatus<RetrocausalQueueBlock>
+reopen_and_read_rcq_block(const RetrocausalQueueBlock &block,
+                          uint64_t stored_as)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+  EXPECT_TRUE(dir.has_value());
+  if (!dir.has_value())
+    return HogDbError(HogDbCode::kInternal);
+
+  ItemKey rcq_key(ContractAddress{7}, StorageKeyContractData{42});
+
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kDefaultHeapSize, 0);
+    EXPECT_TRUE(db);
+    if (!db)
+      return HogDbError(HogDbCode::kInternal);
+    auto dao = HogDbDAO(RAMDB(std::move(*db)));
+    auto block_key = make_retrocausal_queue_block_key(rcq_key, stored_as);
+    auto buf = x23::serialize(block);
+    EXPECT_TRUE(dao.get_ramdb()
+                    .put(std::as_bytes(std::span(block_key)), 0,
+                         std::as_bytes(std::span(buf)))
+                    .has_value());
+    EXPECT_TRUE(dao.commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kDefaultHeapSize, 0);
+  EXPECT_TRUE(db);
+  if (!db)
+    return HogDbError(HogDbCode::kInternal);
+  auto dao = HogDbDAO(RAMDB(std::move(*db)));
+  return dao.read_retrocausal_queue_block(rcq_key, stored_as);
+}
+
+} // namespace
+
+// A block row must sit under its own number and hold 1 to
+// kRetrocausalQueueBlockEntriesMaxLen entries; the DAO rejects anything else
+// as kCorruption on load (#2978).
+TEST(RecoveryTests, RecoveredConsistentRCQBlockAcceptedOnLoad)
+{
+  RetrocausalQueueBlock block;
+  block.block_number = 1;
+  block.entries.push_back(QueueEntry{1});
+  auto recovered = reopen_and_read_rcq_block(block, 1);
+  ASSERT_TRUE(recovered.has_value());
+  EXPECT_EQ(recovered->entries.size(), 1);
+}
+
+TEST(RecoveryTests, RecoveredMisfiledRCQBlockRejectedOnLoad)
+{
+  RetrocausalQueueBlock block;
+  block.block_number = 2;
+  block.entries.push_back(QueueEntry{1});
+  auto recovered = reopen_and_read_rcq_block(block, 1);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
+TEST(RecoveryTests, RecoveredEmptyRCQBlockRejectedOnLoad)
+{
+  RetrocausalQueueBlock block;
+  block.block_number = 1;
+  auto recovered = reopen_and_read_rcq_block(block, 1);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
+TEST(RecoveryTests, RecoveredOversizedRCQBlockRejectedOnLoad)
+{
+  RetrocausalQueueBlock block;
+  block.block_number = 1;
+  for (size_t i = 0; i <= kRetrocausalQueueBlockEntriesMaxLen; ++i)
+    block.entries.push_back(QueueEntry{1});
+  auto recovered = reopen_and_read_rcq_block(block, 1);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
+// First touch prices the key through the DAO; corrupt state fail-stops
+// there with the key in the message.
+TEST(RecoveryTests, RecoveredCorruptRCQMetadataDiesOnFirstTouch)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
   ASSERT_TRUE(dir.has_value());
 
   ItemKey rcq_key(ContractAddress{7}, StorageKeyContractData{42});
@@ -399,24 +568,45 @@ TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
         Database::open(dir->get_path(), kDefaultHeapSize, 0);
     ASSERT_TRUE(db);
     auto dao = HogDbDAO(RAMDB(std::move(*db)));
+    ASSERT_TRUE(
+        dao.write_address_balance(rcq_key.get_address(), int128_t{1} << 40)
+            .has_value());
 
     RetrocausalQueueMetadata metadata{};
-    metadata.live_entries = kHighBitLiveEntries;
+    metadata.live_entries = 1;
+    metadata.max_live_block_num = 0;
+    metadata.consume_state.max_fully_consumed_block_number = 1;
     ASSERT_TRUE(
         dao.write_retrocausal_queue_metadata(rcq_key, metadata).has_value());
     ASSERT_TRUE(dao.commit().has_value());
   }
 
-  EXPECT_DEATH(
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kDefaultHeapSize, 0);
+  ASSERT_TRUE(db);
+  auto dao = HogDbDAO(RAMDB(std::move(*db)));
+
+  AuthChangeSubscriptionManager subscription_manager;
+  BackgroundCommitWorker background_commit_worker(subscription_manager,
+                                                  nullptr);
+  StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  PerThreadARC<BlockTX> block_tx(
+      dao, cost_model, background_commit_worker, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+  invoke_tx.create_savepoint();
+
+  X23_EXPECT_DEATH(
       {
-        DBStatus<std::unique_ptr<Database>> db =
-            Database::open(dir->get_path(), kDefaultHeapSize, 0);
-        ASSERT_TRUE(db);
-        auto dao = HogDbDAO(RAMDB(std::move(*db)));
-        auto recovered = dao.read_retrocausal_queue_metadata(rcq_key);
-        (void)recovered;
+        RetrocausalQueueDelta delta;
+        delta.insert.added_entries.push_back(QueueEntry{1});
+        std::ignore =
+            invoke_tx.request_retrocausal_queue(rcq_key, std::move(delta),
+                                                std::to_underlying(
+                                                    StorageDeltaFlags::None));
       },
-      "CHECK FAILED");
+      "corrupt persisted state under key");
 }
 
 TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)

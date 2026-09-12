@@ -74,6 +74,13 @@ NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
   CHECK_EQ(std::to_underlying(param.param()), index);
 
   switch (id) {
+  case ConfigParamID::kConfigParamMaxContractSizeBytes:
+  case ConfigParamID::kConfigParamMaxSavepointDepth:
+  case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+  case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+  case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+  case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+    panic("unimplemented");
   case ConfigParamID::kConfigParamMaxSHA256Buffers:
     return param.max_sha256_buffers();
   case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
@@ -91,6 +98,13 @@ NetworkConfigParams::make_param(ConfigParamID id, uint32_t value)
 {
   ConfigParam out(id);
   switch (id) {
+  case ConfigParamID::kConfigParamMaxContractSizeBytes:
+  case ConfigParamID::kConfigParamMaxSavepointDepth:
+  case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+  case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+  case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+  case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+    panic("unimplemented");
   case ConfigParamID::kConfigParamMaxSHA256Buffers:
     out.max_sha256_buffers() = value;
     break;
@@ -111,6 +125,13 @@ inline uint32_t
 NetworkConfigParams::in_force(ConfigParamID id) const
 {
   switch (id) {
+  case ConfigParamID::kConfigParamMaxContractSizeBytes:
+  case ConfigParamID::kConfigParamMaxSavepointDepth:
+  case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+  case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+  case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+  case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+    panic("unimplemented");
   case ConfigParamID::kConfigParamMaxSHA256Buffers:
     return max_sha256_buffers;
   case ConfigParamID::kConfigParamMaxCrossInvokeDepth:

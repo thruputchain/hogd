@@ -23,6 +23,7 @@
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd::rv32 {
 
@@ -1397,7 +1398,7 @@ TEST(Rv32ThreadedYieldApi, resumeFromEcallRejectsHostTrap)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   EXPECT_EQ(machine.start(), StepResult::kEcall);
-  EXPECT_DEATH(
+  X23_EXPECT_DEATH(
       {
         [[maybe_unused]] const StepResult ignored =
             machine.resume_from_ecall(HostResult::trap());

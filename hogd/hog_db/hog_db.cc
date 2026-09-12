@@ -142,7 +142,16 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     ctx.initialize_cost_model(*cost_model);
   }
   else {
-    CHECK_EQ(db_hash, StorageLongHash{});
+    // Only an absent tip denotes a fresh database. Decode, type, and I/O
+    // failures must never turn recovered state into a new genesis.
+    if (tip.error().code() != HogDbCode::kNotFound) {
+      critical("Failed to read recovered DbTip: {}", tip.error());
+      return EXIT_FAILURE;
+    }
+    if (db_hash != StorageLongHash{}) {
+      critical("Database has committed state but no DbTip");
+      return EXIT_FAILURE;
+    }
     ConsensusValue value{};
     value.proposal_header.block_height = -1;
     ctx.set_tip(DbTip{.id = std::numeric_limits<BlockTXID>::max(),
