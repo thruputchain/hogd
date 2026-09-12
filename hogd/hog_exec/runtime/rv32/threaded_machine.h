@@ -110,7 +110,7 @@ static_assert(alignof(Slot) == 16);
 // Immutable, decode-once form of a contract: the baked Slot handler array plus
 // the initial memory image (the contract's seeded bytes zero-padded out to
 // total_memory_size). Shared across ThreadedMachine instantiations -- each
-// machine copies the full image into its own memory_ at construction/reset.
+// machine restores the seed and zero-fills padding at construction/reset.
 class ThreadedMachinePreInstantiation {
 public:
   // `memory` is the initial seeded image (e.g. an artifact's initial_memory);
@@ -143,13 +143,29 @@ public:
 private:
   ThreadedMachinePreInstantiation(std::vector<Slot> exec,
                                   std::vector<uint8_t> initial_memory_image,
+                                  uint32_t memory_start, size_t seed_size,
                                   bool trace)
     : exec_(std::move(exec)),
-      initial_memory_image_(std::move(initial_memory_image)), trace_(trace)
+      initial_memory_image_(std::move(initial_memory_image)),
+      memory_start_(memory_start), seed_size_(seed_size), trace_(trace)
   {}
+
+  void restore_memory(std::vector<uint8_t> &memory) const
+  {
+    memory.resize(initial_memory_image_.size());
+    // Every byte must be restored, including dirty recycled guest memory.
+    // Zero padding needs stores only, not a read of the full cached image.
+    std::fill_n(memory.begin(), memory_start_, uint8_t{0});
+    std::copy_n(initial_memory_image_.begin() + memory_start_, seed_size_,
+                memory.begin() + memory_start_);
+    std::fill(memory.begin() + memory_start_ + seed_size_, memory.end(),
+              uint8_t{0});
+  }
 
   std::vector<Slot> exec_;
   std::vector<uint8_t> initial_memory_image_;
+  uint32_t memory_start_;
+  size_t seed_size_;
   bool trace_ = false;
 
   friend struct ThreadedMachinePreInstantiationTestPeer;
@@ -271,13 +287,10 @@ public:
     : pre_instantiation_(&pre_instantiation),
       exec_traced_(pre_instantiation.trace_)
   {
-    const auto &image = pre_instantiation.initial_memory_image_;
-    assert(image.size() <= kMaxMemoryBytes);
     // memory_ acquired its slot from the pool on construction. The recycled
-    // slot is dirty, but the image is full-size (zero-padded to
-    // total_memory_size), so this assign fully overwrites it -- and the
-    // reserved capacity means no allocation on a pool hit.
-    memory_.bytes().assign(image.begin(), image.end());
+    // slot is dirty: restore both the seed and all zero padding. Reserved
+    // capacity means no allocation on a pool hit.
+    pre_instantiation.restore_memory(memory_.bytes());
 
     regs_.fill(0);
     // Entry ABI v3: sp (x2) stays 0 from the fill above -- the guest owns
@@ -302,10 +315,7 @@ public:
   void reset(uint64_t gas)
   {
     regs_.fill(0);
-    // memory_ is sized to the (already zero-padded) image, so restoring it is a
-    // straight copy -- no separate tail zero-fill needed.
-    std::ranges::copy(pre_instantiation_->initial_memory_image_,
-                      memory_.bytes().begin());
+    pre_instantiation_->restore_memory(memory_.bytes());
     pc_ = 0;
     gas_remaining_ = gas;
     gas_deficit_ = 0;
@@ -2038,7 +2048,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
 
   return ThreadedMachinePreInstantiation(std::move(exec),
                                          std::move(initial_memory_image),
-                                         trace);
+                                         memory_start, memory.size(), trace);
 }
 
 inline MachineView

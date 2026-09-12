@@ -455,6 +455,33 @@ TEST(Rv32Threaded, memorySlotRecycledAndReinitializedAcrossMachines)
   EXPECT_EQ(machine.reg(3), 17U);
 }
 
+TEST(Rv32Threaded, seededMemoryRestoredIncludingDirtyPadding)
+{
+  const std::vector<uint32_t> words = {addi(1, 0, 5)};
+  const std::vector<uint8_t> seed = {0x42, 0, 0x7e};
+  for (uint32_t start : {0U, 31U, 253U}) {
+    auto program =
+        ThreadedMachinePreInstantiation::create(words_to_bytes(words), seed,
+                                                start, 256, false);
+    ASSERT_TRUE(program.has_value());
+    std::vector<uint8_t> expected(256, 0);
+    std::ranges::copy(seed, expected.begin() + start);
+    const uint8_t *buffer = nullptr;
+    {
+      ThreadedMachine machine(*program, 100);
+      buffer = machine.memory().data();
+      EXPECT_TRUE(std::ranges::equal(machine.memory(), expected));
+      std::ranges::fill(machine.memory(), uint8_t{0xab});
+      machine.reset(200);
+      EXPECT_TRUE(std::ranges::equal(machine.memory(), expected));
+      std::ranges::fill(machine.memory(), uint8_t{0xcd});
+    }
+    ThreadedMachine recycled(*program, 100);
+    EXPECT_EQ(recycled.memory().data(), buffer);
+    EXPECT_TRUE(std::ranges::equal(recycled.memory(), expected));
+  }
+}
+
 TEST(Rv32Threaded, liveMachinesHoldDistinctMemorySlots)
 {
   const std::vector<uint32_t> words = {addi(1, 0, 5)};
