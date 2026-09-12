@@ -603,9 +603,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return EXIT_FAILURE;
   }
 
+  // No binary hash: the readiness manifest already records version and commit,
+  // and the tests spawn ~85 nodes per run that would each hash the executable.
   int ret = options.log_level.has_value()
-                ? hogd::hogd_init(argc, argv, true, *options.log_level)
-                : hogd::hogd_init(argc, argv);
+                ? hogd::hogd_init(argc, argv, false, *options.log_level)
+                : hogd::hogd_init(argc, argv, false);
   if (ret)
     return ret;
   hogd::info("starting hog-devnode!");
