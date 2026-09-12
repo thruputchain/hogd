@@ -7,10 +7,9 @@ on:
   push:
     branches: ["main"]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-
+# Do not use GitHub concurrency cancellation here: GitHub permanently marks a
+# canceled run as canceled. The warmup step below stops superseded work itself
+# so the old run can finish successfully while genuine hog_sched errors fail.
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
@@ -65,6 +64,26 @@ jobs:
         run: |
           BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
           echo "Branch name: $BRANCH_NAME"
+
+          is_superseded() {
+            if [[ "$GITHUB_EVENT_NAME" != "push" || "$GITHUB_REF" != "refs/heads/main" ]]; then
+              return 1
+            fi
+
+            local main_sha
+            if ! main_sha=$(git ls-remote --exit-code origin refs/heads/main | awk 'NR == 1 { print $1 }'); then
+              echo "::warning::Could not check whether the ccache warmup was superseded"
+              return 1
+            fi
+
+            [[ "$main_sha" != "$GITHUB_SHA" ]]
+          }
+
+          if is_superseded; then
+            echo "A newer commit is already on main; skipping this ccache warmup"
+            exit 0
+          fi
+
           hog_sched \
             --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
             --key=github_repo --value=${{ github.repository }} \
@@ -74,7 +93,33 @@ jobs:
             --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
             --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
             --timeout-sec=28800 \
-            ./scripts/schedules/ccache_warmup.toml
+            ./scripts/schedules/ccache_warmup.toml &
+          HOG_SCHED_PID=$!
+
+          stop_hog_sched() {
+            kill -TERM "$HOG_SCHED_PID" 2>/dev/null || true
+            wait "$HOG_SCHED_PID" 2>/dev/null || true
+          }
+          trap 'stop_hog_sched; exit 143' TERM
+          trap 'stop_hog_sched; exit 130' INT
+
+          while kill -0 "$HOG_SCHED_PID" 2>/dev/null; do
+            sleep 15
+            # Preserve hog_sched's result if it finished before supersession was
+            # detected, especially so a real failure is never reclassified.
+            if ! kill -0 "$HOG_SCHED_PID" 2>/dev/null; then
+              break
+            fi
+            if is_superseded; then
+              echo "A newer commit was merged into main; stopping this ccache warmup"
+              stop_hog_sched
+              trap - TERM INT
+              exit 0
+            fi
+          done
+
+          trap - TERM INT
+          wait "$HOG_SCHED_PID"
 
       - name: Print Log Download Instructions
         if: always()
