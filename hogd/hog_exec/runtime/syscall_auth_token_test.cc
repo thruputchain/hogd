@@ -4,16 +4,20 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <memory>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "auth_token.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -1765,6 +1769,124 @@ TEST_F(SyscallAuthTokenTest, MiddleContractCannotForwardUnownedToken)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
+namespace {
+
+std::span<const std::byte>
+as_byte_span(x23::Buf const &buf)
+{
+  return std::as_bytes(std::span<const uint8_t>{buf.data(), buf.size()});
+}
+
+// A single root-to-leaf chain of `depth` nodes, each carrying its level (0 at
+// the root) as payload.
+AuthTokenNode
+make_auth_token_chain(ContractAddress const &consumer, uint32_t depth)
+{
+  AuthTokenNode node{.consumer_address = consumer,
+                     .payload = x23::serialize(depth - 1),
+                     .child_nodes = {}};
+  for (uint32_t level = depth - 1; level > 0; --level) {
+    node = AuthTokenNode{.consumer_address = consumer,
+                         .payload = x23::serialize(level - 1),
+                         .child_nodes = {node}};
+  }
+  return node;
+}
+
+// A full kAuthTokenMaxChildNodes-way tree of `depth` levels, payload = level.
+AuthTokenNode
+make_full_auth_token_tree(ContractAddress const &consumer, uint32_t depth)
+{
+  AuthTokenNode node{.consumer_address = consumer,
+                     .payload = x23::serialize(depth - 1),
+                     .child_nodes = {}};
+  for (uint32_t level = depth - 1; level > 0; --level) {
+    AuthTokenNode parent{.consumer_address = consumer,
+                         .payload = x23::serialize(level - 1),
+                         .child_nodes = {}};
+    for (uint32_t i = 0; i < uint32_t{kAuthTokenMaxChildNodes}; ++i) {
+      parent.child_nodes.push_back(node);
+    }
+    node = std::move(parent);
+  }
+  return node;
+}
+
+constexpr uint32_t
+full_tree_node_count(uint32_t width, uint32_t depth)
+{
+  uint32_t count = 0;
+  uint32_t level_nodes = 1;
+  for (uint32_t level = 0; level < depth; ++level) {
+    count += level_nodes;
+    level_nodes *= width;
+  }
+  return count;
+}
+
+// Decodes as the MintAuthToken syscall does; nullopt iff refused for depth.
+std::optional<AuthTokenNode>
+decode_under_token_depth_bound(std::span<const uint8_t> bytes)
+{
+  AuthTokenNode out;
+  try {
+    x23::deserialize(&out, x23::BufView{bytes}, size_t{kAuthTokenMaxDepth});
+  } catch (x23::XdrBadInput const &e) {
+    EXPECT_STREQ(
+        e.what(),
+        std::format("x23::Deserializer: exceeded recursion limit of {}",
+                    kAuthTokenMaxDepth)
+            .c_str());
+    return std::nullopt;
+  }
+  return out;
+}
+
+} // namespace
+
+// The decoder's budget is the mint path's only depth check.
+TEST(AuthTokenDepthBoundTest, ChainDecodesIffWithinMaxDepth)
+{
+  constexpr ContractAddress kAddr =
+      NativeContractTestFramework::make_contract_address(0);
+  for (uint32_t depth = 1; depth <= uint32_t{kAuthTokenMaxDepth} + 2; ++depth) {
+    SCOPED_TRACE(depth);
+    auto chain = make_auth_token_chain(kAddr, depth);
+    bool const within = depth <= uint32_t{kAuthTokenMaxDepth};
+    EXPECT_EQ(AuthTokenRegistry::node_within_depth(chain, kAuthTokenMaxDepth),
+              within);
+    auto decoded = decode_under_token_depth_bound(x23::serialize(chain));
+    ASSERT_EQ(decoded.has_value(), within);
+    if (decoded.has_value()) {
+      EXPECT_EQ(*decoded, chain);
+    }
+  }
+}
+
+// Width never consumes budget; one node under the last leaf still exceeds it.
+TEST(AuthTokenDepthBoundTest, FullWidthTreeDecodesUnlessABranchIsTooDeep)
+{
+  constexpr ContractAddress kAddr =
+      NativeContractTestFramework::make_contract_address(0);
+  auto tree = make_full_auth_token_tree(kAddr, uint32_t{kAuthTokenMaxDepth});
+  EXPECT_TRUE(AuthTokenRegistry::node_within_depth(tree, kAuthTokenMaxDepth));
+  auto decoded = decode_under_token_depth_bound(x23::serialize(tree));
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(*decoded, tree);
+
+  // Hang one more node under the last leaf the decoder reaches.
+  AuthTokenNode *last = &tree;
+  while (!last->child_nodes.empty()) {
+    last = &last->child_nodes.back();
+  }
+  last->child_nodes.push_back(
+      AuthTokenNode{.consumer_address = kAddr,
+                    .payload = x23::serialize(uint32_t{kAuthTokenMaxDepth}),
+                    .child_nodes = {}});
+  EXPECT_FALSE(AuthTokenRegistry::node_within_depth(tree, kAuthTokenMaxDepth));
+  EXPECT_FALSE(decode_under_token_depth_bound(x23::serialize(tree)));
+}
+
 TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
 {
   constexpr ContractAddress kAddr = make_contract_address(0);
@@ -1773,27 +1895,34 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
       fns_contract;
   fns_contract.emplace(
       0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        AuthTokenNode node{.consumer_address = kAddr,
-                           .payload =
-                               x23::serialize(uint32_t{kAuthTokenMaxDepth}),
-                           .child_nodes = {}};
-        for (uint32_t level = kAuthTokenMaxDepth; level > 0; --level) {
-          node = AuthTokenNode{.consumer_address = kAddr,
-                               .payload = x23::serialize(level - uint32_t{1}),
-                               .child_nodes = {node}};
-        }
+        auto leaf = make_auth_token_chain(kAddr, 1);
+        auto serialized_leaf = x23::serialize(leaf);
+        uint32_t first_id = 0;
+        auto first_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000}, as_byte_span(serialized_leaf), first_id);
+        EXPECT_TRUE(first_res.has_value());
+        EXPECT_EQ(first_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
-        auto serialized = x23::serialize(node);
-        uint32_t token_id = 0;
+        auto over_depth =
+            make_auth_token_chain(kAddr, uint32_t{kAuthTokenMaxDepth} + 1);
+        auto serialized = x23::serialize(over_depth);
+        uint32_t token_id = 0xDEAD'BEEF;
         auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
-            BlockHeight{1000},
-            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
-                                           serialized.data()),
-                                       serialized.size()},
-            token_id);
+            BlockHeight{1000}, as_byte_span(serialized), token_id);
         EXPECT_TRUE(mint_res.has_value());
         EXPECT_EQ(mint_res.value(),
                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+        EXPECT_EQ(token_id, 0xDEAD'BEEF)
+            << "output must be untouched on reject";
+
+        // The decoder refuses the token before any id is allocated, so the
+        // next mint gets the id right after the one minted before it.
+        uint32_t second_id = 0;
+        auto second_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000}, as_byte_span(serialized_leaf), second_id);
+        EXPECT_TRUE(second_res.has_value());
+        EXPECT_EQ(second_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(second_id, first_id + 1);
 
         co_return InvokeStatus<void>{};
       });
@@ -1956,6 +2085,103 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
         EXPECT_TRUE(mint_res.has_value());
         EXPECT_EQ(mint_res.value(),
                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+        co_return InvokeStatus<void>{};
+      });
+  auto contract = std::make_unique<NativeContract>(std::move(fns_contract));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// The widest and deepest token the bounds admit: mint and consume every node.
+TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsFullWidthMaxDepthTree)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+  constexpr uint32_t kNodeCount =
+      full_tree_node_count(uint32_t{kAuthTokenMaxChildNodes},
+                           uint32_t{kAuthTokenMaxDepth});
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_contract;
+  fns_contract.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto tree =
+            make_full_auth_token_tree(kAddr, uint32_t{kAuthTokenMaxDepth});
+        auto serialized = x23::serialize(tree);
+        uint32_t root_id = 0;
+        auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000}, as_byte_span(serialized), root_id);
+        EXPECT_TRUE(mint_res.has_value());
+        if (!mint_res.has_value() ||
+            mint_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "MintAuthToken refused the maximal token";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        // Consume every node reachable from the root, tracking each id's
+        // level so its payload and child count can be checked.
+        std::vector<std::pair<uint32_t, uint32_t>> pending;
+        pending.emplace_back(root_id, 0U);
+        uint32_t consumed = 0;
+        while (!pending.empty()) {
+          auto [token_id, level] = pending.back();
+          pending.pop_back();
+
+          std::array<std::byte, kAuthTokenMaxLen> payload_buf{};
+          RuntimeMemoryLength payload_written_len = 0;
+          uint32_t child_start = 0, child_count = 0;
+          ContractAddress minter{};
+          auto consume_res = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
+              token_id, std::span<std::byte>{payload_buf}, minter,
+              payload_written_len, child_start, child_count);
+          EXPECT_TRUE(consume_res.has_value());
+          if (!consume_res.has_value() ||
+              consume_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "ConsumeAuthToken failed at level " << level;
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          EXPECT_EQ(minter, kAddr);
+
+          auto expected_payload = x23::serialize(level);
+          EXPECT_EQ(payload_written_len, expected_payload.size());
+          EXPECT_EQ(std::memcmp(payload_buf.data(), expected_payload.data(),
+                                expected_payload.size()),
+                    0);
+
+          bool const is_leaf = level + 1 == uint32_t{kAuthTokenMaxDepth};
+          EXPECT_EQ(child_count,
+                    is_leaf ? 0U : uint32_t{kAuthTokenMaxChildNodes});
+          for (uint32_t i = 0; i < child_count; ++i) {
+            pending.emplace_back(child_start + i, level + 1);
+          }
+          ++consumed;
+        }
+        EXPECT_EQ(consumed, kNodeCount);
 
         co_return InvokeStatus<void>{};
       });

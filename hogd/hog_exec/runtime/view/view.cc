@@ -66,6 +66,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     CHECK(!r.value());
   }
 
+  // Forwarded tokens arrive already decoded (under the process-wide budget),
+  // so bound their depth by walking them.
   try {
     for (auto const &token : query.forwarded_tokens) {
       if (!AuthTokenRegistry::node_within_depth(token.root_node,
