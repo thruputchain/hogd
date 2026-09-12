@@ -19,6 +19,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -505,6 +506,64 @@ TEST_F(Rv32SyscallEntryBridgeTest,
   EXPECT_EQ(threaded_result, rv32::StepResult::kTrap);
   EXPECT_EQ(threaded.trap(), rv32::Trap::kOutOfGas);
   EXPECT_EQ(threaded.gas_remaining(), 0U);
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest, GetCalldataChargesForBytesCopied)
+{
+  // GetCalldata copies the frame's calldata into guest memory. The host gas it
+  // charges must scale with the bytes copied, so a contract cannot repeatedly
+  // buy a large host memcpy for only the flat syscall base cost (#4040).
+  auto run_get_calldata = [&](size_t calldata_len) -> uint64_t {
+    auto handler = make_handler();
+    Calldata calldata;
+    calldata.resize_uninitialized(calldata_len);
+    std::ranges::fill(std::span(calldata.data(), calldata.size()),
+                      static_cast<uint8_t>(0x5A));
+    auto stashed = handler.start_frame(
+        Invocation{
+            .invoked_address = make_contract_address(0),
+            .entrypoint = ContractEntrypointID{},
+            .gas_limit = kPlentyOfGas,
+            .calldata = std::move(calldata),
+        },
+        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
+    EXPECT_TRUE(stashed.has_value());
+
+    // The calldata buffer, then the two length outputs written past it. No auth
+    // tokens: an empty auth list contributes no copy charge.
+    std::vector<uint8_t> memory(calldata_len + 2 * sizeof(RuntimeMemoryLength),
+                                0);
+    const auto written_len_addr = static_cast<uint32_t>(calldata_len);
+    const auto auth_written_len_addr =
+        static_cast<uint32_t>(written_len_addr + sizeof(RuntimeMemoryLength));
+    const std::array<uint32_t, 7> arg_words = {
+        static_cast<uint32_t>(SyscallNo::kGetCalldata),
+        0,                                   // buffer ptr
+        static_cast<uint32_t>(calldata_len), // buffer len
+        written_len_addr,                    // written_len ptr
+        0,                                   // auth token list ptr
+        0,                                   // auth token list len
+        auth_written_len_addr,               // auth_token_written_len ptr
+    };
+
+    const rv32::HostResult result =
+        call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
+    finish_frame(handler, std::move(stashed).value());
+
+    EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+    EXPECT_EQ(result.continue_value(),
+              static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
+    return result.gas_consumed;
+  };
+
+  // One 512-byte block versus three: the per-block copy term on top of the flat
+  // base every syscall pays.
+  const uint64_t one_block = run_get_calldata(500);
+  const uint64_t three_blocks = run_get_calldata(1200);
+
+  EXPECT_EQ(one_block, kSyscallBaseCost + GasCost::guest_buffer_copy(500));
+  EXPECT_EQ(three_blocks, kSyscallBaseCost + GasCost::guest_buffer_copy(1200));
+  EXPECT_GT(three_blocks, one_block);
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)

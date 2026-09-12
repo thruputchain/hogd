@@ -236,6 +236,16 @@ struct GasCost {
            (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
+  // Copying bytes from the host into a guest buffer, with no storage access
+  // attached: the copy term the bytestring read is calibrated on (a
+  // host-to-guest memcpy), but not the storage access
+  // syscall_BytestringGet_inner pays on top. Used by syscalls that hand back
+  // data already living in the active invocation frame, such as GetCalldata.
+  static constexpr uint64_t guest_buffer_copy(uint64_t bytes_len)
+  {
+    return kBytestringReadBlockCost * bytestring_blocks(bytes_len);
+  }
+
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
     assert(message_len <= kMaxCostBytes);

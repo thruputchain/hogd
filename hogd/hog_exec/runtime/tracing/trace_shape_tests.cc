@@ -86,7 +86,10 @@ get_calldata_entry(GasAmount gas, Calldata const &calldata)
   SyscallGetCalldataOutputs outputs;
   outputs.calldata.append_range(calldata);
   body.get_calldata().outputs = std::move(outputs);
-  return make_entry(gas, gas - kSyscallBaseCost, std::move(body), ok_status());
+  return make_entry(gas,
+                    gas - kSyscallBaseCost -
+                        GasCost::guest_buffer_copy(calldata.size()),
+                    std::move(body), ok_status());
 }
 
 SyscallTrace
