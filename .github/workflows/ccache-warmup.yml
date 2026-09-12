@@ -7,9 +7,6 @@ on:
   push:
     branches: ["main"]
 
-# Do not use GitHub concurrency cancellation here: GitHub permanently marks a
-# canceled run as canceled. The warmup step below stops superseded work itself
-# so the old run can finish successfully while genuine hog_sched errors fail.
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
