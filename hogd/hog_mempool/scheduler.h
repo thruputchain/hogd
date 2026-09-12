@@ -307,10 +307,14 @@ private:
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
-  // Tx cache.
-  // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
-  // free them automatically without too much overhead/garbage collection with
-  // smart pointers (e.g., [std::shared_ptr<>]).
+  // Tx cache. Every admitted tx stays here until one of the following removes
+  // it: the tx expires ([account_is_ready()] and [schedule()]), [schedule()]
+  // discards it because the account cannot afford its gas limit, or a block
+  // that includes it is committed ([remove_from_scheduler()]). A tx scheduled
+  // into a pending nomination leaves the runqueue but stays cached, so that
+  // [reenqueue_txs()] can restore it if the nomination is abandoned. An entry
+  // in [txs_] must therefore always be reachable from one of those paths;
+  // a runqueue entry always has a cache entry, but not vice versa.
   SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.

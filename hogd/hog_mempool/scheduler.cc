@@ -1082,6 +1082,16 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // already included in the block, those txs will still be executed.
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
+          //
+          // Drop the tx from the cache as well. This node will never propose
+          // or commit the tx, so nothing downstream ever hands its hash back
+          // to [remove_from_scheduler()]: leaving it in [txs_] leaks it for
+          // the lifetime of the process and keeps it resolvable through
+          // [find_tx()], so gateway lookups report it as pending forever. We
+          // hold the account lock, so this follows the account-then-cache
+          // lock order of [insert_tx_into_runqueue()]. [tx_hash] refers into
+          // the runqueue key, so remove the cache entry before erasing [it].
+          CHECK_EQ(txs_.remove(tx_hash), 1UL);
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
 

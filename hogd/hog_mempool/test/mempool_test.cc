@@ -1169,6 +1169,82 @@ TEST(Mempool, LookupBorrowsTheScheduledTransactionInsteadOfCopyingIt)
   EXPECT_EQ(result[2].get(), scheduled);
 }
 
+// Regression test for https://github.com/groundhogchain/hogd/issues/2812 and
+// https://github.com/groundhogchain/hogd/issues/3995. A tx whose gas limit
+// exceeds every hog its account has is discarded while a block is proposed.
+// The discard used to leave the tx in the scheduler's tx cache, so the gateway
+// lookup behind the public transaction-status RPC kept resolving it and clients
+// saw the tx as pending indefinitely even though it was never going to run.
+TEST(Mempool, DiscardedUnderfundedTxIsNotPendingAfterProposal)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+
+  MempoolTestInfra server;
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool, which call [remove_from_scheduler()]. Wait for
+  // both callbacks to complete before touching the scheduler directly.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // Leave the account with a single hog across all of its groups, so that the
+  // proposal has to discard the tx rather than cycle the account.
+  server.set_hogs(account, /*group=*/kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/1);
+  scheduler->read_average_hog_ages({account})();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(t_to_parallel_batch(txs)())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  // While the tx is queued, the gateway lookup resolves it.
+  TransactionHashBatch hashes;
+  hashes.push_back(tx_hash);
+  auto lookup = gateway.schedgateway_lookup_tx(hashes)();
+  ASSERT_EQ(lookup.size(), 1UL);
+  ASSERT_TRUE(lookup[0]);
+  EXPECT_EQ(*lookup[0], txs[0]);
+
+  const SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  const SchedulerProposalResult res_propose =
+      propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(res_propose.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  SignedTransactionBatch proposed_txs;
+  ASSERT_TRUE(parallel_batch_to_t(res_propose.proposed_block().txs,
+                                  proposed_txs, kNoBatchSizeLimit)());
+  EXPECT_TRUE(proposed_txs.empty());
+
+  // The discard drops the tx from the runqueue *and* the tx cache, so the
+  // lookup no longer resolves it. The status RPC then falls through to the
+  // indexer instead of reporting the tx as pending forever.
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_tx(tx_hash));
+  lookup = gateway.schedgateway_lookup_tx(hashes)();
+  ASSERT_EQ(lookup.size(), 1UL);
+  EXPECT_FALSE(lookup[0]);
+
+  // Committing the (empty) proposed block does not bring the tx back.
+  ASSERT_EQ(commit_block(server, get_tip.db_tip(),
+                         res_propose.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  lookup = gateway.schedgateway_lookup_tx(hashes)();
+  ASSERT_EQ(lookup.size(), 1UL);
+  EXPECT_FALSE(lookup[0]);
+}
+
 TEST(Mempool, Propose)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

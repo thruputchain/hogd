@@ -791,6 +791,75 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 }
 
+// Regression test for https://github.com/groundhogchain/hogd/issues/2812 and
+// https://github.com/groundhogchain/hogd/issues/3995. A tx that [schedule()]
+// discards because its gas limit exceeds every hog the account has must leave
+// the tx cache together with the runqueue. It used to stay in [txs_], where
+// nothing could ever free it and [find_tx()] kept reporting it as pending.
+TEST(Scheduler, DiscardedUnderfundedTxIsDroppedFromCache)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+  const uint128_t gas_limit = txs[0].tx.invocation.gas_limit;
+
+  MempoolTestInfra server;
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool, which call [remove_from_scheduler()]. Wait for
+  // both callbacks to complete before touching the scheduler directly.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // Leave the account with a single hog across all of its groups, so that
+  // [schedule()] has to discard the tx rather than cycle the account.
+  server.set_hogs(account, /*group=*/kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/1);
+  scheduler->read_average_hog_ages({account})();
+
+  SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_NE(scheduler->find_tx(tx_hash), nullptr);
+  EXPECT_TRUE(scheduler->is_pending(txs[0], tx_hash));
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_TRUE(scheduled.empty());
+
+  // The discard drops the tx from both the runqueue and the cache.
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(tx_hash), nullptr);
+  EXPECT_FALSE(scheduler->is_pending(txs[0], tx_hash));
+
+  // Once the account can afford the tx, resubmitting it is a fresh admission
+  // rather than a duplicate of the discarded entry, and it schedules normally.
+  server.set_hogs(account, /*group=*/kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/gas_limit * 10);
+  scheduler->read_average_hog_ages({account})();
+  outcomes = scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled_hashes.size(), 1UL);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled_hashes[0], tx_hash);
+  EXPECT_EQ(sha256(scheduled[0].tx), tx_hash);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  // A scheduled tx stays cached until the block that includes it is committed.
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_NE(scheduler->find_tx(tx_hash), nullptr);
+}
+
 TEST(Scheduler, ReenqueueTxs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
