@@ -76,8 +76,6 @@ jobs:
           # missed). Point it at the cached path, as the Linux workflows do.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
-          # Zero the persisted counters so "Show ccache stats" reports this run.
-          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
           # cargo install writes to ~/.cargo/bin, which the cache volume does not
           # cover, so groundhog-cli and groundhog-rv32-lower were compiled from
@@ -132,7 +130,12 @@ jobs:
       # macos-setup.sh ends by running scripts/fetch.sh (cargo fetch plus the
       # groundhog tool installs), so there is no separate Cargo Fetch step here.
       - name: Setup Environment
-        run: ./scripts/macos-setup.sh
+        run: |
+          ./scripts/macos-setup.sh
+          # ccache is not in the runner image; macos-setup.sh installs it via
+          # Homebrew, so this is the first point it can run. Zero the persisted
+          # counters so "Show ccache stats" reports this run only.
+          ccache -z
 
       - name: Build Clang Debug
         run: |
@@ -177,6 +180,10 @@ jobs:
       - name: Show ccache stats
         if: always()
         run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            echo "ccache is not installed (Setup Environment did not complete)"
+            exit 0
+          fi
           ccache -p | grep -E 'cache_dir|max_size|base_dir' || true
           ccache -s
 
