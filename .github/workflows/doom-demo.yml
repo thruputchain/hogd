@@ -52,7 +52,7 @@ jobs:
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
           submodules: false
-          ref: 6f056a2f46ad7ca23fd843fabb14ba884180c91b
+          ref: 5cd207403209190130f994e7804004222ba26b1f
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -134,6 +134,8 @@ jobs:
               wrapper.write_text(script)
               wrapper.chmod(0o755)
           for src in Path('build/doom/built_contracts').glob('*.rv32a'):
+              shutil.copy2(src, root / 'contracts' / src.name)
+          for src in Path('build/doom/built_contracts').glob('*_spec.json'):
               shutil.copy2(src, root / 'contracts' / src.name)
           assert (root / 'contracts/dev_wallet.rv32a').is_file()
           assert (root / 'contracts/genesis_root.rv32a').is_file()
