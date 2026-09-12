@@ -72,17 +72,32 @@ rm -rf build/llvm_tsan build/llvm_tsan_release
 # all 128 hyperthreads OOMs the host (the OOM killer took out the login
 # session's sd-pam, dropping the SSH job mid-build). Applies to both builds
 # below.
+#
+# Cap the ctest fan-out at 64 for the same reason. `ctest --parallel` with no
+# value means one job per processor, so the test phase ran 128 wide while the
+# build it follows was deliberately held to 64 -- and under TSAN the test
+# phase is the schedule's memory peak, not the build: a test process here is
+# a whole node runtime (mempool, executor, event, ramdb) with 4x shadow over
+# everything it touches, and the suite's heaviest cohort (Mempool.*,
+# Scheduler.*, the PaymentChannel/HTLC integration tests, HogDevnode.*) all
+# sorts together near the end of the run, so the 128 slots fill with the most
+# expensive tests at once. Run #150 died exactly there: ctest had 127 tests in
+# flight, test completions stalled for four seconds, and then the SSH session
+# was killed mid-suite with no failing test and no core dump -- the sd-pam
+# signature above, in the test phase instead of the build.
+CTEST_JOBS=64
+
 echo 'build clang tsan'
 ./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug -j 64 "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tests'
-ctest --test-dir build/llvm_tsan --parallel --timeout 300 --output-on-failure
+ctest --test-dir build/llvm_tsan --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
 
 echo 'build clang tsan release'
 ./scripts/build.sh -d build/llvm_tsan_release -c clang -f "-fsanitize=thread" -t Release -j 64 "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tsan tests release'
-ctest --test-dir build/llvm_tsan_release --parallel --timeout 300 --output-on-failure
+ctest --test-dir build/llvm_tsan_release --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
 
 # Rust mixed-language sanitizer builds use -Zexternal-clangrt, so keep this
 # schedule on Clang's sanitizer runtime rather than mixing Rust LLVM
@@ -185,6 +200,14 @@ GCC_TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "
 
 rm -rf build/gcc_tsan
 
+# Same 64-wide caps as the clang job, for the reasons documented there: the
+# build because 128 concurrent cc1plus OOMs the host, the tests because 128
+# concurrent TSAN node runtimes do the same. This job ran the suite to
+# completion in run #150 while the clang job's host died, but it is the same
+# tests on the same class of host, so it is one scheduling accident away from
+# the same failure.
+CTEST_JOBS=64
+
 # Debug only for now. The clang job above spends most of the schedule's
 # budget on its two trees, and both jobs share that budget; add a Release
 # tree here once a few runs have shown what this one costs. The budget is
@@ -193,7 +216,7 @@ echo 'build gcc tsan'
 ./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug -j 64 "${GCC_TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run gcc tsan tests'
-ctest --test-dir build/gcc_tsan --parallel --timeout 300 --output-on-failure
+ctest --test-dir build/gcc_tsan --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
 
 # `set -e` aborts the script on a failing ctest, so this rm is reached only
 # once the tests have passed; a tree whose tests failed survives for the
