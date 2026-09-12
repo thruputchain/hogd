@@ -135,7 +135,7 @@ TEST(Rv32GasCalibrationKernel, FullRangeVisitsAllBanksAndCacheLines)
         ASSERT_LT(bank, kAddressBankSize);
         const int32_t address = 2048 + (bank * 8192) + instruction->imm;
         ASSERT_GE(address, 0);
-        ASSERT_LT(static_cast<uint32_t>(address), kMaxMemoryBytes);
+        ASSERT_LT(static_cast<uint32_t>(address), kDefaultMaxMemoryBytes);
         lines.insert(static_cast<uint32_t>(address) / 64);
         banks.insert(bank);
       }
