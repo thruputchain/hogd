@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -245,6 +246,7 @@ struct BuiltWorkload {
   size_t body_start_index = 0;
   size_t body_slots = 0;
   uint64_t scheduled_gas_per_iteration = 0;
+  uint64_t expected_gas = 0;
   uint64_t instructions_per_iteration = 0;
   std::map<std::string, uint64_t> op_counts;
 };
@@ -285,6 +287,15 @@ build_workload(const Workload &workload, uint32_t trip_count)
   }
   built.scheduled_gas_per_iteration =
       *body_gas + scheduled_gas_for(Op::kAddi) + scheduled_gas_for(Op::kBne);
+  // The prologue and terminal execute once; the body and loop control run
+  // trip_count times. Check this against actual consumption on every sample.
+  const auto one_pass_gas = scheduled_gas_for_code(built.code);
+  if (!one_pass_gas.has_value()) {
+    return std::nullopt;
+  }
+  built.expected_gas =
+      *one_pass_gas + ((static_cast<uint64_t>(trip_count) - 1) *
+                       built.scheduled_gas_per_iteration);
 
   std::vector<uint32_t> iteration = body;
   iteration.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
@@ -310,6 +321,9 @@ build_workload(const Workload &workload, uint32_t trip_count)
 std::vector<WorkloadResult>
 measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
 {
+  if (repeats < 3) {
+    throw std::runtime_error("validation workloads require at least 3 repeats");
+  }
   std::vector<WorkloadResult> results;
   std::vector<BuiltWorkload> built;
   std::vector<std::unique_ptr<ThreadedMachinePreInstantiation>> programs;
@@ -330,14 +344,15 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
   for (const Workload &workload : workload_table()) {
     const std::optional<BuiltWorkload> seed = build_workload(workload, 64);
     if (!seed.has_value()) {
-      continue;
+      throw std::runtime_error("cannot build workload seed: " + workload.name);
     }
     auto seed_program =
         ThreadedMachinePreInstantiation::create(seed->code, seed->memory, 0,
                                                 kDefaultMaxMemoryBytes,
                                                 /*trace=*/false);
     if (!seed_program.has_value()) {
-      continue;
+      throw std::runtime_error("cannot instantiate workload seed: " +
+                               workload.name);
     }
     trip_counts[workload.name] =
         tune_trip_count(*seed_program, halt_host, 64, target_ns);
@@ -347,19 +362,19 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
   for (const Workload &workload : workload_table()) {
     const auto trip = trip_counts.find(workload.name);
     if (trip == trip_counts.end()) {
-      continue;
+      throw std::runtime_error("missing workload trip count: " + workload.name);
     }
     const std::optional<BuiltWorkload> tuned =
         build_workload(workload, trip->second);
     if (!tuned.has_value()) {
-      continue;
+      throw std::runtime_error("cannot build workload: " + workload.name);
     }
     auto program =
         ThreadedMachinePreInstantiation::create(tuned->code, tuned->memory, 0,
                                                 kDefaultMaxMemoryBytes,
                                                 /*trace=*/false);
     if (!program.has_value()) {
-      continue;
+      throw std::runtime_error("cannot instantiate workload: " + workload.name);
     }
     built.push_back(*tuned);
     programs.push_back(
@@ -383,13 +398,19 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     points.push_back({.label = results[i].name,
                       .x = static_cast<double>(i),
                       .program = programs[i].get(),
-                      .trip_count = measured_trip_counts[i]});
+                      .trip_count = measured_trip_counts[i],
+                      .expected_gas = built[i].expected_gas});
   }
   measure_interleaved(points, halt_host,
                       {.repeats = repeats, .warmup_runs = warmup_runs});
 
   for (size_t i = 0; i < results.size(); ++i) {
+    if (!points[i].ran_clean || points[i].samples.size() != repeats) {
+      throw std::runtime_error("workload failed execution or gas accounting: " +
+                               results[i].name);
+    }
     results[i].ns_per_iteration = points[i].median();
+    results[i].samples = points[i].samples.size();
     results[i].relative_mad = points[i].relative_mad();
     if (results[i].scheduled_gas_per_iteration != 0) {
       results[i].ns_per_gas =

@@ -276,6 +276,13 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
 
+      - name: Configure ccache
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume. Point it at the cached path, as the Linux jobs do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+
       - name: Configure Git for Submodule Caching
         run: |
           mkdir -p ~/.cache/hogcache/
