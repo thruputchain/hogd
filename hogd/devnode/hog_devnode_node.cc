@@ -425,8 +425,8 @@ require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
       requested.network_config_overrides) {
     throw std::runtime_error(
         "hog-devnode data dir was initialized with different --network-config "
-        "overrides; "
-        "reuse the original overrides or choose a fresh data directory");
+        "overrides; reuse the original overrides or choose a fresh data "
+        "directory");
   }
   if (persisted.dev_wallet_profile != requested.dev_wallet_profile) {
     fail("--dev-wallet-profile", persisted.dev_wallet_profile,

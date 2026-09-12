@@ -294,7 +294,7 @@ Options:
   --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
                                  dev-account and wallet shorthand flags
                                  conflict.
-  --network-config <name=value> Override a genesis execution parameter.
+  --network-config <name=value>  Override a genesis execution parameter.
                                  Repeat for multiple parameters. Values are
                                  decimal uint32. Existing data directories
                                  require the same overrides on restart.
