@@ -18,6 +18,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -400,9 +401,10 @@ public:
   PairHistogram *active_histogram = nullptr;
 
   InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params,
                                   PreparedContract &out) const override
   {
-    return delegate_.verify_contract(contract, out);
+    return delegate_.verify_contract(contract, params, out);
   }
 
   x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
@@ -425,7 +427,7 @@ public:
       blob = &contract.value()->rv32_contract();
     }
 
-    auto image = rv32::parse_artifact(blob->data);
+    auto image = rv32::parse_artifact(blob->data, rv32::Rv32Limits::defaults());
     if (!image.has_value()) {
       co_return SystemError{SystemErrorCode::Unrecoverable};
     }

@@ -2,6 +2,7 @@
 
 #include "hogd/hog_db/rpc_from_sched.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <mutex>
@@ -23,6 +24,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
 #include "hogd/hog_exec/common/limits.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -371,18 +373,58 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("invalid genesis height, network hash, or config hash");
     co_return DbSchedResult::DbSchedResultError;
   }
-  // A genesis can name a count whose commit batch this build could not send in
-  // one message; reject it here rather than at commit (#2190).
-  constexpr size_t kBatchOverhead = 1_KiB;
-  const size_t admissible =
-      (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
   const NetworkConfigParams config_params(
       genesis_configuration.network_config.v0());
-  if (const uint32_t stated = config_params.max_new_contracts_per_tx;
-      stated > admissible) {
-    error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
-          "commit in one message",
-          stated, admissible);
+  if (const uint32_t stated = config_params.max_contract_size_bytes;
+      stated > kContractSizeCeilingBytes) {
+    error("genesis max_contract_size_bytes {} exceeds the {} this build can "
+          "store and a transaction can carry",
+          stated, kContractSizeCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // The commit batch a transaction can realize is the smaller of the stated
+  // count at the stated size and what one transaction body carries plus
+  // per-row slack; refuse the pair only if that cannot fit one message (#2190).
+  constexpr size_t kBatchOverhead = 1_KiB;
+  const size_t count = config_params.max_new_contracts_per_tx;
+  const size_t stated_batch =
+      count * serialized_contract_bound(config_params.max_contract_size_bytes);
+  const size_t carried_batch =
+      kContractSizeCeilingBytes + (count * kSerializedContractEnvelopeBytes);
+  const size_t batch_bytes =
+      std::min(stated_batch, carried_batch) + kBatchOverhead;
+  if (batch_bytes > kExecToDbMessageCap) {
+    error("genesis max_new_contracts_per_tx {} of max_contract_size_bytes {} "
+          "needs a {}-byte commit batch; this build sends at most {} in one "
+          "message",
+          count, config_params.max_contract_size_bytes, batch_bytes,
+          kExecToDbMessageCap);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (const uint32_t stated = config_params.max_rv32_code_bytes;
+      stated > rv32::kCodeCeilingBytes) {
+    error("genesis max_rv32_code_bytes {} exceeds the {} this build's VM "
+          "translates",
+          stated, rv32::kCodeCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (const uint32_t stated = config_params.max_rv32_memory_bytes;
+      stated > rv32::kMemoryCeilingBytes) {
+    error("genesis max_rv32_memory_bytes {} exceeds the {} this build's VM "
+          "provisions",
+          stated, rv32::kMemoryCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // Every root commit pushes a savepoint, even without child TryInvokes.
+  if (config_params.max_savepoint_depth == 0) {
+    error("genesis max_savepoint_depth must be at least 1 for root commits");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (const uint32_t stated = config_params.max_savepoint_depth;
+      stated > kSavepointDepthCeiling) {
+    error("genesis max_savepoint_depth {} exceeds the {} this build's "
+          "executor stacks sustain",
+          stated, kSavepointDepthCeiling);
     co_return DbSchedResult::DbSchedResultError;
   }
   // The ceiling bounds the wire type, so a genesis naming more would let a

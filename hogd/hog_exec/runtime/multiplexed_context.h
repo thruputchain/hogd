@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "x23/async.h"
@@ -25,6 +26,7 @@ public:
                    SystemCallHandler *syscall_handler) const override;
 
   InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params,
                                   PreparedContract &out) const override;
   using RuntimeContext::verify_contract;
 

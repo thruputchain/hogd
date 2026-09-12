@@ -134,8 +134,8 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
       std::make_shared<const Program>(std::move(*canonical_program));
 
   // The carve guarantees memory_start + image size <= memory_bytes <=
-  // kFuzzMemCap << kMaxMemoryBytes, so with the code already decode-clean
-  // these creates can only succeed; treat a reject as divergence.
+  // kFuzzMemCap << kDefaultMaxMemoryBytes, so with the code already
+  // decode-clean these creates can only succeed; treat a reject as divergence.
   auto pre = ThreadedMachinePreInstantiation::create(
       code, in->initial_memory, in->memory_start,
       /*total_memory_size=*/in->memory_bytes, /*trace=*/true, in->max_run_gas);

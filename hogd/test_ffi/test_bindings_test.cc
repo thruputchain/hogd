@@ -3747,8 +3747,8 @@ TEST(TestBindingsTest, SetupDeployContractRejectsNativePrecompile)
 // single-item limit stores successfully through the setup path. The artifact
 // format has no slack section, so the row is pushed past kBigItemThreshold
 // with a full 64 KiB initial memory image (memory_bytes lands exactly at
-// kMaxMemoryBytes, the accept-side limit boundary). We also deploy the stored
-// contract and invoke it end-to-end to confirm the full path works; the
+// kDefaultMaxMemoryBytes, the accept-side limit boundary). We also deploy the
+// stored contract and invoke it end-to-end to confirm the full path works; the
 // program Returns, so the invoke is asserted as a frame success.
 TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedRv32StoresChunked)
 {

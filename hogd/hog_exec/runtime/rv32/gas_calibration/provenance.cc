@@ -147,8 +147,8 @@ engine_fingerprint()
   // Structural limits the measurement depends on.
   mix(hash, "limits");
   mix(hash, kMaxRunGas);
-  mix(hash, kMaxMemoryBytes);
-  mix(hash, kMaxCodeBytes);
+  mix(hash, kDefaultMaxMemoryBytes);
+  mix(hash, kDefaultMaxCodeBytes);
   mix(hash, kRegisterCount);
   mix(hash, kOpCount);
 

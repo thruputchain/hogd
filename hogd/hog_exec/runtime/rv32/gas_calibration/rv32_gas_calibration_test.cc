@@ -135,7 +135,7 @@ TEST(Rv32GasCalibrationKernel, FullRangeVisitsAllBanksAndCacheLines)
         ASSERT_LT(bank, kAddressBankSize);
         const int32_t address = 2048 + (bank * 8192) + instruction->imm;
         ASSERT_GE(address, 0);
-        ASSERT_LT(static_cast<uint32_t>(address), kMaxMemoryBytes);
+        ASSERT_LT(static_cast<uint32_t>(address), kDefaultMaxMemoryBytes);
         lines.insert(static_cast<uint32_t>(address) / 64);
         banks.insert(bank);
       }
@@ -523,8 +523,8 @@ TEST(Rv32GasCalibrationAudit, DetectsFusionWhenItHappens)
   words.push_back(0x00000073U);
 
   const std::vector<uint8_t> code = test_program::code_from_words(words);
-  const std::vector<uint8_t> memory(kMaxMemoryBytes, 0);
-  const LoweringAudit audit = audit_body(code, memory, kMaxMemoryBytes,
+  const std::vector<uint8_t> memory(kDefaultMaxMemoryBytes, 0);
+  const LoweringAudit audit = audit_body(code, memory, kDefaultMaxMemoryBytes,
                                          body_start_index, kFusibleBodySlots);
   EXPECT_FALSE(audit.clean());
   EXPECT_GT(audit.rewritten_slots, 0U)
@@ -1013,8 +1013,8 @@ TEST(Rv32GasCalibrationSyscall, FillerNeverWritesAnArgumentRegister)
 // memory with room for the payload.
 TEST(Rv32GasCalibrationSyscall, OutPointersAddressRealGuestMemory)
 {
-  EXPECT_LE(kSyscallOutPointerA + 32U, kMaxMemoryBytes);
-  EXPECT_LE(kSyscallOutPointerB + 32U, kMaxMemoryBytes);
+  EXPECT_LE(kSyscallOutPointerA + 32U, kDefaultMaxMemoryBytes);
+  EXPECT_LE(kSyscallOutPointerB + 32U, kDefaultMaxMemoryBytes);
   EXPECT_NE(kSyscallOutPointerA, kSyscallOutPointerB);
 
   for (const SyscallShape shape : kAllSyscallShapes) {

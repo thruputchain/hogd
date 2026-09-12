@@ -30,7 +30,6 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
-#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -204,13 +203,6 @@ build_genesis_json(GenesisConfiguration const &genesis)
                 w.object_field(
                     std::format("{}", param.param()), [&](json::Writer &w) {
                       switch (param.param()) {
-                      case ConfigParamID::kConfigParamMaxContractSizeBytes:
-                      case ConfigParamID::kConfigParamMaxSavepointDepth:
-                      case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
-                      case ConfigParamID::kConfigParamMaxAuthTokenDepth:
-                      case ConfigParamID::kConfigParamMaxRv32CodeBytes:
-                      case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
-                        panic("unimplemented");
                       case ConfigParamID::kConfigParamMaxSHA256Buffers:
                         w.field("max_sha256_buffers",
                                 std::int64_t{param.max_sha256_buffers()});
@@ -226,6 +218,30 @@ build_genesis_json(GenesisConfiguration const &genesis)
                       case ConfigParamID::kConfigParamMaxBytestringLen:
                         w.field("max_bytestring_len",
                                 std::int64_t{param.max_bytestring_len()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxContractSizeBytes:
+                        w.field("max_contract_size_bytes",
+                                std::int64_t{param.max_contract_size_bytes()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxSavepointDepth:
+                        w.field("max_savepoint_depth",
+                                std::int64_t{param.max_savepoint_depth()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+                        w.field("max_sha256_buffer_bytes",
+                                std::int64_t{param.max_sha256_buffer_bytes()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+                        w.field("max_auth_token_depth",
+                                std::int64_t{param.max_auth_token_depth()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+                        w.field("max_rv32_code_bytes",
+                                std::int64_t{param.max_rv32_code_bytes()});
+                        break;
+                      case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+                        w.field("max_rv32_memory_bytes",
+                                std::int64_t{param.max_rv32_memory_bytes()});
                         break;
                       }
                     });

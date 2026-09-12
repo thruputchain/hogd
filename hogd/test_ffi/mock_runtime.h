@@ -7,6 +7,7 @@
 
 #include "contract.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -42,9 +43,10 @@ public:
                    SystemCallHandler *syscall_handler) const override;
 
   InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params,
                                   PreparedContract &out) const override
   {
-    return base_context_->verify_contract(contract, out);
+    return base_context_->verify_contract(contract, params, out);
   }
   using RuntimeContext::verify_contract;
   ;

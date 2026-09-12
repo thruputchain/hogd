@@ -273,7 +273,7 @@ build_workload(const Workload &workload, uint32_t trip_count)
 
   BuiltWorkload built;
   built.code = test_program::code_from_words(words);
-  built.memory.assign(kMaxMemoryBytes, 0);
+  built.memory.assign(kDefaultMaxMemoryBytes, 0);
   built.body_start_index = body_start_index;
   built.body_slots = body.size();
   built.instructions_per_iteration = body.size() + 2;
@@ -348,7 +348,7 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     }
     auto seed_program =
         ThreadedMachinePreInstantiation::create(seed->code, seed->memory, 0,
-                                                kMaxMemoryBytes,
+                                                kDefaultMaxMemoryBytes,
                                                 /*trace=*/false);
     if (!seed_program.has_value()) {
       throw std::runtime_error("cannot instantiate workload seed: " +
@@ -371,7 +371,7 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     }
     auto program =
         ThreadedMachinePreInstantiation::create(tuned->code, tuned->memory, 0,
-                                                kMaxMemoryBytes,
+                                                kDefaultMaxMemoryBytes,
                                                 /*trace=*/false);
     if (!program.has_value()) {
       throw std::runtime_error("cannot instantiate workload: " + workload.name);
@@ -385,9 +385,10 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     result.scheduled_gas_per_iteration = tuned->scheduled_gas_per_iteration;
     result.instructions_per_iteration = tuned->instructions_per_iteration;
     result.op_counts = tuned->op_counts;
-    result.fused_slots = audit_body(tuned->code, tuned->memory, kMaxMemoryBytes,
-                                    tuned->body_start_index, tuned->body_slots)
-                             .rewritten_slots;
+    result.fused_slots =
+        audit_body(tuned->code, tuned->memory, kDefaultMaxMemoryBytes,
+                   tuned->body_start_index, tuned->body_slots)
+            .rewritten_slots;
     results.push_back(std::move(result));
     measured_trip_counts.push_back(trip->second);
   }

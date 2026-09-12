@@ -11,8 +11,38 @@ namespace hogd::rv32 {
 
 constexpr uint32_t kInstructionBytes = 4;
 constexpr uint32_t kRegisterCount = 32;
-constexpr uint32_t kMaxMemoryBytes = 64 * 1024;
-constexpr uint32_t kMaxCodeBytes = 64 * 1024;
+
+// The bounds in force when a chain's configuration states none: the protocol
+// defaults, restated so the VM does not depend on the XDR headers
+// (rv32_contract.cc pins them equal).
+constexpr uint32_t kDefaultMaxMemoryBytes = 64 * 1024;
+constexpr uint32_t kDefaultMaxCodeBytes = 64 * 1024;
+
+// The most this VM provisions and translates: the ceilings on the configured
+// bounds, checked at genesis load. Memory is copied in per invocation and a
+// translation holds a Slot per instruction, neither charged to gas.
+constexpr uint32_t kMemoryCeilingBytes = 16 * 1024 * 1024;
+constexpr uint32_t kCodeCeilingBytes = 4 * 1024 * 1024;
+static_assert(kDefaultMaxMemoryBytes <= kMemoryCeilingBytes);
+static_assert(kDefaultMaxCodeBytes <= kCodeCeilingBytes);
+
+// The bounds an artifact is admitted under: the chain's configuration at
+// attachment, the ceilings when a deployed contract is instantiated.
+struct Rv32Limits {
+  uint32_t max_code_bytes;
+  uint32_t max_memory_bytes;
+
+  static constexpr Rv32Limits defaults()
+  {
+    return Rv32Limits{.max_code_bytes = kDefaultMaxCodeBytes,
+                      .max_memory_bytes = kDefaultMaxMemoryBytes};
+  }
+  static constexpr Rv32Limits ceiling()
+  {
+    return Rv32Limits{.max_code_bytes = kCodeCeilingBytes,
+                      .max_memory_bytes = kMemoryCeilingBytes};
+  }
+};
 // Gas tiers, in units of one dispatch. Measured by the calibration harness on
 // hog10 (see gas_calibration/README.md); the ratios each tier is rounded up
 // from are in the comments below. An opcode costs what the engine spends on its

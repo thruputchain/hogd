@@ -15,6 +15,7 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "db_sched.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -321,7 +322,8 @@ insert_into_recovered_rcq(uint64_t live_entries)
   StorageCostModel cost_model = StorageCostModel::default_cost_model();
   PerThreadARC<BlockTX> block_tx(
       dao, cost_model, background_commit_worker, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   EXPECT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
   invoke_tx.create_savepoint();
@@ -592,7 +594,8 @@ TEST(RecoveryTests, RecoveredCorruptRCQMetadataDiesOnFirstTouch)
   StorageCostModel cost_model = StorageCostModel::default_cost_model();
   PerThreadARC<BlockTX> block_tx(
       dao, cost_model, background_commit_worker, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
   invoke_tx.create_savepoint();

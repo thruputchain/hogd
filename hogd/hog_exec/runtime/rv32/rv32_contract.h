@@ -4,8 +4,10 @@
 #include <optional>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "types.hh"
 #include "x23/async.h"
@@ -19,7 +21,10 @@ class Rv32Contract {
 public:
   // TODO(geoff): decide if we want to wire out the several different error
   // categories here.
-  static std::optional<Rv32Contract> create(ContractBlob const &contract_blob);
+  // Translates `contract_blob` under `limits`: the chain's configured bounds
+  // at attachment, the VM's ceilings for an already-deployed contract.
+  static std::optional<Rv32Contract> create(ContractBlob const &contract_blob,
+                                            rv32::Rv32Limits limits);
   Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation);
 
   rv32::ThreadedMachine instantiate(uint64_t gas) const;
@@ -65,6 +70,7 @@ private:
 class Rv32Context final : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params,
                                   PreparedContract &out) const override;
   using RuntimeContext::verify_contract;
 

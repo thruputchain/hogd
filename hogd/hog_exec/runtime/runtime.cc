@@ -1,4 +1,5 @@
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/base/network_config_params.h"
 
 #include <exception>
 
@@ -14,10 +15,11 @@
 namespace hogd {
 
 InvokeErrorCode
-RuntimeContext::verify_contract(Contract const &contract) const
+RuntimeContext::verify_contract(Contract const &contract,
+                                NetworkConfigParams const &params) const
 {
   PreparedContract discarded;
-  return verify_contract(contract, discarded);
+  return verify_contract(contract, params, discarded);
 }
 
 x23::Async<InvokeResult>

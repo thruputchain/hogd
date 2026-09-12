@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/container/synchronized_map.h"
@@ -71,9 +72,11 @@ public:
     if (ret.has_value()) {
       // There is an existing dbtip, meaning that blocks have already been
       // committed to the db.
-      *tip_.take() = *ret;
-      current_committed_id_ = ret->id;
-      current_committed_height_ = ret->value.proposal_header.block_height;
+      auto state = tip_.take();
+      state->params = NetworkConfigParams(ret->network_config.v0());
+      state->tip = std::move(*ret);
+      current_committed_id_ = state->tip.id;
+      current_committed_height_ = state->tip.value.proposal_header.block_height;
     }
     else if (ret.error().code() != HogDbCode::kNotFound) {
       ret.error().raise("failed to read DbTip");
@@ -84,7 +87,7 @@ public:
 
   // getters.
   HogDbDAO &get_db() { return db_; }
-  DbTip get_tip() { return *tip_.take(); }
+  DbTip get_tip() { return tip_.take()->tip; }
   static bool has_committed_tip(DbTip const &tip)
   {
     return tip.value.proposal_header.block_height >= 0;
@@ -94,8 +97,9 @@ public:
   {
     const BlockTXID id = new_tip.id;
     const BlockHeight height = new_tip.value.proposal_header.block_height;
-    auto tip = tip_.take();
-    *tip = std::move(new_tip);
+    auto state = tip_.take();
+    state->params = NetworkConfigParams(new_tip.network_config.v0());
+    state->tip = std::move(new_tip);
     current_committed_height_.store(height, std::memory_order_relaxed);
     current_committed_id_.store(id, std::memory_order_release);
   }
@@ -142,7 +146,10 @@ public:
   // commit's write_dbtip persists it.
   void set_network_config(NetworkConfig const &network_config)
   {
-    tip_.with([&](DbTip &tip) { tip.network_config = network_config; });
+    tip_.with([&](TipState &state) {
+      state.tip.network_config = network_config;
+      state.params = NetworkConfigParams(network_config.v0());
+    });
   }
 
   // Install the chain-configured default wallet into the tip. Called at
@@ -150,7 +157,8 @@ public:
   // field, so the commit's write_dbtip persists it.
   void set_default_wallet(DeployedContractHash const &default_wallet)
   {
-    tip_.with([&](DbTip &tip) { tip.default_wallet = default_wallet; });
+    tip_.with(
+        [&](TipState &state) { state.tip.default_wallet = default_wallet; });
   }
 
   // opens a new block transaction.
@@ -285,12 +293,18 @@ private:
 
   // the database used to persist state.
   HogDbDAO db_;
-  x23::MVar<DbTip> tip_{[] {
+  // The tip and the parameters its network config puts in force.
+  struct TipState {
+    DbTip tip;
+    NetworkConfigParams params;
+  };
+  x23::MVar<TipState> tip_{[] {
     ConsensusValue value{};
     value.proposal_header.block_height = -1;
-    return DbTip{.id = std::numeric_limits<BlockTXID>::max(),
-                 .storage_long_hash = {},
-                 .value = std::move(value)};
+    return TipState{.tip = DbTip{.id = std::numeric_limits<BlockTXID>::max(),
+                                 .storage_long_hash = {},
+                                 .value = std::move(value)},
+                    .params = NetworkConfigParams{}};
   }()};
   // Scalar mirror of tip_.id for the per-RPC snapshot staleness check. DbTip
   // contains the 2 KiB storage hash and a non-trivial ConsensusValue, so

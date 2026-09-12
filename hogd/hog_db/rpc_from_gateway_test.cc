@@ -16,6 +16,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -138,7 +139,8 @@ TEST(HogDbGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
     StorageLongHash base_hash = dao.compute_full_db_hash();
     PerThreadARC<BlockTX> block_tx(
         dao, cost_model, background_commit_worker, BlockHeight{1},
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 

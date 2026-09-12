@@ -425,12 +425,12 @@ TEST(Rv32Threaded, memorySlotRecycledAndReinitializedAcrossMachines)
                                        op(3, 1, 2, 0, 0)};
   // Different memory sizes on purpose: the system allocator can hand the next
   // same-size allocation the just-freed block (which would fake a recycling
-  // signal), but it cannot serve a kMaxMemoryBytes request from a freed
-  // 256-byte block. Pool slots are reserved to kMaxMemoryBytes, so only real
-  // pool recycling reproduces the first machine's buffer address here.
+  // signal), but it cannot serve a kDefaultMaxMemoryBytes request from a freed
+  // 256-byte block. Pool slots are reserved to kDefaultMaxMemoryBytes, so only
+  // real pool recycling reproduces the first machine's buffer address here.
   auto small_program = threaded_from_words(words, /*total_memory_size=*/256);
   auto full_program =
-      threaded_from_words(words, /*total_memory_size=*/kMaxMemoryBytes);
+      threaded_from_words(words, /*total_memory_size=*/kDefaultMaxMemoryBytes);
 
   const uint8_t *first_buffer = nullptr;
   {
@@ -1517,12 +1517,13 @@ TEST(Rv32Threaded, createRejectsTotalMemoryAboveLimitAcceptsAtLimit)
   const std::vector<uint32_t> words = {addi(1, 0, 5)};
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(
                 words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0,
-                /*total_memory_size=*/kMaxMemoryBytes + 1, /*trace=*/false)
+                /*total_memory_size=*/kMemoryCeilingBytes + 1,
+                /*trace=*/false)
                 .error(),
             ProgramError::kMemoryTooLarge);
   EXPECT_TRUE(ThreadedMachinePreInstantiation::create(
                   words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0,
-                  /*total_memory_size=*/kMaxMemoryBytes, /*trace=*/false)
+                  /*total_memory_size=*/kMemoryCeilingBytes, /*trace=*/false)
                   .has_value());
 }
 
@@ -1530,8 +1531,8 @@ TEST(Rv32Threaded, createRejectsCodeTooLargeAndUnsupportedLikeCanonical)
 {
   // The remaining two ProgramError values the production gate must report
   // identically to canonical decode (the other three are pinned above).
-  const std::vector<uint32_t> oversized((kMaxCodeBytes / kInstructionBytes) + 1,
-                                        addi(0, 0, 0));
+  const std::vector<uint32_t> oversized(
+      (kCodeCeilingBytes / kInstructionBytes) + 1, addi(0, 0, 0));
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(
                 words_to_bytes(oversized), /*memory=*/{}, /*memory_start=*/0,
                 /*total_memory_size=*/256, /*trace=*/false)

@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 
 #include <cassert>
 #include <exception>
@@ -11,7 +12,9 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -29,11 +32,16 @@
 
 namespace hogd {
 
-std::optional<Rv32Contract>
-Rv32Contract::create(ContractBlob const &contract_blob)
-{
+// The VM's defaults restate the protocol's.
+static_assert(rv32::kDefaultMaxCodeBytes ==
+              static_cast<uint32_t>(kDefaultMaxRv32CodeBytes));
+static_assert(rv32::kDefaultMaxMemoryBytes ==
+              static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
 
-  auto artifact = rv32::parse_threaded_artifact(contract_blob.data);
+std::optional<Rv32Contract>
+Rv32Contract::create(ContractBlob const &contract_blob, rv32::Rv32Limits limits)
+{
+  auto artifact = rv32::parse_threaded_artifact(contract_blob.data, limits);
   if (!artifact.has_value()) {
     return std::nullopt;
   }
@@ -203,6 +211,7 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
 
 InvokeErrorCode
 Rv32Context::verify_contract(Contract const &contract,
+                             NetworkConfigParams const &params,
                              PreparedContract &out) const
 {
   if (contract.contract_type() != ContractType::kRv32) {
@@ -219,8 +228,12 @@ Rv32Context::verify_contract(Contract const &contract,
   // The translation is handed back rather than discarded: it is the whole
   // product of verification, and the caller reuses it for a same-transaction
   // deployment instead of lowering the identical bytes a second time (#3536).
-  std::optional<Rv32Contract> translated =
-      Rv32Contract::create(contract.rv32_contract());
+  // Attachment uses the chain's bounds; a deployed contract runs under the
+  // VM's ceilings (StorageSnapshotCache).
+  std::optional<Rv32Contract> translated = Rv32Contract::create(
+      contract.rv32_contract(),
+      rv32::Rv32Limits{.max_code_bytes = params.max_rv32_code_bytes,
+                       .max_memory_bytes = params.max_rv32_memory_bytes});
   if (!translated.has_value()) {
     return InvokeErrorCode::Deterministic;
   }

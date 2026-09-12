@@ -38,7 +38,7 @@ public:
     if ((code.size() % kInstructionBytes) != 0) {
       return std::unexpected(ProgramError::kCodeSizeNotAligned);
     }
-    if (code.size() > kMaxCodeBytes) {
+    if (code.size() > kCodeCeilingBytes) {
       return std::unexpected(ProgramError::kCodeTooLarge);
     }
     ThreadedProgram program;

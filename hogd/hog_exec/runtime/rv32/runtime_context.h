@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -22,7 +23,7 @@ namespace hogd::rv32 {
 struct RuntimeContractImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
   SyscallFunction entry = nullptr;
 };
 
@@ -34,6 +35,7 @@ public:
       std::unordered_map<int32_t, RuntimeContractImage> contracts);
 
   InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params,
                                   hogd::PreparedContract &out) const override;
   using hogd::RuntimeContext::verify_contract;
 

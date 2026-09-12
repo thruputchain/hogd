@@ -14,9 +14,12 @@ namespace hogd {
 
 class HashBuffers {
 public:
-  // `max_buffers` is the chain's kConfigParamMaxSHA256Buffers, read off the
-  // db tip when the owning frame starts. It is fixed for the frame's life.
-  explicit HashBuffers(uint32_t max_buffers) : max_buffers_(max_buffers) {}
+  // `max_buffers` is the chain's kConfigParamMaxSHA256Buffers and
+  // `max_buffer_bytes` its kConfigParamMaxSHA256BufferBytes, both read off the
+  // db tip when the owning frame starts and fixed for the frame's life.
+  HashBuffers(uint32_t max_buffers, uint32_t max_buffer_bytes)
+    : max_buffers_(max_buffers), max_buffer_bytes_(max_buffer_bytes)
+  {}
 
   SyscallStatus<SHA256Hash> finalize(uint32_t index,
                                      size_t *output_size = nullptr);
@@ -29,7 +32,7 @@ private:
   // byte count absorbed since the last reset. The state is constant-size
   // regardless of how many bytes were fed, so copying a stream (a planned
   // fork operation for keypath derivation) is constant-time. The byte count
-  // enforces kSHA256BufferMaxSize — contract-observable, so it outlives the
+  // enforces max_buffer_bytes_ — contract-observable, so it outlives the
   // representation that needed it — and feeds finalize's size report into
   // transaction stats.
   struct Stream {
@@ -43,5 +46,6 @@ private:
   std::unordered_map<uint32_t, Stream> streams_;
 
   const uint32_t max_buffers_;
+  const uint32_t max_buffer_bytes_;
 };
 } // namespace hogd

@@ -11,6 +11,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -22,6 +23,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
@@ -49,6 +51,7 @@ namespace {
 class NoopRv32Context : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const & /*unused*/,
+                                  NetworkConfigParams const & /*params*/,
                                   PreparedContract &out) const override
   {
     // Hand back a placeholder image, as a real rv32 verification would: an
@@ -60,7 +63,7 @@ public:
     placeholder.data.append_range(
         rv32::test_artifact::build_artifact({rv32::test_program::addi(0, 0, 0)},
                                             std::span<const uint8_t>{}));
-    out.rv32 = Rv32Contract::create(placeholder);
+    out.rv32 = Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults());
     return InvokeErrorCode::None;
   }
 

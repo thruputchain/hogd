@@ -117,7 +117,8 @@ public:
   // it is placed at data-space VA `memory_start`, with zeros filling [0,
   // memory_start) and [memory_start+memory.size(), total_memory_size).
   // `total_memory_size` is the machine's full memory size and must be <=
-  // kMaxMemoryBytes; memory_start + memory.size() must be <= total_memory_size.
+  // kMemoryCeilingBytes; memory_start + memory.size() must be <=
+  // total_memory_size.
   // `max_run_gas` is the chunk cap the lowering splits runs at; production
   // always uses the default kMaxRunGas. Tests and the engine-diff fuzzer pass
   // smaller caps so break carriers (and their refund/deficit seams) appear in
@@ -157,13 +158,15 @@ private:
 };
 
 // Thread-local recycling pool for machine guest-memory buffers. A machine is
-// constructed per method invocation, and nested TryInvoke machines (up to
-// kMaxSavepointDepth deep) are live simultaneously on one thread -- so this
-// is a free list of *released* buffers, not a single slot: every live machine
-// owns its own buffer, and the pool only bounds how many freed buffers are
-// retained for reuse. Acquire reserves kMaxMemoryBytes so any recycled buffer
-// satisfies any artifact's memory size without reallocating; bursts deeper
-// than the cap fall back to plain allocation.
+// constructed per method invocation, and nested TryInvoke machines (up to the
+// chain's max_savepoint_depth deep) are live simultaneously on one thread --
+// so this is a free list of *released* buffers, not a single slot: every live
+// machine owns its own buffer, and the pool only bounds how many freed buffers
+// are retained for reuse. Acquire reserves kDefaultMaxMemoryBytes so a
+// recycled buffer satisfies any artifact within the default memory size
+// without reallocating; a chain admitting larger memories grows the buffer on
+// first use and keeps it, and bursts deeper than the cap fall back to plain
+// allocation.
 inline constexpr size_t kMemorySlotPoolCap = 8;
 
 // Fixed-capacity LIFO: a std::array of vectors so the thread_local's
@@ -190,7 +193,7 @@ acquire_memory_slot()
   if (pool.count != 0) {
     slot = std::move(pool.slots[--pool.count]);
   }
-  slot.reserve(kMaxMemoryBytes);
+  slot.reserve(kDefaultMaxMemoryBytes);
   return slot;
 }
 
@@ -272,7 +275,7 @@ public:
       exec_traced_(pre_instantiation.trace_)
   {
     const auto &image = pre_instantiation.initial_memory_image_;
-    assert(image.size() <= kMaxMemoryBytes);
+    assert(image.size() <= kMemoryCeilingBytes);
     // memory_ acquired its slot from the pool on construction. The recycled
     // slot is dirty, but the image is full-size (zero-padded to
     // total_memory_size), so this assign fully overwrites it -- and the
@@ -1880,7 +1883,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   // Check the fit with subtraction so the guard is independent of host pointer
   // width: memory_start + memory.size() can wrap when size_t is 32 bits, which
   // would let an out-of-bounds image slip through to the copy below.
-  if (total_memory_size > kMaxMemoryBytes || memory_start > total_memory_size ||
+  if (total_memory_size > kMemoryCeilingBytes ||
+      memory_start > total_memory_size ||
       memory.size() > total_memory_size - memory_start) {
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }

@@ -17,6 +17,7 @@
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
@@ -41,10 +42,10 @@ InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  size_t event_count,
                                  std::span<uint32_t const> owned_auth_token_ids,
                                  uint32_t inherited_try_invoke_depth,
-                                 uint32_t max_sha256_buffers)
-  : hash_buffers_(max_sha256_buffers), address_(address),
-    calldata_(std::forward<Calldata>(calldata)), flags_(flags),
-    event_count_(event_count),
+                                 NetworkConfigParams const &params)
+  : hash_buffers_(params.max_sha256_buffers, params.max_sha256_buffer_bytes),
+    address_(address), calldata_(std::forward<Calldata>(calldata)),
+    flags_(flags), event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
     owned_auth_token_ids_(owned_auth_token_ids.begin(),
                           owned_auth_token_ids.end())
@@ -160,9 +161,9 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 } // namespace
 
 void
-InvocationFrame::note_try_invoke_success()
+InvocationFrame::note_try_invoke_success(NetworkConfigParams const &params)
 {
-  assert(!depth_cap_reached());
+  assert(!depth_cap_reached(params));
   total_try_invoke_depth_++;
 }
 
@@ -177,7 +178,7 @@ InvocationFrame::try_acquire_frame_locks(
   // commit caller (SystemCallHandler::try_commit_transaction) ignores that
   // count, since the root frame is discarded immediately after commit.
   //
-  // The deterministic TryInvoke depth cap (kMaxSavepointDepth) is NOT enforced
+  // The deterministic TryInvoke depth cap (max_savepoint_depth) is NOT enforced
   // or advanced here; InvocationFrameStack::finish_frame checks it before
   // calling this for a child TryInvoke frame and bumps the depth afterwards,
   // in the one place shared by every execution mode. The child cap reserves
@@ -266,7 +267,7 @@ InvocationFrame::collect_storage_deltas(
 SystemStatus<void>
 InvocationFrameStack::start_frame(
     ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids, uint32_t max_sha256_buffers)
+    std::span<uint32_t const> owned_auth_token_ids)
 {
   assert(frame_stack_.empty() || check_auth_tokens_owned(owned_auth_token_ids));
 
@@ -287,7 +288,7 @@ InvocationFrameStack::start_frame(
   try {
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
                               event_count, owned_auth_token_ids, parent_depth,
-                              max_sha256_buffers);
+                              config_params_);
   } catch (...) {
     return SystemError{SystemErrorCode::Unrecoverable};
   }
@@ -335,7 +336,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     if (frame_result.is_frame_success() && !manually_reverted) {
       bool acq_success = false;
 
-      if (frame_stack_.back().depth_cap_reached()) {
+      if (frame_stack_.back().depth_cap_reached(config_params_)) {
         // Deterministic failure across both proposal and validation modes.
         // No nondeterministic bit is logged or consumed here, so the bit
         // stream represents only lock-acquisition outcomes.
@@ -402,7 +403,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       // counting it. A mode-specific bump was how viewing came to skip the
       // cap.
       if (acq_success) {
-        frame_stack_.back().note_try_invoke_success();
+        frame_stack_.back().note_try_invoke_success(config_params_);
       }
       else {
         // If the frame locks were not acquired successfully, then we mark

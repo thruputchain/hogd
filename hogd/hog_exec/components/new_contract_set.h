@@ -4,6 +4,7 @@
 #include <unordered_set>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "types.hh"
@@ -27,13 +28,15 @@ public:
   // so they must outlive the set (buffer-stealing moves of the enclosing
   // vector are fine; destroying the elements is not).
   static std::pair<InvokeStatus<NewContractSet>, GasAmount>
-  make(NewContractBatch const &contracts, RuntimeContext &runtime_context);
+  make(NewContractBatch const &contracts, RuntimeContext &runtime_context,
+       NetworkConfigParams const &params);
 
   // A temporary batch would leave the returned set holding dangling element
   // pointers before its first use. Deleted to make that a compile error at
   // the call site (same guard as SystemCallHandler's Transaction&& ctor).
   static std::pair<InvokeStatus<NewContractSet>, GasAmount>
-  make(NewContractBatch &&contracts, RuntimeContext &runtime_context) = delete;
+  make(NewContractBatch &&contracts, RuntimeContext &runtime_context,
+       NetworkConfigParams const &params) = delete;
 
   BorrowedContractBatch borrow_contracts(
       std::unordered_set<SHA256Hash, SipHash24Hasher> const &hashes) const

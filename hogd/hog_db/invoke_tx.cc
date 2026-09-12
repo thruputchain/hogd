@@ -16,7 +16,6 @@
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -688,7 +687,7 @@ InvokeTX::assert_is_valid() const noexcept
     return;
   }
   assert(tx_depth_ >= 0);
-  assert(tx_depth_ <= kMaxSavepointDepth);
+  assert(tx_depth_ <= max_savepoint_depth());
   if constexpr (is_debug_build()) {
     try {
       std::unordered_map<Address, int128_t> balance_deltas;
@@ -784,12 +783,13 @@ InvokeTX::assert_is_valid() const noexcept
 HogDbStatus<void>
 InvokeTX::request_new_contract(Contract contract)
 {
-  // hog_exec rejects attached contract blobs above kMaxContractSizeBytes in
-  // perform_initial_validation(), before execution, and storage stores any
-  // legal row (chunked across RAMDB items if necessary; see
-  // for_each_contract_code_item). A serialized row above the bound here
-  // therefore means the executor is misbehaving, not that the contract is
-  // merely large. xdr_size computes the serialized length without
+  // hog_exec rejects attached contract blobs above the chain's
+  // max_contract_size_bytes in perform_initial_validation(), before
+  // execution; genesis load caps that parameter at kContractSizeCeilingBytes,
+  // and storage stores any row up to it (chunked across RAMDB items if
+  // necessary; see for_each_contract_code_item). A serialized row above the
+  // bound here therefore means the executor is misbehaving, not that the
+  // contract is merely large. xdr_size computes the serialized length without
   // allocating; it equals the byte count NewContractLock stages.
   if (x23::xdr_size(contract) > kMaxSerializedContractBytes)
     return HogDbError(HogDbCode::kInvalidExecutorBehavior);

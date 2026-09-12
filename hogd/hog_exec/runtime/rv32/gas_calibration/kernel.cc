@@ -254,8 +254,8 @@ branch_operands(Op op, bool taken)
 // kFullRange: eight bases 8 KiB apart, each covering [base-2048, base+2047] --
 // 32 KiB in eight disjoint chunks spread across the whole 64 KiB guest space,
 // which is L1d-sized and so guarantees L1 pressure while staying inside L2.
-// Guest memory is capped at kMaxMemoryBytes (64 KiB), so those two contexts
-// bracket the entire cache behaviour a guest can reach; there is no
+// Guest memory is capped at kDefaultMaxMemoryBytes (64 KiB), so those two
+// contexts bracket the entire cache behaviour a guest can reach; there is no
 // DRAM-resident case to price.
 struct MemoryOperand {
   uint8_t base_reg = 0;
@@ -740,7 +740,7 @@ kernel_error_name(KernelError error)
   case KernelError::kTargetImmediateOutOfRange:
     return "target immediate out of range";
   case KernelError::kCodeTooLarge:
-    return "generated code exceeds kMaxCodeBytes";
+    return "generated code exceeds kDefaultMaxCodeBytes";
   case KernelError::kUndecodable:
     return "generated code did not decode";
   }
@@ -961,8 +961,8 @@ build_kernel(const KernelSpec &spec)
   // Not a backwards branch: a B-type immediate is 13 bits signed, reaching
   // only 1024 instructions, and the encoder truncates rather than refuses --
   // the kernel jumps into the middle of itself and still halts cleanly. JAL's
-  // 21 bits cover anything kMaxCodeBytes allows, and the branch skipping it
-  // only ever jumps two instructions.
+  // 21 bits cover anything kDefaultMaxCodeBytes allows, and the branch skipping
+  // it only ever jumps two instructions.
   words.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
   // beq counter, x0, +8 -- when the counter hits zero, skip the JAL and fall
   // into the ecall.
@@ -974,7 +974,7 @@ build_kernel(const KernelSpec &spec)
   words.push_back(test_program::j_type(0, back_edge));
   words.push_back(0x00000073U); // ecall: the halting host ends the run
 
-  if (words.size() * kInstructionBytes > kMaxCodeBytes) {
+  if (words.size() * kInstructionBytes > kDefaultMaxCodeBytes) {
     return std::unexpected(KernelError::kCodeTooLarge);
   }
 
@@ -983,8 +983,8 @@ build_kernel(const KernelSpec &spec)
   for (const uint32_t word : words) {
     append_u32(kernel.code, word);
   }
-  kernel.memory_bytes = kMaxMemoryBytes;
-  kernel.initial_memory.assign(kMaxMemoryBytes, 0);
+  kernel.memory_bytes = kDefaultMaxMemoryBytes;
+  kernel.initial_memory.assign(kDefaultMaxMemoryBytes, 0);
   if (spec.working_set == WorkingSet::kPointerChase) {
     seed_pointer_chase(kernel.initial_memory,
                        chase_geometry(spec.target, kernel.memory_bytes),

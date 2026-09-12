@@ -91,7 +91,7 @@ namespace hogd {
 namespace {
 
 constexpr uint64_t kPlentyOfGas = 1'000'000'000;
-constexpr uint32_t kGuestMemoryBytes = rv32::kMaxMemoryBytes;
+constexpr uint32_t kGuestMemoryBytes = rv32::kDefaultMaxMemoryBytes;
 // Output pointers the guest hands the syscall. Two, because GetCalldataLen
 // writes through two.
 constexpr uint32_t kOutputAddressA = 0x0400;
@@ -138,10 +138,6 @@ static_assert(kMessageAddress + kMaxMessageBytes <= kInputAddress,
 // low indices are enough and stay well inside the cap.
 constexpr uint32_t kHashSlot = 0;
 constexpr uint32_t kHashSlotCopy = 1;
-// The limit start_frame() fixes on the frame it admits: passed in rather than
-// read off the db tip, so this constant does not depend on the pin.
-constexpr uint32_t kMaxSha256Buffers = 8;
-
 // NNInt argument block, above VerifySignature's material and below the hashing
 // input. Every argument gets its own cache-line-sized slot so the alias guard
 // never sees two of them overlap, whatever order the ABI registers them in.
@@ -320,6 +316,7 @@ constexpr int64_t kColdIterations = 20000;
 class NoChildRuntimeContext final : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const & /*contract*/,
+                                  NetworkConfigParams const & /*params*/,
                                   PreparedContract & /*out*/) const override
   {
     std::abort();
@@ -470,8 +467,7 @@ public:
             .gas_limit = kPlentyOfGas,
             .calldata = Calldata{},
         },
-        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{},
-        kMaxSha256Buffers);
+        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
   }
 
   // Finish the top frame. A successful child merges its modified items into
@@ -1281,7 +1277,8 @@ bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
   const std::array<std::byte, 32> data{};
   int64_t copies = 0;
   for (auto _ : state) {
-    HashBuffers buffers(occupancy + 1);
+    HashBuffers buffers(occupancy + 1,
+                        static_cast<uint32_t>(kSHA256BufferMaxSize));
     auto seeded = buffers.update(0, data, /*reset=*/true);
     benchmark::DoNotOptimize(seeded);
     for (uint32_t slot = 1; slot <= occupancy; ++slot) {
@@ -1308,7 +1305,8 @@ bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
   const std::array<std::byte, 32> data{};
   int64_t creations = 0;
   for (auto _ : state) {
-    HashBuffers buffers(occupancy + 1);
+    HashBuffers buffers(occupancy + 1,
+                        static_cast<uint32_t>(kSHA256BufferMaxSize));
     for (uint32_t slot = 0; slot < occupancy; ++slot) {
       auto created = buffers.update(slot, data, /*reset=*/true);
       benchmark::DoNotOptimize(created);

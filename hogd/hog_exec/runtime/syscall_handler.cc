@@ -1,5 +1,4 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
@@ -200,7 +199,7 @@ SystemCallHandler::SystemCallHandler(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
         },
-        db_proxy_),
+        db_proxy_, snapshot_cache.get_network_config_params()),
     source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
@@ -227,7 +226,7 @@ SystemCallHandler::SystemCallHandler(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
         },
-        db_proxy_),
+        db_proxy_, snapshot_cache.get_network_config_params()),
     source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
     execution_mode_data_(
         make_execution_mode_data(std::move(execution_mode_ctor))),
@@ -270,8 +269,13 @@ SystemCallHandler::perform_initial_validation()
     return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
+  // The blob bound is the chain's (#2569): a configuration may raise it past
+  // the default, and hog_db stores whatever a loadable genesis admits.
   for (auto const &contract : contracts_to_deploy_) {
-    if (contract_blob_size(contract) > kMaxContractSizeBytes) {
+    if (const uint32_t permitted = config_params().max_contract_size_bytes;
+        contract_blob_size(contract) > permitted) {
+      error("Transaction attaches a {}-byte contract; chain permits {}",
+            contract_blob_size(contract), permitted);
       return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }
@@ -285,7 +289,8 @@ SystemCallHandler::perform_initial_validation()
   // since it is a genuine bug.
   try {
     auto [res, gas_consumed] =
-        NewContractSet::make(contracts_to_deploy_, runtime_context_);
+        NewContractSet::make(contracts_to_deploy_, runtime_context_,
+                             config_params());
     if (!res.has_value()) {
       return {res.error(), gas_consumed};
     }
@@ -884,11 +889,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // protected body runs, so a copy could throw std::bad_alloc across that
   // noexcept boundary and terminate the executor. The move is allocation-free
   // and invocation is unused afterward (#3058).
-  // The tip was pinned above, so this is a field load rather than another trip
-  // through the snapshot cache -- invoke() runs per frame.
   auto start_status =
-      start_frame(std::move(invocation), flags, owned_auth_token_ids,
-                  config_params().max_sha256_buffers);
+      start_frame(std::move(invocation), flags, owned_auth_token_ids);
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and
@@ -932,9 +934,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
 }
 
 SystemStatus<std::unique_ptr<InvocationFrameTrace>>
-SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
-                               std::span<uint32_t const> owned_auth_token_ids,
-                               uint32_t max_sha256_buffers) noexcept
+SystemCallHandler::start_frame(
+    Invocation invocation, InvokeFlagSet flags,
+    std::span<uint32_t const> owned_auth_token_ids) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -975,12 +977,9 @@ SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
   // here rather than terminating through the noexcept boundary.
   auto admitted = [&]() -> SystemStatus<void> {
     try {
-      // The frame's hash-buffer limit is fixed at admission, so a syscall
-      // enforcing it has no tip read left to fail on.
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
-                                                 flags, owned_auth_token_ids,
-                                                 max_sha256_buffers);
+                                                 flags, owned_auth_token_ids);
     } catch (std::exception const &e) {
       guarded_log("frame-admission failure diagnostic", [&] {
         error("unrecoverable: frame admission threw: {}", e.what());

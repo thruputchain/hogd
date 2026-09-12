@@ -50,6 +50,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
@@ -125,7 +126,8 @@ protected:
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -150,7 +152,8 @@ protected:
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     bool acquired_reference = block_tx.try_acquire_reference();
     EXPECT_TRUE(acquired_reference);
     if (!acquired_reference) {
@@ -624,7 +627,8 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -816,7 +820,8 @@ TEST_F(HogDbTest, BalanceTransferReducesByCost)
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -866,7 +871,8 @@ TEST_F(HogDbTest, NewBalanceHogAgeIsAllZeroes)
   constexpr BlockHeight kBlockHeight = 42;
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, kBlockHeight,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -1139,7 +1145,8 @@ TEST_F(HogDbTest, TwoTransfersToSameAddressCostOnce)
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     // First InvokeTX: transfer to recipient (new address, cost applies)
@@ -1282,7 +1289,8 @@ TEST_F(HogDbTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -1335,7 +1343,8 @@ TEST_F(HogDbTest, InvariantsAcceptCanonicalBalanceBytes)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -1549,9 +1558,10 @@ TEST_F(HogDbTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
 }
 
 // Regression for #1775/#2569: a serialized contract row larger than
-// kMaxSerializedContractBytes is executor misbehavior -- hog_exec enforces
-// kMaxContractSizeBytes on attached blobs before execution, and hog_db stores
-// any legal row (chunked if necessary). Reject at staging with
+// kMaxSerializedContractBytes is executor misbehavior -- hog_exec enforces the
+// chain's max_contract_size_bytes on attached blobs before execution, genesis
+// load keeps that under kContractSizeCeilingBytes, and hog_db stores any legal
+// row (chunked if necessary). Reject at staging with
 // kInvalidExecutorBehavior, not at block write-back, where apply() would
 // leave earlier writes visible and the commit error would abort the node.
 TEST_F(HogDbTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
@@ -1570,7 +1580,8 @@ TEST_F(HogDbTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -1657,7 +1668,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
@@ -1757,7 +1769,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1785,7 +1798,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1845,7 +1859,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1873,7 +1888,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1940,7 +1956,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1969,7 +1986,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2035,7 +2053,8 @@ TEST_F(HogDbTest,
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2064,7 +2083,8 @@ TEST_F(HogDbTest,
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2130,7 +2150,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2159,7 +2180,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2239,7 +2261,8 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2263,7 +2286,8 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2349,7 +2373,8 @@ TEST_F(HogDbTest, ReplayCacheGCOnlyRunsOnCommittedReplayCacheTouch)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 5,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2419,7 +2444,8 @@ TEST_F(HogDbTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 5,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
     invoke_tx.create_savepoint();
@@ -2485,7 +2511,8 @@ TEST_F(HogDbTest, SyncBalanceLocksReportsAllBalanceConflicts)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 5,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
   invoke_tx.create_savepoint();
@@ -2683,7 +2710,8 @@ TEST_F(HogDbTest, AuthDataCreateThenDeleteMatchesEmptyDb)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2702,7 +2730,8 @@ TEST_F(HogDbTest, AuthDataCreateThenDeleteMatchesEmptyDb)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 2,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2823,7 +2852,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameNNInt128Key)
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
 
     // First InvokeTX: add 100
@@ -2966,7 +2996,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameRCQ)
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
 
     // First InvokeTX: insert entries
@@ -3063,7 +3094,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameReplayCache)
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
 
     // First InvokeTX: add nonce
@@ -3124,7 +3156,8 @@ TEST_F(HogDbTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
     BlockHeight height = 2;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
 
     // First InvokeTX: insert entries
@@ -3180,7 +3213,8 @@ TEST_F(HogDbTest, AbortedFreshHeightDoesNotPersistEmptyReplayCacheHeight)
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx_a(block_tx);
@@ -3233,7 +3267,8 @@ TEST_F(HogDbTest, AbortedFreshHeightStaysAbsentInNextBlock)
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx_a(block_tx);
@@ -3292,7 +3327,8 @@ TEST_F(HogDbTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx_a(block_tx);
@@ -3353,7 +3389,8 @@ TEST_F(HogDbTest, AbortedFreshHeightHashEquivalentToCleanBlock)
 
     PerThreadARC<BlockTX> block_tx(
         dao, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     if (include_aborted_attempt) {
       EXPECT_TRUE(block_tx.try_acquire_reference());
@@ -3404,7 +3441,8 @@ TEST_F(HogDbTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   // T1: fund the fresh address and insert RCQ entries
   ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -3452,7 +3490,8 @@ TEST_F(HogDbTest, ReleaseBalanceRefundOnFreshAddressSameTx)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   // Single tx: fund address, insert RCQ entries, then add a consume in the
   // same invocation via a child frame. The cumulative delta (inserts + consume)
@@ -3597,7 +3636,8 @@ TEST_F(HogDbTest, FreshBalanceGuardRejectsUnderfundedTxRegardlessOfPeerState)
   Address addr = make_address(kAddress + 200);
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_with_balance_cost_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   // T1: fund the fresh address with enough to cover the balance-row cost.
   ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -3634,7 +3674,8 @@ TEST_F(HogDbTest, FreshBalanceGuardAbortDoesNotInvalidatePeerLock)
   Address addr = make_address(kAddress + 201);
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_with_balance_cost_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   // T1: fund the fresh address with exactly the balance-row cost.
   ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -3676,7 +3717,8 @@ TEST_F(HogDbTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
     BlockHeight height = ordering + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_with_balance_cost_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx1(block_tx);
@@ -3724,7 +3766,8 @@ TEST_F(HogDbTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
 
   PerThreadARC<BlockTX> block_tx_a(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx_a.try_acquire_reference());
   InvokeTX itx_a(block_tx_a);
 
@@ -3738,7 +3781,8 @@ TEST_F(HogDbTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
   {
     PerThreadARC<BlockTX> block_tx_b(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx_b.try_acquire_reference());
     InvokeTX itx_b(block_tx_b);
 
@@ -3780,7 +3824,8 @@ TEST_F(HogDbTest, BytestringConflictRecordsDbConflictReason)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -3816,7 +3861,8 @@ TEST_F(HogDbTest, ConflictReasonTypeMismatch)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -3850,7 +3896,8 @@ TEST_F(HogDbTest, ConflictReasonReplayProtection)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -3885,7 +3932,8 @@ TEST_F(HogDbTest, ConflictReasonExclusiveLockBalanceFlag)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -3914,7 +3962,8 @@ TEST_F(HogDbTest, ExclusiveLockOnReplayCacheIsInvalidExecutorBehavior)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -3970,7 +4019,8 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 2,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx(block_tx);
 
@@ -4018,7 +4068,8 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnFreshKeyRejectedAtReservation)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx(block_tx);
 
@@ -4068,7 +4119,8 @@ TEST_F(HogDbTest, ExclusiveNNIntOverflowRejectedAtReservation)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 2,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx(block_tx);
 
@@ -4113,7 +4165,8 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnBytestringRejectedAtReservation)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 2,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx(block_tx);
 
@@ -4166,7 +4219,8 @@ TEST_F(HogDbTest, ExclusiveDeployBlocksConcurrentDeploy)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -4202,7 +4256,8 @@ TEST_F(HogDbTest, NonExclusiveDeployAdmitsConcurrentIdenticalDeploy)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -4232,7 +4287,8 @@ TEST_F(HogDbTest, ExclusiveDeployStaysLockedAfterCommitAndPersists)
   StorageLongHash base_hash = db_.compute_full_db_hash();
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -4282,12 +4338,12 @@ TEST_F(HogDbTest, DbHashDeltaExclusiveDeploymentMatchesFullStateHash)
 
 TEST_F(HogDbTest, InvalidateSiblingBlockTX)
 {
-  PerThreadARC<BlockTX> block_a(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
-  PerThreadARC<BlockTX> block_b(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+  PerThreadARC<BlockTX> block_a(db_, cost_model_, background_commit_worker_, 1,
+                                BlockExecutionMode::kBlockExecutionModeProposal,
+                                static_cast<uint32_t>(kMaxSavepointDepth));
+  PerThreadARC<BlockTX> block_b(db_, cost_model_, background_commit_worker_, 1,
+                                BlockExecutionMode::kBlockExecutionModeProposal,
+                                static_cast<uint32_t>(kMaxSavepointDepth));
 
   EXPECT_FALSE(block_a.get().is_invalidated());
   EXPECT_FALSE(block_b.get().is_invalidated());
@@ -4306,7 +4362,8 @@ TEST_F(HogDbTest, InvalidatedBlockTXReadReturnsStaleBlock)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ItemKey key = make_item_key(addr, 0);
   auto result_before = block_tx.get().read_nnint128_base(key);
@@ -4327,7 +4384,8 @@ TEST_F(HogDbTest, InvalidatedBlockTXBalanceReadReturnsStaleBlock)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   auto result_before = block_tx.get().read_balance_base(addr);
   ASSERT_TRUE(result_before.has_value());
@@ -4347,7 +4405,8 @@ TEST_F(HogDbTest, InvalidatedBlockTXLockReturnsStaleBlock)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   block_tx.get().invalidate();
 
@@ -4364,9 +4423,9 @@ TEST_F(HogDbTest, ViewingBlockTXLockRejectsWrite)
   Address addr = make_address(kViewingAddr);
   setup_contract_address(addr);
 
-  PerThreadARC<BlockTX> block_tx(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeViewing);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1,
+                                 BlockExecutionMode::kBlockExecutionModeViewing,
+                                 static_cast<uint32_t>(kMaxSavepointDepth));
 
   ItemKey key = make_item_key(addr, 0);
   ItemChange change = ItemChange(NNInt128(0, 10));
@@ -4377,9 +4436,9 @@ TEST_F(HogDbTest, ViewingBlockTXLockRejectsWrite)
 
 TEST_F(HogDbTest, ViewingBlockTXCommitRejectsWrite)
 {
-  PerThreadARC<BlockTX> block_tx(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeViewing);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1,
+                                 BlockExecutionMode::kBlockExecutionModeViewing,
+                                 static_cast<uint32_t>(kMaxSavepointDepth));
 
   auto result = block_tx.get().commit();
   ASSERT_FALSE(result.has_value());
@@ -4403,12 +4462,12 @@ TEST_F(HogDbTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
                            .contract_size = 10,
                            .contract_type = ContractType::kRv32}));
 
-  PerThreadARC<BlockTX> block_a(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
-  PerThreadARC<BlockTX> block_b(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+  PerThreadARC<BlockTX> block_a(db_, cost_model_, background_commit_worker_, 1,
+                                BlockExecutionMode::kBlockExecutionModeProposal,
+                                static_cast<uint32_t>(kMaxSavepointDepth));
+  PerThreadARC<BlockTX> block_b(db_, cost_model_, background_commit_worker_, 1,
+                                BlockExecutionMode::kBlockExecutionModeProposal,
+                                static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_a.try_acquire_reference());
   {
@@ -4490,7 +4549,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlock)
 
   PerThreadARC<BlockTX> stale_block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(stale_block_tx.try_acquire_reference());
   InvokeTX insert_only_tx(stale_block_tx);
@@ -4516,7 +4576,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlock)
 
   PerThreadARC<BlockTX> sibling_block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
   {
     InvokeTX sibling_tx(sibling_block_tx);
@@ -4581,7 +4642,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
   // Exclusive RCQ delete + recreate with consume on a non-stale block.
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx(block_tx);
   ASSERT_TRUE(itx.request_deletion(key, kExclusiveFlags));
@@ -4651,7 +4713,8 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   // restore takes the shrink branch.
   PerThreadARC<BlockTX> stale_block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(stale_block_tx.try_acquire_reference());
   InvokeTX stale_tx(stale_block_tx);
 
@@ -4669,7 +4732,8 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   // would during commit publication).
   PerThreadARC<BlockTX> sibling_block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
   {
     InvokeTX sibling_tx(sibling_block_tx);
@@ -4703,7 +4767,8 @@ TEST_F(HogDbTest, InvokeTxDestructorReleasesBlockTxReference)
 {
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   {
     InvokeTX invoke_tx(block_tx);
@@ -4721,7 +4786,8 @@ TEST_F(HogDbTest, InvokeTxMoveTransfersBlockTxReference)
 {
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   {
     InvokeTX source(block_tx);
@@ -4767,7 +4833,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
   StorageLongHash parent_hash = db_.compute_full_db_hash();
   PerThreadARC<BlockTX> stale_block_tx(
       db_, rcq_cost_model, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(stale_block_tx.try_acquire_reference());
   InvokeTX stale_tx(stale_block_tx);
@@ -4779,7 +4846,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
 
   PerThreadARC<BlockTX> sibling_block_tx(
       db_, rcq_cost_model, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
   {
     InvokeTX sibling_tx(sibling_block_tx);

@@ -4,7 +4,6 @@
 #include <span>
 #include <utility>
 
-#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -37,7 +36,7 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
 
   // Validate before touching any state: a rejected reset must leave an
   // existing stream hashing as if the call never happened.
-  if (data.size() > kSHA256BufferMaxSize) {
+  if (data.size() > max_buffer_bytes_) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -94,7 +93,7 @@ HashBuffers::update_existing_stream(uint32_t index,
   }
   // Reject before absorbing: a failed append must leave the stream hashing
   // as if the call never happened.
-  if (it->second.size + data.size() > kSHA256BufferMaxSize) {
+  if (it->second.size + data.size() > max_buffer_bytes_) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   it->second.hasher.update(data);

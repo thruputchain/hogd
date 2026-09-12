@@ -17,8 +17,8 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -48,7 +48,7 @@ public:
                   InvokeFlagSet flags, size_t event_count,
                   std::span<uint32_t const> owned_auth_token_ids,
                   uint32_t inherited_try_invoke_depth,
-                  uint32_t max_sha256_buffers);
+                  NetworkConfigParams const &params);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -123,11 +123,12 @@ public:
     return try_invoke_frame_count_;
   }
 
-  bool depth_cap_reached() const
+  bool depth_cap_reached(NetworkConfigParams const &params) const
   {
-    // Reserve one savepoint slot for the root commit frame, which always
-    // pushes a subtransaction through the same HogDb path.
-    return total_try_invoke_depth_ >= kMaxSavepointDepth - 1;
+    // One slot is reserved for the root commit's subtransaction push; a depth
+    // of 0 leaves none for a TryInvoke.
+    return params.max_savepoint_depth == 0 ||
+           total_try_invoke_depth_ >= params.max_savepoint_depth - 1;
   }
 
   // returned pointer is invalidated by any call to add_item_view
@@ -151,8 +152,8 @@ public:
   // calls this once a child's success is settled in any execution mode, so
   // the cap counts the same frames whether the mode probed locks (proposal),
   // replayed a bit (validation), or defaulted one (viewing). Precondition:
-  // !depth_cap_reached().
-  void note_try_invoke_success();
+  // !depth_cap_reached(params).
+  void note_try_invoke_success(NetworkConfigParams const &params);
 
   void
   collect_storage_deltas(x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
@@ -281,10 +282,13 @@ static_assert(std::is_nothrow_move_constructible_v<InvocationFrame>);
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
+  // `config_params` are the pinned tip's; one reference serves every frame.
   InvocationFrameStack(
       std::function<void(InvocationFrame &&)> last_frame_action,
-      PerTransactionDatabaseProxy &db_proxy)
-    : last_frame_action_(std::move(last_frame_action)), db_proxy_(db_proxy)
+      PerTransactionDatabaseProxy &db_proxy,
+      NetworkConfigParams const &config_params)
+    : last_frame_action_(std::move(last_frame_action)), db_proxy_(db_proxy),
+      config_params_(config_params)
   {}
 
   ContractAddress const &get_current_address() const
@@ -320,8 +324,7 @@ public:
   [[nodiscard]] SystemStatus<void>
   start_frame(ContractAddress const &address, Calldata &&calldata,
               InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids,
-              uint32_t max_sha256_buffers);
+              std::span<uint32_t const> owned_auth_token_ids);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode
@@ -463,6 +466,7 @@ private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;
+  NetworkConfigParams const &config_params_;
   AuthTokenRegistry auth_token_registry_;
 };
 

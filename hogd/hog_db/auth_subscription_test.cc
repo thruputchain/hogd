@@ -22,6 +22,7 @@
 #include "auth_rpc.hh"
 #include "consensus.hh"
 #include "db_sched.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
@@ -209,7 +210,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -315,7 +317,8 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -391,7 +394,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -467,7 +471,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 

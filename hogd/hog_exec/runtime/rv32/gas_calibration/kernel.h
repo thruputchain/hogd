@@ -85,9 +85,9 @@ enum class OperandContext : uint8_t {
 };
 
 // Where a memory target's addresses land. Guest memory is capped at
-// kMaxMemoryBytes (64 KiB), which is smaller than this machine class's L2, so
-// the spread between these two is the whole cache-behaviour range a guest can
-// reach -- there is no cold-DRAM case to price.
+// kDefaultMaxMemoryBytes (64 KiB), which is smaller than this machine class's
+// L2, so the spread between these two is the whole cache-behaviour range a
+// guest can reach -- there is no cold-DRAM case to price.
 enum class WorkingSet : uint8_t {
   kNone,      // non-memory target
   kL1Region,  // all bases inside one 4 KiB region
@@ -194,7 +194,7 @@ struct KernelSpec {
 struct Kernel {
   std::vector<uint8_t> code;
   std::vector<uint8_t> initial_memory;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
   // Instructions retired per loop iteration and over the whole run. Used to
   // cross-check the measurement against what actually executed.
   uint64_t instructions_per_iteration = 0;
@@ -226,7 +226,7 @@ enum class KernelError {
   kBodyTooSmall,      // fewer slots than the fixed boundaries need
   kZeroTripCount,
   kTooManyTargets, // would put two targets adjacent, exposing them to fusion
-  kCodeTooLarge,   // over kMaxCodeBytes
+  kCodeTooLarge,   // over kDefaultMaxCodeBytes
   // A body slot's own immediate does not reach. JALR carries the whole
   // per-slot offset from a base anchored at the body midpoint, so its 12-bit
   // signed field caps how large a body it can fill.

@@ -16,6 +16,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -379,7 +380,8 @@ TEST_F(Rv32ProductionMappingTest, ZeroMemoryContractVerifiesAndExecutes)
   blob.data.append_range(artifact);
   Contract verify_contract_xdr(ContractType::kRv32);
   verify_contract_xdr.rv32_contract() = blob;
-  EXPECT_EQ(runtime_context_.verify_contract(verify_contract_xdr),
+  EXPECT_EQ(runtime_context_.verify_contract(verify_contract_xdr,
+                                             NetworkConfigParams{}),
             InvokeErrorCode::None);
 
   auto contract = std::make_shared<Contract>(ContractType::kRv32);
@@ -665,10 +667,10 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
   // This case used to be written against the legacy uint16 run bound (65535),
   // which a run over that bound was formerly rejected for. That is no longer
   // constructible: the priciest instruction costs kMaxInstructionGas and
-  // kMaxCodeBytes caps a program's length, so the most gas any straight-line
-  // run can hold now falls short of the legacy bound. The reachable case is
-  // kMaxRunGas, which is where the lowering actually splits.
-  static_assert((rv32::kMaxCodeBytes / rv32::kInstructionBytes) *
+  // kDefaultMaxCodeBytes caps a program's length, so the most gas any
+  // straight-line run can hold now falls short of the legacy bound. The
+  // reachable case is kMaxRunGas, which is where the lowering actually splits.
+  static_assert((rv32::kDefaultMaxCodeBytes / rv32::kInstructionBytes) *
                         rv32::kMaxInstructionGas <
                     0xFFFFU,
                 "a straight-line run can reach the legacy uint16 bound again; "
@@ -684,12 +686,14 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
 
   ContractBlob blob;
   blob.data.append_range(artifact);
-  EXPECT_TRUE(Rv32Contract::create(blob).has_value());
+  EXPECT_TRUE(
+      Rv32Contract::create(blob, rv32::Rv32Limits::defaults()).has_value());
 
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
   Rv32Context context;
-  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::None);
+  EXPECT_EQ(context.verify_contract(contract, NetworkConfigParams{}),
+            InvokeErrorCode::None);
 }
 
 namespace {
@@ -702,7 +706,7 @@ verify_rv32_blob(std::vector<uint8_t> const &artifact)
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
   Rv32Context context;
-  return context.verify_contract(contract);
+  return context.verify_contract(contract, NetworkConfigParams{});
 }
 
 } // namespace
@@ -736,14 +740,16 @@ TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
 
   ContractBlob blob;
   blob.data.append_range(artifact);
-  EXPECT_FALSE(Rv32Contract::create(blob).has_value());
+  EXPECT_FALSE(
+      Rv32Contract::create(blob, rv32::Rv32Limits::defaults()).has_value());
 }
 
 TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
 {
   Contract contract(ContractType::kNative);
   Rv32Context context;
-  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(context.verify_contract(contract, NetworkConfigParams{}),
+            InvokeErrorCode::Deterministic);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

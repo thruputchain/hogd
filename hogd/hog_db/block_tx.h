@@ -30,10 +30,12 @@ class BlockTX {
 public:
   BlockTX(HogDbDAO &db, const StorageCostModel &cost_model,
           BackgroundCommitWorker &background_commit_worker,
-          BlockHeight block_height, BlockExecutionMode mode)
+          BlockHeight block_height, BlockExecutionMode mode,
+          uint32_t max_savepoint_depth)
     : db_(db), cost_model_(cost_model),
       background_commit_worker_(background_commit_worker),
-      block_height_(block_height), mode_(mode)
+      block_height_(block_height), mode_(mode),
+      max_savepoint_depth_(max_savepoint_depth)
   {}
   ~BlockTX() = default;
 
@@ -41,6 +43,7 @@ public:
   HogDbDAO &get_db() const { return db_; }
   BlockHeight get_height() const { return block_height_; }
   BlockExecutionMode mode() const { return mode_; }
+  uint32_t max_savepoint_depth() const { return max_savepoint_depth_; }
 
   void invalidate() { invalidated_.store(true, std::memory_order_release); }
   bool is_invalidated() const
@@ -135,6 +138,7 @@ private:
   std::atomic<bool> invalidated_{false};
   std::atomic<bool> poisoned_{false};
   const BlockExecutionMode mode_;
+  uint32_t max_savepoint_depth_;
 
   HogDbStatus<void> stage_locks(ChangeSet &changes, WorkerPool &pool);
 

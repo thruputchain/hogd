@@ -1,4 +1,5 @@
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <memory>
@@ -39,12 +40,13 @@ MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
 
 InvokeErrorCode
 MultiplexedContext::verify_contract(Contract const &contract,
+                                    NetworkConfigParams const &params,
                                     PreparedContract &out) const
 {
   auto it = contexts_.find(contract.contract_type());
   if (it == contexts_.end()) {
     return InvokeErrorCode::Deterministic;
   }
-  return it->second.first->verify_contract(contract, out);
+  return it->second.first->verify_contract(contract, params, out);
 }
 } // namespace hogd

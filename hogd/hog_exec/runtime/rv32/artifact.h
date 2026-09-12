@@ -122,11 +122,15 @@ struct AcceptedGasSchedule {
   uint64_t digest;
 };
 
+// What every published groundhog-cli stamps. Remove once the lowerer stamps v4.
+inline constexpr uint32_t kTransitionalGasTableVersion = 3;
+inline constexpr uint64_t kTransitionalGasScheduleDigest =
+    0x918317c21c46bb60ULL;
+
 inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
     {.version = kGasTableVersion, .digest = kGasScheduleDigest},
-    // groundhog-cli <= 0.11.0, which is what every deployed artifact was
-    // stamped by. Remove once the lowerer stamps v4.
-    {.version = 3, .digest = 0x918317c21c46bb60ULL},
+    {.version = kTransitionalGasTableVersion,
+     .digest = kTransitionalGasScheduleDigest},
 }};
 
 constexpr uint64_t
@@ -178,10 +182,14 @@ format_fingerprint_layout_field(uint64_t digest, const char8_t *offset_name,
 // (`...format.vN`) and kArtifactFormatVersion together — passing a different
 // format_version here does not produce a correct fingerprint for another
 // version on its own.
+//
+// `folds_fixed_bounds` reproduces the fingerprint of a lowerer from before
+// the code and memory bounds became chain configuration.
 constexpr uint64_t
 format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                    uint32_t gas_version = kGasTableVersion,
-                   uint64_t gas_digest = kGasScheduleDigest)
+                   uint64_t gas_digest = kGasScheduleDigest,
+                   bool folds_fixed_bounds = false)
 {
   uint64_t digest = kFnvOffsetBasis;
   digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v5");
@@ -267,9 +275,14 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
       format_fingerprint_u64(digest, u8"digest_bytes", kArtifactDigestBytes);
   digest =
       format_fingerprint_u64(digest, u8"instruction_bytes", kInstructionBytes);
-  digest = format_fingerprint_u64(digest, u8"max_code_bytes", kMaxCodeBytes);
-  digest =
-      format_fingerprint_u64(digest, u8"max_memory_bytes", kMaxMemoryBytes);
+  // Older lowerers folded the then-fixed bounds; they are chain configuration
+  // now, not part of the format.
+  if (folds_fixed_bounds) {
+    digest = format_fingerprint_u64(digest, u8"max_code_bytes",
+                                    kDefaultMaxCodeBytes);
+    digest = format_fingerprint_u64(digest, u8"max_memory_bytes",
+                                    kDefaultMaxMemoryBytes);
+  }
 
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
@@ -288,36 +301,27 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0xd26fde3ac8a39141ULL);
+static_assert(kArtifactFormatFingerprint == 0x33c13073a37de665ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
-// The engine fingerprints a lowerer may report while kAcceptedGasSchedules
-// still has transitional entries: one per accepted schedule, in the same order.
-// The fingerprint folds the gas schedule, so a lowerer that stamps a
-// transitional schedule necessarily reports a different value from this build's
-// -- the same rollout skew kAcceptedGasSchedules exists for, seen from the
-// metadata side. This list is derived from that one and disappears with it.
-constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
-accepted_format_fingerprints()
-{
-  std::array<uint64_t, kAcceptedGasSchedules.size()> fingerprints = {};
-  for (size_t i = 0; i < kAcceptedGasSchedules.size(); ++i) {
-    fingerprints[i] = format_fingerprint(kArtifactFormatVersion,
-                                         kAcceptedGasSchedules[i].version,
-                                         kAcceptedGasSchedules[i].digest);
-  }
-  return fingerprints;
-}
-
-inline constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
-    kAcceptedFormatFingerprints = accepted_format_fingerprints();
-static_assert(kAcceptedFormatFingerprints.front() ==
-              kArtifactFormatFingerprint);
-// The v3 entry is what groundhog-cli 0.11.0 still reports. Pinning it here
-// proves this derivation reproduces a fingerprint the lowerer actually emits,
-// rather than one only this header believes in.
-static_assert(kAcceptedFormatFingerprints.back() == 0x8e5caf3e9cd23b22ULL);
+// The fingerprints a lowerer may report: one per lowerer generation in the
+// field, pinned to what that lowerer emits. The transitional entries go with
+// kAcceptedGasSchedules' transitional entry.
+inline constexpr std::array<uint64_t, 3> kAcceptedFormatFingerprints = {
+    // This build's own.
+    kArtifactFormatFingerprint,
+    // groundhog-cli <= 0.15.1: gas table v3 with the bounds folded.
+    format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
+                       kTransitionalGasScheduleDigest,
+                       /*folds_fixed_bounds=*/true),
+    // The next groundhog-cli: gas table v3 with the bounds dropped.
+    format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
+                       kTransitionalGasScheduleDigest,
+                       /*folds_fixed_bounds=*/false),
+};
+static_assert(kAcceptedFormatFingerprints[1] == 0x8e5caf3e9cd23b22ULL);
+static_assert(kAcceptedFormatFingerprints[2] == 0xc5f00a7d4451045eULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
@@ -358,7 +362,7 @@ struct ArtifactImage {
   // zeros below the image's load VA are included so consumers can keep
   // writing it at data address 0.
   std::vector<uint8_t> initial_memory;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
 };
 
 // The ThreadedArtifactImage output from parse_threaded_artifact must not
@@ -368,7 +372,7 @@ struct ThreadedArtifactImage {
   std::span<const uint8_t> initial_memory;
   // Data-space VA where initial_memory is placed; [0, start) zero-fills.
   uint32_t initial_memory_start = 0;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
 };
 
 // Canonical SHA-256 over one artifact section. Infallible by construction:
@@ -377,12 +381,13 @@ struct ThreadedArtifactImage {
 [[nodiscard]]
 ArtifactDigest artifact_digest(std::span<const uint8_t> bytes);
 
+// `limits` bounds the code_size and memory_bytes the header may declare.
 [[nodiscard]]
 std::expected<ArtifactImage, ArtifactError>
-parse_artifact(std::span<const uint8_t> bytes);
+parse_artifact(std::span<const uint8_t> bytes, Rv32Limits limits);
 
 [[nodiscard]]
 std::expected<ThreadedArtifactImage, ArtifactError>
-parse_threaded_artifact(std::span<const uint8_t> bytes);
+parse_threaded_artifact(std::span<const uint8_t> bytes, Rv32Limits limits);
 
 } // namespace hogd::rv32

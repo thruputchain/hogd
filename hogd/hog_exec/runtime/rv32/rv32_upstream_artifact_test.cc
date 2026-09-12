@@ -110,7 +110,7 @@ make_artifact_image(std::span<const uint32_t> words,
 {
   const std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact(words, initial_memory);
-  auto parsed = rv32::parse_artifact(artifact);
+  auto parsed = rv32::parse_artifact(artifact, rv32::Rv32Limits::defaults());
   if (!parsed.has_value()) {
     ADD_FAILURE() << "failed to parse upstream-derived RV32 artifact";
     return {};
