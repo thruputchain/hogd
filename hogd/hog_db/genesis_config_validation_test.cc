@@ -158,7 +158,7 @@ TEST_F(GenesisConfigValidationTest, BoundsContractSizeLimitByCeiling)
 // The commit-batch bound is on what a transaction can realize, not on the
 // product of the two maxima: a count of contracts at the ceiling whose
 // product would not fit one executor->HogDb message still loads, because no
-// transaction can carry more than kMaxBytesSignedTransaction of attachments.
+// transaction can carry more than kMaxBytesTransaction of attachments.
 // The count only starts to matter through the per-row slack each stored row
 // adds, so the boundary sits far out. Pinned from the constants, so a change
 // to any of them moves this test.

@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <format>
 #include <memory>
 #include <span>
+#include <string>
 #include <utility>
 
 #include "auth_token.hh"
@@ -214,23 +216,60 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
   ASSERT_NE(stack.lookup_auth_token(token_id.value()), nullptr);
 }
 
-TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
-{
+// The child TryInvoke depth cap is a deterministic rule of the frame stack, so
+// it must hold identically in every execution mode. Each mode takes its own
+// arm in finish_frame to decide whether a child succeeded, and a bump missed
+// in one arm lets that mode run past the cap (viewing did, #3943 audit).
+class InvocationFrameDepthCapTest
+  : public InvocationFrameTest,
+    public ::testing::WithParamInterface<ExecutionMode> {
+protected:
   // One slot is reserved for root commit, so the child cap is
   // kMaxSavepointDepth - 1.
-  static constexpr int kChildCap = kMaxSavepointDepth - 1;
+  static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
+
+  static NondeterministicProposalData all_true_bits(uint32_t count)
+  {
+    NondeterministicProposalData ndet{};
+    for (uint32_t i = 0; i < (count + 7) / 8; i++) {
+      ndet.nondeterministic_bits.push_back(0xff);
+    }
+    ndet.nondeterministic_bit_count = count;
+    return ndet;
+  }
+
+  // Mode data under which every child TryInvoke that reaches the mode's arm
+  // succeeds: proposal probes locks nothing contends for, validation replays
+  // a true bit per child, and viewing is left to its default of true. Only
+  // the depth cap can then fail a child.
+  static ExecutionModeData make_mode_data(ExecutionMode mode)
+  {
+    if (mode == ExecutionMode::kValidating) {
+      return ExecutionModeData{std::in_place_type<ValidationModeData>,
+                               all_true_bits(kChildCap + 1)};
+    }
+    if (mode == ExecutionMode::kViewing) {
+      ViewingModeCtor ctor{.proposal_data_segment_ = {}};
+      return ExecutionModeData{std::in_place_type<ViewingModeData>, ctor};
+    }
+    return ProposalModeData{};
+  }
+};
+
+TEST_P(InvocationFrameDepthCapTest, TryInvokeHitsSavepointDepthLimit)
+{
+  ExecutionModeData mode_data = make_mode_data(GetParam());
 
   InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
   ASSERT_TRUE(
       stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
 
-  for (int i = 0; i < kChildCap; i++) {
+  for (uint32_t i = 0; i < kChildCap; i++) {
     ASSERT_TRUE(stack
                     .start_frame(make_test_address(1), Calldata{},
                                  std::to_underlying(InvokeFlag::TryInvoke), {})
                     .has_value());
-    auto result =
-        stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
+    auto result = stack.finish_frame(InvokeStatus<void>{}, mode_data)();
     ASSERT_TRUE(result.has_value()) << "iteration " << i;
     ASSERT_TRUE(result.value().first.result_.has_value()) << "iteration " << i;
     ASSERT_EQ(result.value().second, false);
@@ -240,11 +279,28 @@ TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
                   .start_frame(make_test_address(1), Calldata{},
                                std::to_underlying(InvokeFlag::TryInvoke), {})
                   .has_value());
-  auto result =
-      stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
+  auto result = stack.finish_frame(InvokeStatus<void>{}, mode_data)();
   ASSERT_TRUE(result.has_value());
-  ASSERT_FALSE(result.value().first.result_.has_value());
+  ASSERT_FALSE(result.value().first.result_.has_value())
+      << "child TryInvoke past the cap must fail deterministically in "
+      << std::format("{}", GetParam());
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    ExecutionModes, InvocationFrameDepthCapTest,
+    ::testing::Values(ExecutionMode::kProposing, ExecutionMode::kValidating,
+                      ExecutionMode::kViewing),
+    [](::testing::TestParamInfo<ExecutionMode> const &info) -> std::string {
+      switch (info.param) {
+      case ExecutionMode::kProposing:
+        return "Proposing";
+      case ExecutionMode::kValidating:
+        return "Validating";
+      case ExecutionMode::kViewing:
+        return "Viewing";
+      }
+      return "Unknown";
+    });
 
 TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
 {

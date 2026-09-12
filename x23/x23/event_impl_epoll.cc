@@ -57,7 +57,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   // calling {read,write}_wait.
 #if X23_FD_TRACE
   if (mode == kFree)
-    panic("Mode was kFree when setting {} callback on fd {}\n{}", int(mode),
+    panic("Mode was kFree when setting {} callback on fd {}\n{}",
           write ? "write" : "read", fd.get(), *fdp->info_.take());
 #else  // !X23_FD_TRACE
   x23assert(mode != kFree);

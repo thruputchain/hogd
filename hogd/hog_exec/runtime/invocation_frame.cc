@@ -161,8 +161,7 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 } // namespace
 
 void
-InvocationFrame::note_validation_try_invoke_success(
-    NetworkConfigParams const &params)
+InvocationFrame::note_try_invoke_success(NetworkConfigParams const &params)
 {
   assert(!depth_cap_reached(params));
   total_try_invoke_depth_++;
@@ -175,14 +174,15 @@ InvocationFrame::try_acquire_frame_locks(
 {
   // Pushes the accumulated delta batch as a HogDb subtransaction. Returns
   // true on a successful lock acquisition, false on contention failure.
-  // On success, increments the per-frame TryInvoke counters; the root commit
-  // caller (SystemCallHandler::try_commit_transaction) ignores those counters,
-  // since the root frame is discarded immediately after commit.
+  // On success, counts the pushed subtransaction against this frame; the root
+  // commit caller (SystemCallHandler::try_commit_transaction) ignores that
+  // count, since the root frame is discarded immediately after commit.
   //
   // The deterministic TryInvoke depth cap (max_savepoint_depth) is NOT enforced
-  // here; it is enforced exclusively by InvocationFrameStack::finish_frame's
-  // depth-cap arm before this is called for a child TryInvoke frame. The child
-  // cap reserves one slot for the root commit's subtransaction push.
+  // or advanced here; InvocationFrameStack::finish_frame checks it before
+  // calling this for a child TryInvoke frame and bumps the depth afterwards,
+  // in the one place shared by every execution mode. The child cap reserves
+  // one slot for the root commit's subtransaction push.
 
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
@@ -231,7 +231,6 @@ InvocationFrame::try_acquire_frame_locks(
   }
   if (res.value()) {
     try_invoke_frame_count_++;
-    total_try_invoke_depth_++;
   }
   co_return res.value();
 }
@@ -396,14 +395,19 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
               co_return SystemError{SystemErrorCode::ValidationFailure};
             }
           }
-          frame_stack_.back().note_validation_try_invoke_success(
-              config_params_);
         }
       }
 
-      // If the frame locks were not acquired successfully, then we mark
-      // the entire frame as failing.
-      if (!acq_success) {
+      // Each mode above only decides whether the child succeeded; the depth
+      // cap is advanced here so that no mode can settle a success without
+      // counting it. A mode-specific bump was how viewing came to skip the
+      // cap.
+      if (acq_success) {
+        frame_stack_.back().note_try_invoke_success(config_params_);
+      }
+      else {
+        // If the frame locks were not acquired successfully, then we mark
+        // the entire frame as failing.
         try_invoke_failed = true;
         // TODO(geoff): perhaps add additional gas consumption
         frame_result = InvokeResult{

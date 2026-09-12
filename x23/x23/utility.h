@@ -11,7 +11,6 @@
 #include <initializer_list>
 #include <new>
 #include <ranges>
-#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -274,11 +273,11 @@ using ArgNumType = typename FnTraits<F>::template arg_type<N>;
 template<typename U, typename T>
 constexpr size_t variant_index =
     []<template<typename...> typename V, typename... Ts>(V<Ts...> *) {
+      // Cause a compilation error if type not in argument:
+      static_assert((std::same_as<Ts, T> || ...), "type not in argument list");
       size_t ret = 0;
-      if (((std::same_as<Ts, T> || (++ret, false)) || ...))
-        return ret;
-      // Cause a constexpr compilation error if type not in argument:
-      throw std::logic_error("type not in argument list");
+      (void)((std::same_as<Ts, T> || (++ret, false)) || ...);
+      return ret;
     }(static_cast<U *>(nullptr));
 
 // Try to find a common return type for a bunch of functions, but fall

@@ -199,19 +199,28 @@ endif()
 set(GOOGLETEST_PATH "" CACHE PATH "Path to googletest")
 set(BENCHMARK_PATH "" CACHE PATH "Path to Google benchmark")
 
+# Look for a file we actually consume, not just the directory: a submodule
+# that has been registered but not checked out leaves an empty directory
+# behind, and accepting it makes the configure step fail outright on a
+# "Cannot find source file" for gtest-all.cc instead of quietly skipping
+# the googletest-based tests.
 if(NOT GOOGLETEST_PATH)
   foreach(dir IN LISTS SUBMODULE_DIRS)
-    if(IS_DIRECTORY ${dir}/googletest)
+    if(EXISTS ${dir}/googletest/googletest/src/gtest-all.cc)
       set(GOOGLETEST_PATH ${dir}/googletest
         CACHE PATH "Path to googletest" FORCE)
       break()
     endif()
   endforeach()
+  if(NOT GOOGLETEST_PATH)
+    message(STATUS "googletest not found; skipping its tests "
+      "(git submodule update --init, or set GOOGLETEST_PATH)")
+  endif()
 endif()
 
 if(BUILD_BENCHMARKS AND GOOGLETEST_PATH AND NOT BENCHMARK_PATH)
   foreach(dir IN LISTS SUBMODULE_DIRS)
-    if(IS_DIRECTORY ${dir}/benchmark)
+    if(EXISTS ${dir}/benchmark/CMakeLists.txt)
       set(BENCHMARK_PATH ${dir}/benchmark
         CACHE PATH "Path to Google benchmark" FORCE)
       break()
@@ -236,6 +245,7 @@ enable_testing()
 add_subdirectory(x23c)
 add_subdirectory(x23)
 add_subdirectory(tests)
+include(cmake/coverage.cmake)
 
 set(X23_CMAKE_ECHO_COLOR_ARGS --cyan)
 if(CMAKE_GENERATOR MATCHES "Makefiles")

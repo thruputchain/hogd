@@ -1385,7 +1385,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
 
   // Validation round-trips: A -> B -> kChildCap successful C invocations
   // (each consuming a true bit and bumping depth via
-  // note_validation_try_invoke_success); B's frame hits the cap; no bit
+  // note_try_invoke_success); B's frame hits the cap; no bit
   // consumed for B; A's TryInvoke of B fails deterministically; A propagates.
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
   auto validation_handler =

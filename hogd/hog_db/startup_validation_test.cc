@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -211,6 +212,24 @@ TEST_F(RecoveredTipTest, RejectsNonCanonicalNetworkConfig)
   tip->network_config = gapped;
 
   EXPECT_FALSE(StartupValidation::tip_is_servable(db, *tip, cost_model_));
+}
+
+TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  for (BlockHeight height : {BlockHeight{-1}, BlockHeight{-2},
+                             std::numeric_limits<BlockHeight>::min()}) {
+    tip->value.proposal_header.block_height = height;
+    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+    ASSERT_TRUE(db.commit().has_value());
+    const auto recovered = db.read_dbtip();
+    ASSERT_TRUE(recovered.has_value());
+    EXPECT_FALSE(
+        StartupValidation::tip_is_servable(db, *recovered, cost_model_));
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -15,6 +15,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -22,7 +23,6 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/view/view.h"
-#include "integration.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "view.hh"
@@ -160,10 +160,9 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kProposing);
 
-  // Reject an over-cap body before execution so it can't overflow the event
-  // RPC (#2857); NonDeterministicError matches the sibling db-push reject.
-  if (x23::xdr_size(signed_tx) > kMaxBytesSignedTransaction) {
-    co_return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
+  // Cap the body, not the wrapper: signatures are node-local (#3844).
+  if (x23::xdr_size(signed_tx.tx) > kMaxBytesTransaction) {
+    co_return ExecProposeResult(ExecResult::ExecResultMalformedTransaction);
   }
 
   auto proxy = make_per_tx_db_proxy(tx_id);
@@ -266,10 +265,9 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
 {
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kValidating);
-  // Same cap as proposal, so a peer-proposed oversized tx is a deterministic
-  // reject rather than fail-stopping the validator (#2857).
-  if (x23::xdr_size(tx.signed_tx) > kMaxBytesSignedTransaction) {
-    co_return ExecResult::ExecResultTxNonDeterministicError;
+  // Same body cap as proposal (#3844).
+  if (x23::xdr_size(tx.signed_tx.tx) > kMaxBytesTransaction) {
+    co_return ExecResult::ExecResultTxValidationFailure;
   }
   auto proxy = make_per_tx_db_proxy(tx_id);
   // SystemCallHandler's ctor re-serializes the tx for sha256 (#1905), which

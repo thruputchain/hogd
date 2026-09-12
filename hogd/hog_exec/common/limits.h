@@ -10,6 +10,10 @@
 
 namespace hogd {
 
+// Cap on the Transaction body, what TransactionHash commits to (#3844).
+inline constexpr size_t kMaxBytesTransaction = 1'900'000;
+static_assert(kMaxBytesTransaction < kMaxBytesSignedTransaction);
+
 // The most storage savepoints a chain may configure this build to hold
 // (kConfigParamMaxSavepointDepth), checked when a genesis is loaded. Every
 // open savepoint is a TryInvoke frame still executing, and each of those is a
@@ -32,17 +36,16 @@ inline constexpr size_t kExecToDbMessageCap = 0x100'0000;
 // contract is verified or executed (#2569); this bound only says how far a
 // chain may raise it.
 //
-// A transaction carries its attachments, so a blob above
-// kMaxBytesSignedTransaction could never reach the executor and nothing is
-// lost by refusing to configure one. Everything below it must then hold up:
-// hog_db must store a row of this size (the chunk-count static_assert in
+// A transaction body carries its attachments, so a blob above
+// kMaxBytesTransaction could never reach the executor and nothing is lost by
+// refusing to configure one. Everything below it must then hold up: hog_db
+// must store a row of this size (the chunk-count static_assert in
 // InvokeTX::request_new_contract), and the commit batch
 // max_new_contracts_per_tx bounds must fit one executor->HogDb message
 // (checked against the pair at genesis load, and for one contract below).
-// Raising kMaxBytesSignedTransaction past what either can carry fails to
-// compile rather than admitting a contract no node could commit.
-inline constexpr size_t kContractSizeCeilingBytes =
-    static_cast<size_t>(kMaxBytesSignedTransaction);
+// Raising kMaxBytesTransaction past what either can carry fails to compile
+// rather than admitting a contract no node could commit.
+inline constexpr size_t kContractSizeCeilingBytes = kMaxBytesTransaction;
 
 // Bytes the XDR envelope adds to a blob in a serialized Contract row: union
 // tag 4 + opaque length 4 + padding <= 3, with slack.

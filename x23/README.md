@@ -43,6 +43,44 @@ either `g++ -std=c++23` or `clang++ -std=c++23 -stdlib=libc++
 -fexperimental-library`.  (It does not work to use `clang++` with
 GCC's `libstdc++` or `g++` with LLVM's `libc++`.)
 
+### Test coverage
+
+Use Clang with matching `llvm-cov` and `llvm-profdata` tools to build
+with [LLVM source-based coverage](https://clang.llvm.org/docs/SourceBasedCodeCoverage.html):
+
+```sh
+cmake -S . -B local/coverage -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_BUILD_TYPE=Debug -DX23_COVERAGE=ON -DBUILD_BENCHMARKS=OFF
+cmake --build local/coverage --target coverage -j8
+```
+
+Coverage builds use `-O0`, debug symbols, enabled assertions, and
+atomic profile counters. Normal builds are unaffected. The LLVM tools
+must match the compiler's major version; set `X23_LLVM_COV` and
+`X23_LLVM_PROFDATA` to select explicit paths.
+
+The `coverage` target builds the tests, clears previous profiles, runs
+CTest, and writes `local/coverage/coverage/summary.txt` and
+`local/coverage/coverage/html/index.html`. CTest parallelism can be limited
+with `CTEST_PARALLEL_LEVEL`. Failed tests still fail the target, but a
+partial report is generated when profiles are available.
+
+Reports include maintained library and compiler sources (`x23/` and
+`x23c/`), including library code not linked into a test. Test code,
+generated files, and dependencies are excluded. Header templates are
+measured only where instantiated, and conditional code only for the
+configured platform/build. Compiler invocations during the build do not
+count as tests. Googletest tests are included when its submodule is
+available (or `GOOGLETEST_PATH` is set); long-running tests not registered
+with CTest are not run.
+
+LLVM can report [mismatched function data](https://github.com/llvm/llvm-project/issues/32849)
+for unused copies of inline functions across objects. Warnings are kept
+visible; `llvm-cov report -dump` with the same objects and profile identifies
+the affected functions. Zero-hash entries can be unused inline mappings;
+nonzero-hash mismatches in project sources should be investigated before
+relying on the report.
+
 ### Integration with cmake
 
 There are two ways to integrate X23 with a cmake-based project.
@@ -255,7 +293,7 @@ source /path/to/x23/x23/x23_gdb.py
 If you want to debug interactions between clients and servers, you
 will want to set a log file descriptor on all your connections.  You
 can do this with the following line of code in `main`, assuming you
-also create your `RpcStreams` with `rpc_stream_logger` (see below).
+also create your `RpcStreams` with `rpc_stream_logged` (see below).
 
 ``` cpp
 x23::RpcLogger::default_logfd = 2;
@@ -422,7 +460,7 @@ do_n_things(int n)
   [n](this auto) -> Detached { // OK because this not a reference
     for (int i = 0; i < n; ++i)
       co_await thing();
-  };
+  }();
 }
 ```
 
@@ -530,7 +568,7 @@ static_assert(is_myvers<MyVersImpl*, MaybeAsync>);
 To invoke and serve RPC services over a stream socket, include the
 header file `<x23/rpc.h>`.  You hand a socket file descriptor to the
 X23 runtime by means of the functions `rpc_stream` or
-`rpc_stream_logger` (the latter of which logs a trace of all RPC calls
+`rpc_stream_logged` (the latter of which logs a trace of all RPC calls
 if you set `x23::RpcLogger::default_logfd` to an output file
 descriptor such as 1).  These functions return a `Configurator` object
 that can then be used to configure the stream, first by declaring
@@ -607,7 +645,7 @@ the tcp port number on which it is listening (useful if you passed in
 
 ``` cpp
 #include <x23/rpc.h>
-#include <x23/refcount.h>
+#include <x23/refcnt.h>
 
 x23::ThreadPool pool;
 x23::CoroPoll cp(pool);
@@ -620,7 +658,7 @@ main()
 {
   // You only need this if you want to block the main thread while
   // RPCs are being serviced.
-  x23:DestroyInhibit di;
+  x23::DestroyInhibit di;
 
   auto [port, lfd] =
       tcp_rpc_server(cp, 5665, [lk=RefPtr(di)](auto c) {
@@ -739,14 +777,14 @@ be pinned to the each LLC.  RPC calls will then be routed to the
 appropriate stream for the invoking thread's LLC.  An example:
 
 ``` cpp
-  char *server = "server.lan";
+  const char *server = "server.lan";
   uint16_t port = 5665;
 
   sockaddr_storage server_addr;
   if (auto ea = x23::HostPort{server, port}.to_addr(true))
     server_addr = *ea;
   else
-    ea->error().raise("getnameinfo({})", server);
+    ea.error().raise("getnameinfo({})", server);
 
   auto client =
     SRpcMulticlient<RpcLogger>::make(server_addr)->client(myvers{});

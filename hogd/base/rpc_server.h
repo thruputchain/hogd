@@ -3,8 +3,10 @@
 #include <atomic>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <expected>
+#include <map>
 #include <string>
 #include <string_view>
 #include <sys/socket.h>

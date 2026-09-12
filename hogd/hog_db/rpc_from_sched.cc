@@ -389,7 +389,7 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   // (#2190). The batch a transaction can realize is the smaller of two
   // bounds: the stated count of contracts at the stated size, and what one
   // transaction carries -- every attached contract rides in the signed
-  // transaction, which the executor caps at kMaxBytesSignedTransaction, plus
+  // transaction body, which the executor caps at kMaxBytesTransaction, plus
   // the per-row slack a stored row adds over its in-transaction encoding. So
   // a chain may admit one large contract or several smaller ones without the
   // product of the two maxima being held against it.
