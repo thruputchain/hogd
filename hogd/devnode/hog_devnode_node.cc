@@ -982,9 +982,16 @@ HogDevnodeNode::materialize_bootstrap_accounts(
       build_local_bootstrap_account_artifact(config, network_hash_,
                                              ctx_->get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
-  CHECK_EQ(client.schedcoord_load_genesis_configuration(
-               std::move(artifact.genesis_configuration))(),
-           DbSchedResult::DbSchedResultOK);
+  const auto genesis_result = client.schedcoord_load_genesis_configuration(
+      std::move(artifact.genesis_configuration))();
+  if (genesis_result != DbSchedResult::DbSchedResultOK) {
+    panic("devnode could not load the genesis configuration: {}. A "
+          "--network-config override is likely outside the bounds this build "
+          "accepts. If this node has a persistent --data-dir, it already "
+          "recorded the requested overrides; correct them and start from a "
+          "fresh data directory.",
+          genesis_result);
+  }
   co_await initialize_fresh_event_outbox_origin();
   register_event_with_mempool();
   register_executor_with_mempool();
