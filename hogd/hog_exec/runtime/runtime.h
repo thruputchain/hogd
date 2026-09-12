@@ -52,10 +52,9 @@ public:
   //
   // For RV32, verification *is* translation: Rv32Contract::create parses the
   // artifact and builds the threaded pre-instantiation, and nothing cheaper
-  // proves translatability (a contract deployed before this check can still
-  // fail it; make_new_runtime treats that as a deterministic failure, #4024).
-  // Handing that image back lets the caller reuse it instead of lowering the
-  // same bytes again (#3536).
+  // proves translatability (make_new_runtime reports a non-translatable
+  // deployed contract as a deterministic failure, #4024). Handing that image
+  // back lets the caller reuse it instead of lowering the same bytes (#3536).
   // Runtimes with nothing to prepare leave `out` untouched.
   //
   // `out` is built in place: the caller supplies storage at whatever scope it

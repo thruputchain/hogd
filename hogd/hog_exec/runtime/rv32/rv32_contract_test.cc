@@ -635,9 +635,8 @@ TEST_F(Rv32ProductionMappingTest,
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
 }
 
-// An untranslatable deployed row can only predate the admission check, since
-// a fresh attachment with the same bytes never deploys. Invoking it is a
-// deterministic contract failure, not an executor-level Unrecoverable (#4024).
+// Untranslatable deployed rows predate admission, so invoking one is a
+// deterministic contract failure, not Unrecoverable (#4024).
 TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsDeterministic)
 {
   auto contract = std::make_shared<Contract>(ContractType::kRv32);

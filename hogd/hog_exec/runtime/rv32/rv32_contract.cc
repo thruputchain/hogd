@@ -212,9 +212,8 @@ Rv32Context::verify_contract(Contract const &contract,
   // artifact only runs the structural artifact checks, whereas Rv32Contract::-
   // create additionally builds the threaded program (instruction decode) and
   // the pre-instantiation image, which can reject inputs that parse cleanly.
-  // Rejecting non-translatable contracts here keeps the "not translatable"
-  // path in make_new_runtime unreachable for freshly attached code, but not
-  // for a row deployed before this check existed (#4024).
+  // This keeps make_new_runtime's "not translatable" path unreachable for
+  // freshly attached code, though not for rows deployed before it (#4024).
   //
   // The translation is handed back rather than discarded: it is the whole
   // product of verification, and the caller reuses it for a same-transaction
@@ -244,9 +243,8 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   // Snapshot deployment: the back-pointer entry was translated eagerly when the
   // contract entered the cache. A present translation is the fast path (no
   // resolve_contract round trip, no per-invocation translation); a null
-  // translation means a row persisted before admission rejected it, so resolve
-  // it like any address with no runnable code and let the caller report a
-  // deterministic fault rather than an executor-level Unrecoverable (#4024).
+  // translation means the row predates admission, so treat it as an address
+  // with no runnable code: the caller reports a deterministic fault (#4024).
   if (deployed_contract.entry != nullptr) {
     if (!deployed_contract.entry->prepared.rv32.has_value()) [[unlikely]] {
       warn("rv32 contract is not translatable: {}",
