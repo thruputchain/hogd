@@ -436,9 +436,9 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   auto [account_state, account_lock] = get_account_state(account);
 
   // Publish the cache and runqueue entries while holding both locks in the
-  // account-then-cache order used by removal. Otherwise, removal could delete
-  // a newly published cache entry while this submission waits for the account
-  // lock, leaving the caller with an admitted outcome for an absent tx.
+  // account-then-cache order used by removal. Otherwise, [schedule()] could
+  // delete a newly published cache entry while this submission waits for the
+  // account lock, leaving the caller with an admitted outcome for an absent tx.
   //
   // The tx may already exist in [txs_] because it is okay to add a tx back
   // into the scheduler again. This can happen if the tx was originally added
@@ -1057,6 +1057,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // already included in the block, those txs will still be executed.
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
+          // -----
           // Keep the account locked until the cache entry is gone, so a
           // concurrent resubmit cannot restore only the runqueue entry. The
           // runqueue's shared_ptr keeps [tx] alive while the cache entry is

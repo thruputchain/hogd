@@ -121,11 +121,12 @@ public:
       };
       auto [account_state, account_lock] = get_account_state(account);
 
-      // The expiry sweep or commit may have removed the cache entry since the
-      // lookup above. Revalidate it while holding both locks in
-      // account-then-cache order so a runqueue entry cannot outlive its cache
-      // entry. Use the current cached value because a replacement signed
-      // wrapper may carry different signatures for the same transaction hash.
+      // [schedule()] or the commit path may have removed the signed tx cache
+      // entry since the lookup above. Revalidate signed tx while holding both
+      // locks in account-then-cache order so a runqueue entry cannot outlive
+      // its cache entry. Use the newly cached signed tx value because a
+      // replacement signed tx may carry different signatures for the same
+      // transaction hash.
       const auto [cached_value, txs_lock] = txs_.find(tx_hash);
       if (cached_value &&
           account_state->txs.insert({key, *cached_value}).second) {
