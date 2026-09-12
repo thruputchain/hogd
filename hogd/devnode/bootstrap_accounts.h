@@ -48,7 +48,7 @@ struct LocalBootstrapConfig {
   std::string seed = "groundhog-dev-accounts";
   std::uint64_t user_storage_tokens = kDefaultLocalUserStorageTokens;
   std::string dev_wallet_profile = std::string(kDefaultDevWalletProfile);
-  LocalNetworkConfigOverrides network_config_overrides = {};
+  LocalNetworkConfigOverrides network_config_overrides;
 };
 
 enum class BootstrapAccountRole {

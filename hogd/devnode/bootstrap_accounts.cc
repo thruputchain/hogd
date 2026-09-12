@@ -7,6 +7,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -22,6 +23,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "types.hh"
 
 namespace hogd {
