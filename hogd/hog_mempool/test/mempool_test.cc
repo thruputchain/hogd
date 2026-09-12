@@ -2618,6 +2618,12 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
 
   MempoolTestInfra server;
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool for heights 0 and 1. The mempool CHECKs that
+  // auth-data updates arrive in strictly increasing order, so the explicit
+  // height-2 update below must not reach it before the height-1 callback has
+  // finished. Wait for it here.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
 
   AddressAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
@@ -3227,6 +3233,12 @@ TEST(Mempool, RejectedSigningIsReverifiedOnEveryResubmission)
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
 
   MempoolTestInfra server;
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool for heights 0 and 1. The mempool CHECKs that
+  // auth-data updates arrive in strictly increasing order, so the explicit
+  // height-2 update below must not reach it before the height-1 callback has
+  // finished. Wait for it here.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
 
   // The account lists one key now and a different one after the change, and
   // the transaction is signed by neither. Authentication turns it down either
