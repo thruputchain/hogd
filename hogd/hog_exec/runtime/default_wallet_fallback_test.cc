@@ -15,6 +15,7 @@
 #include "built_contracts/default_wallet.hh"
 #include "contract.hh"
 #include "exec_result.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -675,10 +676,13 @@ TEST_F(CustomDefaultWalletTest, UntranslatableRv32WalletIsDeterministic)
   auto handler = make_new_system_call_handler(stx, ctx);
   auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
+  // The classification is the point: Deterministic is a contract fault the
+  // block can carry, where Unrecoverable takes the executor down. Asserted
+  // here rather than through try_commit_transaction, whose nonce reservation
+  // needs a funded source this fixture does not set up.
+  EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::Deterministic);
   EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
             InvocationFrameStatusCode::Fault);
-  EXPECT_EQ(handler.try_commit_transaction()(),
-            ExecResult::ExecResultTxDeterministicError);
 }
 
 // NOLINTEND(bugprone-exception-escape)
