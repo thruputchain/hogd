@@ -27,9 +27,6 @@ public:
   // Borrows [contracts]: the returned set holds pointers into its elements,
   // so they must outlive the set (buffer-stealing moves of the enclosing
   // vector are fine; destroying the elements is not).
-  //
-  // `params` is the chain's configuration in force: the bounds an attached
-  // artifact must fit.
   static std::pair<InvokeStatus<NewContractSet>, GasAmount>
   make(NewContractBatch const &contracts, RuntimeContext &runtime_context,
        NetworkConfigParams const &params);

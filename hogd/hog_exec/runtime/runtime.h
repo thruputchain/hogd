@@ -61,9 +61,6 @@ public:
   // `out` is built in place: the caller supplies storage at whatever scope it
   // wants the preparation to live, and the context memoizes nothing. It is
   // written only on success; on rejection it is left as the caller had it.
-  //
-  // `params` is the chain's configuration in force where the contract is
-  // attached: the bounds an rv32 artifact must fit to be admitted.
   virtual InvokeErrorCode verify_contract(Contract const &contract,
                                           NetworkConfigParams const &params,
                                           PreparedContract &out) const = 0;

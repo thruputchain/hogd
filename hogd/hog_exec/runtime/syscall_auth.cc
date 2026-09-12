@@ -153,9 +153,7 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
-  // The wire type does not bound depth: decode under the chain's
-  // max_auth_token_depth, so an over-depth token is refused before any id is
-  // allocated.
+  // The wire type does not bound depth; decode under the chain's limit.
   try {
     x23::deserialize(&auth_token.root_node,
                      x23::BufView{input_serialized_auth_token},

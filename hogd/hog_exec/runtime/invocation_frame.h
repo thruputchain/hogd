@@ -123,13 +123,10 @@ public:
     return try_invoke_frame_count_;
   }
 
-  // `params` are the chain's, held by the owning stack for the whole
-  // transaction rather than copied into every frame.
   bool depth_cap_reached(NetworkConfigParams const &params) const
   {
-    // The chain's max_savepoint_depth, less one slot reserved for the root
-    // commit frame, which always pushes a subtransaction through the same
-    // HogDb path. A depth of 0 leaves no slot for a TryInvoke at all.
+    // One slot is reserved for the root commit's subtransaction push; a depth
+    // of 0 leaves none for a TryInvoke.
     return params.max_savepoint_depth == 0 ||
            total_try_invoke_depth_ >= params.max_savepoint_depth - 1;
   }
@@ -285,9 +282,7 @@ static_assert(std::is_nothrow_move_constructible_v<InvocationFrame>);
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
-  // `config_params` are the chain's parameters in force for this transaction.
-  // The db tip they come from is pinned for the block, so one reference serves
-  // every frame the stack admits; no frame carries its own copy.
+  // `config_params` are the pinned tip's; one reference serves every frame.
   InvocationFrameStack(
       std::function<void(InvocationFrame &&)> last_frame_action,
       PerTransactionDatabaseProxy &db_proxy,

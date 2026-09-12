@@ -38,9 +38,6 @@ RPCContext::open_block_tx_locked(BlockTXID bid, BlockExecutionMode mode)
   // BlockHeight is signed, so evaluating that + 1 would be UB. No successor
   // block exists at the maximum height; reject it before constructing a
   // BlockTX (issue #3955).
-  // The block also runs under the configuration the tip it builds on
-  // carries. Read both under the tip's lock; the tip itself is large (the
-  // storage hash and a consensus value) and is not copied.
   BlockHeight parent_height = -1;
   uint32_t max_savepoint_depth = 0;
   tip_.with([&](TipState const &state) {

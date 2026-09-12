@@ -143,8 +143,7 @@ public:
 
   // Install the chain's execution parameters into the tip. Called at genesis
   // load, before the genesis commit; update_dbtip preserves the field, so the
-  // commit's write_dbtip persists it. The flattened parameters are refreshed
-  // alongside it.
+  // commit's write_dbtip persists it.
   void set_network_config(NetworkConfig const &network_config)
   {
     tip_.with([&](TipState &state) {
@@ -294,11 +293,7 @@ private:
 
   // the database used to persist state.
   HogDbDAO db_;
-  // The committed tip and, beside it, the flattened parameters its network
-  // config puts in force. Both change together: at load, at genesis install,
-  // and on set_tip. update_dbtip carries the config forward unchanged, so
-  // opening a block reads the parameters without re-parsing the config or
-  // copying the tip.
+  // The tip and the parameters its network config puts in force.
   struct TipState {
     DbTip tip;
     NetworkConfigParams params;

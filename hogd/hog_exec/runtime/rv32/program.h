@@ -12,29 +12,22 @@ namespace hogd::rv32 {
 constexpr uint32_t kInstructionBytes = 4;
 constexpr uint32_t kRegisterCount = 32;
 
-// Bytes of guest data memory and of code an artifact may declare when a
-// chain's configuration does not state otherwise: the protocol's
-// kDefaultMaxRv32MemoryBytes / kDefaultMaxRv32CodeBytes, restated here so
-// the VM does not depend on the XDR headers (rv32_contract.cc pins them
-// equal). The gas schedule was calibrated against this working set; a chain
-// admitting more keeps determinism, not the calibration's cache assumptions.
+// The bounds in force when a chain's configuration states none: the protocol
+// defaults, restated so the VM does not depend on the XDR headers
+// (rv32_contract.cc pins them equal).
 constexpr uint32_t kDefaultMaxMemoryBytes = 64 * 1024;
 constexpr uint32_t kDefaultMaxCodeBytes = 64 * 1024;
 
-// The most this VM provisions and translates, and so the ceilings on
-// kConfigParamMaxRv32MemoryBytes / kConfigParamMaxRv32CodeBytes, checked when
-// a genesis is loaded. Every invocation copies the declared memory in and a
-// translation holds one Slot per instruction, neither charged to gas, so
-// these bound what one cheaply-invoked contract can cost a node; anything a
-// chain states below them is enforced where a contract is attached.
+// The most this VM provisions and translates: the ceilings on the configured
+// bounds, checked at genesis load. Memory is copied in per invocation and a
+// translation holds a Slot per instruction, neither charged to gas.
 constexpr uint32_t kMemoryCeilingBytes = 16 * 1024 * 1024;
 constexpr uint32_t kCodeCeilingBytes = 4 * 1024 * 1024;
 static_assert(kDefaultMaxMemoryBytes <= kMemoryCeilingBytes);
 static_assert(kDefaultMaxCodeBytes <= kCodeCeilingBytes);
 
-// The bounds an artifact is admitted under. Attachment uses the chain's
-// configured values; instantiating an already-deployed contract uses the
-// ceilings, so lowering the configuration leaves deployed contracts runnable.
+// The bounds an artifact is admitted under: the chain's configuration at
+// attachment, the ceilings when a deployed contract is instantiated.
 struct Rv32Limits {
   uint32_t max_code_bytes;
   uint32_t max_memory_bytes;

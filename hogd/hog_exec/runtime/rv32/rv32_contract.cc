@@ -32,8 +32,7 @@
 
 namespace hogd {
 
-// The VM's defaults restate the protocol's; a drift would let a chain stating
-// nothing run under a bound other than the one its config hash commits to.
+// The VM's defaults restate the protocol's.
 static_assert(rv32::kDefaultMaxCodeBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32CodeBytes));
 static_assert(rv32::kDefaultMaxMemoryBytes ==
@@ -229,9 +228,8 @@ Rv32Context::verify_contract(Contract const &contract,
   // The translation is handed back rather than discarded: it is the whole
   // product of verification, and the caller reuses it for a same-transaction
   // deployment instead of lowering the identical bytes a second time (#3536).
-  // The chain's bounds apply here, at attachment; a deployed contract is
-  // instantiated under the VM's ceilings instead (StorageSnapshotCache), so
-  // lowering them later strands nothing.
+  // Attachment uses the chain's bounds; a deployed contract runs under the
+  // VM's ceilings (StorageSnapshotCache).
   std::optional<Rv32Contract> translated = Rv32Contract::create(
       contract.rv32_contract(),
       rv32::Rv32Limits{.max_code_bytes = params.max_rv32_code_bytes,

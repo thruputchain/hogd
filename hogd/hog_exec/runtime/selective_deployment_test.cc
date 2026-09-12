@@ -1637,10 +1637,8 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-// The size gate reads the chain's configuration, not a build constant: a
-// chain stating a larger max_contract_size_bytes admits, executes, and stores
-// contracts the stock 256 KiB would refuse. Well above the default so the two
-// cannot be confused, and under the ceiling genesis load enforces.
+// The size gate reads the chain's configuration: a chain stating a larger
+// max_contract_size_bytes admits contracts the stock 256 KiB would refuse.
 constexpr uint32_t kRaisedContractSizeBytes =
     2 * static_cast<uint32_t>(kDefaultMaxContractSizeBytes);
 static_assert(kRaisedContractSizeBytes == 512_KiB);

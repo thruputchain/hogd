@@ -134,9 +134,8 @@ public:
   // frame admission fails under memory pressure; no child frame is pushed in
   // that case, so finish_frame must not be called (#3058).
   //
-  // The frame's limits come from config_params(), which the frame stack holds
-  // for the whole transaction; nothing here reads the tip, so this stays a
-  // noexcept non-coroutine boundary the test FFI mock path enters directly.
+  // The frame's limits come from config_params(), held by the frame stack, so
+  // this stays a noexcept non-coroutine boundary the FFI mock path enters.
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
               std::span<uint32_t const> owned_auth_token_ids) noexcept;

@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "db_conflict.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/concurrent_map.h"
@@ -29,15 +28,10 @@ namespace hogd {
 // Multiple BlockTXes can be instantiated, but only one should be committed.
 class BlockTX {
 public:
-  // max_savepoint_depth is the chain's kConfigParamMaxSavepointDepth, read
-  // off the tip the block builds on; hog_exec enforces it deterministically,
-  // and hog_db treats a push past it as executor misbehavior. Tests and
-  // benchmarks that build a block directly run under the protocol default.
-  BlockTX(
-      HogDbDAO &db, const StorageCostModel &cost_model,
-      BackgroundCommitWorker &background_commit_worker,
-      BlockHeight block_height, BlockExecutionMode mode,
-      uint32_t max_savepoint_depth = static_cast<uint32_t>(kMaxSavepointDepth))
+  BlockTX(HogDbDAO &db, const StorageCostModel &cost_model,
+          BackgroundCommitWorker &background_commit_worker,
+          BlockHeight block_height, BlockExecutionMode mode,
+          uint32_t max_savepoint_depth)
     : db_(db), cost_model_(cost_model),
       background_commit_worker_(background_commit_worker),
       block_height_(block_height), mode_(mode),

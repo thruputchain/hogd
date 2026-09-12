@@ -375,8 +375,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   }
   const NetworkConfigParams config_params(
       genesis_configuration.network_config.v0());
-  // A contract above the ceiling could never be carried by a transaction, and
-  // hog_db is only proven to store rows up to it.
   if (const uint32_t stated = config_params.max_contract_size_bytes;
       stated > kContractSizeCeilingBytes) {
     error("genesis max_contract_size_bytes {} exceeds the {} this build can "
@@ -384,15 +382,9 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, kContractSizeCeilingBytes);
     co_return DbSchedResult::DbSchedResultError;
   }
-  // A genesis can name a size and count whose commit batch this build could
-  // not send in one message; reject the pair here rather than at commit
-  // (#2190). The batch a transaction can realize is the smaller of two
-  // bounds: the stated count of contracts at the stated size, and what one
-  // transaction carries -- every attached contract rides in the signed
-  // transaction body, which the executor caps at kMaxBytesTransaction, plus
-  // the per-row slack a stored row adds over its in-transaction encoding. So
-  // a chain may admit one large contract or several smaller ones without the
-  // product of the two maxima being held against it.
+  // The commit batch a transaction can realize is the smaller of the stated
+  // count at the stated size and what one transaction body carries plus
+  // per-row slack; refuse the pair only if that cannot fit one message (#2190).
   constexpr size_t kBatchOverhead = 1_KiB;
   const size_t count = config_params.max_new_contracts_per_tx;
   const size_t stated_batch =
@@ -409,8 +401,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           kExecToDbMessageCap);
     co_return DbSchedResult::DbSchedResultError;
   }
-  // Past what the VM provisions or translates, an admitted artifact would be
-  // unrunnable, so refuse the configuration up front.
   if (const uint32_t stated = config_params.max_rv32_code_bytes;
       stated > rv32::kCodeCeilingBytes) {
     error("genesis max_rv32_code_bytes {} exceeds the {} this build's VM "
@@ -430,8 +420,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("genesis max_savepoint_depth must be at least 1 for root commits");
     co_return DbSchedResult::DbSchedResultError;
   }
-  // Deeper than the executor's stacks are sized for would abort a node on a
-  // transaction that merely recursed, so refuse it up front.
   if (const uint32_t stated = config_params.max_savepoint_depth;
       stated > kSavepointDepthCeiling) {
     error("genesis max_savepoint_depth {} exceeds the {} this build's "

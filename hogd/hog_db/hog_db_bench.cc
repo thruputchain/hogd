@@ -22,6 +22,7 @@
 
 #include "consensus.hh"
 #include "header.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -323,7 +324,8 @@ Benchmark::run()
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
   PerThreadARC<BlockTX> block(db_, cost_model_, background_commit_worker, 1,
-                              BlockExecutionMode::kBlockExecutionModeProposal);
+                              BlockExecutionMode::kBlockExecutionModeProposal,
+                              static_cast<uint32_t>(kMaxSavepointDepth));
 
   ConsensusValue tip_value{};
   tip_value.proposal_header.block_height = 0;
@@ -531,7 +533,8 @@ RCQBenchmark::run_sequential()
       PerThreadARC<BlockTX> block_tx(
           db_, cost_model_, background_commit_worker_,
           static_cast<BlockHeight>(block + 1),
-          BlockExecutionMode::kBlockExecutionModeProposal);
+          BlockExecutionMode::kBlockExecutionModeProposal,
+          static_cast<uint32_t>(kMaxSavepointDepth));
 
       size_t block_end =
           std::min(num_entries_,
@@ -593,7 +596,8 @@ RCQBenchmark::run_sequential()
       PerThreadARC<BlockTX> block_tx(
           db_, cost_model_, background_commit_worker_,
           static_cast<BlockHeight>(num_blocks + 1),
-          BlockExecutionMode::kBlockExecutionModeProposal);
+          BlockExecutionMode::kBlockExecutionModeProposal,
+          static_cast<uint32_t>(kMaxSavepointDepth));
 
       std::vector<size_t> queue_indices;
       queue_indices.reserve(num_queues_);
@@ -818,7 +822,8 @@ RCQBenchmark::run_concurrent()
       PerThreadARC<BlockTX> block_tx(
           db_, cost_model_, background_commit_worker_,
           static_cast<BlockHeight>(block + 1),
-          BlockExecutionMode::kBlockExecutionModeProposal);
+          BlockExecutionMode::kBlockExecutionModeProposal,
+          static_cast<uint32_t>(kMaxSavepointDepth));
 
       size_t cur_block_end =
           std::min(num_entries_,

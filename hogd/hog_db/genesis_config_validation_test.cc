@@ -140,11 +140,8 @@ TEST_F(GenesisConfigValidationTest, RejectsBytestringLimitAboveCeiling)
 // A database loads genesis once, so each case below ends in at most one
 // successful load, after any it expects refused.
 
-// The largest contract a transaction can carry is admissible, and with it the
-// stock attachment count: raising the size past the 256 KiB default is a
-// configuration choice, not a protocol change. One byte past the ceiling is
-// refused: hog_db is only proven to store rows up to it, and no transaction
-// could carry the contract anyway.
+// A contract at the ceiling loads with the stock attachment count; one byte
+// past it is refused.
 TEST_F(GenesisConfigValidationTest, BoundsContractSizeLimitByCeiling)
 {
   EXPECT_EQ(load_with_contract_limits(kContractCeiling + 1, 1),
@@ -155,13 +152,9 @@ TEST_F(GenesisConfigValidationTest, BoundsContractSizeLimitByCeiling)
             DbSchedResult::DbSchedResultOK);
 }
 
-// The commit-batch bound is on what a transaction can realize, not on the
-// product of the two maxima: a count of contracts at the ceiling whose
-// product would not fit one executor->HogDb message still loads, because no
-// transaction can carry more than kMaxBytesTransaction of attachments.
-// The count only starts to matter through the per-row slack each stored row
-// adds, so the boundary sits far out. Pinned from the constants, so a change
-// to any of them moves this test.
+// The commit-batch bound is on what a transaction can realize, not the
+// product of the two maxima, so a count at the ceiling still loads. Pinned
+// from the constants.
 TEST_F(GenesisConfigValidationTest, CommitBatchIsNotTheProductOfTheMaxima)
 {
   constexpr size_t kBatchOverhead = 1_KiB;
