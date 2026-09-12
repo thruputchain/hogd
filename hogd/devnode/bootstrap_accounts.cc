@@ -1,5 +1,6 @@
 #include "hogd/devnode/bootstrap_accounts.h"
 
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -7,12 +8,14 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include "built_contracts/dev_wallet.h"
 #include "contract.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/dev_wallet_profile.h"
@@ -24,6 +27,34 @@
 namespace hogd {
 
 namespace {
+
+ConfigParamID
+local_parameter_id(std::string_view name)
+{
+  static constexpr std::pair<std::string_view, ConfigParamID> kParameters[] = {
+      {"max_sha256_buffers", ConfigParamID::kConfigParamMaxSHA256Buffers},
+      {"max_cross_invoke_depth",
+       ConfigParamID::kConfigParamMaxCrossInvokeDepth},
+      {"max_new_contracts_per_tx",
+       ConfigParamID::kConfigParamMaxNewContractsPerTx},
+      {"max_bytestring_len", ConfigParamID::kConfigParamMaxBytestringLen},
+      {"max_contract_size_bytes",
+       ConfigParamID::kConfigParamMaxContractSizeBytes},
+      {"max_savepoint_depth", ConfigParamID::kConfigParamMaxSavepointDepth},
+      {"max_sha256_buffer_bytes",
+       ConfigParamID::kConfigParamMaxSHA256BufferBytes},
+      {"max_auth_token_depth", ConfigParamID::kConfigParamMaxAuthTokenDepth},
+      {"max_rv32_code_bytes", ConfigParamID::kConfigParamMaxRv32CodeBytes},
+      {"max_rv32_memory_bytes", ConfigParamID::kConfigParamMaxRv32MemoryBytes},
+  };
+  for (auto const &[key, id] : kParameters) {
+    if (name == key) {
+      return id;
+    }
+  }
+  throw std::runtime_error(
+      std::format("unknown network configuration parameter '{}'", name));
+}
 
 SHA256Hash
 derive_labeled_hash(std::string_view seed, std::string_view label)
@@ -80,7 +111,8 @@ BootstrapAccountArtifact
 finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
                           std::vector<BootstrapAccountMetadata> accounts,
                           NetworkHash const &network_hash,
-                          StorageCostModel const &cost_model)
+                          StorageCostModel const &cost_model,
+                          NetworkConfig const &network_config)
 {
   auto initialization_txs =
       builder.try_make_genesis_ceremony_transactions(cost_model);
@@ -92,14 +124,48 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
   return BootstrapAccountArtifact{
       .genesis_configuration =
           builder.build(network_hash, cost_model,
-                        *load_stock_genesis_root_contract(),
-                        stock_network_config()),
+                        *load_stock_genesis_root_contract(), network_config),
       .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
   };
 }
 
 } // namespace
+
+void
+add_local_network_config_override(LocalNetworkConfigOverrides &overrides,
+                                  std::string_view assignment)
+{
+  const auto separator = assignment.find('=');
+  if (separator == std::string_view::npos) {
+    throw std::runtime_error("--network-config expects NAME=VALUE");
+  }
+  const auto name = assignment.substr(0, separator);
+  const auto raw = assignment.substr(separator + 1);
+  static_cast<void>(local_parameter_id(name));
+  std::uint32_t value = 0;
+  const auto [end, error] =
+      std::from_chars(raw.data(), raw.data() + raw.size(), value);
+  if (error != std::errc{} || end != raw.data() + raw.size()) {
+    throw std::runtime_error(
+        std::format("network parameter '{}' requires a decimal uint32 value",
+                    name));
+  }
+  if (!overrides.emplace(std::string(name), value).second) {
+    throw std::runtime_error(
+        std::format("network parameter '{}' specified more than once", name));
+  }
+}
+
+NetworkConfig
+local_network_config(LocalNetworkConfigOverrides const &overrides)
+{
+  auto config = stock_network_config();
+  for (auto const &[name, value] : overrides) {
+    NetworkConfigParams::set_param(config, local_parameter_id(name), value);
+  }
+  return config;
+}
 
 std::pair<Ed25519PublicKey, Ed25519SecretKey>
 derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index)
@@ -118,7 +184,7 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config,
       append_bootstrap_accounts(builder, config);
 
   return finish_bootstrap_artifact(builder, std::move(accounts), network_hash,
-                                   cost_model);
+                                   cost_model, stock_network_config());
 }
 
 std::vector<BootstrapAccountMetadata>
@@ -167,7 +233,9 @@ build_local_bootstrap_account_artifact(LocalBootstrapConfig const &config,
                                  BootstrapAccountRole::kLocalUser));
   }
   return finish_bootstrap_artifact(builder, std::move(accounts), network_hash,
-                                   cost_model);
+                                   cost_model,
+                                   local_network_config(
+                                       config.network_config_overrides));
 }
 
 } // namespace hogd

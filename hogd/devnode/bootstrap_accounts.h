@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -10,6 +11,7 @@
 #include "hogd/base/types.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -30,11 +32,23 @@ struct BootstrapAccountConfig {
   std::string dev_wallet_profile = std::string(kDefaultDevWalletProfile);
 };
 
+using LocalNetworkConfigOverrides = std::map<std::string, std::uint32_t>;
+
+// Parse a named decimal uint32 override. Reject unknown names and duplicates.
+void add_local_network_config_override(LocalNetworkConfigOverrides &overrides,
+                                       std::string_view assignment);
+
+// Apply overrides through the canonical config builder; database genesis
+// validation remains authoritative for build-specific ceilings.
+NetworkConfig
+local_network_config(LocalNetworkConfigOverrides const &overrides);
+
 struct LocalBootstrapConfig {
   std::uint32_t user_account_count = 0;
   std::string seed = "groundhog-dev-accounts";
   std::uint64_t user_storage_tokens = kDefaultLocalUserStorageTokens;
   std::string dev_wallet_profile = std::string(kDefaultDevWalletProfile);
+  LocalNetworkConfigOverrides network_config_overrides = {};
 };
 
 enum class BootstrapAccountRole {

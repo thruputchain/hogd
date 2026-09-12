@@ -52,6 +52,7 @@
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -61,6 +62,7 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
@@ -1774,6 +1776,47 @@ TEST(HogDevnode, BootstrapAccountDerivationMatchesRustGoldens)
   }
 }
 
+TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
+{
+  LocalBootstrapConfig config;
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_rv32_memory_bytes=16777216");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_rv32_code_bytes=1048576");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_contract_size_bytes=1048576");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_bytestring_len=32768");
+  auto artifact = build_local_bootstrap_account_artifact(config);
+  auto const &network = artifact.genesis_configuration.network_config;
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(network.v0()));
+  const NetworkConfigParams params(network.v0());
+  EXPECT_EQ(params.max_rv32_memory_bytes, 16 * 1024 * 1024U);
+  EXPECT_EQ(params.max_rv32_code_bytes, 1024 * 1024U);
+  EXPECT_EQ(params.max_contract_size_bytes, 1024 * 1024U);
+  EXPECT_EQ(params.max_bytestring_len, 32768U);
+  EXPECT_EQ(params.max_new_contracts_per_tx, 4U);
+  EXPECT_EQ(local_network_config({}), stock_network_config());
+}
+
+TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
+{
+  LocalNetworkConfigOverrides overrides;
+  for (const auto *bad :
+       {"unknown=2", "max_bytestring_len",
+        "max_bytestring_len=", "max_bytestring_len=-1",
+        "max_bytestring_len=4294967296", "max_bytestring_len=1x"}) {
+    EXPECT_THROW(add_local_network_config_override(overrides, bad),
+                 std::runtime_error);
+    EXPECT_TRUE(overrides.empty());
+  }
+  add_local_network_config_override(overrides, "max_bytestring_len=32768");
+  EXPECT_THROW(add_local_network_config_override(overrides,
+                                                 "max_bytestring_len=65536"),
+               std::runtime_error);
+  EXPECT_EQ(overrides.at("max_bytestring_len"), 32768U);
+}
+
 TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 {
   LocalBootstrapConfig config{.user_account_count = 3};
@@ -3021,6 +3064,35 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
           "1000000000",
       },
       "recovered database storage hash does not match DbTip");
+}
+
+TEST(HogDevnode, NetworkOverridesSurviveRestartAndRejectChangedIntent)
+{
+  const auto data_dir = make_test_data_dir();
+  Defer cleanup([&] { std::filesystem::remove_all(data_dir); });
+  for (const auto *expected_state : {"fresh", "recovered"}) {
+    auto process = HogDevnodeProcess::start(
+        {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+         "--network-config", "max_bytestring_len=32768"});
+    const auto readiness = process.wait_for_readiness();
+    EXPECT_EQ(readiness.chain_state, expected_state);
+    auto scheduler = create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                                    readiness.scheduler.port,
+                                                    /*retry=*/true)()
+                         .value();
+    const auto tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(NetworkConfigParams(tip.db_tip().network_config.v0())
+                  .max_bytestring_len,
+              32768U);
+    expect_clean_exit(process);
+  }
+  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+                          "1"},
+                         "different --network-config");
+  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+                          "1", "--network-config", "max_bytestring_len=16384"},
+                         "different --network-config");
 }
 
 TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountSeed)
