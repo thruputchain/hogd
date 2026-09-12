@@ -101,7 +101,10 @@ constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
-constexpr std::size_t kTestRamDbBytes = 15UL * 1024 * 1024 * 1024;
+// 2 GiB per node instead of the 15 GiB default; this suite boots ~85 nodes.
+constexpr std::size_t kTestRamDbBytes = 2UL * 1024 * 1024 * 1024;
+// Read by available_parallelism(); set only when unset so suite-wide pins win.
+constexpr char kTestDevnodeThreadpoolSize[] = "4";
 
 // Unwraps a page-query result; a backend failure (e.g. the indexer db
 // still opening) yields an empty page, so pollers simply retry and
@@ -658,10 +661,17 @@ public:
       if (include_default_args) {
         args.insert(args.end(),
                     {"--listen-host", "127.0.0.1", "--scheduler-port", "0",
-                     "--readiness", "stdout"});
+                     "--readiness", "stdout", "--ramdb-bytes",
+                     std::to_string(kTestRamDbBytes)});
       }
+      // Appended after the defaults, so a test's own --ramdb-bytes wins.
       args.insert(args.end(), extra_args.begin(), extra_args.end());
 
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      if (setenv("DEFAULT_THREADPOOL_SIZE", kTestDevnodeThreadpoolSize,
+                 /*overwrite=*/0) != 0) {
+        _exit(127);
+      }
       for (auto const &[key, value] : extra_env) {
         // NOLINTNEXTLINE(misc-include-cleaner)
         if (setenv(key.c_str(), value.c_str(), /*overwrite=*/1) != 0) {
@@ -1403,10 +1413,10 @@ TEST(HogDevnode, RamdbReservationFailureReferencesFlag)
 
 TEST(HogDevnode, ReducedRamdbBytesReachesReadiness)
 {
-  // 2 GiB instead of the 15 GiB default; mirrors the low-memory (e.g. WSL)
-  // configuration the flag exists for.
+  // 1 GiB, below the 2 GiB each test node gets; mirrors the low-memory
+  // (e.g. WSL) configuration the flag exists for.
   HogDevnodeProcess process =
-      HogDevnodeProcess::start({"--ramdb-bytes", "2147483648"});
+      HogDevnodeProcess::start({"--ramdb-bytes", "1073741824"});
   process.wait_for_readiness();
   expect_clean_exit(process);
 }
