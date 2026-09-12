@@ -29,10 +29,18 @@ rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 # the GitHub runner; hog_sched jobs only inherit the env their schedule
 # declares, which is why deriving them here matters.
 export CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX:-sparse+https://groundhog.dev/crates/api/v1/crates/}"
+# xtrace is on from [set -ex] above, and it prints commands *after* expansion --
+# tracing the token would write the registry credential straight into the job
+# log, which hog_sched relays and [gh run view --log] hands back. Drop tracing
+# across the credential handling only, the same way [ccache_warmup.toml] does
+# before it passes this token. The installs below stay traced: they carry the
+# token in the environment, not on their command line.
+set +x
 if [ -n "${CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN:-${CARGO_REGISTRIES_GROUNDHOG_TOKEN:-}}" ]; then
   export CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN:-${CARGO_REGISTRIES_GROUNDHOG_TOKEN}}"
   export CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER:-cargo:token}"
 fi
+set -x
 
 echo "Installing groundhog-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
