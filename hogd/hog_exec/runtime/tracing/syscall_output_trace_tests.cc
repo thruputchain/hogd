@@ -981,6 +981,20 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        // A peek copies the entry like a consume but leaves the cursor put, so
+        // it must be metered the same and the consume below still sees the
+        // entry. This is the repeated-peek path that motivated #4007.
+        std::array<std::byte, 3> peek_buffer{};
+        RuntimeMemoryLength peek_written_len = 0;
+        auto peek_consume =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::span<std::byte>(peek_buffer), peek_written_len);
+        if (!peek_consume.has_value() ||
+            peek_consume.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            peek_written_len != entry_bytes.size()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
         // A 1-byte buffer for a 3-byte entry: written_len reports the full
         // length, the buffer gets the prefix, and the trace must record the
         // whole entry.
@@ -1026,11 +1040,22 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueConsume);
     body.retrocausal_queue_consume().inputs.key = key;
+    body.retrocausal_queue_consume().inputs.peek = true;
+    body.retrocausal_queue_consume().outputs =
+        SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
+    // The peek copies all 3 bytes into a 3-byte buffer: one read block, the
+    // copy charge added for #4007, on the peek path.
+    expected.push_back(step_entry(gas, GasCost::retrocausal_queue_consume(3),
+                                  std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kRetrocausalQueueConsume);
+    body.retrocausal_queue_consume().inputs.key = key;
     body.retrocausal_queue_consume().inputs.peek = false;
     body.retrocausal_queue_consume().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
     // One byte reached the guest (a 1-byte buffer for a 3-byte entry), so the
-    // consume pays for one read block -- the copy charge added for #4007.
+    // consume pays for one read block, the copy charge added for #4007.
     expected.push_back(step_entry(gas, GasCost::retrocausal_queue_consume(1),
                                   std::move(body), ok_status()));
   }

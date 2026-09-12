@@ -66,11 +66,8 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
                            std::as_bytes(std::span(queue_entry.data(),
                                                    queue_entry.size())));
 
-  // Charge for the payload bytes copied into the guest, the byte-proportional
-  // work a bytestring read is billed for. Without this a contract can peek a
-  // maximum-size self entry repeatedly and copy its payload unmetered (#4007).
-  // The copy is min(buffer, entry) bytes -- the amount copy_to_guest_buffer
-  // memcpy'd -- not the full entry length it reports.
+  // Charge for the bytes actually copied into the guest: copy_to_guest_buffer
+  // memcpy's min(buffer, entry), not the full entry length it reports (#4007).
   const std::size_t copied_len =
       std::min<std::size_t>(output_queue_entry.size(), queue_entry.size());
 
