@@ -180,6 +180,13 @@ build_data_dir_metadata_json(LocalBootstrapConfig const &config)
               static_cast<std::int64_t>(config.user_account_count));
       w.field("devAccountSeed", config.seed);
       w.field("devAccountTokens", std::to_string(config.user_storage_tokens));
+      if (!config.network_config_overrides.empty()) {
+        w.object_field("networkConfigOverrides", [&](json::Writer &fields) {
+          for (auto const &[name, value] : config.network_config_overrides) {
+            fields.field(name, static_cast<std::int64_t>(value));
+          }
+        });
+      }
     });
   });
   return buffer;
@@ -365,6 +372,21 @@ parse_data_dir_metadata(std::string_view bytes)
           std::string(require_string_field(config_json, "devWalletProfile",
                                            "bootstrapConfig")),
   };
+  if (const auto *overrides = config_json.find("networkConfigOverrides")) {
+    if (overrides->type() != json::Value::Type::kObject) {
+      throw std::runtime_error(
+          "data metadata networkConfigOverrides must be an object");
+    }
+    for (auto const &[name, value] : overrides->as_object()) {
+      const auto number = value.as_integer();
+      if (!number || *number < 0 || std::cmp_greater(*number, UINT32_MAX)) {
+        throw std::runtime_error(
+            "data metadata network override must be a uint32 integer");
+      }
+      add_local_network_config_override(config.network_config_overrides,
+                                        std::format("{}={}", name, *number));
+    }
+  }
   if (config.seed.empty()) {
     throw std::runtime_error(
         "hog-devnode data metadata devAccountSeed must not be empty");
@@ -398,6 +420,13 @@ require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
   if (persisted.user_storage_tokens != requested.user_storage_tokens) {
     fail("--dev-account-tokens", std::to_string(persisted.user_storage_tokens),
          std::to_string(requested.user_storage_tokens));
+  }
+  if (persisted.network_config_overrides !=
+      requested.network_config_overrides) {
+    throw std::runtime_error(
+        "hog-devnode data dir was initialized with different --network-config "
+        "overrides; reuse the original overrides or choose a fresh data "
+        "directory");
   }
   if (persisted.dev_wallet_profile != requested.dev_wallet_profile) {
     fail("--dev-wallet-profile", persisted.dev_wallet_profile,
@@ -953,9 +982,16 @@ HogDevnodeNode::materialize_bootstrap_accounts(
       build_local_bootstrap_account_artifact(config, network_hash_,
                                              ctx_->get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
-  CHECK_EQ(client.schedcoord_load_genesis_configuration(
-               std::move(artifact.genesis_configuration))(),
-           DbSchedResult::DbSchedResultOK);
+  const auto genesis_result = client.schedcoord_load_genesis_configuration(
+      std::move(artifact.genesis_configuration))();
+  if (genesis_result != DbSchedResult::DbSchedResultOK) {
+    panic("devnode could not load the genesis configuration: {}. A "
+          "--network-config override is likely outside the bounds this build "
+          "accepts. If this node has a persistent --data-dir, it already "
+          "recorded the requested overrides; correct them and start from a "
+          "fresh data directory.",
+          genesis_result);
+  }
   co_await initialize_fresh_event_outbox_origin();
   register_event_with_mempool();
   register_executor_with_mempool();

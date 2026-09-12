@@ -294,6 +294,10 @@ Options:
   --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
                                  dev-account and wallet shorthand flags
                                  conflict.
+  --network-config <name=value>  Override a genesis execution parameter.
+                                 Repeat for multiple parameters. Values are
+                                 decimal uint32. Existing data directories
+                                 require the same overrides on restart.
   --dev-accounts <count>         Deterministic user accounts, excluding dev-0
                                  [default: 0]. groundhog node passes its own
                                  count; pass at least 1 when running directly
@@ -438,6 +442,7 @@ parse_args(int argc, char *argv[])
 {
   HogDevnodeOptions options;
   OptionSources sources;
+  hogd::LocalNetworkConfigOverrides network_config_overrides;
   std::optional<std::filesystem::path> bootstrap_manifest_path;
   std::optional<std::string> dev_accounts_value;
   std::optional<std::string> dev_account_seed_value;
@@ -500,6 +505,11 @@ parse_args(int argc, char *argv[])
       }
       sources.dev_wallet_profile = true;
       dev_wallet_profile_value = argv[++i];
+      continue;
+    }
+    if (arg == "--network-config" && i + 1 < argc) {
+      hogd::add_local_network_config_override(network_config_overrides,
+                                              argv[++i]);
       continue;
     }
     if (arg == "--bootstrap-manifest" && i + 1 < argc) {
@@ -583,6 +593,8 @@ parse_args(int argc, char *argv[])
     options.runtime_network_hash = manifest_config->network_hash;
     options.bootstrap_config = std::move(manifest_config->bootstrap_config);
   }
+  options.bootstrap_config.network_config_overrides =
+      std::move(network_config_overrides);
   return options;
 }
 
