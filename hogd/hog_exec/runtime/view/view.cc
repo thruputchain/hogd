@@ -66,6 +66,9 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     CHECK(!r.value());
   }
 
+  // Forwarded tokens arrive already decoded, under the process-wide recursion
+  // budget rather than the token bound the mint syscall decodes under, so
+  // their depth is checked by walking them here.
   try {
     for (auto const &token : query.forwarded_tokens) {
       if (!AuthTokenRegistry::node_within_depth(token.root_node,

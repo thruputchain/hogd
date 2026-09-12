@@ -13,7 +13,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
@@ -153,17 +152,18 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
+  // The wire type bounds a node's payload and its direct children but not
+  // the nesting depth, so the decoder's recursion budget is what bounds the
+  // token: each AuthTokenNode holds one level while it decodes and releases
+  // it on return, so the token decodes iff no root-to-leaf path has more
+  // than kAuthTokenMaxDepth nodes. Width never consumes budget (a full
+  // kAuthTokenMaxChildNodes-way tree of kAuthTokenMaxDepth levels decodes),
+  // and an over-depth token is refused here, before any id is allocated.
   try {
     x23::deserialize(&auth_token.root_node,
-                     x23::BufView{input_serialized_auth_token});
+                     x23::BufView{input_serialized_auth_token},
+                     size_t{kAuthTokenMaxDepth});
   } catch (x23::XdrException &e) {
-    return SyscallInnerResult{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-        WrappedGasAmount{0}};
-  }
-
-  if (!AuthTokenRegistry::node_within_depth(auth_token.root_node,
-                                            kAuthTokenMaxDepth)) {
     return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};
