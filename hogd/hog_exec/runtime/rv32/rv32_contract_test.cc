@@ -659,14 +659,8 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
 }
 
-// Regression test for #4038: a BytestringGetLen on an absent contract-data key
-// still walks the frame stack, hits the snapshot cache, and admits a negative
-// entry, so it must pay host gas rather than only the guest schedule. A load is
-// the transaction's first touch of a key (gas_cost_table.h), so same-key
-// repeats dedupe to a single kDBRPCCost while distinct keys each pay it. Both
-// programs below issue kReadCount length reads on missing keys with an
-// identical instruction shape, so the entire gas difference between them is the
-// extra distinct-key cold loads.
+// Regression test for #4038: a missing-key BytestringGetLen must still pay the
+// host cold-load charge, so distinct keys cost one extra kDBRPCCost each.
 TEST_F(Rv32ProductionMappingTest,
        DistinctMissingBytestringReadsAreChargedHostGas)
 {
