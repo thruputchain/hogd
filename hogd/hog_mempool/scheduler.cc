@@ -424,35 +424,6 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
   return account_state.hog_age;
 }
 
-bool
-Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
-                                   const std::shared_ptr<TxValue> &tx_value)
-{
-  const ContractAddress &account = tx_value->tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height =
-                      tx_value->tx.tx.uniquifier.block_expiry_height,
-                  .tx_hash = tx_hash};
-  auto [account_state, lock] = get_account_state(account);
-  // The expiry sweep or commit may have removed the cache entry since the
-  // caller looked it up. Hold both locks in account-then-cache order so that
-  // a runqueue insertion cannot race with removal from the cache.
-  const auto [cached_value, txs_lock] = txs_.find(tx_hash);
-  if (!cached_value) {
-    return false;
-  }
-  // Check if the tx is already present in [account_state->txs]. If it is, we
-  // are adding a duplicate tx, so we do not want to increment [size_].
-  //
-  // We deliberately use [cached_value] instead of [tx_value]. [cached_value] is
-  // the current value in [txs_], whereas [tx_value] could point to a stale tx
-  // since [txs_] could have changed while we were not holding [txs_lock]. Note
-  // that even though [cached_value] and [tx_value] both point to txs with the
-  // same hash and therefore the txs are the same, the [SignedTransaction]'s
-  // that hold these inner txs could have different signatures. Thus,
-  // [cached_value] and [tx_value] could refer to different txs altogether.
-  return account_state->txs.insert({key, *cached_value}).second;
-}
-
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool

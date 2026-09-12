@@ -112,7 +112,23 @@ public:
         CHECK_PTR(tx_value_ptr);
         tx_value = *tx_value_ptr;
       }
-      if (insert_tx_into_runqueue(tx_hash, tx_value)) {
+
+      const SignedTransaction &tx = tx_value->tx;
+      const ContractAddress &account = tx.tx.invocation.invoked_address;
+      const TxKey key{
+          .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+          .tx_hash = tx_hash,
+      };
+      auto [account_state, account_lock] = get_account_state(account);
+
+      // The expiry sweep or commit may have removed the cache entry since the
+      // lookup above. Revalidate it while holding both locks in
+      // account-then-cache order so a runqueue entry cannot outlive its cache
+      // entry. Use the current cached value because a replacement signed
+      // wrapper may carry different signatures for the same transaction hash.
+      const auto [cached_value, txs_lock] = txs_.find(tx_hash);
+      if (cached_value &&
+          account_state->txs.insert({key, *cached_value}).second) {
         num_inserted++;
       }
     }
@@ -250,18 +266,6 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
-  // Inserts the tx with [tx_hash] into the runqueue. Returns true if the
-  // insertion succeeded and false otherwise.
-  // The caller must not hold a [txs_] bucket lock: when both locks are needed,
-  // acquire the account bucket lock before the tx cache bucket lock.
-  //
-  // This method does *not* modify [size_]! The caller must do this. Generally,
-  // the caller will often want to add multiple txs to the runqueue, so it is
-  // more efficient for the caller to do a single [fetch_add()] to [size_]
-  // rather than have [insert_tx_into_runqueue()] increment [size_] for every
-  // single tx.
-  bool insert_tx_into_runqueue(const TransactionHash &tx_hash,
-                               const std::shared_ptr<TxValue> &tx_value);
   bool add_txs_helper(const SignedTransaction &tx,
                       const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
