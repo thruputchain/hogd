@@ -153,8 +153,8 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   ASSERT_EQ(lookup.size(), 1UL);
   EXPECT_FALSE(lookup[0]);
 
-  // A later submission must atomically restore both the cache and runqueue
-  // entries; removal and admission use the same account-then-cache lock order.
+  // A later submission must restore the tx to both the [Scheduler::txs_] cache
+  // and runqueue entries.
   const SchedGatewaySubmitOutcomeBatch outcomes =
       scheduler->add_txs({txs[0]}, {tx_hash})();
   ASSERT_EQ(outcomes.size(), 1UL);
