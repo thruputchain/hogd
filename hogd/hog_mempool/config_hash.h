@@ -1,5 +1,6 @@
 #pragma once
 
+#include "contract.hh"
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/log.h"
@@ -22,7 +23,8 @@ config_hashable(const NetworkConfig &network_config)
 
 inline ConfigHashPreimage
 make_config_hash_preimage(const StorageCostModel &storage_cost_model,
-                          const NetworkConfig &network_config)
+                          const NetworkConfig &network_config,
+                          const DeployedContractHash &default_wallet)
 {
   // Callers refuse a non-canonical configuration at ingress, so one reaching
   // here is this node being inconsistent rather than untrusted input.
@@ -30,6 +32,7 @@ make_config_hash_preimage(const StorageCostModel &storage_cost_model,
   return ConfigHashPreimage{
       .storage_cost_model = storage_cost_model.to_xdr(),
       .network_config = network_config,
+      .default_wallet = default_wallet,
   };
 }
 
@@ -51,6 +54,7 @@ compute_config_hash(const GenesisConfiguration &genesis_configuration)
   return compute_config_hash(ConfigHashPreimage{
       .storage_cost_model = genesis_configuration.storage_cost_model,
       .network_config = genesis_configuration.network_config,
+      .default_wallet = genesis_configuration.default_wallet,
   });
 }
 

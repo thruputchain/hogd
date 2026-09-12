@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "consensus.hh"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/io.h"
@@ -55,8 +56,26 @@ protected:
     NetworkConfigParams::set_param(config,
                                    ConfigParamID::kConfigParamMaxBytestringLen,
                                    max_bytestring_len);
+    return load(config, std::nullopt);
+  }
 
-    const GenesisConfigurationBuilder builder;
+  // Loads a genesis naming `default_wallet` and reports the result.
+  DbSchedResult
+  load_with_default_wallet(DeployedContractHash const &default_wallet)
+  {
+    return load(stock_network_config(), default_wallet);
+  }
+
+  // Loads a genesis built from `config`, overriding the default wallet where
+  // one is given. The header is always built to match, so anything other than
+  // OK comes from a check past the canonicity and hash gates.
+  DbSchedResult load(NetworkConfig const &config,
+                     std::optional<DeployedContractHash> const &default_wallet)
+  {
+    GenesisConfigurationBuilder builder;
+    if (default_wallet.has_value()) {
+      builder.set_default_wallet(*default_wallet);
+    }
     const StorageCostModel cost_model = StorageCostModel::default_cost_model();
     GenesisConfiguration genesis =
         builder.build(NetworkHash{}, cost_model,
@@ -92,6 +111,27 @@ TEST_F(GenesisConfigValidationTest, RejectsBytestringLimitAboveCeiling)
   EXPECT_EQ(load_with_bytestring_limit(
                 static_cast<uint32_t>(kBytestringCeilingLen) + 1),
             DbSchedResult::DbSchedResultError);
+}
+
+// The stock wallet is written among the genesis prerequisites, so a genesis
+// that does not override it loads.
+TEST_F(GenesisConfigValidationTest, AcceptsStockDefaultWallet)
+{
+  EXPECT_EQ(load_with_default_wallet(native_default_wallet_hash()),
+            DbSchedResult::DbSchedResultOK);
+}
+
+// So is one naming a wallet with no height-0 contract row. A chain may fund
+// its accounts with its own wallet artifact and name that as its default, and
+// the ceremony attaches that code in the height-1 block -- so requiring the
+// row here would refuse a supported chain. validate_recovered_tip carries the
+// requirement instead, from the ceremony onward.
+TEST_F(GenesisConfigValidationTest, AcceptsDefaultWalletTheCeremonyDeploys)
+{
+  DeployedContractHash ceremony_deployed = native_default_wallet_hash();
+  ceremony_deployed.hash.fill(0xE7);
+  EXPECT_EQ(load_with_default_wallet(ceremony_deployed),
+            DbSchedResult::DbSchedResultOK);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

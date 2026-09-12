@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -295,4 +296,106 @@ TEST(refcnt, destroy_inhibit_waits_for_concurrent_last_ref_release)
   obj.reset();
 
   t.join();
+}
+
+TEST(refcnt, AtomicCompareExchangeRetainsAndReplacesReferences)
+{
+  RefPtr first(*new Thing), second(*new Thing);
+  AtomicRefPtr<Thing> atomic(first);
+  auto desired = second;
+  EXPECT_FALSE(atomic.compare_exchange(desired, second.get()));
+  EXPECT_EQ(desired.get(), first.get());
+  EXPECT_EQ(first->refcount(), 3UZ);
+  EXPECT_EQ(second->refcount(), 1UZ);
+  desired = second;
+  EXPECT_TRUE(atomic.compare_exchange(desired, first.get()));
+  EXPECT_EQ(desired.get(), second.get());
+  EXPECT_EQ(first->refcount(), 1UZ);
+  auto old = atomic.exchange(nullptr);
+  EXPECT_EQ(old.get(), second.get());
+  EXPECT_FALSE(atomic.load());
+  EXPECT_FALSE(atomic.compare_exchange(desired, second.get()));
+  EXPECT_FALSE(desired);
+  EXPECT_EQ(second->refcount(), 2UZ);
+  EXPECT_TRUE(atomic.compare_exchange(first, nullptr));
+  EXPECT_EQ(atomic.load().get(), first.get());
+}
+
+namespace {
+
+struct TaggedRefs {
+  static constexpr bool kAllowRefPtrConversion = true;
+  int next_{};
+  std::set<int> tags_;
+  int incref() noexcept
+  {
+    tags_.insert(++next_);
+    return next_;
+  }
+  void decref(int tag) noexcept { EXPECT_EQ(tags_.erase(tag), 1UZ); }
+};
+
+} // namespace
+
+TEST(refcnt, TaggedReferencesFollowCopyMoveSwapAndAtomicOwnership)
+{
+  TaggedRefs a, b;
+  {
+    RefPtr first(a), second(b);
+    auto copy = first;
+    EXPECT_EQ(a.tags_.size(), 2UZ);
+    swap(first, second);
+    EXPECT_EQ(first.get(), &b);
+    EXPECT_EQ(second.get(), &a);
+    copy = std::move(first);
+    EXPECT_FALSE(first);
+    EXPECT_EQ(a.tags_.size(), 1UZ);
+    EXPECT_EQ(b.tags_.size(), 1UZ);
+    auto &alias = copy;
+    copy = alias;
+    copy = std::move(alias);
+    AtomicRefPtr<TaggedRefs> atomic(std::move(copy));
+    auto loaded = atomic.load();
+    EXPECT_EQ(loaded.get(), &b);
+    EXPECT_EQ(b.tags_.size(), 2UZ);
+    EXPECT_TRUE(atomic.compare_exchange(second, &b));
+    EXPECT_EQ(a.tags_.size(), 2UZ);
+    EXPECT_EQ(b.tags_.size(), 1UZ);
+    atomic.store(nullptr);
+  }
+  EXPECT_TRUE(a.tags_.empty());
+  EXPECT_TRUE(b.tags_.empty());
+}
+
+TEST(refcnt, AtomicOpsAdaptTaggedAndUntaggedReferences)
+{
+  RefPtr owner(*new Thing);
+  std::atomic<Thing *> pointer(owner.get());
+  using Ops = detail::AtomicRefOps<Thing, RefPtr<Thing>::ops>;
+  EXPECT_EQ(Ops::get(pointer), owner.get());
+  Ops::incref(pointer);
+  EXPECT_EQ(owner->refcount(), 2UZ);
+  Ops::decref(pointer);
+  EXPECT_EQ(owner->refcount(), 1UZ);
+
+  TaggedRefs tagged;
+  std::atomic<TaggedRefs *> tagged_pointer(&tagged);
+  using TaggedOps = detail::AtomicRefOps<TaggedRefs, RefPtr<TaggedRefs>::ops>;
+  auto tag = TaggedOps::incref(tagged_pointer);
+  EXPECT_TRUE(tagged.tags_.contains(tag));
+  EXPECT_EQ(TaggedOps::get(tagged_pointer), &tagged);
+  TaggedOps::decref(tagged_pointer, tag);
+  EXPECT_TRUE(tagged.tags_.empty());
+}
+
+TEST(refcnt, CopyingEmptyReferenceReleasesPreviousObject)
+{
+  RefPtr<Thing> empty;
+  auto copy = empty;
+  EXPECT_FALSE(copy);
+  RefPtr owner(*new Thing);
+  auto assigned = owner;
+  assigned = empty;
+  EXPECT_FALSE(assigned);
+  EXPECT_EQ(owner->refcount(), 1UZ);
 }

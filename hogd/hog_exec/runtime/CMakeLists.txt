@@ -20,6 +20,7 @@ add_library(runtime_objects OBJECT
   native_runtime.cc
   metrics.cc
   multiplexed_context.cc
+  native_syscall_context.cc
   runtime.cc
   syscall_auth.cc
   syscall_block_data.cc

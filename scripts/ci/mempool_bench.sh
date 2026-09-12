@@ -65,7 +65,8 @@ export EVENT_INDEXER_PORT=8092
 export EVENT_HTTP_PORT=8093
 
 echo 'make sure bench servers are running'
-ci_wait_port_hosts "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
+ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+  "${BENCH_HOSTS[@]}"
 
 echo 'clear work dirs'
 ci_control_clear_work_dirs "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
@@ -112,13 +113,13 @@ echo 'launch coordinator and scp'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
-  --skip 20 \
   --stack \
   --config ./scripts/config-chuckd.json \
   --instance 970c9b \
   --seed 1410441218572558875 \
   --metrics :2223 \
   bench coordinator_loadgen \
+  --skip 20 \
   --in-addr "$(hog_ip hog4)":7888 \
   --debug-port 5500 \
   --num-accts 10000 \

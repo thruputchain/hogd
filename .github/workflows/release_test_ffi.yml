@@ -1,5 +1,8 @@
 name: Release test_ffi Library
 
+# Successful tagged releases are published to public S3 by publish_test_ffi.yml.
+# Release and retry instructions: docs/test-ffi-releases.md.
+
 on:
   push:
     tags:
@@ -15,6 +18,10 @@ on:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  # Published crates and pinned submodules retain the legacy registry identity.
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   
 jobs:
@@ -288,6 +295,13 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
 
+      - name: Configure ccache
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume. Point it at the cached path, as the Linux jobs do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+
       - name: Configure Git for Submodule Caching
         run: |
           mkdir -p ~/.cache/hogcache/
@@ -458,6 +472,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
+          fail_on_unmatched_files: true
           tag_name: ${{ github.ref_name }}
           name: Bindings for Rust SDK (${{ github.ref_name }})
           draft: false

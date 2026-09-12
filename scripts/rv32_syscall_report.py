@@ -35,10 +35,12 @@ import statistics
 import sys
 import textwrap
 
+from rv32_gas_units import DEFAULT_RESOLUTION, baseline_ns, gas_unit_ns
+
 # One gas is 1/RESOLUTION of a baseline instruction. Matches
 # rv32_gas_report.py's default; a syscall schedule built at a different
 # resolution than the opcode schedule it sits beside is not a schedule.
-DEFAULT_RESOLUTION = 1
+
 
 # The instruction gas the schedule already charges for the ecall itself
 # (kBaseInstructionGas). Host gas is charged on top of it, so a proposal that
@@ -889,12 +891,7 @@ def baseline_ns_from_calibration(data):
     the same way. If the two disagreed, a syscall cost and an instruction cost
     would be denominated in different gas.
     """
-    costs = sorted(cell["ns_saturated"] for cell in data.get("opcodes", [])
-                   if cell.get("usable") and not cell.get("pair")
-                   and cell.get("ns_saturated", 0.0) > 0.0)
-    if costs:
-        return statistics.median(costs)
-    return data.get("baseline", {}).get("ns_per_filler_instruction", 0.0)
+    return baseline_ns(data)
 
 
 def check_joinable(bench, calibration):
@@ -1273,7 +1270,8 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
     baseline = baseline_ns_from_calibration(calibration)
     if baseline <= 0.0:
         return None
-    unit = baseline / resolution
+    unit = gas_unit_ns(baseline, resolution)
+    ecall_gas = ECALL_INSTRUCTION_GAS * resolution
 
     def to_gas(ns):
         # Round up, never down. A syscall priced below what it costs is
@@ -1283,7 +1281,8 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         return max(1, math.ceil(ns * (1.0 + margin) / unit - 1e-9))
 
     proposal = {"unit_ns": unit, "baseline_ns": baseline,
-                "resolution": resolution, "margin": margin, "syscalls": {}}
+                "resolution": resolution, "ecall_gas": ecall_gas,
+                "margin": margin, "syscalls": {}}
 
     # Every measured syscall, with what a guest actually causes: the vm row
     # where there is one -- crossing included -- and the entry row otherwise.
@@ -1321,7 +1320,7 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
                "own_ns": max(0.0, row["vm_ns"] - crossing_worst_ns),
                # base + its own work, rounded up once on the total rather
                # than twice.
-               "total_gas": to_gas(row["vm_ns"]) - ECALL_INSTRUCTION_GAS,
+               "total_gas": to_gas(row["vm_ns"]) - ecall_gas,
                "own_gas": to_gas(max(0.0, row["vm_ns"] - crossing_worst_ns))}
         for name, row in sorted(heavy.items())}
 
@@ -1343,7 +1342,7 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         if vm_ns:
             seams.append(vm_ns - measured["entry/" + name]["real_time"])
     proposal["seam_ns"] = statistics.median(seams) if seams else 0.0
-    proposal["base_gas"] = max(1, to_gas(worst_ns) - ECALL_INSTRUCTION_GAS)
+    proposal["base_gas"] = max(1, to_gas(worst_ns) - ecall_gas)
     proposal["base_ns"] = worst_ns
     proposal["base_from"] = worst_name
 
@@ -1502,7 +1501,7 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     # from. Whether that is enough is a policy call, which is what --margin is
     # for; the report's job is to make the size of it visible rather than let
     # it be discovered later.
-    budget_ns = ((proposal["base_gas"] + ECALL_INSTRUCTION_GAS) *
+    budget_ns = ((proposal["base_gas"] + proposal["ecall_gas"]) *
                  proposal["unit_ns"])
     headroom = budget_ns / proposal["base_ns"] - 1.0 if proposal["base_ns"] else 0.0
     print(f"One shared base of {proposal['base_gas']} gas, taken from "
@@ -1529,7 +1528,7 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
               "every")
         print("syscall at the dearest, which is the bug this split exists to "
               "prevent.")
-    print(f"({ECALL_INSTRUCTION_GAS} gas of it is already charged as the ecall")
+    print(f"({proposal['ecall_gas']} gas of it is already charged as the ecall")
     print("instruction, and is subtracted rather than billed twice.)")
 
     sha = proposal.get("sha256")
@@ -1975,6 +1974,8 @@ def main():
                              "prints an independent check of the SHA256 and "
                              "ed25519 numbers")
     args = parser.parse_args()
+    if args.resolution <= 0:
+        parser.error("--resolution must be positive")
 
     runs = [load(path) for path in args.json]
     if args.emit_reference or args.check:
@@ -2024,3 +2025,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

@@ -1,0 +1,22 @@
+name: RV32 gas report tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/rv32_gas_*.py'
+      - 'scripts/rv32_syscall_report.py'
+      - 'scripts/test_rv32*report.py'
+      - 'hogd/hog_exec/runtime/rv32/gas_calibration/**'
+      - '.github/workflows/rv32_gas_reports.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test calibration gates and schedule proposals
+        run: python3 -m unittest discover -s scripts -p 'test_rv32*report.py'

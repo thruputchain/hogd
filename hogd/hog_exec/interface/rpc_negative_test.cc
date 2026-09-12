@@ -22,6 +22,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/interface/rpc_from_coord.h"
@@ -44,6 +45,7 @@
 #include "x23/cleanup.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
@@ -249,11 +251,11 @@ protected:
     return contract;
   }
 
-  // A (non-expired) tx whose serialized size exceeds kMaxBytesSignedTransaction
-  // via oversized calldata (#2857).
+  // A (non-expired) tx whose serialized body exceeds kMaxBytesTransaction via
+  // oversized calldata (#2857).
   static Transaction make_oversized_tx()
   {
-    std::vector<uint8_t> big(kMaxBytesSignedTransaction + 1, 0);
+    std::vector<uint8_t> big(kMaxBytesTransaction + 1, 0);
     return Transaction{
         .invocation =
             Invocation{.invoked_address =
@@ -264,6 +266,26 @@ protected:
                        .calldata = Calldata(big.begin(), big.end())},
         .uniquifier = Uniquifier{.block_expiry_height = 1'000'000, .nonce = 1},
     };
+  }
+
+  // A (non-expired) tx whose body is exactly kMaxBytesTransaction.
+  static Transaction make_body_at_cap_tx()
+  {
+    Transaction tx = make_tx_with_expiry(/*expiry=*/1'000'000);
+    const size_t base = x23::xdr_size(tx);
+    CHECK_LE(base, kMaxBytesTransaction);
+    tx.invocation.calldata.resize(kMaxBytesTransaction - base, 0);
+    CHECK_EQ(x23::xdr_size(tx), kMaxBytesTransaction);
+    return tx;
+  }
+
+  // Pads a wrapper without changing the Transaction (or its hash) inside.
+  static DecoratedSignature make_filler_signature()
+  {
+    DecoratedSignature sig;
+    sig.public_key_id = 0;
+    sig.signature = Signature(CryptographicScheme::Ed25519);
+    return sig;
   }
 };
 
@@ -398,8 +420,8 @@ TEST_F(RpcNegativeTest, ValidateRejectsExpiredReplayUniquifier)
   client_.executorsched_finish_block(block_id);
 }
 
-// Oversized tx: propose() rejects it before the body runs, so it can't reach
-// emit_events and overflow the event RPC (#2857).
+// Oversized body: propose() rejects it as malformed (#2857), so it is dropped
+// from the proposal.
 TEST_F(RpcNegativeTest, ProposeRejectsOversizedTransaction)
 {
   init_executor();
@@ -414,13 +436,13 @@ TEST_F(RpcNegativeTest, ProposeRejectsOversizedTransaction)
                 .executorsched_propose_transaction(
                     block_id, SignedTransaction{.tx = make_oversized_tx()})
                 .result(),
-            ExecResult::ExecResultTxNonDeterministicError);
+            ExecResult::ExecResultMalformedTransaction);
 
   client_.executorsched_finish_block(block_id);
 }
 
-// Same cap on the validation path: a peer-proposed oversized tx is rejected,
-// not a validator fail-stop (#2857).
+// Same cap on the validation path: a deterministic ValidationFailure, not a
+// validator fail-stop (#2857).
 TEST_F(RpcNegativeTest, ValidateRejectsOversizedTransaction)
 {
   init_executor();
@@ -439,9 +461,76 @@ TEST_F(RpcNegativeTest, ValidateRejectsOversizedTransaction)
       .nondeterministic_proposal_data = {},
   };
   EXPECT_EQ(client_.executorsched_validate_transaction(block_id, proposed_tx),
-            ExecResult::ExecResultTxNonDeterministicError);
+            ExecResult::ExecResultTxValidationFailure);
 
   client_.executorsched_finish_block(block_id);
+}
+
+// The cap is on the body, not the wrapper (#3844).
+TEST_F(RpcNegativeTest, SizeCapIgnoresSignedTransactionWrapper)
+{
+  init_executor();
+
+  const Transaction body = make_body_at_cap_tx();
+  const SignedTransaction thin{.tx = body};
+  SignedTransaction fat{.tx = body};
+  while (x23::xdr_size(fat) <= kMaxBytesSignedTransaction + 64_KiB) {
+    fat.signatures.push_back(make_filler_signature());
+  }
+  ASSERT_EQ(sha256(thin.tx), sha256(fat.tx));
+  ASSERT_LE(x23::xdr_size(thin), kMaxBytesSignedTransaction);
+  ASSERT_GT(x23::xdr_size(fat), kMaxBytesSignedTransaction);
+
+  // Thin wrapper: clears the size gate and executes.
+  BlockID propose_block_id = 1022;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(propose_block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(propose_block_id);
+  open_event_block(propose_block_id);
+  const auto proposed =
+      client_.executorsched_propose_transaction(propose_block_id, thin);
+  EXPECT_NE(proposed.result(), ExecResult::ExecResultMalformedTransaction);
+  EXPECT_NE(proposed.result(), ExecResult::ExecResultTxNonDeterministicError);
+  client_.executorsched_finish_block(propose_block_id);
+
+  // Fat wrapper: same body, same outcome.
+  BlockID fat_propose_block_id = 1023;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(fat_propose_block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(fat_propose_block_id);
+  open_event_block(fat_propose_block_id);
+  EXPECT_EQ(client_.executorsched_propose_transaction(fat_propose_block_id, fat)
+                .result(),
+            proposed.result());
+  client_.executorsched_finish_block(fat_propose_block_id);
+
+  // Validate the fat wrapper against the thin proposal.
+  BlockID validate_block_id = 1024;
+  ASSERT_EQ(client_.executorsched_open_validation_block(validate_block_id,
+                                                        kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  auto db_res = db_client_.dbsched_create_snapshot(
+      0, validate_block_id, BlockExecutionMode::kBlockExecutionModeValidation);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+  open_event_block(validate_block_id);
+
+  NondeterministicProposalData proposal_data;
+  if (proposed.result() == ExecResult::ExecResultOK ||
+      proposed.result() == ExecResult::ExecResultTxDeterministicError ||
+      proposed.result() == ExecResult::ExecResultTxRootFrameReverted) {
+    proposal_data = proposed.proposal_data();
+  }
+  ProposedTransaction proposed_tx{
+      .signed_tx = fat,
+      .nondeterministic_proposal_data = std::move(proposal_data),
+  };
+  EXPECT_EQ(client_.executorsched_validate_transaction(validate_block_id,
+                                                       proposed_tx),
+            proposed.result());
+
+  client_.executorsched_finish_block(validate_block_id);
 }
 
 //
@@ -889,13 +978,8 @@ TEST_F(RpcNegativeTest, TestConflictingModeOpenValidationFirst)
   client_.executorsched_finish_block(block_id);
 }
 
-// Check-ordering pin: the kMaxBytesSignedTransaction size cap runs before the
-// handler's expiry validation, so a transaction that is both oversized and
-// expired reports TxNonDeterministicError (the size arm), not
-// TxValidationFailure. Both single arms are pinned by
-// ProposeRejectsOversizedTransaction / ProposeRejectsExpiredReplayUniquifier;
-// this pins which one wins. Also pins that the rejected result carries no
-// proposal data (the result union has no proposal_data arm for either code).
+// Check-ordering pin: the size cap runs before expiry validation, so a tx that
+// is both oversized and expired reports MalformedTransaction.
 TEST_F(RpcNegativeTest, TestOversizedBeatsExpired)
 {
   init_executor();
@@ -913,7 +997,7 @@ TEST_F(RpcNegativeTest, TestOversizedBeatsExpired)
                 .executorsched_propose_transaction(block_id,
                                                    SignedTransaction{.tx = tx})
                 .result(),
-            ExecResult::ExecResultTxNonDeterministicError);
+            ExecResult::ExecResultMalformedTransaction);
 
   client_.executorsched_finish_block(block_id);
 }

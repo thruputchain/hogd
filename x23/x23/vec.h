@@ -161,9 +161,10 @@ public:
   constexpr PtrIterator(pointer ptr) noexcept : ptr_(ptr) {}
 
   template<typename U>
-  requires std::constructible_from<U *, T *> &&
+  requires std::constructible_from<T *, U *> &&
            std::same_as<std::remove_cv_t<U>, std::remove_cv_t<T>>
-  constexpr PtrIterator(const PtrIterator<U> &other) noexcept : ptr_(other.ptr_)
+  constexpr PtrIterator(const PtrIterator<U> &other) noexcept
+    : ptr_(other.operator->())
   {}
 
   constexpr pointer operator->() const noexcept { return ptr_; }
@@ -383,7 +384,7 @@ public:
 
   template<size_t MS>
   constexpr Vec &operator=(Vec<T, MS, allocator_type> &&other)
-      noexcept(max_size() <= Vec<T, MS, allocator_type>::max_size())
+      noexcept(max_size() >= Vec<T, MS, allocator_type>::max_size())
   {
     if constexpr (std::remove_reference_t<decltype(other)>::max_size() >
                   max_size())
@@ -420,15 +421,14 @@ public:
   }
 
   template<typename Self>
-  constexpr decltype(auto) operator+(this Self &&self,
-                                     std::ranges::range auto &&rg)
+  constexpr auto operator+(this Self &&self, std::ranges::range auto &&rg)
   {
     if constexpr (std::convertible_to<Self &&, Vec &&>) {
       self.append_range(rg);
       return std::move(self);
     }
     else {
-      Self ret;
+      std::remove_cvref_t<Self> ret;
       ret.reserve(self.size() + std::ranges::size(rg));
       ret.append_range(self);
       ret.append_range(rg);
@@ -494,9 +494,30 @@ public:
   }
   template<typename... Args> constexpr reference emplace_back(Args &&...args)
   {
-    ensure();
-    std::construct_at(b_.end, std::forward<Args>(args)...);
-    auto &out = *b_.end++;
+    if (size_type(b_.bufend - b_.end) < 1 + kExtraAlloc) {
+      Vec newbuf(a_);
+      newbuf.reserve(
+          std::max(size() + 1, std::min(2 * capacity(), max_size())));
+      // Construct before relocating: arguments may refer to existing elements.
+      std::construct_at(newbuf.b_.begin + size(), std::forward<Args>(args)...);
+      [&] noexcept {
+        // Like realloc(), require existing elements to move without throwing.
+        if !consteval {
+          std::uninitialized_move_n(b_.begin, size(), newbuf.b_.begin);
+        }
+        else {
+          for (size_t i = 0; i < size(); ++i)
+            std::construct_at(newbuf.b_.begin + i, std::move(b_.begin[i]));
+        }
+      }();
+      newbuf.b_.end = newbuf.b_.begin + size() + 1;
+      swap(newbuf);
+    }
+    else {
+      std::construct_at(b_.end, std::forward<Args>(args)...);
+      ++b_.end;
+    }
+    auto &out = b_.end[-1];
     terminate();
     return out;
   }
@@ -554,9 +575,14 @@ public:
   template<typename Op>
   void resize_and_overwrite(this auto &self, size_type count, Op op)
   {
-    x23assert(count != std::numeric_limits<size_type>::max());
-    self.resize_uninitialized(count + 1);
+    // ExtraAlloc already reserves the string terminator outside max_size().
+    self.resize_uninitialized(count);
     self.resize(std::move(op)(self.data(), count));
+    // The callback may overwrite the terminator even when size is unchanged.
+    if constexpr (kExtraAlloc > 0 &&
+                  std::is_trivially_destructible_v<value_type>)
+      if (!self.empty())
+        std::construct_at(self.data() + self.size(), value_type{});
   }
 
   template<std::random_access_iterator IterIn>
@@ -631,12 +657,18 @@ public:
     constexpr int aadj = OVec::kExtraAlloc - kExtraAlloc;
     if constexpr (aadj > 0)
       ensure(aadj);
-    OVec ret{typename OVec::Buf{
-                 .begin = reinterpret_cast<new_type *>(b_.begin),
-                 .end = reinterpret_cast<new_type *>(b_.end),
-                 .bufend = reinterpret_cast<new_type *>(b_.bufend) - aadj,
-             },
-             std::move(a_)};
+    // An unallocated Vec has all-null pointers.  Offsetting a null bufend
+    // by a negative aadj (e.g. Str, which reserves a terminator, to
+    // Vec<uint8_t>, which doesn't) would report capacity over a null
+    // buffer, and the next insert would write through it.
+    typename OVec::Buf newb{};
+    if (b_.begin)
+      newb = {
+          .begin = reinterpret_cast<new_type *>(b_.begin),
+          .end = reinterpret_cast<new_type *>(b_.end),
+          .bufend = reinterpret_cast<new_type *>(b_.bufend) - aadj,
+      };
+    OVec ret{newb, std::move(a_)};
     // ctor calls terminate(), so no need to call it here
     b_ = {};
     return ret;
@@ -915,7 +947,19 @@ public:
     std::copy_n(s, count, this->data());
   }
 
+#if 0
+  // Delete these if they are not necessary.  Older versions of some
+  // compilers might not have made the implicit destructor constexpr,
+  // and when you define a defaulted destructor it disables the
+  // implicit move constructor.
+
+  constexpr BoundedStr() noexcept = default;
+  constexpr BoundedStr(const BoundedStr &) = default;
+  constexpr BoundedStr(BoundedStr &&) noexcept = default;
+  constexpr BoundedStr &operator=(const BoundedStr &) = default;
+  constexpr BoundedStr &operator=(BoundedStr &&) noexcept = default;
   constexpr ~BoundedStr() = default;
+#endif
 
   constexpr const char *c_str(this const auto &self)
   {
@@ -938,9 +982,10 @@ public:
   }
 
   template<typename Self>
-  constexpr Self substr(this Self &&self, size_type pos = 0,
-                        size_type count = npos)
+  constexpr std::remove_cvref_t<Self>
+  substr(this Self &&self, size_type pos = 0, size_type count = npos)
   {
+    using Result = std::remove_cvref_t<Self>;
     size_type new_size = self.size();
     if (pos >= new_size)
       new_size = 0;
@@ -948,7 +993,7 @@ public:
       new_size = std::min(new_size - pos, count);
 
     if (!new_size)
-      return Self{};
+      return Result{};
 
     if constexpr (std::convertible_to<Self, BoundedStr &&>) {
       if (pos == 0) {
@@ -963,7 +1008,7 @@ public:
       }
     }
 
-    return Self{self.data() + pos, new_size};
+    return Result{self.data() + pos, new_size};
   }
 
   friend constexpr std::strong_ordering operator<=>(const BoundedStr &a,

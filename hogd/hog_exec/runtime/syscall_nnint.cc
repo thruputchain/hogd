@@ -33,17 +33,25 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  if (!(*status).has_value()) {
-    co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
+  // Both syscall-visible exits pay the access: the frame walk and item lookup
+  // happen before the read can tell whether the key exists or holds the right
+  // type, so a miss is not cheaper work than a hit. The load is billed here
+  // too -- the key is marked loaded either way, so nothing later recovers the
+  // charge and a caller could otherwise probe cold storage for the base cost.
+  auto const &[result, load_gas] = *status;
+  if (!result.has_value()) {
+    co_return SyscallInnerResult{result.error().code(),
+                                 WrappedGasAmount{kStorageAccessCost +
+                                                  load_gas}};
   }
-  if ((*status)->first.has_value()) {
-    output_current_set = *((*status)->first);
+  if (result->first.has_value()) {
+    output_current_set = *(result->first);
     output_current_set_opt = true;
   }
   else {
     output_current_set_opt = false;
   }
-  output_current_add = (*status)->second;
+  output_current_add = result->second;
 
   // If we load from the snapshot, we must have a set value.
   assert(!input_force_load_from_snapshot || output_current_set_opt);
@@ -58,7 +66,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs->current_add = to_xdr(output_current_add);
   }
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost}};
+                               WrappedGasAmount{kStorageAccessCost + load_gas}};
 }
 
 MaybeAsyncSyscallInnerResult

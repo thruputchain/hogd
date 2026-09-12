@@ -67,6 +67,9 @@ struct MeasurementPoint {
   // ns per loop iteration, one entry per repeat.
   std::vector<double> samples;
   bool ran_clean = true;
+  // Zero disables this check for diagnostic sweeps. Validation workloads
+  // require the exact gas for the prologue, all iterations, and terminal.
+  uint64_t expected_gas = 0;
 
   [[nodiscard]] double median() const;
   // Median absolute deviation over the repeats, relative to the median. The

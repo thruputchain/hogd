@@ -64,9 +64,8 @@ export EVENT_INDEXER_PORT=8092
 export EVENT_HTTP_PORT=8093
 
 echo 'make sure bench servers are running'
-for host in "${BENCH_HOSTS[@]}"; do
-  ci_wait_port "$host" "$CI_CONTROL_PORT"
-done
+ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+  "${BENCH_HOSTS[@]}"
 
 echo 'clear work dirs'
 ci_control_clear_work_dirs "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"

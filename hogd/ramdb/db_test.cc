@@ -410,6 +410,35 @@ TEST_F(DatabaseTest, Snapshot)
   check_integrity();
 }
 
+// A snapshot filename that is not in the canonical "{begin}-{end}.snap" form --
+// here the leading-zero alias "00-01.snap" -- parses to the same LSN range as
+// "0-1.snap" but may hold different content. Recovery must ignore such aliases
+// so that startup state selection cannot depend on directory enumeration order
+// (#1049). With only the alias on disk, recovery must therefore restore
+// nothing rather than load it.
+TEST_F(DatabaseTest, IgnoresNonCanonicalSnapshotAlias)
+{
+  insert_n(kInsertions);
+  remove_every_n(3);
+
+  auto sync_ret = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(sync_ret);
+  auto &[lsn, snapshot_future] = *sync_ret;
+  ASSERT_EQ(lsn, 1);
+  ASSERT_TRUE(snapshot_future.get());
+  check_file_exists("0-1.snap");
+
+  // Leave only a non-canonical alias of the snapshot on disk.
+  ASSERT_TRUE(static_cast<bool>(dir_.rename("0-1.snap", "00-01.snap")));
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  size_t count = 0;
+  db_->get_each([&count](std::span<const std::byte>, int,
+                         std::span<const std::byte>) { ++count; });
+  EXPECT_EQ(count, 0U);
+}
+
 TEST_F(DatabaseTest, SnapshotRepeatable)
 {
   // check to make sure that if we take multiple full snapshots with
@@ -1235,6 +1264,30 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
 
   holder.join();
   resizer.join();
+}
+
+TEST(Loglet, CloneZeroesNextSlot)
+{
+  auto allocator = LogletAllocator::create(2 * kLogletRegionSize, 1, [] {});
+  ASSERT_NE(allocator, nullptr);
+  UniqueLoglet ll = make_unique_loglet(*allocator, LogletMode::kDiskBuffer);
+  ASSERT_TRUE(ll);
+
+  // Recovery clones headers rebuilt from disk into the checksummed buffer
+  // (#2975). A live pointer stands in for a nullptr whose object
+  // representation is not all zero.
+  ItemHeader src(ItemStorage::kNormal, /*type=*/7, /*key_len=*/3,
+                 /*value_len=*/5);
+  src.next = &src;
+
+  ItemHeader *dst = ll->clone(&src);
+  ASSERT_NE(dst, nullptr);
+  std::span<const std::byte> next_slot =
+      std::as_bytes(std::span(dst, 1)).subspan(offsetof(ItemHeader, next));
+  EXPECT_EQ(next_slot.size(), sizeof(ItemHeader *));
+  EXPECT_TRUE(std::ranges::all_of(next_slot, [](std::byte b) {
+    return b == std::byte{0};
+  }));
 }
 
 } // namespace hogd

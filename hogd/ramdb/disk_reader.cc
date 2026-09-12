@@ -205,6 +205,22 @@ struct FileMetadata {
       }
       file.end_lsn_exclusive_ = *lsn;
 
+      // Require the canonical "{begin}-{end}.snap" spelling. parse_integer
+      // accepts leading zeros and trailing characters, so aliases such as
+      // "00-01.snap" parse to the same LSN range as "0-1.snap" but may hold
+      // different, individually CRC-valid content. operator<() would then
+      // treat the aliases as equivalent, and recovery would pick between them
+      // by directory enumeration order, so two honest validators could restart
+      // from different accepted state commitments (#1049). Reconstructing the
+      // canonical name and rejecting anything else guarantees at most one
+      // snapshot per parsed range, since a directory cannot hold two entries
+      // with the same name.
+      if (file.path_ !=
+          std::format("{}-{}.snap", file.begin_lsn_, file.end_lsn_exclusive_)) {
+        debug("non-canonical snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+
       return file;
     }
 
@@ -219,6 +235,14 @@ struct FileMetadata {
     }
     file.begin_lsn_ = *tmp;
     file.end_lsn_exclusive_ = std::numeric_limits<uint64_t>::max();
+
+    // Require the canonical "{lsn}.log" spelling, for the same reason as
+    // snapshots above: reject leading-zero or trailing-character aliases that
+    // parse to the same LSN.
+    if (file.path_ != std::format("{}.log", file.begin_lsn_)) {
+      debug("non-canonical log filename {}; ignoring", file.path_);
+      return std::nullopt;
+    }
 
     return file;
   }

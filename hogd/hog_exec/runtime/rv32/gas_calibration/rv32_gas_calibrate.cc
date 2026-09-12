@@ -1109,11 +1109,12 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         "    {{\"name\": \"{}\", \"ns_per_iteration\": {:.6f}, "
         "\"scheduled_gas_per_iteration\": {}, \"instructions_per_iteration\": "
         "{}, \"ns_per_gas\": {:.6f}, \"relative_mad\": {:.6f}, "
+        "\"samples\": {}, \"ran_clean\": true, "
         "\"fused_slots\": {}, \"shape\": \"{}\", \"op_counts\": {{",
         escape_json(workload.name), workload.ns_per_iteration,
         workload.scheduled_gas_per_iteration,
         workload.instructions_per_iteration, workload.ns_per_gas,
-        workload.relative_mad, workload.fused_slots,
+        workload.relative_mad, workload.samples, workload.fused_slots,
         escape_json(workload.shape));
     bool first = true;
     for (const auto &[op, count] : workload.op_counts) {

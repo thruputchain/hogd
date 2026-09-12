@@ -14,6 +14,7 @@
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -25,6 +26,17 @@ namespace {
 
 constexpr size_t kBlockSize = 100;
 constexpr size_t kNumTxs = 100;
+
+TransactionHashBatch
+hash_txs(const SignedTransactionBatch &txs)
+{
+  TransactionHashBatch hashes;
+  hashes.reserve(txs.size());
+  for (const SignedTransaction &tx : txs) {
+    hashes.push_back(sha256(tx.tx));
+  }
+  return hashes;
+}
 
 } // namespace
 
@@ -54,7 +66,10 @@ TEST(Scheduler, AddVettedTx)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
@@ -71,8 +86,12 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
 
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
@@ -82,6 +101,18 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
+}
+
+TEST(Scheduler, IsPendingReturnsFalseForUncachedAccount)
+{
+  const ContractAddress kUncachedAccount = make_account_address(99);
+  fib_client_t fib_client(kUncachedAccount);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  EXPECT_FALSE(scheduler->is_pending(txs[0], sha256(txs[0].tx)));
 }
 
 TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
@@ -97,7 +128,7 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
@@ -118,10 +149,17 @@ TEST(Scheduler, AddVettedTxDuplicate)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch first =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(first.size(), 1UL);
+  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
   // Now add the transaction a second time.
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch duplicate =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(duplicate.size(), 1UL);
+  EXPECT_EQ(duplicate[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
@@ -158,7 +196,7 @@ TEST(Scheduler, Single)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
   // Check that the correct number of hogs was deducted.
   auto [age, lock] =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
@@ -196,7 +234,7 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
 
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
@@ -252,7 +290,8 @@ TEST(Scheduler, PendingNominationExcludesUnschedulableAccountAcrossSchedules)
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1], txs[2]})();
+  scheduler->add_txs({txs[0], txs[1], txs[2]},
+                     hash_txs({txs[0], txs[1], txs[2]}))();
   EXPECT_EQ(scheduler->size(), 3UL);
 
   scheduler->start_pending_nomination(/*block_id=*/1);
@@ -300,7 +339,7 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
 
   scheduler->start_pending_nomination(/*block_id=*/1);
@@ -312,7 +351,7 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 0UL);
 
-  scheduler->add_txs({txs[2]})();
+  scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
 
   scheduled_hashes.clear();
@@ -354,7 +393,7 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
 
   scheduler->start_pending_nomination(/*block_id=*/1);
@@ -370,7 +409,7 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
 
   // An ordinary follow-up submission lands on the excluded account's runqueue,
   // but [add_txs] refuses to re-insert the account into [ready_accounts_].
-  scheduler->add_txs({txs[2]})();
+  scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
   ASSERT_NE(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
 
@@ -473,7 +512,7 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesSkipsAccountWhenGasExceedsLocalHogs)
   server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
   scheduler->apply_committed_block_hog_ages({txs[0]}, /*block_height=*/1)();
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
@@ -514,7 +553,8 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesSkipsOnlyInvalidAccounts)
                   /*num_hogs=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  scheduler->add_txs({valid_txs[0], invalid_txs[0]})();
+  scheduler->add_txs({valid_txs[0], invalid_txs[0]},
+                     hash_txs({valid_txs[0], invalid_txs[0]}))();
   scheduler->apply_committed_block_hog_ages({valid_txs[0], invalid_txs[0]},
                                             /*block_height=*/1)();
 
@@ -551,7 +591,7 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesRollsBackAccountWhenLaterTxFails)
   server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   scheduler->apply_committed_block_hog_ages({txs[0], txs[1]},
                                             /*block_height=*/1)();
 
@@ -610,7 +650,7 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
@@ -634,7 +674,7 @@ TEST(Scheduler, FindTx)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
 
   TransactionHash hash = sha256(txs[0].tx);
@@ -657,7 +697,7 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
 
@@ -695,7 +735,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
 
@@ -726,7 +766,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
   x23::XdrVec<TransactionHash> scheduled_hashes;
@@ -759,7 +799,7 @@ TEST(Scheduler, ReenqueueTxs)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
@@ -813,7 +853,7 @@ TEST(Scheduler, Fairness)
                     /*num_hogs=*/5'000'000'000 * (i + 1));
   }
   for (const SignedTransactionBatch &tx : txs) {
-    scheduler->add_txs(tx)();
+    scheduler->add_txs(tx, hash_txs(tx))();
   }
 
   std::unordered_map<ContractAddress, size_t, SipHash24Hasher> tx_counts;
@@ -888,7 +928,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
                     /*num_hogs=*/5'000'000'000 * (i + 1));
   }
   for (const auto &[_, tx] : txs) {
-    scheduler->add_txs(tx)();
+    scheduler->add_txs(tx, hash_txs(tx))();
   }
 
   std::unordered_map<ContractAddress, size_t, SipHash24Hasher> tx_counts;
@@ -963,7 +1003,7 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
           .contracts_to_deploy = {},
       }};
 
-  scheduler->add_txs({tx1, tx2, tx_b})();
+  scheduler->add_txs({tx1, tx2, tx_b}, hash_txs({tx1, tx2, tx_b}))();
 
   {
     x23::XdrVec<TransactionHash> scheduled_hashes;

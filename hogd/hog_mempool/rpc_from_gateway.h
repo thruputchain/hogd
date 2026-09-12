@@ -50,11 +50,10 @@ public:
     co_return SchedGatewayIntroOutcome::SchedGatewayIntroSuccess;
   }
 
-  x23::Async<void>
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
   schedgateway_submit_tx_batch(ParallelSignedTransactionBatch batch)
   {
-    co_await coord_->schedulercoord_submit_unvetted(std::move(batch));
-    co_return;
+    co_return co_await coord_->submit_unvetted_with_outcomes(std::move(batch));
   }
 
   x23::Async<ExpectedDBTip> schedgateway_get_tip()

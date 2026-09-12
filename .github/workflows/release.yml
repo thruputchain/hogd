@@ -9,6 +9,10 @@ on:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  # Published crates and pinned submodules retain the legacy registry identity.
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
   # Version embedded in binaries assembled by this component release.
@@ -201,6 +205,20 @@ jobs:
             grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
           done
 
+      # Keep server code generation separate from portable developer artifacts.
+      # These binaries must be runtime-qualified on a Zen 5 host before deployment.
+      - name: Build and package Zen 5 server binaries
+        if: matrix.architecture == 'x86_64'
+        run: |
+          ./scripts/build.sh \
+            -d build/znver5 -t Release -c gcc \
+            -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DBUILD_ARCHITECTURE=znver5" \
+            -x "-DRUST_BUILD_CPU=znver5" \
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
+          ./scripts/package_hogd_validator_release.sh \
+            build/znver5 artifacts release x86_64 znver5
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -257,6 +275,13 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+
+      - name: Configure ccache
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume. Point it at the cached path, as the Linux jobs do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -540,7 +565,7 @@ jobs:
           set -euo pipefail
           cd artifacts
           archives=(*.tar.gz)
-          test "${#archives[@]}" -eq 9
+          test "${#archives[@]}" -eq 10
           for archive in "${archives[@]}"; do
             test -s "$archive"
           done

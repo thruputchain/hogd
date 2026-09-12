@@ -5,8 +5,13 @@
 #include <cstddef>
 
 #include "hogd/base/types.h"
+#include "integration.hh"
 
 namespace hogd {
+
+// Cap on the Transaction body, what TransactionHash commits to (#3844).
+inline constexpr size_t kMaxBytesTransaction = 1'900'000;
+static_assert(kMaxBytesTransaction < kMaxBytesSignedTransaction);
 
 // Maximum size of a deployed contract's code blob (ContractBlob.data for
 // kRv32) -- the same quantity contract_deployment_cost_per_byte charges
