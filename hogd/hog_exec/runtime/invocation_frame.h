@@ -214,10 +214,7 @@ public:
   // auth-token list can name only owned tokens and must be duplicate-free, so a
   // valid list is no longer than this; the syscalls use it to reject an
   // over-long list before copying and sorting it (#4042).
-  size_t owned_auth_token_count() const
-  {
-    return owned_auth_token_ids_.size();
-  }
+  size_t owned_auth_token_count() const { return owned_auth_token_ids_.size(); }
 
   void mint_auth_token(uint32_t token_id)
   {
