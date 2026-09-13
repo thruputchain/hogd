@@ -334,9 +334,8 @@ public:
   SystemStatus<SyscallStatus<const ReturnBuffer *>> get_return_buffer() const;
   std::span<const uint32_t> get_returned_auth_token_ids() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
-  // Number of auth tokens the active frame owns; an upper bound on the length
-  // of a valid returned-auth-token list, used by the Return syscall to reject
-  // an over-long list before it is copied and sorted (#4042).
+  // Owned-token count of the active frame; see
+  // InvocationFrame::owned_auth_token_count().
   size_t owned_auth_token_count() const
   {
     return invocation_frame_stack_.active_frame_owned_auth_token_count();
