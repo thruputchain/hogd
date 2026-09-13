@@ -12,8 +12,6 @@ ed25519-zebra = { version = "4.1" }
 lru = "0.14.0"
 bindgen = "0.71"
 siphasher = { version = "1.0.1", default-features = false }
-hogexec-internal = { version = "0.15.0", registry = "groundhog" }
-groundhog-xdr = { version = "0.15.0", registry = "groundhog", features = ["xdrs"] }
 
 # Shared optimization profiles
 [profile.release]
