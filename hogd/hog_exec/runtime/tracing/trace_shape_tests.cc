@@ -80,15 +80,19 @@ get_calldata_len_entry(GasAmount gas, uint32_t len)
 }
 
 SyscallTrace
-get_calldata_entry(GasAmount gas, Calldata const &calldata)
+get_calldata_entry(GasAmount gas, Calldata const &calldata,
+                   std::span<const uint32_t> auth_tokens = {})
 {
   SyscallTraceBody body(SyscallNo::kGetCalldata);
   SyscallGetCalldataOutputs outputs;
   outputs.calldata.append_range(calldata);
+  outputs.auth_tokens.append_range(auth_tokens);
   body.get_calldata().outputs = std::move(outputs);
   return make_entry(gas,
                     gas - kSyscallBaseCost -
-                        GasCost::guest_buffer_copy(calldata.size()),
+                        GasCost::guest_buffer_copy(
+                            calldata.size() +
+                            (auth_tokens.size() * sizeof(uint32_t))),
                     std::move(body), ok_status());
 }
 
