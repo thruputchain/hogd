@@ -31,17 +31,28 @@ public:
 
   explicit HogDbGatewayRpc(RPCContext &ctx) : ctx_(ctx) {}
 
-  // Upper bound on the number of items serviced in a single
-  // dbgateway_get_items batch.  The batch type is an unbounded XDR array,
-  // so without this the only limit is the RPC max_message_size (16 MiB),
-  // which still lets one request decode and retain a much larger result
-  // graph — e.g. duplicated AuthData keys each deep-copy a full 21-signer
-  // AddressAuthData into the response.  A batch is the gateway aggregating
-  // concurrent client reads; legitimate batches are orders of magnitude
-  // below this, while the cap keeps worst-case decoded/retained memory and
-  // the outgoing response comfortably within the message budget.
-  // Over-cap batches are rejected wholesale (see dbgateway_get_items).
+  // Bounds on a single dbgateway_get_items batch.  The batch type is an
+  // unbounded XDR array, so without these the only limit is the RPC
+  // max_message_size (16 MiB), which still lets one request decode and
+  // retain a much larger result graph — e.g. duplicated fat keys each
+  // deserialized and deep-copied into the response.  Over-limit batches
+  // are rejected wholesale (see dbgateway_get_items).  Two distinct
+  // resources are bounded:
+  //
+  // kMaxBatchItems caps the number of reads performed and the size of the
+  // in-memory result vector (each slot is a fixed-size DbGatewayItemResult
+  // regardless of whether the item was found), so a batch of many tiny
+  // misses can't blow up the response vector.  A batch is the gateway
+  // aggregating concurrent client reads; legitimate batches are orders of
+  // magnitude below this.
+  //
+  // kMaxResponseBytes caps the cumulative serialized size of the results,
+  // since an individual item is variable-sized (a bytestring is up to
+  // kBytestringCeilingLen; an AuthData row carries up to kMaxSigners
+  // signers).  This keeps the retained content and the outgoing response
+  // within the 16 MiB RPC message budget, with headroom for the envelope.
   static constexpr std::size_t kMaxBatchItems = 16384;
+  static constexpr std::size_t kMaxResponseBytes = 15UL * 1024 * 1024;
 
   static DbGatewayIntroOutcome dbgateway_intro(ProtocolCommit const &protocol);
 

@@ -162,7 +162,9 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
   // fat keys — e.g. AuthData rows that each deep-copy 21 signer pointees
   // into the response — can decode and retain a result graph far larger
   // than the request.  Cap the item count so one request can't amplify
-  // into disproportionate work and retained memory.
+  // into a disproportionate number of reads or an oversized result vector.
+  // The cumulative response bytes are bounded separately, in the read loop
+  // below, since individual items are variable-sized.
   if (batch.size() > kMaxBatchItems) {
     error("dbgateway_get_items: batch of {} items exceeds cap of {}; rejecting",
           batch.size(), kMaxBatchItems);
@@ -196,8 +198,20 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
     DbGatewayPayload payload;
     payload.block_height = tip.value.proposal_header.block_height;
     payload.items.reserve(batch.size());
-    for (AddressAndKey const &k : batch)
-      payload.items.push_back(read_one_item(db, k));
+    std::size_t response_bytes = 0;
+    for (AddressAndKey const &k : batch) {
+      DbGatewayItemResult item = read_one_item(db, k);
+      // Bound cumulative serialized size so a batch of large items (fat
+      // bytestrings or full AuthData rows) can't retain or produce a
+      // response beyond the RPC message budget.
+      response_bytes += x23::xdr_size(item);
+      if (response_bytes > kMaxResponseBytes) [[unlikely]] {
+        error("dbgateway_get_items: response exceeds {} bytes; rejecting",
+              kMaxResponseBytes);
+        co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+      }
+      payload.items.push_back(std::move(item));
+    }
 
     if (ctx_.is_committed_read_stale(tip)) [[unlikely]] {
       continue;

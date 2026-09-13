@@ -8,6 +8,7 @@
 #include <memory>
 #include <thread>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "consensus.hh"
@@ -252,6 +253,41 @@ TEST(HogDbGatewayRpcTest, GetItemsRejectsBatchesOverCap)
   batch.push_back(make_balance_query(addr));
   DbGatewayResult rejected = gateway.dbgateway_get_items(batch)();
   EXPECT_EQ(rejected.error(), RPCError::kRPCUnrecoverable);
+}
+
+// The item-count cap alone doesn't bound the response bytes: one request
+// of large items (here a fat bytestring, duplicated) must be rejected once
+// the cumulative serialized size would exceed the message budget, even
+// though the item count stays well under kMaxBatchItems (issue #4056).
+TEST(HogDbGatewayRpcTest, GetItemsRejectsResponseOverByteBudget)
+{
+  HogDbDAO dao = make_dao();
+
+  ContractAddress addr{};
+  addr[0] = 0x33;
+  StorageKey storage_key(StorageKeyType::ContractData);
+  storage_key.contract_data_key()[0] = 9;
+  AddressAndKey query{.address = addr, .key = storage_key};
+
+  // A single large bytestring, duplicated just enough to overflow the
+  // response byte budget while staying far below the item-count cap, so
+  // this exercises the byte budget rather than the count cap.
+  constexpr std::size_t kValueBytes = 60000;
+  std::vector<std::byte> value(kValueBytes, std::byte{0xAB});
+  ASSERT_TRUE(dao.write_bytes(make_item_key(query), value).has_value());
+
+  const std::size_t count =
+      HogDbGatewayRpc::kMaxResponseBytes / kValueBytes + 2;
+  ASSERT_LT(count, HogDbGatewayRpc::kMaxBatchItems);
+
+  AddressAndKeyBatch batch;
+  for (std::size_t i = 0; i < count; ++i)
+    batch.push_back(query);
+
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
 }
 
 // is_committed_read_stale must report a snapshot as stale once the tip has
