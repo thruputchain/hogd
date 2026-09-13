@@ -17,6 +17,7 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -207,6 +208,15 @@ public:
   bool check_owns_auth_token(uint32_t token_id) const
   {
     return owned_auth_token_ids_.contains(token_id);
+  }
+
+  // Number of auth tokens this frame currently owns. A returned/forwarded
+  // auth-token list can name only owned tokens and must be duplicate-free, so a
+  // valid list is no longer than this; the syscalls use it to reject an
+  // over-long list before copying and sorting it (#4042).
+  size_t owned_auth_token_count() const
+  {
+    return owned_auth_token_ids_.size();
   }
 
   void mint_auth_token(uint32_t token_id)
@@ -459,6 +469,14 @@ public:
   SyscallStatus<ConsumeAuthTokenResult> consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+
+  // Number of auth tokens the active (top) frame owns. See
+  // InvocationFrame::owned_auth_token_count().
+  size_t active_frame_owned_auth_token_count() const
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().owned_auth_token_count();
+  }
 
   size_t size() const { return frame_stack_.size(); }
 
