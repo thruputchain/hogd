@@ -277,7 +277,7 @@ TEST(HogDbGatewayRpcTest, GetItemsRejectsResponseOverByteBudget)
   ASSERT_TRUE(dao.write_bytes(make_item_key(query), value).has_value());
 
   const std::size_t count =
-      HogDbGatewayRpc::kMaxResponseBytes / kValueBytes + 2;
+      (HogDbGatewayRpc::kMaxResponseBytes / kValueBytes) + 2;
   ASSERT_LT(count, HogDbGatewayRpc::kMaxBatchItems);
 
   AddressAndKeyBatch batch;
