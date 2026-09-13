@@ -1,6 +1,5 @@
 #include <sys/wait.h>
 
-#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -24,6 +23,7 @@
 #include "contract.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hosted_bootstrap_generator.h"
@@ -31,6 +31,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "types.hh"
 
 #ifndef HOG_HOSTED_BOOTSTRAP_BINARY
@@ -153,29 +154,15 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   const auto &stated_params =
       artifact.genesis_configuration.network_config.v0().params;
   ASSERT_EQ(encoded_params.size(), stated_params.size());
-  const std::array<std::string_view, 10> fields{
-      "max_sha256_buffers",       "max_cross_invoke_depth",
-      "max_new_contracts_per_tx", "max_bytestring_len",
-      "max_contract_size_bytes",  "max_savepoint_depth",
-      "max_sha256_buffer_bytes",  "max_auth_token_depth",
-      "max_rv32_code_bytes",      "max_rv32_memory_bytes"};
-  ASSERT_EQ(stated_params.size(), fields.size());
-  const std::array<std::int64_t, 10> values{
-      stated_params[0].max_sha256_buffers(),
-      stated_params[1].max_cross_invoke_depth(),
-      stated_params[2].max_new_contracts_per_tx(),
-      stated_params[3].max_bytestring_len(),
-      stated_params[4].max_contract_size_bytes(),
-      stated_params[5].max_savepoint_depth(),
-      stated_params[6].max_sha256_buffer_bytes(),
-      stated_params[7].max_auth_token_depth(),
-      stated_params[8].max_rv32_code_bytes(),
-      stated_params[9].max_rv32_memory_bytes()};
-  for (std::size_t i = 0; i < fields.size(); ++i) {
+  // Names are pinned in network_config_params_test; check that each stated
+  // parameter reaches the artifact under its name.
+  for (std::size_t i = 0; i < stated_params.size(); ++i) {
+    const ConfigParam &param = stated_params[i];
     const auto &body =
-        require_field(encoded_params[i],
-                      std::format("{}", stated_params[i].param()));
-    EXPECT_EQ(require_field(body, fields[i]).as_integer(), values[i]);
+        require_field(encoded_params[i], std::format("{}", param.param()));
+    EXPECT_EQ(
+        require_field(body, config_param_name(param.param())).as_integer(),
+        std::int64_t{config_param_value(param)});
   }
   EXPECT_EQ(network_config.find("max_sha256_buffers"), nullptr);
 

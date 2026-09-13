@@ -33,26 +33,8 @@ namespace {
 ConfigParamID
 local_parameter_id(std::string_view name)
 {
-  static constexpr std::pair<std::string_view, ConfigParamID> kParameters[] = {
-      {"max_sha256_buffers", ConfigParamID::kConfigParamMaxSHA256Buffers},
-      {"max_cross_invoke_depth",
-       ConfigParamID::kConfigParamMaxCrossInvokeDepth},
-      {"max_new_contracts_per_tx",
-       ConfigParamID::kConfigParamMaxNewContractsPerTx},
-      {"max_bytestring_len", ConfigParamID::kConfigParamMaxBytestringLen},
-      {"max_contract_size_bytes",
-       ConfigParamID::kConfigParamMaxContractSizeBytes},
-      {"max_savepoint_depth", ConfigParamID::kConfigParamMaxSavepointDepth},
-      {"max_sha256_buffer_bytes",
-       ConfigParamID::kConfigParamMaxSHA256BufferBytes},
-      {"max_auth_token_depth", ConfigParamID::kConfigParamMaxAuthTokenDepth},
-      {"max_rv32_code_bytes", ConfigParamID::kConfigParamMaxRv32CodeBytes},
-      {"max_rv32_memory_bytes", ConfigParamID::kConfigParamMaxRv32MemoryBytes},
-  };
-  for (auto const &[key, id] : kParameters) {
-    if (name == key) {
-      return id;
-    }
+  if (const auto id = config_param_id(name)) {
+    return *id;
   }
   throw std::runtime_error(
       std::format("unknown network configuration parameter '{}'", name));

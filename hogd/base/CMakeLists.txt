@@ -29,6 +29,7 @@ add_library(base_test_objects OBJECT
   cpputil_test.cc
   io_test.cc
   json_test.cc
+  network_config_params_test.cc
   perthread_arc_test.cc
   perthread_test.cc
   status_test.cc
