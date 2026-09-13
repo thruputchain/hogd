@@ -31,13 +31,9 @@ public:
 
   explicit HogDbGatewayRpc(RPCContext &ctx) : ctx_(ctx) {}
 
-  // Bounds on a single dbgateway_get_items batch (an unbounded XDR array);
-  // over-limit batches are rejected in dbgateway_get_items. kMaxBatchItems
-  // caps the read count and the fixed-size result vector (one slot per
-  // item, found or not). kMaxResponseBytes caps the cumulative serialized
-  // size, since items are variable-sized (a bytestring up to
-  // kBytestringCeilingLen, an AuthData row up to kMaxSigners), keeping the
-  // retained content and wire response within the RPC message budget.
+  // Caps on a single dbgateway_get_items batch, rejected outright when
+  // exceeded: kMaxBatchItems bounds the read count and result-vector size,
+  // kMaxResponseBytes the cumulative serialized size (items vary in size).
   static constexpr std::size_t kMaxBatchItems = 16384;
   static constexpr std::size_t kMaxResponseBytes = 15UL * 1024 * 1024;
 

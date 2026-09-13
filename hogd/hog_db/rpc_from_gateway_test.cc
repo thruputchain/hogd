@@ -224,9 +224,8 @@ TEST(HogDbGatewayRpcTest, GetItemsWaitsOutCommitPublication)
             int128_t{12345});
 }
 
-// A batch at the cap is serviced normally; one item over the cap is
-// rejected wholesale before any reads, bounding the work and retained
-// memory a single request can force (issue #4056).
+// A batch at the cap is serviced; one item over the cap is rejected
+// wholesale before any reads (issue #4056).
 TEST(HogDbGatewayRpcTest, GetItemsRejectsBatchesOverCap)
 {
   HogDbDAO dao = make_dao();
@@ -240,23 +239,18 @@ TEST(HogDbGatewayRpcTest, GetItemsRejectsBatchesOverCap)
   for (std::size_t i = 0; i < HogDbGatewayRpc::kMaxBatchItems; ++i)
     batch.push_back(make_balance_query(addr));
 
-  // At the cap: serviced normally (every item is a miss, but the outer
-  // batch succeeds and returns one result per requested slot).
   DbGatewayResult ok = gateway.dbgateway_get_items(batch)();
   ASSERT_EQ(ok.error(), RPCError::kRPCNone);
   EXPECT_EQ(ok.payload().items.size(), HogDbGatewayRpc::kMaxBatchItems);
 
-  // One item over the cap: rejected wholesale.  dbgateway_get_items takes
-  // the batch by const ref, so the accepted batch above is unchanged.
+  // One more item exceeds the cap (batch is taken by const ref above).
   batch.push_back(make_balance_query(addr));
   DbGatewayResult rejected = gateway.dbgateway_get_items(batch)();
   EXPECT_EQ(rejected.error(), RPCError::kRPCUnrecoverable);
 }
 
-// The item-count cap alone doesn't bound the response bytes: one request
-// of large items (here a fat bytestring, duplicated) must be rejected once
-// the cumulative serialized size would exceed the message budget, even
-// though the item count stays well under kMaxBatchItems (issue #4056).
+// Item count alone doesn't bound response size; an oversized response is
+// rejected even when the item count stays under kMaxBatchItems (#4056).
 TEST(HogDbGatewayRpcTest, GetItemsRejectsResponseOverByteBudget)
 {
   HogDbDAO dao = make_dao();
