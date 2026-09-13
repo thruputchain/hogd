@@ -233,9 +233,7 @@ TEST(HogDbGatewayRpcTest, GetItemsRejectsBatchesOverCap)
   RPCContext ctx(std::move(dao), nullptr);
   HogDbGatewayRpc gateway(ctx);
 
-  // Zero address: nothing is seeded, so each item is a cheap miss.  This
-  // keeps the fixture to a plain vector of small keys rather than any
-  // heavyweight state.
+  // Zero address: nothing is seeded, so each item is a cheap miss.
   ContractAddress addr{};
 
   AddressAndKeyBatch batch;
@@ -269,9 +267,8 @@ TEST(HogDbGatewayRpcTest, GetItemsRejectsResponseOverByteBudget)
   storage_key.contract_data_key()[0] = 9;
   AddressAndKey query{.address = addr, .key = storage_key};
 
-  // A single large bytestring, duplicated just enough to overflow the
-  // response byte budget while staying far below the item-count cap, so
-  // this exercises the byte budget rather than the count cap.
+  // One large bytestring, duplicated just past the byte budget but under
+  // the count cap, so this exercises the byte budget, not the count cap.
   constexpr std::size_t kValueBytes = 60000;
   std::vector<std::byte> value(kValueBytes, std::byte{0xAB});
   ASSERT_TRUE(dao.write_bytes(make_item_key(query), value).has_value());

@@ -157,14 +157,7 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 {
   HogDbDAO &db = ctx_.get_db();
 
-  // Reject oversized batches before touching the db.  The batch is an
-  // unbounded XDR array, so a single request full of (possibly duplicated)
-  // fat keys — e.g. AuthData rows that each deep-copy 21 signer pointees
-  // into the response — can decode and retain a result graph far larger
-  // than the request.  Cap the item count so one request can't amplify
-  // into a disproportionate number of reads or an oversized result vector.
-  // The cumulative response bytes are bounded separately, in the read loop
-  // below, since individual items are variable-sized.
+  // Reject oversized batches before touching the db (see kMaxBatchItems).
   if (batch.size() > kMaxBatchItems) {
     error("dbgateway_get_items: batch of {} items exceeds cap of {}; rejecting",
           batch.size(), kMaxBatchItems);
@@ -201,9 +194,7 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
     std::size_t response_bytes = 0;
     for (AddressAndKey const &k : batch) {
       DbGatewayItemResult item = read_one_item(db, k);
-      // Bound cumulative serialized size so a batch of large items (fat
-      // bytestrings or full AuthData rows) can't retain or produce a
-      // response beyond the RPC message budget.
+      // Items are variable-sized, so bound the cumulative response size too.
       response_bytes += x23::xdr_size(item);
       if (response_bytes > kMaxResponseBytes) [[unlikely]] {
         error("dbgateway_get_items: response exceeds {} bytes; rejecting",
