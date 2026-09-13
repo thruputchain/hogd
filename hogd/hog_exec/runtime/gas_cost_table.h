@@ -157,10 +157,9 @@ constexpr static uint64_t kBytestringBlockBytes = 512;
 constexpr static uint64_t kBytestringWriteBlockCost = 13;
 constexpr static uint64_t kBytestringReadBlockCost = 7;
 
-// Per-block cost of copying a payload out of the active frame into a guest
-// buffer (GetCalldata). Same rate as the bytestring read, but a distinct
-// schedule entry with no storage-access term, which also versions this
-// repricing in the gas-schedule digest (issue #4040).
+// Per-block cost of copying a frame payload into a guest buffer (GetCalldata):
+// bytestring read rate, but a distinct entry (no storage-access term) so the
+// repricing shows up in the gas-schedule digest (#4040).
 constexpr static uint64_t kGuestBufferCopyBlockCost = 7;
 
 constexpr static uint64_t kNoSyscallCost = 10;
