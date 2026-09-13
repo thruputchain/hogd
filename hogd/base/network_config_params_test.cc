@@ -11,10 +11,7 @@
 
 namespace hogd {
 
-// The names hog-devnode's --network-config flag, the overrides it records in
-// a data directory's metadata, and the genesis JSON key parameters by.
-// Spelled out rather than derived, so this pins the wire spelling: a rename
-// that changes any of those three surfaces has to change this list too.
+// Wire names, spelled out so a rename has to be made here too.
 constexpr std::array<std::pair<ConfigParamID, std::string_view>, 10> kNames{{
     {ConfigParamID::kConfigParamMaxSHA256Buffers, "max_sha256_buffers"},
     {ConfigParamID::kConfigParamMaxCrossInvokeDepth, "max_cross_invoke_depth"},

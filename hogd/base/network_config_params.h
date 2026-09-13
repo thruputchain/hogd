@@ -78,12 +78,9 @@ private:
 inline constexpr ConfigParamID kHighestConfigParamID =
     ConfigParamID::kConfigParamMaxRv32MemoryBytes;
 
-// The field name `id`'s ConfigParam arm carries.
-//
-// hog-devnode's --network-config flag, the overrides it records in a data
-// directory's metadata, and the genesis JSON all key parameters by these
-// names, so they are spelled here once. A parameter added to ConfigParamID
-// does not compile until it is named.
+// The field name `id`'s ConfigParam arm carries: the one spelling shared by
+// the --network-config flag, a data directory's recorded overrides, and the
+// genesis JSON.
 inline std::string_view
 config_param_name(ConfigParamID id)
 {

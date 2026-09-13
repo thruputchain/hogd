@@ -154,9 +154,8 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   const auto &stated_params =
       artifact.genesis_configuration.network_config.v0().params;
   ASSERT_EQ(encoded_params.size(), stated_params.size());
-  // What each parameter is named is pinned in network_config_params_test;
-  // what matters here is that every stated parameter reaches the artifact
-  // under that name with the value it states.
+  // Names are pinned in network_config_params_test; check that each stated
+  // parameter reaches the artifact under its name.
   for (std::size_t i = 0; i < stated_params.size(); ++i) {
     const ConfigParam &param = stated_params[i];
     const auto &body =
