@@ -39,7 +39,7 @@ TEST(ConfigParamNameTest, EveryParameterCarriesItsWireName)
     const std::optional<ConfigParamID> found = config_param_id(name);
 
     ASSERT_TRUE(found.has_value()) << name;
-    EXPECT_EQ(*found, id) << name;
+    EXPECT_EQ(found.value(), id) << name;
   }
 }
 
@@ -48,7 +48,7 @@ TEST(ConfigParamNameTest, EveryParameterCarriesItsWireName)
 TEST(ConfigParamNameTest, TheHighestIdIsTheLastOneNamed)
 {
   EXPECT_EQ(std::to_underlying(kHighestConfigParamID),
-            static_cast<int32_t>(kNames.size()) - 1);
+            static_cast<std::int32_t>(kNames.size()) - 1);
   EXPECT_EQ(config_param_name(kHighestConfigParamID), kNames.back().second);
 }
 
@@ -62,7 +62,7 @@ TEST(ConfigParamNameTest, AnUnnamedParameterIsNotFound)
 
 TEST(ConfigParamValueTest, ReadsTheArmTheParameterNames)
 {
-  uint32_t value = 1000;
+  std::uint32_t value = 1000;
   for (auto const &[id, name] : kNames) {
     ++value;
 
