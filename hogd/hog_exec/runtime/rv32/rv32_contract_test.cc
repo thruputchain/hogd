@@ -409,16 +409,9 @@ TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
   ASSERT_TRUE(result.is_root_success());
 }
 
-// #4051: an RV32 artifact that declares the accepted transitional (v3) gas
-// pair is metered by the production runtime with this build's single local gas
-// schedule -- identically to the same code stamped with the current (v4) pair.
-// The header-declared schedule gates acceptance only (see
-// kAcceptedGasSchedules), never metering: gas comes from gas_cost_for_op at
-// lowering time and nothing in ThreadedArtifactImage carries the declared
-// schedule into execution. So every node running a given build meters the same
-// bytes with the same table and produces the same gas and the same result;
-// there is no second, v3-priced execution path in the binary to diverge
-// against.
+// #4051: the header-declared gas schedule gates acceptance only, never
+// metering, so a v3-stamped artifact meters identically to a v4 one and nodes
+// cannot diverge on it. (Rationale in the PR description.)
 TEST_F(Rv32ProductionMappingTest, TransitionalGasScheduleIsMeteredLikeCurrent)
 {
   constexpr uint32_t kDivX0X0X0 = 0x02004033U; // div x0,x0,x0
@@ -428,9 +421,8 @@ TEST_F(Rv32ProductionMappingTest, TransitionalGasScheduleIsMeteredLikeCurrent)
   const std::vector<uint8_t> current_artifact =
       rv32::test_artifact::build_artifact(program, std::span<const uint8_t>{});
 
-  // The same bytes, restamped to the accepted transitional (v3) gas pair. Only
-  // the two header fields change; the code/memory sections and their digests
-  // are untouched, so the artifact still verifies.
+  // Restamp only the two gas header fields; digests are untouched, so the
+  // artifact still verifies.
   std::vector<uint8_t> transitional_artifact = current_artifact;
   rv32::store_u32_le(transitional_artifact, rv32::kArtifactGasVersionOffset,
                      rv32::kTransitionalGasTableVersion);
