@@ -145,13 +145,9 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                                   .auth_tokens = auth_token_list});
   }
 
-  // Price the bytes actually copied into guest memory, so repeatedly retrieving
-  // a large calldata frame costs proportionally more than a tiny one (#4040).
-  // Only the copy term applies: the calldata and auth-token list already live
-  // in the active frame, so there is no storage access to charge (contrast
-  // syscall_BytestringGet_inner). Bytes copied, not source length, for the same
-  // reason the bytestring read prices what reaches the guest and not the buffer
-  // offered.
+  // Charge the bytes actually copied into guest memory, so repeated retrieval
+  // of a large frame costs more than a tiny one; the frame data needs no
+  // storage access, so only the copy term applies (#4040).
   const WrappedGasAmount gas{GasCost::guest_buffer_copy(
       std::min(output_buffer.size(), calldata_bytes.size()) +
       std::min(output_auth_token_list.size(), auth_token_bytes.size()))};

@@ -157,15 +157,10 @@ constexpr static uint64_t kBytestringBlockBytes = 512;
 constexpr static uint64_t kBytestringWriteBlockCost = 13;
 constexpr static uint64_t kBytestringReadBlockCost = 7;
 
-// What copying a payload out of the active invocation frame into a guest buffer
-// costs, per block, paid by GetCalldata for the calldata and auth-token list it
-// hands back. It is the same host-to-guest memcpy the bytestring read is
-// calibrated on, so it shares that rate, but it carries its own schedule
-// identity: GetCalldata reads from the live frame, so unlike the bytestring
-// read it has no storage access to fold the copy onto, and a distinct entry is
-// what makes this repricing change the gas-schedule digest (issue #4040). The
-// block unit is the same 512 bytes as the bytestring copies
-// (kBytestringBlockBytes).
+// Per-block cost of copying a payload out of the active frame into a guest
+// buffer (GetCalldata). Same rate as the bytestring read, but a distinct
+// schedule entry with no storage-access term, which also versions this
+// repricing in the gas-schedule digest (issue #4040).
 constexpr static uint64_t kGuestBufferCopyBlockCost = 7;
 
 constexpr static uint64_t kNoSyscallCost = 10;
@@ -247,11 +242,7 @@ struct GasCost {
            (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
-  // Copying bytes from the host into a guest buffer, with no storage access
-  // attached: the copy term the bytestring read is calibrated on (a
-  // host-to-guest memcpy), but not the storage access
-  // syscall_BytestringGet_inner pays on top. Used by syscalls that hand back
-  // data already living in the active invocation frame, such as GetCalldata.
+  // Copy term only, no storage access (see kGuestBufferCopyBlockCost).
   static constexpr uint64_t guest_buffer_copy(uint64_t bytes_len)
   {
     return kGuestBufferCopyBlockCost * bytestring_blocks(bytes_len);
