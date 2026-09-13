@@ -531,7 +531,8 @@ TEST_F(Rv32SyscallEntryBridgeTest, GetCalldataChargesForBytesCopied)
 
     // The calldata buffer, then the two length outputs written past it. No auth
     // tokens: an empty auth list contributes no copy charge.
-    std::vector<uint8_t> memory(calldata_len + 2 * sizeof(RuntimeMemoryLength),
+    std::vector<uint8_t> memory(calldata_len +
+                                    (2 * sizeof(RuntimeMemoryLength)),
                                 0);
     const auto written_len_addr = static_cast<uint32_t>(calldata_len);
     const auto auth_written_len_addr =
