@@ -286,6 +286,18 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
+  // A frame can return only auth tokens it owns, and the duplicate check below
+  // rejects repeats, so a valid list is no longer than the frame's owned-token
+  // count. A longer list is guaranteed to fail that duplicate/ownership check;
+  // reject it here, before the copy and sort, so a contract-controlled list
+  // cannot force host copy/sort work that scales with guest memory rather than
+  // with the frame's (gas-bounded) owned-token count (#4042). Unlike the
+  // return payload, there is no separate byte cap on this span.
+  if (input_returned_auth_token_ids.size() / sizeof(uint32_t) >
+      syscall_handler.owned_auth_token_count()) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
   ReturnBuffer buffer;
   std::vector<uint32_t> returned_auth_token_ids_vec;
   buffer.resize_uninitialized(input_buffer.size());
