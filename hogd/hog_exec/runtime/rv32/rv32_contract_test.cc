@@ -20,6 +20,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
@@ -656,6 +657,47 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   auto result = invoke_deployed(addr, 10'000);
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
+}
+
+// Regression test for #4038: a missing-key BytestringGetLen must still pay the
+// host cold-load charge, so distinct keys cost one extra kDBRPCCost each.
+TEST_F(Rv32ProductionMappingTest,
+       DistinctMissingBytestringReadsAreChargedHostGas)
+{
+  constexpr size_t kReadCount = 4;
+  constexpr uint32_t kKeyBytes = StorageKeyContractData{}.size();
+  constexpr uint32_t kOutputAddress = 192;
+
+  auto make_program = [&](bool distinct) {
+    std::vector<uint32_t> program;
+    std::vector<uint8_t> memory(256);
+    for (size_t i = 0; i < kReadCount; ++i) {
+      const uint32_t key_address = distinct ? i * kKeyBytes : 0;
+      if (distinct || i == 0) {
+        std::fill_n(memory.begin() + key_address, kKeyBytes,
+                    static_cast<uint8_t>(i + 1));
+      }
+      append_syscall(program, {kBytestringGetLenSyscallNo,
+                               static_cast<int32_t>(key_address),
+                               static_cast<int32_t>(kOutputAddress)});
+    }
+    append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+    return std::pair{std::move(program), std::move(memory)};
+  };
+
+  auto [same_program, same_memory] = make_program(false);
+  auto [distinct_program, distinct_memory] = make_program(true);
+  const auto same_addr = deploy_words(same_program, 0, same_memory);
+  const auto distinct_addr = deploy_words(distinct_program, 1, distinct_memory);
+
+  const auto same_result = invoke_deployed(same_addr, 1'000'000);
+  const auto distinct_result = invoke_deployed(distinct_addr, 1'000'000);
+  ASSERT_TRUE(same_result.is_root_success());
+  ASSERT_TRUE(distinct_result.is_root_success());
+
+  EXPECT_GT(distinct_result.gas_consumed_, same_result.gas_consumed_);
+  EXPECT_EQ(distinct_result.gas_consumed_ - same_result.gas_consumed_,
+            (kReadCount - 1) * kDBRPCCost);
 }
 
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
