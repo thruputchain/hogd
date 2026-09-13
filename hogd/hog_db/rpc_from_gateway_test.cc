@@ -223,6 +223,37 @@ TEST(HogDbGatewayRpcTest, GetItemsWaitsOutCommitPublication)
             int128_t{12345});
 }
 
+// A batch at the cap is serviced normally; one item over the cap is
+// rejected wholesale before any reads, bounding the work and retained
+// memory a single request can force (issue #4056).
+TEST(HogDbGatewayRpcTest, GetItemsRejectsBatchesOverCap)
+{
+  HogDbDAO dao = make_dao();
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+
+  // Zero address: nothing is seeded, so each item is a cheap miss.  This
+  // keeps the fixture to a plain vector of small keys rather than any
+  // heavyweight state.
+  ContractAddress addr{};
+
+  AddressAndKeyBatch batch;
+  for (std::size_t i = 0; i < HogDbGatewayRpc::kMaxBatchItems; ++i)
+    batch.push_back(make_balance_query(addr));
+
+  // At the cap: serviced normally (every item is a miss, but the outer
+  // batch succeeds and returns one result per requested slot).
+  DbGatewayResult ok = gateway.dbgateway_get_items(batch)();
+  ASSERT_EQ(ok.error(), RPCError::kRPCNone);
+  EXPECT_EQ(ok.payload().items.size(), HogDbGatewayRpc::kMaxBatchItems);
+
+  // One item over the cap: rejected wholesale.  dbgateway_get_items takes
+  // the batch by const ref, so the accepted batch above is unchanged.
+  batch.push_back(make_balance_query(addr));
+  DbGatewayResult rejected = gateway.dbgateway_get_items(batch)();
+  EXPECT_EQ(rejected.error(), RPCError::kRPCUnrecoverable);
+}
+
 // is_committed_read_stale must report a snapshot as stale once the tip has
 // advanced past it, and as fresh for the current tip.
 TEST(HogDbGatewayRpcTest, CommittedReadStaleDetectsTipAdvance)

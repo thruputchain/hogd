@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 
 // generated x23 headers
 #include "db_gateway.hh"
@@ -29,6 +30,18 @@ public:
   using rpc_service = DbGateway1;
 
   explicit HogDbGatewayRpc(RPCContext &ctx) : ctx_(ctx) {}
+
+  // Upper bound on the number of items serviced in a single
+  // dbgateway_get_items batch.  The batch type is an unbounded XDR array,
+  // so without this the only limit is the RPC max_message_size (16 MiB),
+  // which still lets one request decode and retain a much larger result
+  // graph — e.g. duplicated AuthData keys each deep-copy a full 21-signer
+  // AddressAuthData into the response.  A batch is the gateway aggregating
+  // concurrent client reads; legitimate batches are orders of magnitude
+  // below this, while the cap keeps worst-case decoded/retained memory and
+  // the outgoing response comfortably within the message budget.
+  // Over-cap batches are rejected wholesale (see dbgateway_get_items).
+  static constexpr std::size_t kMaxBatchItems = 16384;
 
   static DbGatewayIntroOutcome dbgateway_intro(ProtocolCommit const &protocol);
 

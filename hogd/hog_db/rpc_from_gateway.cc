@@ -157,6 +157,18 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 {
   HogDbDAO &db = ctx_.get_db();
 
+  // Reject oversized batches before touching the db.  The batch is an
+  // unbounded XDR array, so a single request full of (possibly duplicated)
+  // fat keys — e.g. AuthData rows that each deep-copy 21 signer pointees
+  // into the response — can decode and retain a result graph far larger
+  // than the request.  Cap the item count so one request can't amplify
+  // into disproportionate work and retained memory.
+  if (batch.size() > kMaxBatchItems) {
+    error("dbgateway_get_items: batch of {} items exceeds cap of {}; rejecting",
+          batch.size(), kMaxBatchItems);
+    co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+  }
+
   // Snapshot the committed tip once up-front so every item in the response
   // is labeled with the same height.  This is a TOCTOU: a block that
   // commits between this snapshot and the reads below applies its data to
