@@ -409,9 +409,8 @@ TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
   ASSERT_TRUE(result.is_root_success());
 }
 
-// #4051: the header-declared gas schedule gates acceptance only, never
-// metering, so a v3-stamped artifact meters identically to a v4 one and nodes
-// cannot diverge on it. (Rationale in the PR description.)
+// #4051: the declared gas schedule gates acceptance only, never metering, so a
+// v3-stamped artifact meters identically to a v4 one.
 TEST_F(Rv32ProductionMappingTest, TransitionalGasScheduleIsMeteredLikeCurrent)
 {
   constexpr uint32_t kDivX0X0X0 = 0x02004033U; // div x0,x0,x0
