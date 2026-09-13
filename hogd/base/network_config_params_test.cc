@@ -38,8 +38,12 @@ TEST(ConfigParamNameTest, EveryParameterCarriesItsWireName)
 
     const std::optional<ConfigParamID> found = config_param_id(name);
 
-    ASSERT_TRUE(found.has_value()) << name;
-    EXPECT_EQ(found.value(), id) << name;
+    if (found.has_value()) {
+      EXPECT_EQ(*found, id) << name;
+    }
+    else {
+      ADD_FAILURE() << name << " is not found by config_param_id";
+    }
   }
 }
 
