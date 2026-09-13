@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "auth_token.hh"
@@ -72,21 +73,65 @@ private:
   uint32_t in_force(ConfigParamID id) const;
 };
 
-inline std::optional<uint32_t>
-NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
-                                  ConfigParamID id)
+// The highest parameter id this build knows. A configuration states its ids
+// contiguously from zero, so this bounds a scan across all of them.
+inline constexpr ConfigParamID kHighestConfigParamID =
+    ConfigParamID::kConfigParamMaxRv32MemoryBytes;
+
+// The field name `id`'s ConfigParam arm carries.
+//
+// hog-devnode's --network-config flag, the overrides it records in a data
+// directory's metadata, and the genesis JSON all key parameters by these
+// names, so they are spelled here once. A parameter added to ConfigParamID
+// does not compile until it is named.
+inline std::string_view
+config_param_name(ConfigParamID id)
 {
-  const int32_t index = std::to_underlying(id);
-  CHECK_GE(index, 0);
-
-  if (std::cmp_greater_equal(index, config.params.size())) {
-    return std::nullopt;
-  }
-
-  ConfigParam const &param = config.params[static_cast<size_t>(index)];
-  CHECK_EQ(std::to_underlying(param.param()), index);
-
   switch (id) {
+  case ConfigParamID::kConfigParamMaxSHA256Buffers:
+    return "max_sha256_buffers";
+  case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
+    return "max_cross_invoke_depth";
+  case ConfigParamID::kConfigParamMaxNewContractsPerTx:
+    return "max_new_contracts_per_tx";
+  case ConfigParamID::kConfigParamMaxBytestringLen:
+    return "max_bytestring_len";
+  case ConfigParamID::kConfigParamMaxContractSizeBytes:
+    return "max_contract_size_bytes";
+  case ConfigParamID::kConfigParamMaxSavepointDepth:
+    return "max_savepoint_depth";
+  case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+    return "max_sha256_buffer_bytes";
+  case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+    return "max_auth_token_depth";
+  case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+    return "max_rv32_code_bytes";
+  case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+    return "max_rv32_memory_bytes";
+  }
+  panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
+}
+
+// The parameter `name` names, or nullopt when no parameter carries it.
+// Callers that reject a name decide what an unknown one means.
+inline std::optional<ConfigParamID>
+config_param_id(std::string_view name)
+{
+  const int32_t highest = std::to_underlying(kHighestConfigParamID);
+  for (int32_t i = 0; i <= highest; ++i) {
+    const auto id = static_cast<ConfigParamID>(i);
+    if (config_param_name(id) == name) {
+      return id;
+    }
+  }
+  return std::nullopt;
+}
+
+// The value `param` states, read from the arm it names.
+inline uint32_t
+config_param_value(ConfigParam const &param)
+{
+  switch (param.param()) {
   case ConfigParamID::kConfigParamMaxSHA256Buffers:
     return param.max_sha256_buffers();
   case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
@@ -108,7 +153,24 @@ NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     return param.max_rv32_memory_bytes();
   }
-  panic("Unrecoverable; unknown ConfigParamID: {}", index);
+  panic("Unrecoverable; unknown ConfigParamID: {}",
+        std::to_underlying(param.param()));
+}
+
+inline std::optional<uint32_t>
+NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
+                                  ConfigParamID id)
+{
+  const int32_t index = std::to_underlying(id);
+  CHECK_GE(index, 0);
+
+  if (std::cmp_greater_equal(index, config.params.size())) {
+    return std::nullopt;
+  }
+
+  ConfigParam const &param = config.params[static_cast<size_t>(index)];
+  CHECK_EQ(std::to_underlying(param.param()), index);
+  return config_param_value(param);
 }
 
 inline ConfigParam

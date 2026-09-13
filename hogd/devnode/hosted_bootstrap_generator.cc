@@ -30,6 +30,7 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -200,51 +201,12 @@ build_genesis_json(GenesisConfiguration const &genesis)
           w.array_field("params", [&](json::Writer &w) {
             for (const ConfigParam &param : config.v0().params) {
               w.object([&](json::Writer &w) {
-                w.object_field(
-                    std::format("{}", param.param()), [&](json::Writer &w) {
-                      switch (param.param()) {
-                      case ConfigParamID::kConfigParamMaxSHA256Buffers:
-                        w.field("max_sha256_buffers",
-                                std::int64_t{param.max_sha256_buffers()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
-                        w.field("max_cross_invoke_depth",
-                                std::int64_t{param.max_cross_invoke_depth()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxNewContractsPerTx:
-                        w.field("max_new_contracts_per_tx",
-                                std::int64_t{param.max_new_contracts_per_tx()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxBytestringLen:
-                        w.field("max_bytestring_len",
-                                std::int64_t{param.max_bytestring_len()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxContractSizeBytes:
-                        w.field("max_contract_size_bytes",
-                                std::int64_t{param.max_contract_size_bytes()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxSavepointDepth:
-                        w.field("max_savepoint_depth",
-                                std::int64_t{param.max_savepoint_depth()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
-                        w.field("max_sha256_buffer_bytes",
-                                std::int64_t{param.max_sha256_buffer_bytes()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxAuthTokenDepth:
-                        w.field("max_auth_token_depth",
-                                std::int64_t{param.max_auth_token_depth()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxRv32CodeBytes:
-                        w.field("max_rv32_code_bytes",
-                                std::int64_t{param.max_rv32_code_bytes()});
-                        break;
-                      case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
-                        w.field("max_rv32_memory_bytes",
-                                std::int64_t{param.max_rv32_memory_bytes()});
-                        break;
-                      }
-                    });
+                w.object_field(std::format("{}", param.param()),
+                               [&](json::Writer &w) {
+                                 w.field(config_param_name(param.param()),
+                                         std::int64_t{
+                                             config_param_value(param)});
+                               });
               });
             }
           });
