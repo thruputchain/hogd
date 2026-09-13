@@ -78,9 +78,7 @@ private:
 inline constexpr ConfigParamID kHighestConfigParamID =
     ConfigParamID::kConfigParamMaxRv32MemoryBytes;
 
-// The field name `id`'s ConfigParam arm carries: the one spelling shared by
-// the --network-config flag, a data directory's recorded overrides, and the
-// genesis JSON.
+// Wire name for `id`: --network-config, recorded overrides, genesis JSON.
 inline std::string_view
 config_param_name(ConfigParamID id)
 {
