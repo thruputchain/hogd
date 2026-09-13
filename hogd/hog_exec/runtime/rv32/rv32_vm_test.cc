@@ -977,7 +977,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kEcall, u8"ECALL", 1}, {Op::kEbreak, u8"EBREAK", 1},
       {Op::kUnimp, u8"UNIMP", 1},
   }};
-  const std::array<ExpectedSyscallGasEntry, 12> expected_syscalls = {{
+  const std::array<ExpectedSyscallGasEntry, 13> expected_syscalls = {{
       {u8"SyscallBase", hogd::kSyscallBaseCost},
       {u8"SHA256HashBlock", hogd::kSHA256HashBlockCost},
       {u8"SHA256Stream", hogd::kSHA256StreamCost},
