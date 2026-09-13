@@ -157,6 +157,17 @@ constexpr static uint64_t kBytestringBlockBytes = 512;
 constexpr static uint64_t kBytestringWriteBlockCost = 13;
 constexpr static uint64_t kBytestringReadBlockCost = 7;
 
+// What copying a payload out of the active invocation frame into a guest buffer
+// costs, per block, paid by GetCalldata for the calldata and auth-token list it
+// hands back. It is the same host-to-guest memcpy the bytestring read is
+// calibrated on, so it shares that rate, but it carries its own schedule
+// identity: GetCalldata reads from the live frame, so unlike the bytestring
+// read it has no storage access to fold the copy onto, and a distinct entry is
+// what makes this repricing change the gas-schedule digest (issue #4040). The
+// block unit is the same 512 bytes as the bytestring copies
+// (kBytestringBlockBytes).
+constexpr static uint64_t kGuestBufferCopyBlockCost = 7;
+
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
@@ -243,7 +254,7 @@ struct GasCost {
   // data already living in the active invocation frame, such as GetCalldata.
   static constexpr uint64_t guest_buffer_copy(uint64_t bytes_len)
   {
-    return kBytestringReadBlockCost * bytestring_blocks(bytes_len);
+    return kGuestBufferCopyBlockCost * bytestring_blocks(bytes_len);
   }
 
   static constexpr uint64_t verify_signature(uint64_t message_len)
@@ -266,7 +277,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 12> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 13> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -277,6 +288,7 @@ constexpr std::array<SyscallGasCostEntry, 12> kSyscallGasCostSchedule = {{
     {.name = u8"BytestringBlockBytes", .cost = kBytestringBlockBytes},
     {.name = u8"BytestringWriteBlock", .cost = kBytestringWriteBlockCost},
     {.name = u8"BytestringReadBlock", .cost = kBytestringReadBlockCost},
+    {.name = u8"GuestBufferCopyBlock", .cost = kGuestBufferCopyBlockCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
 }};
