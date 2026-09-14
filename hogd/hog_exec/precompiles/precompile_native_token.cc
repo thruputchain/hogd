@@ -79,10 +79,8 @@ compute_event_signature(std::u8string_view qualified_name)
 // which syscall outcome produced it.
 //
 // Both syscall failures below are ordinary transaction outcomes, not node
-// faults, so they log at info -- but info is also the floor that survives a
-// release build (kMaxLogLevel), and any transfer can reach them for the price
-// of an underfunded gas limit. Rate-limited so traffic cannot flood the log
-// while a devnet still sees the first occurrence immediately.
+// faults, so they log at info rather than warn -- info also being the floor
+// that survives a release build (kMaxLogLevel compiles trace and debug out).
 template<uint32_t NumTopics>
 x23::Async<InvokeStatus<void>>
 emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
@@ -92,16 +90,14 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
   auto buf = std::as_bytes(std::span(event_buf));
 
   // The split below reads NumTopics fixed-size topics off the front, so a
-  // shorter buffer would read past the end. Unreachable unless an event
-  // struct's leading fields stop matching the NumTopics its call site passes,
-  // which is a bug in this file rather than anything a transaction can
-  // provoke -- so unlike the syscall failures below, this one stays a warning.
-  if (buf.size() < NumTopics * sizeof(Topic)) {
-    warn("native token {} event: {}-byte event buffer is too short for {} "
-         "topics",
-         event_name, buf.size(), NumTopics);
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-  }
+  // shorter buffer would read past the end. Only an event struct whose leading
+  // fields stopped matching the NumTopics its call site passes can get here --
+  // a bug in this file, not anything a transaction can provoke -- so crash
+  // rather than fault the transaction: a build that got this wrong would
+  // reject transfers a correct build commits, splitting the chain quietly
+  // instead of loudly. Mirrors make_tx_emitted_event's CHECK_LE on the same
+  // buffer one layer down.
+  CHECK_GE(buf.size(), NumTopics * sizeof(Topic));
 
   const Topic *t0 = nullptr;
   const Topic *t1 = nullptr;
@@ -123,11 +119,9 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
   if (!r.has_value()) {
     // OutOfGas means this frame could not even pay kSyscallBaseCost for the
     // crossing; the remaining codes abandon the transaction outright.
-    info_every_n_sec(5.0F,
-                     "native token {} event: kLogEvent failed: {} ({} topics, "
-                     "{} data bytes, {} gas left)",
-                     event_name, r.error(), NumTopics, data.size(),
-                     ctx.gas_remaining());
+    info("native token {} event: kLogEvent failed: {} ({} topics, {} data "
+         "bytes, {} gas left)",
+         event_name, r.error(), NumTopics, data.size(), ctx.gas_remaining());
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -136,10 +130,9 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
     // kMaxEventsPerTransaction events, or the call arrived in read-only mode
     // (kLogEvent is not a read-only syscall, so the entry path rejects it
     // before the handler sees it).
-    info_every_n_sec(5.0F,
-                     "native token {} event: kLogEvent rejected the event: {} "
-                     "({} topics, {} data bytes)",
-                     event_name, x23::show(*r), NumTopics, data.size());
+    info("native token {} event: kLogEvent rejected the event: {} ({} topics, "
+         "{} data bytes)",
+         event_name, x23::show(*r), NumTopics, data.size());
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   co_return InvokeStatus<void>{};
