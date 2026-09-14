@@ -181,7 +181,7 @@ public:
   // opened.
   [[nodiscard]] SystemStatus<SyscallStatus<void>>
   validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
-                          std::span<uint32_t const> owned_auth_token_ids) const;
+                          ValidatedAuthTokens const &owned_auth_tokens) const;
 
   // Copy events from the currently active invocation frame.
   x23::Vec<TxEmittedEvent> copy_active_frame_events() const
@@ -335,6 +335,7 @@ public:
   SystemStatus<SyscallStatus<const ReturnBuffer *>> get_return_buffer() const;
   std::span<const uint32_t> get_returned_auth_token_ids() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.

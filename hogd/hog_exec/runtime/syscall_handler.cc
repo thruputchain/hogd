@@ -48,6 +48,7 @@
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -780,7 +781,7 @@ SystemCallHandler::get_msg_sender() const
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::validate_new_invocation(
     ContractAddress const &address, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids) const
+    ValidatedAuthTokens const &owned_auth_tokens) const
 {
   if (!validate_invoke_flags(flags)) {
     return SyscallStatus<void>{std::unexpected(
@@ -811,7 +812,8 @@ SystemCallHandler::validate_new_invocation(
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
   }
   if (!invocation_frame_stack_.empty() &&
-      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
+      !invocation_frame_stack_.check_auth_tokens_owned(
+          owned_auth_tokens.set())) {
     return SyscallStatus<void>{std::unexpected(
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput})};
   }
@@ -1287,6 +1289,13 @@ SystemCallHandler::get_return_buffer() const
 bool
 SystemCallHandler::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
+{
+  return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
+}
+
+bool
+SystemCallHandler::check_auth_tokens_owned(
+    AuthTokenIdSet const &token_ids) const
 {
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }

@@ -112,7 +112,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   auto admitted =
       syscall_handler.validate_new_invocation(query.invocation.invoked_address,
                                               query.invoke_flags,
-                                              forwarded_auth_tokens->ids());
+                                              *forwarded_auth_tokens);
   if (!admitted.has_value()) {
     error("view invocation admission failed: {}", admitted.error());
     co_return ExpectedViewResult{TransactionViewStatus::InternalError};

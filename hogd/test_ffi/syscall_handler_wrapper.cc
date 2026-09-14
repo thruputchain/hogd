@@ -368,8 +368,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // error() log, which can throw.
   auto admitted =
       to_handler().validate_new_invocation(invocation.invoked_address,
-                                           frame_flags,
-                                           std::span<uint32_t const>{});
+                                           frame_flags, ValidatedAuthTokens{});
   // Reading the depth bound off the tip failed: a system error, which is not
   // one of the caller's admission refusals.
   if (!admitted.has_value()) {

@@ -155,7 +155,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // repeat at will (#2973). invoke() relies on this having run.
   auto admitted =
       syscall_handler.validate_new_invocation(input_address, input_inputs.flags,
-                                              owned_auth_tokens->ids());
+                                              *owned_auth_tokens);
   // Reading the depth bound off the tip failed: a SystemError, which ends
   // execution of the whole block rather than being reported to the caller.
   if (!admitted.has_value()) {
@@ -252,7 +252,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
-  if (!syscall_handler.check_auth_tokens_owned(returned_auth_tokens->ids())) {
+  if (!syscall_handler.check_auth_tokens_owned(returned_auth_tokens->set())) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
