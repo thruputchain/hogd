@@ -253,6 +253,21 @@ TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
   EXPECT_EQ(result.error_code(), SyscallErrorCode::kSyscallErrorCodeReentrance);
 }
 
+// The view path runs the same admission checks as a contract's Invoke before
+// any frame opens; 0x8 is not a defined InvokeFlag.
+TEST_F(ViewTest, ViewRejectsUndefinedInvokeFlags)
+{
+  ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
+  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 5U);
+  auto query = make_query(invocation);
+  query.invoke_flags = 0x8;
+
+  auto result = run_view(query);
+  EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
+  EXPECT_EQ(result.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+}
+
 TEST_F(ViewTest, ViewContractSelfInvokeAborts)
 {
   ContractTraitClient<read_only_test::ReadOnlyTest> client(kReadOnlyAddress);
