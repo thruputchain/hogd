@@ -138,8 +138,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
         WrappedGasAmount{0}};
   }
 
-  // Shape of the forwarded token list: whole uint32_t ids, none repeated. The
-  // frame stack takes the list over in invoke() without copying it again.
+  // Materialized once; the frame stack takes the list over without copying.
   auto owned_auth_tokens =
       ValidatedAuthTokens::parse(input_owned_auth_token_ids);
   if (!owned_auth_tokens.has_value()) {
@@ -240,9 +239,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
-  // Shape of the returned token list: whole uint32_t ids, none repeated. The
-  // ordered ids move on to the parent frame below; the set only serves the
-  // duplicate check here.
+  // Ordered ids go to the parent; set() only serves the duplicate check.
   auto returned_auth_tokens =
       ValidatedAuthTokens::parse(input_returned_auth_token_ids);
   if (!returned_auth_tokens.has_value()) {

@@ -313,16 +313,9 @@ public:
     return frame_stack_.back().event_count();
   }
 
-  // It MUST be the case that the owned_auth_tokens are owned by the parent
-  // frame. Caller is responsible for checking as much.
-  //
-  // Consumes the token list; the parent's owned set is untouched until the
-  // child commits.
-  //
-  // Admitting a child frame runs throwing STL allocations. On allocation
-  // failure the call is a clean no-op and an Unrecoverable SystemError is
-  // returned, so the noexcept caller (SystemCallHandler::start_frame) never
-  // lets the exception terminate the executor (#3058).
+  // The tokens MUST be owned by the parent frame; the caller checks. Consumes
+  // the list; the parent's owned set is untouched until the child commits.
+  // Admission failure is a clean no-op that returns Unrecoverable (#3058).
   [[nodiscard]] SystemStatus<void>
   start_frame(ContractAddress const &address, Calldata &&calldata,
               InvokeFlagSet flags, ValidatedAuthTokens &&owned_auth_tokens);
