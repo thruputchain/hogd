@@ -73,10 +73,7 @@ compute_event_signature(std::u8string_view qualified_name)
 // make_event_from_cxs_struct). num_topics topics of sizeof(Topic) bytes each
 // are split off the front; the remainder is data.
 //
-// event_name identifies the caller. The rejection arm is logged here because it
-// collapses to Deterministic; host_fn_error_conversion keeps the rest
-// (OutOfGas, Abandon, ...). At info: transaction outcomes, not node faults, and
-// info is the floor a release build keeps.
+// event_name identifies the calling entry point in the log lines below.
 template<uint32_t NumTopics>
 x23::Async<InvokeStatus<void>>
 emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
@@ -85,9 +82,8 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
   static_assert(NumTopics <= 3);
   auto buf = std::as_bytes(std::span(event_buf));
 
-  // NumTopics must match the event struct's leading fields; a mismatch is a bug
-  // here, not transaction input. Crash rather than fault the transaction, which
-  // would reject transfers a correct build commits.
+  // NumTopics must match the event struct's leading fields; a mismatch is a
+  // build bug.
   CHECK_GE(buf.size(), NumTopics * sizeof(Topic));
 
   const Topic *t0 = nullptr;
@@ -116,9 +112,7 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    // log_event only returns InvalidSyscallInput: oversized event or the per-tx
-    // event limit. Read-only frames never reach here, having already failed at
-    // the balance or allowance write.
+    // log_event only rejects oversized events or the per-tx event limit.
     info("native token {} event: kLogEvent rejected the event: {} ({} topics, "
          "{} data bytes)",
          event_name, x23::show(*r), NumTopics, data.size());
