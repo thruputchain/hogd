@@ -169,12 +169,7 @@ public:
   // reports that even when it also forwards a token it does not own (#2973
   // established this for reentrance; the depth bound follows the same rule).
   //
-  // Every path that opens a frame runs these once before invoke(), which does
-  // not repeat them: root_invoke() for the transaction's root frame; the
-  // Invoke syscall body, before it copies the caller's calldata, so a rejected
-  // invoke does no length-dependent host work (#2973); the view path, before
-  // handing its query to invoke(); and the test FFI mock frame path, which
-  // enters at start_frame(), below invoke(), and so runs them itself (#3301).
+  // Callers must run this before invoke(); invoke() does not repeat it.
   //
   // Failing is a no-op -- nothing here mutates the handler. The depth bound is
   // a plain load off the tip the snapshot cache loaded when the block was

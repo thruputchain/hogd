@@ -224,12 +224,7 @@ public:
 
   HashBuffers hash_buffers_;
 
-  // Records the list forwarded to the child frame now starting, as-is: this
-  // is the vector the Invoke syscall built, and the child reads it back in
-  // this order through GetCalldata. The ids stay in this frame's owned set
-  // until the child commits successfully (see commit_successful_child_frame);
-  // a child that faults or reverts leaves them untouched. Non-allocating, so
-  // it cannot throw.
+  // Ids stay in this frame's owned set until the child commits successfully.
   void
   set_child_forwarded_auth_tokens(std::vector<uint32_t> &&token_ids) noexcept
   {
@@ -321,16 +316,13 @@ public:
   // It MUST be the case that the owned_auth_tokens are owned by the parent
   // frame. Caller is responsible for checking as much.
   //
-  // The token list is consumed: its set becomes the child's owned set and its
-  // ordered ids become the parent's record of what it forwarded, without
-  // copying either. The parent's owned set is untouched until the child
-  // commits successfully.
+  // Consumes the token list; the parent's owned set is untouched until the
+  // child commits.
   //
   // Admitting a child frame runs throwing STL allocations. On allocation
-  // failure the call is a clean no-op — any parent state touched is rolled
-  // back — and an Unrecoverable SystemError is returned, so the noexcept caller
-  // (SystemCallHandler::start_frame) never lets the exception terminate the
-  // executor (#3058).
+  // failure the call is a clean no-op and an Unrecoverable SystemError is
+  // returned, so the noexcept caller (SystemCallHandler::start_frame) never
+  // lets the exception terminate the executor (#3058).
   [[nodiscard]] SystemStatus<void>
   start_frame(ContractAddress const &address, Calldata &&calldata,
               InvokeFlagSet flags, ValidatedAuthTokens &&owned_auth_tokens);

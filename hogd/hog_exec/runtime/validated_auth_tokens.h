@@ -15,12 +15,8 @@
 
 namespace hogd {
 
-// Keyed hasher for auth-token ids. The ids a contract hands to Invoke or Return
-// are attacker-chosen, so a set built from them with the default integer hasher
-// could be packed into one bucket before ownership has filtered them (#2788).
-// Iteration order over a set hashed this way is per-process and must never
-// reach consensus-visible state; the ordered copy in ValidatedAuthTokens is
-// what the receiving frame reads back.
+// Keyed hasher for auth-token ids: the ids are contract-chosen, so a default
+// integer hash could be packed into one bucket (#2788).
 struct AuthTokenIdHasher {
   std::size_t operator()(uint32_t token_id) const noexcept
   {
@@ -30,19 +26,12 @@ struct AuthTokenIdHasher {
 
 using AuthTokenIdSet = std::unordered_set<uint32_t, AuthTokenIdHasher>;
 
-// A list of auth-token ids whose shape has been checked once: a whole number of
-// uint32_t values with no id repeated. Carries the ids in two forms, each built
-// exactly once here and moved, never copied, into the frame that ends up owning
-// it:
+// Per-process hash order in AuthTokenIdSet must never reach consensus-visible
+// state; ids() is the ordered form for that.
 //
-//   - ids(): in the order the contract gave them. A child reads a forwarded
-//     list back in this order through GetCalldata and a parent reads a returned
-//     list back through GetReturnedBuffer, so this order is consensus-visible.
-//   - set(): the same ids keyed for the frame stack's ownership lookups.
-//
-// Ownership (whether the active frame holds each id) is not checked here. That
-// belongs to the frame stack, after the caller-frame conditions that outrank it
-// (see SystemCallHandler::validate_new_invocation).
+// Auth-token ids checked once for shape: whole uint32_t values, no repeats.
+// ids() preserves contract order (consensus-visible); set() is for ownership
+// lookups. Ownership itself is checked by the frame stack, not here.
 class ValidatedAuthTokens {
 public:
   ValidatedAuthTokens() = default;

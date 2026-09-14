@@ -138,11 +138,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
         WrappedGasAmount{0}};
   }
 
-  // Shape of the forwarded token list: whole uint32_t ids, none repeated. This
-  // is the one place the list is materialized; the frame stack takes it over
-  // in invoke() without copying it again. A std::bad_alloc here propagates to
-  // wrap_after_parse's exception boundary, which translates it to a structured
-  // Unrecoverable error (#2698).
+  // Shape of the forwarded token list: whole uint32_t ids, none repeated. The
+  // frame stack takes the list over in invoke() without copying it again.
   auto owned_auth_tokens =
       ValidatedAuthTokens::parse(input_owned_auth_token_ids);
   if (!owned_auth_tokens.has_value()) {

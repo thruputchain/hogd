@@ -105,10 +105,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     co_return ExpectedViewResult{TransactionViewStatus::InternalError};
   }
 
-  // The admission checks invoke() expects its caller to have run: defined
-  // flags, no reentrance against the parent frame, room under the depth bound,
-  // and forwarded tokens owned by that frame. A refusal is the query's fault
-  // and reports production's syscall error code, as a refused Invoke would.
+  // Admission checks invoke() expects its caller to have run.
   auto admitted =
       syscall_handler.validate_new_invocation(query.invocation.invoked_address,
                                               query.invoke_flags,

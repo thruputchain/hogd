@@ -279,14 +279,8 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
 
   auto [forwarded_ids, owned_set] = std::move(owned_auth_tokens).release();
 
-  // Perform every throwing allocation before touching parent state, so this
-  // stays a clean no-op under memory pressure and the noexcept caller can
-  // report Unrecoverable instead of terminating (#3058).
-  //
-  // Growing the frame stack is the only allocation: the child's owned-token
-  // set arrives already built and is moved in. InvocationFrame's move ctor is
-  // noexcept, so emplace_back has the strong guarantee: on throw the stack is
-  // unchanged.
+  // Only allocation here; emplace_back is strongly exception-safe (noexcept
+  // move ctor), so a throw leaves the stack unchanged (#3058).
   try {
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
                               event_count, std::move(owned_set), parent_depth,
@@ -296,9 +290,8 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
   }
 
   if (frame_stack_.size() >= 2) {
-    // A non-allocating move, so it cannot throw: once here the frame is
-    // admitted. The parent's owned set is not touched; the forwarded ids leave
-    // it when the child commits successfully.
+    // Non-allocating, so it cannot throw: once here the frame is admitted. The
+    // forwarded ids leave the parent's set when the child commits.
     frame_stack_[frame_stack_.size() - 2].set_child_forwarded_auth_tokens(
         std::move(forwarded_ids));
   }

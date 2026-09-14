@@ -355,10 +355,7 @@ SystemCallHandler::root_invoke()
           ? root_invocation.gas_limit - initial_validation_gas_consumed
           : 0;
 
-  // The admission checks every invoke() caller runs first (see
-  // validate_new_invocation()). With no frame open, only the flag and
-  // depth-bound checks can refuse; a refusal is reported the way a rejected
-  // child invoke is, so the root's ExecResult is unchanged.
+  // Root frame: only the flag and depth-bound checks can refuse here.
   auto admitted =
       validate_new_invocation(root_invocation.invoked_address,
                               std::to_underlying(InvokeFlag::None), {});
@@ -831,9 +828,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
       std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
                 GasAmount>;
 
-  // Every caller runs validate_new_invocation() before invoke() (see its
-  // comment in the header), so reaching this with undefined flags is a bug,
-  // not caller input.
+  // Callers run validate_new_invocation() first, so undefined flags here are a
+  // bug, not caller input.
   CHECK(validate_invoke_flags(flags));
 
   if (!invocation_frame_stack_.empty() && is_read_only()) {
