@@ -72,12 +72,28 @@ compute_event_signature(std::u8string_view qualified_name)
 // The event_buf must contain topics concatenated with data (as produced by
 // make_event_from_cxs_struct). num_topics topics of sizeof(Topic) bytes each
 // are split off the front; the remainder is data.
+//
+// event_name names the emitting entry point for diagnostics. The failure is
+// logged here rather than at the call sites because the InvokeError they see
+// collapses every rejection into Deterministic: only this frame still knows
+// which syscall outcome produced it.
 template<uint32_t NumTopics>
 x23::Async<InvokeStatus<void>>
-emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf)
+emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
+           std::string_view event_name)
 {
   static_assert(NumTopics <= 3);
   auto buf = std::as_bytes(std::span(event_buf));
+
+  // The split below reads NumTopics fixed-size topics off the front, so a
+  // shorter buffer would read past the end. Unreachable unless an event
+  // struct's leading fields stop matching the NumTopics its call site passes.
+  if (buf.size() < NumTopics * sizeof(Topic)) {
+    warn("native token {} event: {}-byte event buffer is too short for {} "
+         "topics",
+         event_name, buf.size(), NumTopics);
+    co_return InvokeError{InvokeErrorCode::Deterministic};
+  }
 
   const Topic *t0 = nullptr;
   const Topic *t1 = nullptr;
@@ -97,9 +113,22 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf)
   auto data = buf.subspan(NumTopics * sizeof(Topic));
   auto r = co_await ctx.syscall<SyscallNo::kLogEvent>(t0, t1, t2, data);
   if (!r.has_value()) {
+    // OutOfGas means this frame could not even pay kSyscallBaseCost for the
+    // crossing; the remaining codes abandon the transaction outright.
+    warn("native token {} event: kLogEvent failed: {} ({} topics, {} data "
+         "bytes, {} gas left)",
+         event_name, r.error(), NumTopics, data.size(), ctx.gas_remaining());
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    // InvalidSyscallInput is the only code log_event returns, for any of:
+    // the event exceeds kMaxEventLength, the transaction already holds
+    // kMaxEventsPerTransaction events, or the call arrived in read-only mode
+    // (kLogEvent is not a read-only syscall, so the entry path rejects it
+    // before the handler sees it).
+    warn("native token {} event: kLogEvent rejected the event: {} ({} topics, "
+         "{} data bytes)",
+         event_name, x23::show(*r), NumTopics, data.size());
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   co_return InvokeStatus<void>{};
@@ -302,7 +331,8 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   if (!event_buf) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  if (auto emitted = co_await emit_event<2>(ctx, *event_buf); !emitted) {
+  if (auto emitted = co_await emit_event<2>(ctx, *event_buf, "mint");
+      !emitted) {
     co_return emitted.error();
   }
   co_return Result<void, ERC20Exception>::make_ok();
@@ -366,7 +396,8 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   if (!event_buf) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  if (auto emitted = co_await emit_event<2>(ctx, *event_buf); !emitted) {
+  if (auto emitted = co_await emit_event<2>(ctx, *event_buf, "burn");
+      !emitted) {
     co_return emitted.error();
   }
   co_return Result<void, ERC20Exception>::make_ok();
@@ -440,8 +471,8 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   if (!event_buf)
     co_return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = co_await emit_event<3>(ctx, *event_buf); !err.has_value()) {
-    warn("failed to log transfer event in native token transfer");
+  if (auto err = co_await emit_event<3>(ctx, *event_buf, "transfer");
+      !err.has_value()) {
     co_return err.error();
   }
 
@@ -528,8 +559,8 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   if (!event_buf)
     co_return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = co_await emit_event<3>(ctx, *event_buf); !err.has_value()) {
-    warn("failed to log transfer_from event in native token transfer_from");
+  if (auto err = co_await emit_event<3>(ctx, *event_buf, "transfer_from");
+      !err.has_value()) {
     co_return err.error();
   }
 
@@ -578,9 +609,8 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
   if (!event_buf)
     co_return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = co_await emit_event<3>(ctx, *event_buf); !err.has_value()) {
-    warn("failed to log adjust_allowance event in native token "
-         "adjust_allowance");
+  if (auto err = co_await emit_event<3>(ctx, *event_buf, "adjust_allowance");
+      !err.has_value()) {
     co_return err.error();
   }
 
