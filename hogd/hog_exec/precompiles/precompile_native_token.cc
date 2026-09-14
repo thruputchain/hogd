@@ -77,6 +77,12 @@ compute_event_signature(std::u8string_view qualified_name)
 // logged here rather than at the call sites because the InvokeError they see
 // collapses every rejection into Deterministic: only this frame still knows
 // which syscall outcome produced it.
+//
+// Both syscall failures below are ordinary transaction outcomes, not node
+// faults, so they log at info -- but info is also the floor that survives a
+// release build (kMaxLogLevel), and any transfer can reach them for the price
+// of an underfunded gas limit. Rate-limited so traffic cannot flood the log
+// while a devnet still sees the first occurrence immediately.
 template<uint32_t NumTopics>
 x23::Async<InvokeStatus<void>>
 emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
@@ -87,7 +93,9 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
 
   // The split below reads NumTopics fixed-size topics off the front, so a
   // shorter buffer would read past the end. Unreachable unless an event
-  // struct's leading fields stop matching the NumTopics its call site passes.
+  // struct's leading fields stop matching the NumTopics its call site passes,
+  // which is a bug in this file rather than anything a transaction can
+  // provoke -- so unlike the syscall failures below, this one stays a warning.
   if (buf.size() < NumTopics * sizeof(Topic)) {
     warn("native token {} event: {}-byte event buffer is too short for {} "
          "topics",
@@ -115,9 +123,11 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
   if (!r.has_value()) {
     // OutOfGas means this frame could not even pay kSyscallBaseCost for the
     // crossing; the remaining codes abandon the transaction outright.
-    warn("native token {} event: kLogEvent failed: {} ({} topics, {} data "
-         "bytes, {} gas left)",
-         event_name, r.error(), NumTopics, data.size(), ctx.gas_remaining());
+    info_every_n_sec(5.0F,
+                     "native token {} event: kLogEvent failed: {} ({} topics, "
+                     "{} data bytes, {} gas left)",
+                     event_name, r.error(), NumTopics, data.size(),
+                     ctx.gas_remaining());
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -126,9 +136,10 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
     // kMaxEventsPerTransaction events, or the call arrived in read-only mode
     // (kLogEvent is not a read-only syscall, so the entry path rejects it
     // before the handler sees it).
-    warn("native token {} event: kLogEvent rejected the event: {} ({} topics, "
-         "{} data bytes)",
-         event_name, x23::show(*r), NumTopics, data.size());
+    info_every_n_sec(5.0F,
+                     "native token {} event: kLogEvent rejected the event: {} "
+                     "({} topics, {} data bytes)",
+                     event_name, x23::show(*r), NumTopics, data.size());
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   co_return InvokeStatus<void>{};
