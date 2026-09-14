@@ -73,14 +73,9 @@ compute_event_signature(std::u8string_view qualified_name)
 // make_event_from_cxs_struct). num_topics topics of sizeof(Topic) bytes each
 // are split off the front; the remainder is data.
 //
-// event_name names the emitting entry point for diagnostics. The failure is
-// logged here rather than at the call sites because the InvokeError they see
-// collapses every rejection into Deterministic: only this frame still knows
-// which syscall outcome produced it.
-//
-// Both syscall failures below are ordinary transaction outcomes, not node
-// faults, so they log at info rather than warn -- info also being the floor
-// that survives a release build (kMaxLogLevel compiles trace and debug out).
+// event_name identifies the caller; failures are logged here because callers
+// only see a collapsed Deterministic error. At info: these are transaction
+// outcomes, not node faults, and info is the floor a release build keeps.
 template<uint32_t NumTopics>
 x23::Async<InvokeStatus<void>>
 emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
@@ -89,14 +84,9 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
   static_assert(NumTopics <= 3);
   auto buf = std::as_bytes(std::span(event_buf));
 
-  // The split below reads NumTopics fixed-size topics off the front, so a
-  // shorter buffer would read past the end. Only an event struct whose leading
-  // fields stopped matching the NumTopics its call site passes can get here --
-  // a bug in this file, not anything a transaction can provoke -- so crash
-  // rather than fault the transaction: a build that got this wrong would
-  // reject transfers a correct build commits, splitting the chain quietly
-  // instead of loudly. Mirrors make_tx_emitted_event's CHECK_LE on the same
-  // buffer one layer down.
+  // NumTopics must match the event struct's leading fields; a mismatch is a bug
+  // here, not transaction input. Crash rather than fault the transaction, which
+  // would reject transfers a correct build commits.
   CHECK_GE(buf.size(), NumTopics * sizeof(Topic));
 
   const Topic *t0 = nullptr;
@@ -125,11 +115,8 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf,
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    // InvalidSyscallInput is the only code log_event returns, for any of:
-    // the event exceeds kMaxEventLength, the transaction already holds
-    // kMaxEventsPerTransaction events, or the call arrived in read-only mode
-    // (kLogEvent is not a read-only syscall, so the entry path rejects it
-    // before the handler sees it).
+    // log_event only returns InvalidSyscallInput: oversized event, per-tx event
+    // limit, or read-only mode.
     info("native token {} event: kLogEvent rejected the event: {} ({} topics, "
          "{} data bytes)",
          event_name, x23::show(*r), NumTopics, data.size());
