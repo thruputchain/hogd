@@ -4,12 +4,12 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <span>
 #include <utility>
 #include <vector>
 
+#include "hogd/base/types.h"
 #include "syscall_error.hh"
 
 namespace hogd {
