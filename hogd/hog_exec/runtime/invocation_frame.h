@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/components/hash_buffers.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -46,7 +47,7 @@ class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
-                  std::span<uint32_t const> owned_auth_token_ids,
+                  AuthTokenIdSet &&owned_auth_token_ids,
                   uint32_t inherited_try_invoke_depth,
                   NetworkConfigParams const &params);
 
@@ -223,13 +224,13 @@ public:
 
   HashBuffers hash_buffers_;
 
-  void set_child_restore_auth_tokens(std::span<uint32_t const> token_ids)
+  // Takes the child's forwarded list as-is: this is the vector the Invoke
+  // syscall built, and the child reads it back in this order through
+  // GetCalldata. Non-allocating, so it cannot throw.
+  void set_child_restore_auth_tokens(std::vector<uint32_t> &&token_ids) noexcept
   {
     assert(most_recent_child_frame_forwarded_auth_tokens_.empty());
-    most_recent_child_frame_forwarded_auth_tokens_.reserve(token_ids.size());
-    for (auto token_id : token_ids) {
-      most_recent_child_frame_forwarded_auth_tokens_.push_back(token_id);
-    }
+    most_recent_child_frame_forwarded_auth_tokens_ = std::move(token_ids);
   }
 
   std::span<const uint32_t> get_child_forwarded_auth_tokens() const
@@ -271,7 +272,7 @@ private:
   std::unordered_map<ContractAddress, DeployedContractHash, SipHash24Hasher>
       new_contract_deployments_;
 
-  std::unordered_set<uint32_t> owned_auth_token_ids_;
+  AuthTokenIdSet owned_auth_token_ids_;
   std::vector<uint32_t>
       most_recent_child_frame_forwarded_auth_tokens_; // refunded if the frame
                                                       // reverts
@@ -313,8 +314,11 @@ public:
     return frame_stack_.back().event_count();
   }
 
-  // It MUST be the case that the owned_auth_token_ids are owned by the parent
+  // It MUST be the case that the owned_auth_tokens are owned by the parent
   // frame. Caller is responsible for checking as much.
+  //
+  // The token list is consumed: its set becomes the child's owned set and its
+  // ordered ids become the parent's restore list, without copying either.
   //
   // Admitting a child frame runs throwing STL allocations. On allocation
   // failure the call is a clean no-op — any parent state touched is rolled
@@ -323,8 +327,7 @@ public:
   // executor (#3058).
   [[nodiscard]] SystemStatus<void>
   start_frame(ContractAddress const &address, Calldata &&calldata,
-              InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids);
+              InvokeFlagSet flags, ValidatedAuthTokens &&owned_auth_tokens);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode

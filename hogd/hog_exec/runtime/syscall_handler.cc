@@ -354,6 +354,26 @@ SystemCallHandler::root_invoke()
           ? root_invocation.gas_limit - initial_validation_gas_consumed
           : 0;
 
+  // The admission checks every invoke() caller runs first (see
+  // validate_new_invocation()). With no frame open, only the flag and
+  // depth-bound checks can refuse; a refusal is reported the way a rejected
+  // child invoke is, so the root's ExecResult is unchanged.
+  auto admitted =
+      validate_new_invocation(root_invocation.invoked_address,
+                              std::to_underlying(InvokeFlag::None), {});
+  std::optional<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>> refusal;
+  if (!admitted.has_value()) {
+    refusal.emplace(admitted.error());
+  }
+  else if (!admitted->has_value()) {
+    refusal.emplace(admitted->error());
+  }
+  if (refusal.has_value()) {
+    co_return finalize_after_root_frame(
+        InvokeResult{.result_ = handle_root_host_fn_status(*refusal),
+                     .gas_consumed_ = initial_validation_gas_consumed});
+  }
+
   auto [res, gas_consumed] =
       co_await invoke(root_invocation.invoked_address,
                       sdk_method_id(root_invocation.entrypoint), available_gas,
@@ -803,36 +823,19 @@ x23::Async<std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
-                          std::span<uint32_t const> owned_auth_token_ids)
+                          ValidatedAuthTokens owned_auth_tokens)
 {
   using invoke_result_t =
       std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
                 GasAmount>;
 
-  // syscall_Invoke_inner() rejects undefined flags before we get here, so
-  // reaching this with invalid ones is a bug, not caller input. Asserted here
-  // even though validate_new_invocation() also checks it -- that check is for
-  // the test FFI boundary, which must report rather than abort.
+  // Every caller runs validate_new_invocation() before invoke() (see its
+  // comment in the header), so reaching this with undefined flags is a bug,
+  // not caller input.
   CHECK(validate_invoke_flags(flags));
 
   if (!invocation_frame_stack_.empty() && is_read_only()) {
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
-  }
-
-  // Rejected before a child frame is created, so this is a complete no-op:
-  // nothing is mutated, and the caller leaves its output state untouched.
-  // Every one of these -- the depth bound included -- is reported as a syscall
-  // error, which is what CopyableInvokeOutputs documents a nonzero error code
-  // to mean. Reporting a faulted child frame instead would be
-  // indistinguishable from a callee that ran and trapped. (The TryInvoke cap
-  // does report Fault, but it fires in InvocationFrameStack::finish_frame,
-  // after its child frame has actually run.)
-  auto admitted = validate_new_invocation(address, flags, owned_auth_token_ids);
-  if (!admitted.has_value()) {
-    co_return invoke_result_t{admitted.error(), 0};
-  }
-  if (!admitted->has_value()) {
-    co_return invoke_result_t{admitted->error(), 0};
   }
 
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
@@ -890,7 +893,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // noexcept boundary and terminate the executor. The move is allocation-free
   // and invocation is unused afterward (#3058).
   auto start_status =
-      start_frame(std::move(invocation), flags, owned_auth_token_ids);
+      start_frame(std::move(invocation), flags, std::move(owned_auth_tokens));
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and
@@ -934,9 +937,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
 }
 
 SystemStatus<std::unique_ptr<InvocationFrameTrace>>
-SystemCallHandler::start_frame(
-    Invocation invocation, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids) noexcept
+SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
+                               ValidatedAuthTokens owned_auth_tokens) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -979,7 +981,8 @@ SystemCallHandler::start_frame(
     try {
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
-                                                 flags, owned_auth_token_ids);
+                                                 flags,
+                                                 std::move(owned_auth_tokens));
     } catch (std::exception const &e) {
       guarded_log("frame-admission failure diagnostic", [&] {
         error("unrecoverable: frame admission threw: {}", e.what());

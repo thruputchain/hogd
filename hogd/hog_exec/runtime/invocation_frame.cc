@@ -40,15 +40,14 @@ namespace hogd {
 InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  Calldata &&calldata, InvokeFlagSet flags,
                                  size_t event_count,
-                                 std::span<uint32_t const> owned_auth_token_ids,
+                                 AuthTokenIdSet &&owned_auth_token_ids,
                                  uint32_t inherited_try_invoke_depth,
                                  NetworkConfigParams const &params)
   : hash_buffers_(params.max_sha256_buffers, params.max_sha256_buffer_bytes),
     address_(address), calldata_(std::forward<Calldata>(calldata)),
     flags_(flags), event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
-    owned_auth_token_ids_(owned_auth_token_ids.begin(),
-                          owned_auth_token_ids.end())
+    owned_auth_token_ids_(std::move(owned_auth_token_ids))
 {}
 
 void
@@ -265,11 +264,12 @@ InvocationFrame::collect_storage_deltas(
 }
 
 SystemStatus<void>
-InvocationFrameStack::start_frame(
-    ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids)
+InvocationFrameStack::start_frame(ContractAddress const &address,
+                                  Calldata &&calldata, InvokeFlagSet flags,
+                                  ValidatedAuthTokens &&owned_auth_tokens)
 {
-  assert(frame_stack_.empty() || check_auth_tokens_owned(owned_auth_token_ids));
+  assert(frame_stack_.empty() ||
+         check_auth_tokens_owned(owned_auth_tokens.ids()));
 
   size_t event_count =
       frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
@@ -277,17 +277,20 @@ InvocationFrameStack::start_frame(
       frame_stack_.empty() ? 0
                            : frame_stack_.back().get_total_try_invoke_depth();
 
+  auto [forwarded_ids, owned_set] = std::move(owned_auth_tokens).release();
+
   // Perform every throwing allocation before mutating parent-owned auth-token
   // state, and roll back on failure, so this stays a clean no-op under memory
   // pressure and the noexcept caller can report Unrecoverable instead of
   // terminating (#3058).
   //
-  // emplace_back grows the frame stack and builds the child's owned-token set.
-  // InvocationFrame's move ctor is noexcept, so emplace_back has the strong
-  // guarantee: on throw the stack is unchanged.
+  // Growing the frame stack is the only allocation left: the child's
+  // owned-token set arrives already built and is moved in. InvocationFrame's
+  // move ctor is noexcept, so emplace_back has the strong guarantee: on throw
+  // the stack is unchanged.
   try {
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
-                              event_count, owned_auth_token_ids, parent_depth,
+                              event_count, std::move(owned_set), parent_depth,
                               config_params_);
   } catch (...) {
     return SystemError{SystemErrorCode::Unrecoverable};
@@ -295,17 +298,10 @@ InvocationFrameStack::start_frame(
 
   if (frame_stack_.size() >= 2) {
     InvocationFrame &parent = frame_stack_[frame_stack_.size() - 2];
-    // set_child_restore_auth_tokens only allocates in its initial reserve(), so
-    // a throw leaves the restore list empty; drop the child frame we just
-    // pushed to return to the pre-call state.
-    try {
-      parent.set_child_restore_auth_tokens(owned_auth_token_ids);
-    } catch (...) {
-      frame_stack_.pop_back();
-      return SystemError{SystemErrorCode::Unrecoverable};
-    }
-    // Non-allocating, so it cannot throw: once here the frame is admitted.
-    parent.remove_auth_tokens(owned_auth_token_ids);
+    // Both steps are non-allocating, so neither can throw: once here the frame
+    // is admitted.
+    parent.set_child_restore_auth_tokens(std::move(forwarded_ids));
+    parent.remove_auth_tokens(parent.get_child_forwarded_auth_tokens());
   }
   return {};
 }
