@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include "syscall_error.hh"
+
 namespace hogd {
 
 namespace {
@@ -46,14 +48,22 @@ TEST(ValidatedAuthTokensTest, ParseRejectsPartialId)
   auto bytes = to_bytes(std::vector<uint32_t>{1, 2});
   bytes.pop_back();
 
-  EXPECT_FALSE(ValidatedAuthTokens::parse(bytes).has_value());
+  auto parsed = ValidatedAuthTokens::parse(bytes);
+
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 }
 
 TEST(ValidatedAuthTokensTest, ParseRejectsRepeatedId)
 {
   auto bytes = to_bytes(std::vector<uint32_t>{1, 2, 3, 2});
 
-  EXPECT_FALSE(ValidatedAuthTokens::parse(bytes).has_value());
+  auto parsed = ValidatedAuthTokens::parse(bytes);
+
+  ASSERT_FALSE(parsed.has_value());
+  EXPECT_EQ(parsed.error().code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 }
 
 TEST(ValidatedAuthTokensTest, ParseAcceptsUnalignedSpan)
@@ -76,12 +86,6 @@ TEST(ValidatedAuthTokensTest, EmptySpanParsesToEmptyList)
   ASSERT_TRUE(parsed.has_value());
   EXPECT_TRUE(parsed->empty());
   EXPECT_TRUE(parsed->set().empty());
-}
-
-TEST(ValidatedAuthTokensTest, FromIdsRejectsRepeatedId)
-{
-  EXPECT_FALSE(ValidatedAuthTokens::from_ids({5, 5}).has_value());
-  EXPECT_TRUE(ValidatedAuthTokens::from_ids({5, 6}).has_value());
 }
 
 TEST(ValidatedAuthTokensTest, ReleaseHandsOutBothForms)

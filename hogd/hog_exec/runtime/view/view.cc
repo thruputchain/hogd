@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -98,7 +99,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
 
   // Freshly minted ids never repeat, so this only fails on a broken registry.
   auto forwarded_auth_tokens =
-      ValidatedAuthTokens::from_ids(std::move(forwarded_token_ids));
+      ValidatedAuthTokens::parse(std::as_bytes(std::span(forwarded_token_ids)));
   if (!forwarded_auth_tokens.has_value()) {
     error("unrecoverable: view forwarded-token ids repeat");
     co_return ExpectedViewResult{TransactionViewStatus::InternalError};

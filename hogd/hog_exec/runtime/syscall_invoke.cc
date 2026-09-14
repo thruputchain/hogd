@@ -146,9 +146,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   auto owned_auth_tokens =
       ValidatedAuthTokens::parse(input_owned_auth_token_ids);
   if (!owned_auth_tokens.has_value()) {
-    co_return SyscallInnerResult{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-        WrappedGasAmount{0}};
+    co_return SyscallInnerResult{owned_auth_tokens.error().code(),
+                                 WrappedGasAmount{0}};
   }
 
   // Admission before the calldata is copied: a rejection reports gas 0, so

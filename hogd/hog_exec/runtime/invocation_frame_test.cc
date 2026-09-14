@@ -52,6 +52,13 @@ protected:
     address[0] = id;
     return address;
   }
+
+  // A forwarded-token list holding one id, built the way the Invoke syscall
+  // builds it.
+  static ValidatedAuthTokens forward(uint32_t token_id)
+  {
+    return *ValidatedAuthTokens::parse(std::as_bytes(std::span(&token_id, 1)));
+  }
 };
 
 TEST_F(InvocationFrameTest, MintAuthToken)
@@ -96,11 +103,10 @@ TEST_F(InvocationFrameTest, ForwardAuthToken)
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
-  ASSERT_TRUE(
-      stack
-          .start_frame(make_test_address(1), Calldata{}, 0,
-                       *ValidatedAuthTokens::from_ids({token_id.value()}))
-          .has_value());
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(1), Calldata{}, 0,
+                               forward(token_id.value()))
+                  .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
@@ -135,11 +141,10 @@ TEST_F(InvocationFrameTest, RevertsRestoreToken)
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
-  ASSERT_TRUE(
-      stack
-          .start_frame(make_test_address(1), Calldata{}, 0,
-                       *ValidatedAuthTokens::from_ids({token_id.value()}))
-          .has_value());
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(1), Calldata{}, 0,
+                               forward(token_id.value()))
+                  .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
@@ -196,11 +201,10 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
   // forward token to child
-  ASSERT_TRUE(
-      stack
-          .start_frame(make_test_address(1), Calldata{}, 0,
-                       *ValidatedAuthTokens::from_ids({token_id.value()}))
-          .has_value());
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(1), Calldata{}, 0,
+                               forward(token_id.value()))
+                  .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
@@ -324,11 +328,10 @@ TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
   auto token_id = stack.mint_auth_token(auth_token);
   ASSERT_TRUE(token_id.has_value());
 
-  ASSERT_TRUE(
-      stack
-          .start_frame(make_test_address(1), Calldata{}, 0,
-                       *ValidatedAuthTokens::from_ids({token_id.value()}))
-          .has_value());
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(1), Calldata{}, 0,
+                               forward(token_id.value()))
+                  .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 }
@@ -349,11 +352,10 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
   ASSERT_TRUE(token_id.has_value());
 
   // forward token to child, which manually reverts
-  ASSERT_TRUE(
-      stack
-          .start_frame(make_test_address(1), Calldata{}, 0,
-                       *ValidatedAuthTokens::from_ids({token_id.value()}))
-          .has_value());
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(1), Calldata{}, 0,
+                               forward(token_id.value()))
+                  .has_value());
   stack.set_active_frame_return(
       InvocationFrameOutput(InvocationFrameStatusCode::Fault));
   auto result1 =
@@ -366,11 +368,10 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
   // re-forward the same token to a new child that succeeds
-  ASSERT_TRUE(
-      stack
-          .start_frame(make_test_address(2), Calldata{}, 0,
-                       *ValidatedAuthTokens::from_ids({token_id.value()}))
-          .has_value());
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(2), Calldata{}, 0,
+                               forward(token_id.value()))
+                  .has_value());
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
