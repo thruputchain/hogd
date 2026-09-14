@@ -153,7 +153,7 @@ HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 }
 
 x23::Async<DbGatewayResult>
-HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
+HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch batch)
 {
   HogDbDAO &db = ctx_.get_db();
 

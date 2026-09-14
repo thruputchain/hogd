@@ -34,6 +34,8 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/rpc.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -221,6 +223,61 @@ TEST(HogDbGatewayRpcTest, GetItemsWaitsOutCommitPublication)
   ASSERT_EQ(result.payload().items[0].error(), RPCError::kRPCNone);
   EXPECT_EQ(from_xdr(result.payload().items[0].item().nnint()),
             int128_t{12345});
+}
+
+// Regression for #4060: dispatch owns the decoded argument only until serve
+// returns. A handler suspended on commit publication must own its batch.
+TEST(HogDbGatewayRpcTest, DispatchedGetItemsOwnsBatchAcrossCommitPublication)
+{
+  HogDbDAO dao = make_dao();
+  ContractAddress first{};
+  first[0] = 1;
+  ContractAddress second{};
+  second[0] = 2;
+  ASSERT_TRUE(dao.write_address_balance(first, int128_t{12345}));
+  ASSERT_TRUE(dao.write_address_balance(second, int128_t{67890}));
+
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  x23::RpcDispatcher<DbGateway1, HogDbGatewayRpc *> dispatcher(&gateway, {});
+  auto call = x23::call_msg<DbGateway1::proc_meta<1>>();
+  call.xid = 4060;
+  auto publication_guard =
+      std::make_unique<RPCContext::CommitPublicationGuard>(ctx, BlockTXID{1});
+
+  auto pending = [&] {
+    AddressAndKeyBatch batch{make_balance_query(first),
+                             make_balance_query(ContractAddress{}),
+                             make_balance_query(second)};
+    auto args = x23::serialize(batch);
+    return dispatcher.serve(call, args);
+  }();
+  // The held publication forces suspension without sleeps or a timing race.
+  EXPECT_FALSE(pending.await_ready());
+  publication_guard.reset();
+  auto reply = pending();
+
+  ASSERT_GE(reply.size(), 4U);
+  x23::rpc_msg msg;
+  auto header_size =
+      x23::deserialize_from(&msg, x23::BufView(reply).subspan(4));
+  EXPECT_EQ(msg.xid, call.xid);
+  ASSERT_EQ(msg.body.mtype(), x23::msg_type::REPLY);
+  ASSERT_EQ(msg.body.rbody().stat(), x23::reply_stat::MSG_ACCEPTED);
+  ASSERT_EQ(msg.body.rbody().areply().reply_data.stat(),
+            x23::accept_stat::SUCCESS);
+  DbGatewayResult result;
+  x23::deserialize(&result, x23::BufView(reply).subspan(4 + header_size));
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items.size(), 3U);
+  auto const &items = result.payload().items;
+  ASSERT_EQ(items[0].error(), RPCError::kRPCNone);
+  ASSERT_EQ(items[0].item().type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(items[0].item().nnint()), int128_t{12345});
+  EXPECT_EQ(items[1].error(), RPCError::kRPCNotFound);
+  ASSERT_EQ(items[2].error(), RPCError::kRPCNone);
+  ASSERT_EQ(items[2].item().type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(items[2].item().nnint()), int128_t{67890});
 }
 
 // is_committed_read_stale must report a snapshot as stale once the tip has

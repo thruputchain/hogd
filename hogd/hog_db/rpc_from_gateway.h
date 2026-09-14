@@ -34,8 +34,9 @@ public:
 
   // A coroutine: it may suspend to wait out a commit publication, and the
   // rpc server runs handlers on ThreadPool workers, which must not park.
-  x23::Async<DbGatewayResult>
-  dbgateway_get_items(AddressAndKeyBatch const &batch);
+  // Own the decoded batch because RPC dispatch releases its arguments when
+  // a handler suspends.
+  x23::Async<DbGatewayResult> dbgateway_get_items(AddressAndKeyBatch batch);
 
   void shut_down() { shutdown_flag_ = true; }
 
