@@ -138,7 +138,7 @@ public:
   // this stays a noexcept non-coroutine boundary the FFI mock path enters.
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids) noexcept;
+              ValidatedAuthTokens owned_auth_tokens) noexcept;
   x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>> finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
@@ -169,19 +169,14 @@ public:
   // reports that even when it also forwards a token it does not own (#2973
   // established this for reentrance; the depth bound follows the same rule).
   //
-  // invoke() runs these before creating a child frame; the test FFI mock frame
-  // path enters at start_frame(), below invoke(), so it runs them itself
-  // (#3301). The Invoke syscall body runs them before it copies the caller's
-  // calldata, so a rejected invoke does no length-dependent host work (#2973)
-  // -- which is why the depth bound is checked here and not further down in
-  // invoke(), where it would refuse only after that copy.
+  // Callers must run this before invoke(); invoke() does not repeat it.
   //
-  // Failing is a no-op -- nothing here mutates the handler, so any of those
-  // callers may ask more than once. The depth bound is a plain load off the
-  // tip the snapshot cache loaded when the block was opened.
-  [[nodiscard]] SystemStatus<SyscallStatus<void>>
+  // Failing is a no-op -- nothing here mutates the handler. The depth bound is
+  // a plain load off the tip the snapshot cache loaded when the block was
+  // opened.
+  [[nodiscard]] SyscallStatus<void>
   validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
-                          std::span<uint32_t const> owned_auth_token_ids) const;
+                          ValidatedAuthTokens const &owned_auth_tokens) const;
 
   // Copy events from the currently active invocation frame.
   x23::Vec<TxEmittedEvent> copy_active_frame_events() const
@@ -293,7 +288,8 @@ public:
   }
 
   // Create and run a child call frame.
-  // Should be called from within a syscall.
+  // Should be called from within a syscall, after validate_new_invocation()
+  // has admitted the call; invoke() does not repeat those checks.
   //
   // The result layers the two failure channels:
   //  - outer SystemError: a block-ending error (Unrecoverable / Abandon /
@@ -308,7 +304,7 @@ public:
                        GasAmount>>
   invoke(ContractAddress const &address, Runtime::MethodID method,
          GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
-         std::span<uint32_t const> owned_auth_token_ids);
+         ValidatedAuthTokens owned_auth_tokens);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -334,6 +330,7 @@ public:
   SystemStatus<SyscallStatus<const ReturnBuffer *>> get_return_buffer() const;
   std::span<const uint32_t> get_returned_auth_token_ids() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.

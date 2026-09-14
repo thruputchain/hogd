@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <expected>
 #include <limits>
 #include <map>
 #include <memory>
@@ -48,6 +47,7 @@
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -353,6 +353,17 @@ SystemCallHandler::root_invoke()
       initial_validation_gas_consumed < root_invocation.gas_limit
           ? root_invocation.gas_limit - initial_validation_gas_consumed
           : 0;
+
+  // Root frame: only the depth bound can refuse here. Rejected before any
+  // frame ran, so deterministic, as handle_root_host_fn_status() reports it.
+  auto admitted =
+      validate_new_invocation(root_invocation.invoked_address,
+                              std::to_underlying(InvokeFlag::None), {});
+  if (!admitted.has_value()) {
+    co_return finalize_after_root_frame(
+        InvokeResult{.result_ = InvokeError{InvokeErrorCode::Deterministic},
+                     .gas_consumed_ = initial_validation_gas_consumed});
+  }
 
   auto [res, gas_consumed] =
       co_await invoke(root_invocation.invoked_address,
@@ -757,14 +768,13 @@ SystemCallHandler::get_msg_sender() const
                    SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
-SystemStatus<SyscallStatus<void>>
+SyscallStatus<void>
 SystemCallHandler::validate_new_invocation(
     ContractAddress const &address, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids) const
+    ValidatedAuthTokens const &owned_auth_tokens) const
 {
   if (!validate_invoke_flags(flags)) {
-    return SyscallStatus<void>{std::unexpected(
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput})};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   // Reentrance and the depth bound are both conditions of the calling frame,
   // and both sit above the auth-token check so that either is reported even
@@ -775,8 +785,7 @@ SystemCallHandler::validate_new_invocation(
   // chain, where the depth bound says only that this frame is too deep and a
   // shallower one would admit the same call.
   if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return SyscallStatus<void>{std::unexpected(
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance})};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
   }
   // A chain bounds how many invocation frames one transaction may have open at
   // once. Every open frame holds a live contract runtime, so without this a
@@ -787,15 +796,14 @@ SystemCallHandler::validate_new_invocation(
   // whose tip was never loaded.
   if (invocation_frame_stack_.size() >=
       config_params().max_cross_invoke_depth) {
-    return SyscallStatus<void>{std::unexpected(
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded};
   }
   if (!invocation_frame_stack_.empty() &&
-      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
-    return SyscallStatus<void>{std::unexpected(
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput})};
+      !invocation_frame_stack_.check_auth_tokens_owned(
+          owned_auth_tokens.set())) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  return SyscallStatus<void>{};
+  return {};
 }
 
 x23::Async<std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
@@ -803,36 +811,18 @@ x23::Async<std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
-                          std::span<uint32_t const> owned_auth_token_ids)
+                          ValidatedAuthTokens owned_auth_tokens)
 {
   using invoke_result_t =
       std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
                 GasAmount>;
 
-  // syscall_Invoke_inner() rejects undefined flags before we get here, so
-  // reaching this with invalid ones is a bug, not caller input. Asserted here
-  // even though validate_new_invocation() also checks it -- that check is for
-  // the test FFI boundary, which must report rather than abort.
+  // Callers run validate_new_invocation() first, so undefined flags here are a
+  // bug, not caller input.
   CHECK(validate_invoke_flags(flags));
 
   if (!invocation_frame_stack_.empty() && is_read_only()) {
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
-  }
-
-  // Rejected before a child frame is created, so this is a complete no-op:
-  // nothing is mutated, and the caller leaves its output state untouched.
-  // Every one of these -- the depth bound included -- is reported as a syscall
-  // error, which is what CopyableInvokeOutputs documents a nonzero error code
-  // to mean. Reporting a faulted child frame instead would be
-  // indistinguishable from a callee that ran and trapped. (The TryInvoke cap
-  // does report Fault, but it fires in InvocationFrameStack::finish_frame,
-  // after its child frame has actually run.)
-  auto admitted = validate_new_invocation(address, flags, owned_auth_token_ids);
-  if (!admitted.has_value()) {
-    co_return invoke_result_t{admitted.error(), 0};
-  }
-  if (!admitted->has_value()) {
-    co_return invoke_result_t{admitted->error(), 0};
   }
 
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
@@ -890,7 +880,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // noexcept boundary and terminate the executor. The move is allocation-free
   // and invocation is unused afterward (#3058).
   auto start_status =
-      start_frame(std::move(invocation), flags, owned_auth_token_ids);
+      start_frame(std::move(invocation), flags, std::move(owned_auth_tokens));
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and
@@ -934,9 +924,8 @@ SystemCallHandler::invoke(ContractAddress const &address,
 }
 
 SystemStatus<std::unique_ptr<InvocationFrameTrace>>
-SystemCallHandler::start_frame(
-    Invocation invocation, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids) noexcept
+SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
+                               ValidatedAuthTokens owned_auth_tokens) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -979,7 +968,8 @@ SystemCallHandler::start_frame(
     try {
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
-                                                 flags, owned_auth_token_ids);
+                                                 flags,
+                                                 std::move(owned_auth_tokens));
     } catch (std::exception const &e) {
       guarded_log("frame-admission failure diagnostic", [&] {
         error("unrecoverable: frame admission threw: {}", e.what());
@@ -1284,6 +1274,13 @@ SystemCallHandler::get_return_buffer() const
 bool
 SystemCallHandler::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
+{
+  return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
+}
+
+bool
+SystemCallHandler::check_auth_tokens_owned(
+    AuthTokenIdSet const &token_ids) const
 {
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }

@@ -25,6 +25,7 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
@@ -40,15 +41,14 @@ namespace hogd {
 InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  Calldata &&calldata, InvokeFlagSet flags,
                                  size_t event_count,
-                                 std::span<uint32_t const> owned_auth_token_ids,
+                                 AuthTokenIdSet &&owned_auth_token_ids,
                                  uint32_t inherited_try_invoke_depth,
                                  NetworkConfigParams const &params)
   : hash_buffers_(params.max_sha256_buffers, params.max_sha256_buffer_bytes),
     address_(address), calldata_(std::forward<Calldata>(calldata)),
     flags_(flags), event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
-    owned_auth_token_ids_(owned_auth_token_ids.begin(),
-                          owned_auth_token_ids.end())
+    owned_auth_token_ids_(std::move(owned_auth_token_ids))
 {}
 
 void
@@ -58,11 +58,9 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
   child_return_output_ = std::move(frame.to_return_output_);
   child_returned_auth_token_ids_.clear();
 
-  // reclaim the auth tokens from a reverted frame
-  for (auto token_id : most_recent_child_frame_forwarded_auth_tokens_) {
-    owned_auth_token_ids_.insert(token_id);
-  }
-  most_recent_child_frame_forwarded_auth_tokens_.clear();
+  // The forwarded tokens never left this frame's owned set, so a reverted
+  // child has nothing to give back.
+  child_forwarded_auth_tokens_.clear();
 }
 
 void
@@ -94,13 +92,16 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   try_invoke_frame_count_ += frame.try_invoke_frame_count_;
   total_try_invoke_depth_ = frame.total_try_invoke_depth_;
 
-  // Reclaim auth tokens the child returned via the Return syscall
+  // The tokens forwarded to the child leave this frame now that the child has
+  // committed; whatever it returned via the Return syscall comes straight
+  // back. Remove before insert so a returned forwarded token stays owned.
+  remove_auth_tokens(child_forwarded_auth_tokens_);
   for (auto token_id : frame.returned_auth_token_ids_) {
     owned_auth_token_ids_.insert(token_id);
   }
   child_returned_auth_token_ids_ = std::move(frame.returned_auth_token_ids_);
 
-  most_recent_child_frame_forwarded_auth_tokens_.clear();
+  child_forwarded_auth_tokens_.clear();
 }
 
 x23::Async<SystemStatus<void>>
@@ -122,11 +123,9 @@ InvocationFrame::commit_failed_child_frame()
   child_return_output_ =
       InvocationFrameOutput{InvocationFrameStatusCode::Fault};
   child_returned_auth_token_ids_.clear();
-  // reclaim the auth tokens from a failed frame
-  for (auto token_id : most_recent_child_frame_forwarded_auth_tokens_) {
-    owned_auth_token_ids_.insert(token_id);
-  }
-  most_recent_child_frame_forwarded_auth_tokens_.clear();
+  // The forwarded tokens never left this frame's owned set, so a failed child
+  // has nothing to give back.
+  child_forwarded_auth_tokens_.clear();
 }
 
 void
@@ -265,11 +264,12 @@ InvocationFrame::collect_storage_deltas(
 }
 
 SystemStatus<void>
-InvocationFrameStack::start_frame(
-    ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids)
+InvocationFrameStack::start_frame(ContractAddress const &address,
+                                  Calldata &&calldata, InvokeFlagSet flags,
+                                  ValidatedAuthTokens &&owned_auth_tokens)
 {
-  assert(frame_stack_.empty() || check_auth_tokens_owned(owned_auth_token_ids));
+  assert(frame_stack_.empty() ||
+         check_auth_tokens_owned(owned_auth_tokens.set()));
 
   size_t event_count =
       frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
@@ -277,35 +277,23 @@ InvocationFrameStack::start_frame(
       frame_stack_.empty() ? 0
                            : frame_stack_.back().get_total_try_invoke_depth();
 
-  // Perform every throwing allocation before mutating parent-owned auth-token
-  // state, and roll back on failure, so this stays a clean no-op under memory
-  // pressure and the noexcept caller can report Unrecoverable instead of
-  // terminating (#3058).
-  //
-  // emplace_back grows the frame stack and builds the child's owned-token set.
-  // InvocationFrame's move ctor is noexcept, so emplace_back has the strong
-  // guarantee: on throw the stack is unchanged.
+  auto [forwarded_ids, owned_set] = std::move(owned_auth_tokens).release();
+
+  // Only allocation here; emplace_back is strongly exception-safe (noexcept
+  // move ctor), so a throw leaves the stack unchanged (#3058).
   try {
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
-                              event_count, owned_auth_token_ids, parent_depth,
+                              event_count, std::move(owned_set), parent_depth,
                               config_params_);
   } catch (...) {
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   if (frame_stack_.size() >= 2) {
-    InvocationFrame &parent = frame_stack_[frame_stack_.size() - 2];
-    // set_child_restore_auth_tokens only allocates in its initial reserve(), so
-    // a throw leaves the restore list empty; drop the child frame we just
-    // pushed to return to the pre-call state.
-    try {
-      parent.set_child_restore_auth_tokens(owned_auth_token_ids);
-    } catch (...) {
-      frame_stack_.pop_back();
-      return SystemError{SystemErrorCode::Unrecoverable};
-    }
-    // Non-allocating, so it cannot throw: once here the frame is admitted.
-    parent.remove_auth_tokens(owned_auth_token_ids);
+    // Non-allocating, so it cannot throw: once here the frame is admitted. The
+    // forwarded ids leave the parent's set when the child commits.
+    frame_stack_[frame_stack_.size() - 2].set_child_forwarded_auth_tokens(
+        std::move(forwarded_ids));
   }
   return {};
 }
@@ -624,6 +612,16 @@ InvocationFrameStack::consume_auth_token(uint32_t token_id)
 bool
 InvocationFrameStack::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
+{
+  assert(!frame_stack_.empty());
+  return std::ranges::all_of(token_ids, [&](uint32_t token_id) {
+    return frame_stack_.back().check_owns_auth_token(token_id);
+  });
+}
+
+bool
+InvocationFrameStack::check_auth_tokens_owned(
+    AuthTokenIdSet const &token_ids) const
 {
   assert(!frame_stack_.empty());
   return std::ranges::all_of(token_ids, [&](uint32_t token_id) {

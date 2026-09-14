@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/components/hash_buffers.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -46,7 +47,7 @@ class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
-                  std::span<uint32_t const> owned_auth_token_ids,
+                  AuthTokenIdSet &&owned_auth_token_ids,
                   uint32_t inherited_try_invoke_depth,
                   NetworkConfigParams const &params);
 
@@ -223,18 +224,17 @@ public:
 
   HashBuffers hash_buffers_;
 
-  void set_child_restore_auth_tokens(std::span<uint32_t const> token_ids)
+  // Ids stay in this frame's owned set until the child commits successfully.
+  void
+  set_child_forwarded_auth_tokens(std::vector<uint32_t> &&token_ids) noexcept
   {
-    assert(most_recent_child_frame_forwarded_auth_tokens_.empty());
-    most_recent_child_frame_forwarded_auth_tokens_.reserve(token_ids.size());
-    for (auto token_id : token_ids) {
-      most_recent_child_frame_forwarded_auth_tokens_.push_back(token_id);
-    }
+    assert(child_forwarded_auth_tokens_.empty());
+    child_forwarded_auth_tokens_ = std::move(token_ids);
   }
 
   std::span<const uint32_t> get_child_forwarded_auth_tokens() const
   {
-    return most_recent_child_frame_forwarded_auth_tokens_;
+    return child_forwarded_auth_tokens_;
   }
 
   void
@@ -271,10 +271,10 @@ private:
   std::unordered_map<ContractAddress, DeployedContractHash, SipHash24Hasher>
       new_contract_deployments_;
 
-  std::unordered_set<uint32_t> owned_auth_token_ids_;
-  std::vector<uint32_t>
-      most_recent_child_frame_forwarded_auth_tokens_; // refunded if the frame
-                                                      // reverts
+  AuthTokenIdSet owned_auth_token_ids_;
+  // Forwarded to the running child; leaves owned_auth_token_ids_ only when
+  // that child commits successfully.
+  std::vector<uint32_t> child_forwarded_auth_tokens_;
 };
 
 static_assert(std::is_nothrow_move_constructible_v<InvocationFrame>);
@@ -313,18 +313,12 @@ public:
     return frame_stack_.back().event_count();
   }
 
-  // It MUST be the case that the owned_auth_token_ids are owned by the parent
-  // frame. Caller is responsible for checking as much.
-  //
-  // Admitting a child frame runs throwing STL allocations. On allocation
-  // failure the call is a clean no-op — any parent state touched is rolled
-  // back — and an Unrecoverable SystemError is returned, so the noexcept caller
-  // (SystemCallHandler::start_frame) never lets the exception terminate the
-  // executor (#3058).
+  // The tokens MUST be owned by the parent frame; the caller checks. Consumes
+  // the list; the parent's owned set is untouched until the child commits.
+  // Admission failure is a clean no-op that returns Unrecoverable (#3058).
   [[nodiscard]] SystemStatus<void>
   start_frame(ContractAddress const &address, Calldata &&calldata,
-              InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids);
+              InvokeFlagSet flags, ValidatedAuthTokens &&owned_auth_tokens);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode
@@ -459,6 +453,7 @@ public:
   SyscallStatus<ConsumeAuthTokenResult> consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
 
   size_t size() const { return frame_stack_.size(); }
 
