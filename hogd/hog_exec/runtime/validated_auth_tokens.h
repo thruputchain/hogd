@@ -24,11 +24,9 @@ struct AuthTokenIdHasher {
   }
 };
 
+// Per-process hash order; must never reach consensus-visible state.
 using AuthTokenIdSet = std::unordered_set<uint32_t, AuthTokenIdHasher>;
 
-// Per-process hash order in AuthTokenIdSet must never reach consensus-visible
-// state; ids() is the ordered form for that.
-//
 // Auth-token ids checked once for shape: whole uint32_t values, no repeats.
 // ids() preserves contract order (consensus-visible); set() is for ownership
 // lookups. Ownership itself is checked by the frame stack, not here.
