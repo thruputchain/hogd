@@ -224,18 +224,22 @@ public:
 
   HashBuffers hash_buffers_;
 
-  // Takes the child's forwarded list as-is: this is the vector the Invoke
-  // syscall built, and the child reads it back in this order through
-  // GetCalldata. Non-allocating, so it cannot throw.
-  void set_child_restore_auth_tokens(std::vector<uint32_t> &&token_ids) noexcept
+  // Records the list forwarded to the child frame now starting, as-is: this
+  // is the vector the Invoke syscall built, and the child reads it back in
+  // this order through GetCalldata. The ids stay in this frame's owned set
+  // until the child commits successfully (see commit_successful_child_frame);
+  // a child that faults or reverts leaves them untouched. Non-allocating, so
+  // it cannot throw.
+  void
+  set_child_forwarded_auth_tokens(std::vector<uint32_t> &&token_ids) noexcept
   {
-    assert(most_recent_child_frame_forwarded_auth_tokens_.empty());
-    most_recent_child_frame_forwarded_auth_tokens_ = std::move(token_ids);
+    assert(child_forwarded_auth_tokens_.empty());
+    child_forwarded_auth_tokens_ = std::move(token_ids);
   }
 
   std::span<const uint32_t> get_child_forwarded_auth_tokens() const
   {
-    return most_recent_child_frame_forwarded_auth_tokens_;
+    return child_forwarded_auth_tokens_;
   }
 
   void
@@ -273,9 +277,9 @@ private:
       new_contract_deployments_;
 
   AuthTokenIdSet owned_auth_token_ids_;
-  std::vector<uint32_t>
-      most_recent_child_frame_forwarded_auth_tokens_; // refunded if the frame
-                                                      // reverts
+  // Forwarded to the running child; leaves owned_auth_token_ids_ only when
+  // that child commits successfully.
+  std::vector<uint32_t> child_forwarded_auth_tokens_;
 };
 
 static_assert(std::is_nothrow_move_constructible_v<InvocationFrame>);
@@ -318,7 +322,9 @@ public:
   // frame. Caller is responsible for checking as much.
   //
   // The token list is consumed: its set becomes the child's owned set and its
-  // ordered ids become the parent's restore list, without copying either.
+  // ordered ids become the parent's record of what it forwarded, without
+  // copying either. The parent's owned set is untouched until the child
+  // commits successfully.
   //
   // Admitting a child frame runs throwing STL allocations. On allocation
   // failure the call is a clean no-op — any parent state touched is rolled

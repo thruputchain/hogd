@@ -871,7 +871,7 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenRejectsUndeserializableBytes)
 // This exercises the full round-trip: mint → forward → consume → Return
 // with returned_auth_token_ids → parent owns the returned tokens.
 //
-// EXPECTED TO FAIL until set_child_restore_auth_tokens is called on the
+// EXPECTED TO FAIL until set_child_forwarded_auth_tokens is called on the
 // parent frame (not the child frame) in set_return_buffer.
 TEST_F(SyscallAuthTokenTest, ReturnAuthTokensToParent)
 {
