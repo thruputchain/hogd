@@ -3501,11 +3501,8 @@ TEST_F(SyscallAuthTokenTest, OutOfGasChildCannotReturnMintedAuthToken)
   }
 }
 
-// The ordered form of an auth-token list is what the other frame reads back:
-// a child sees forwarded ids through GetCalldata in the order the parent gave
-// them, and a parent sees returned ids through GetReturnedBuffer in the order
-// the child gave them. Neither order below is sorted, so serving either list
-// from the ownership set instead of the ordered copy fails this test.
+// Neither list below is sorted, so serving either from the ownership set
+// instead of the ordered copy fails this test.
 TEST_F(SyscallAuthTokenTest,
        ForwardedAndReturnedAuthTokenListsKeepContractOrder)
 {
