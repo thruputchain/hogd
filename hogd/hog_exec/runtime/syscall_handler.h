@@ -174,7 +174,7 @@ public:
   // Failing is a no-op -- nothing here mutates the handler. The depth bound is
   // a plain load off the tip the snapshot cache loaded when the block was
   // opened.
-  [[nodiscard]] SystemStatus<SyscallStatus<void>>
+  [[nodiscard]] SyscallStatus<void>
   validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
                           ValidatedAuthTokens const &owned_auth_tokens) const;
 

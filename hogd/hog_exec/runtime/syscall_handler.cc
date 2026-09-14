@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <expected>
 #include <limits>
 #include <map>
 #include <memory>
@@ -355,20 +354,14 @@ SystemCallHandler::root_invoke()
           ? root_invocation.gas_limit - initial_validation_gas_consumed
           : 0;
 
-  // Root frame: only the flag and depth-bound checks can refuse here.
+  // Root frame: only the depth bound can refuse here. Rejected before any
+  // frame ran, so deterministic, as handle_root_host_fn_status() reports it.
   auto admitted =
       validate_new_invocation(root_invocation.invoked_address,
                               std::to_underlying(InvokeFlag::None), {});
-  std::optional<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>> refusal;
   if (!admitted.has_value()) {
-    refusal.emplace(admitted.error());
-  }
-  else if (!admitted->has_value()) {
-    refusal.emplace(admitted->error());
-  }
-  if (refusal.has_value()) {
     co_return finalize_after_root_frame(
-        InvokeResult{.result_ = handle_root_host_fn_status(*refusal),
+        InvokeResult{.result_ = InvokeError{InvokeErrorCode::Deterministic},
                      .gas_consumed_ = initial_validation_gas_consumed});
   }
 
@@ -775,14 +768,13 @@ SystemCallHandler::get_msg_sender() const
                    SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
-SystemStatus<SyscallStatus<void>>
+SyscallStatus<void>
 SystemCallHandler::validate_new_invocation(
     ContractAddress const &address, InvokeFlagSet flags,
     ValidatedAuthTokens const &owned_auth_tokens) const
 {
   if (!validate_invoke_flags(flags)) {
-    return SyscallStatus<void>{std::unexpected(
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput})};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   // Reentrance and the depth bound are both conditions of the calling frame,
   // and both sit above the auth-token check so that either is reported even
@@ -793,8 +785,7 @@ SystemCallHandler::validate_new_invocation(
   // chain, where the depth bound says only that this frame is too deep and a
   // shallower one would admit the same call.
   if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return SyscallStatus<void>{std::unexpected(
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance})};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
   }
   // A chain bounds how many invocation frames one transaction may have open at
   // once. Every open frame holds a live contract runtime, so without this a
@@ -805,16 +796,14 @@ SystemCallHandler::validate_new_invocation(
   // whose tip was never loaded.
   if (invocation_frame_stack_.size() >=
       config_params().max_cross_invoke_depth) {
-    return SyscallStatus<void>{std::unexpected(
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded};
   }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(
           owned_auth_tokens.set())) {
-    return SyscallStatus<void>{std::unexpected(
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput})};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  return SyscallStatus<void>{};
+  return {};
 }
 
 x23::Async<std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,

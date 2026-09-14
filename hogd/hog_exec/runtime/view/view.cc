@@ -111,14 +111,10 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
                                               query.invoke_flags,
                                               *forwarded_auth_tokens);
   if (!admitted.has_value()) {
-    error("view invocation admission failed: {}", admitted.error());
-    co_return ExpectedViewResult{TransactionViewStatus::InternalError};
-  }
-  if (!admitted->has_value()) {
     info("view transaction failed with SyscallErrorCode::{}",
-         admitted->error().code());
+         admitted.error().code());
     ExpectedViewResult result(TransactionViewStatus::InvalidInput);
-    result.error_code() = admitted->error().code();
+    result.error_code() = admitted.error().code();
     co_return result;
   }
 

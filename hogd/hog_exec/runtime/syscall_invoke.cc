@@ -152,14 +152,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   auto admitted =
       syscall_handler.validate_new_invocation(input_address, input_inputs.flags,
                                               *owned_auth_tokens);
-  // Reading the depth bound off the tip failed: a SystemError, which ends
-  // execution of the whole block rather than being reported to the caller.
   if (!admitted.has_value()) {
-    co_return SyscallInnerResult{admitted.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
-  }
-  if (!admitted->has_value()) {
-    co_return SyscallInnerResult{admitted->error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{admitted.error().code(), WrappedGasAmount{0}};
   }
 
   Calldata calldata;
