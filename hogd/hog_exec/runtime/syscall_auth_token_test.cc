@@ -3796,10 +3796,8 @@ TEST_F(SyscallAuthTokenTest, InvokeDropsUnreturnedForwardedAuthTokens)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// A TryInvoke child consumes a forwarded token and then faults. The fault
-// discards the child frame, token ownership included, so the caller still
-// owns the token and may forward it again; the registry memoizes the unwrap,
-// so the retry yields the same child token ids.
+// A TryInvoke child consumes a forwarded token and then faults; the discarded
+// frame leaves the token with the caller, who may forward it again.
 TEST_F(SyscallAuthTokenTest,
        TryInvokeChildConsumesThenFaultsLeavesTokenWithCaller)
 {
