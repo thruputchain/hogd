@@ -35,7 +35,9 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/rpc.h"
+#include "x23/rpc_msg.hh"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
