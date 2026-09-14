@@ -76,8 +76,9 @@ public:
   }
 
 private:
-  ValidatedAuthTokens(std::vector<uint32_t> &&host_ids, AuthTokenIdSet &&id_set)
-    : ids_(std::move(host_ids)), set_(std::move(id_set))
+  ValidatedAuthTokens(std::vector<uint32_t> &&ordered_ids,
+                      AuthTokenIdSet &&id_set)
+    : ids_(std::move(ordered_ids)), set_(std::move(id_set))
   {}
 
   std::vector<uint32_t> ids_;
