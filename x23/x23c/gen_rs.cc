@@ -545,13 +545,12 @@ impl {0}_{1}_Client {{
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
     // Encode the arguments straight into a CallBuf so the driver frames the
     // call in place instead of copying the payload behind its header.
-    prtop("         let mut call = xdrs::txs::buf_writer::BufWriter::from("
-          "::rpc_api::CallBuf::new().into_vec());\n");
-    prtop("         xdrs::write_xdr(&({}), &mut call).map_err(|_| "
+    prtop("         let mut call = ::rpc_api::CallBuf::new();\n");
+    prtop("         call.encode(&({})).map_err(|_| "
           "::rpc_api::RpcError::GarbageArguments)?;\n",
           join(call_args, ", "));
     prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
-          "::rpc_api::CallBuf::from_vec(call.into())).await?;\n",
+          "call).await?;\n",
           proc.val);
     prtop("         xdrs::txs::decode(&buf).map_err(|_| "
           "::rpc_api::RpcError::SystemError)\n");
