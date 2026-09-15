@@ -79,7 +79,7 @@ public:
 
   // Mark the current frame as failed.
   // Used to clean up failed try_invoke frames.
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
@@ -145,7 +145,7 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
-  x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
+  [[nodiscard]] x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
       std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
 
@@ -329,7 +329,7 @@ public:
   // is still popped and an Unrecoverable SystemError is returned, so the
   // noexcept caller (SystemCallHandler::finish_frame) is never terminated
   // (#3378).
-  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data,
                DbConflictResult *try_invoke_conflict_out = nullptr);
@@ -442,7 +442,8 @@ public:
   }
 
   AuthToken const *lookup_auth_token(uint32_t token_id) const;
-  SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
+  [[nodiscard]] SyscallStatus<uint32_t>
+  mint_auth_token(AuthToken const &auth_token);
 
   struct ConsumeAuthTokenResult {
     AuthTokenPayload const *payload;
@@ -450,7 +451,8 @@ public:
     uint32_t new_token_id_start;
     uint32_t new_token_id_count;
   };
-  SyscallStatus<ConsumeAuthTokenResult> consume_auth_token(uint32_t token_id);
+  [[nodiscard]] SyscallStatus<ConsumeAuthTokenResult>
+  consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
   bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;

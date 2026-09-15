@@ -52,9 +52,10 @@ public:
   // Coroutines: both lazily load from hog_db under rcq_mtx_, which is a
   // CoroLock, so acquiring it suspends the caller instead of parking the
   // thread.
-  x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
+  [[nodiscard]] x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_rcq_block(uint64_t search_start_block) const;
-  x23::Async<SystemStatus<Nondeterministic<std::optional<QueueEntry>>>>
+  [[nodiscard]] x23::Async<
+      SystemStatus<Nondeterministic<std::optional<QueueEntry>>>>
   get_concurrent_rcq_entry(uint32_t index) const;
 
 private:
@@ -69,7 +70,7 @@ private:
   peek_concurrent_entry(uint32_t index) const;
   // Records [entry] at [index], or checks it against what a racing load
   // already recorded there.
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   record_concurrent_entry(uint32_t index, QueueEntry entry) const;
 
 public:
@@ -187,7 +188,7 @@ private:
     // only returns from past blocks.  The caller must hold rcq_mtx_ for the
     // whole call: this suspends on the database read with the lock held, which
     // a CoroLock (unlike a std::mutex) supports.
-    x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
+    [[nodiscard]] x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
     get_next_block(DatabaseProxy &db_proxy, BlockID block_id,
                    AddressAndKey const &addrkey,
                    uint64_t search_start_index) const;

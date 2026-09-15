@@ -139,7 +139,8 @@ public:
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
               ValidatedAuthTokens owned_auth_tokens) noexcept;
-  x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>> finish_frame(
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>>
+  finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
 
@@ -243,7 +244,7 @@ public:
   // ExecResultTxNonDeterministicError) before interpreting this value.
   DbConflictResult const &last_commit_conflict() const;
 
-  x23::Async<SystemStatus<void>> abort_transaction();
+  [[nodiscard]] x23::Async<SystemStatus<void>> abort_transaction();
 
   // Adds the replay-nonce consume delta for the root invoked address to the
   // current subtransaction batch (no-op when there is no uniquifier). The delta
@@ -265,8 +266,8 @@ public:
   // alongside the event log (assembled in proposal mode, forwarded in
   // validation mode).  Tests that only exercise the event-log path pass an
   // empty ProposedTransaction{} explicitly.
-  x23::Async<SystemStatus<void>> emit_events(ExecResult exec_result,
-                                             ProposedTransaction proposed_tx);
+  [[nodiscard]] x23::Async<SystemStatus<void>>
+  emit_events(ExecResult exec_result, ProposedTransaction proposed_tx);
 
   // Get the proposal data.
   // Can only be called after root_invoke()
@@ -310,7 +311,7 @@ public:
   // (i.e. while at least one invoke() is running)
   const ContractAddress &get_current_address() const;
 
-  SyscallStatus<ContractAddress> get_msg_sender() const;
+  [[nodiscard]] SyscallStatus<ContractAddress> get_msg_sender() const;
   SHA256Hash get_source_tx_hash() const;
 
   // return the calldata associated with the current active invocation.
@@ -327,7 +328,8 @@ public:
 
   // Get the buffer returned by a child call frame.
   // Error if most recent child did call set_return_buffer.
-  SystemStatus<SyscallStatus<const ReturnBuffer *>> get_return_buffer() const;
+  [[nodiscard]] SystemStatus<SyscallStatus<const ReturnBuffer *>>
+  get_return_buffer() const;
   std::span<const uint32_t> get_returned_auth_token_ids() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
   bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
@@ -337,18 +339,19 @@ public:
   void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame,
                          std::vector<uint32_t> returned_auth_token_ids = {});
 
-  SyscallStatus<void> log_event(Topic const *topic0, Topic const *topic1,
-                                Topic const *topic2,
-                                std::span<const std::byte> data);
-  SyscallStatus<void> log_event(uint32_t num_topics,
-                                std::span<const std::byte> data);
+  [[nodiscard]] SyscallStatus<void> log_event(Topic const *topic0,
+                                              Topic const *topic1,
+                                              Topic const *topic2,
+                                              std::span<const std::byte> data);
+  [[nodiscard]] SyscallStatus<void> log_event(uint32_t num_topics,
+                                              std::span<const std::byte> data);
 
   static ContractAddress
   static_get_deploy_address(ContractAddress const &sender,
                             SHA256Hash const &nonce,
                             SHA256Hash const &contract_hash);
 
-  x23::Async<SystemStatus<SyscallStatus<ContractAddress>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<ContractAddress>>>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
   bool is_read_only() const
@@ -357,18 +360,18 @@ public:
   }
 
   // === Crypto syscalls ===
-  SyscallStatus<void> sha256_update(uint32_t input_index,
-                                    std::span<const std::byte> input_buffer,
-                                    bool input_reset);
-  SyscallStatus<void> sha256_copy(uint32_t input_src_index,
-                                  uint32_t input_dst_index);
-  SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
+  [[nodiscard]] SyscallStatus<void>
+  sha256_update(uint32_t input_index, std::span<const std::byte> input_buffer,
+                bool input_reset);
+  [[nodiscard]] SyscallStatus<void> sha256_copy(uint32_t input_src_index,
+                                                uint32_t input_dst_index);
+  [[nodiscard]] SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
-  x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
   get_bytestring(StorageKeyContractData const &storage_key);
-  x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_bytestring(StorageKeyContractData const &storage_key,
                  std::span<const std::byte> input_bytestring,
                  StorageDeltaFlagSet input_flags);
@@ -382,41 +385,42 @@ public:
       SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
   get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
 
-  x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_nnint(StorageKeyContractData const &storage_key,
             std::optional<int128_t> set_value, const int128_t &add_value,
             StorageDeltaFlagSet input_flags);
 
   // === Delete syscall ===
-  x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   delete_object(StorageKeyContractData const &storage_key,
                 StorageDeltaFlagSet flags);
 
   // === Retrocausal Queue syscalls ===
-  x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
-  x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
-  x23::Async<SystemStatus<StorageRead<int128_t>>>
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<int128_t>>>
   get_native_token_balance(ContractAddress const &contract_address);
-  x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   modify_native_token_balance(ContractAddress const &contract_address,
                               int128_t transfer_amount);
 
   // == Authentication syscalls ==
-  x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   change_public_key_registration(uint32_t key_index,
                                  PublicKeyConfigOpt new_key);
 
-  x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_address_required_weight(Weight required_weight);
 
   // Auth token syscalls
-  SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
-  SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
+  [[nodiscard]] SyscallStatus<uint32_t>
+  mint_auth_token(AuthToken const &auth_token);
+  [[nodiscard]] SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
   // == Block statistics syscalls ==
@@ -432,7 +436,7 @@ public:
   // == General access methods ==
   //
   // returns nullptr if the contract does not exist
-  x23::Async<SystemStatus<const Contract *>>
+  [[nodiscard]] x23::Async<SystemStatus<const Contract *>>
   resolve_contract(SHA256Hash const &hash) const;
 
   // Returns the image already built for `hash`: by perform_initial_validation
@@ -440,7 +444,7 @@ public:
   // already-committed contract. Never builds a second one. The result is
   // borrowed -- both owners are node-stable and outlive this transaction's
   // runtimes. Returns nullptr (wrapped) if `hash` names no contract.
-  x23::Async<SystemStatus<const PreparedContract *>>
+  [[nodiscard]] x23::Async<SystemStatus<const PreparedContract *>>
   resolve_prepared_contract(SHA256Hash hash);
 
   // The parameters this transaction's chain puts in force.
@@ -562,12 +566,12 @@ private:
 
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.
-  static InvokeStatus<void> handle_root_host_fn_status(
+  [[nodiscard]] static InvokeStatus<void> handle_root_host_fn_status(
       SystemStatus<SyscallStatus<InvocationFrameStatusCode>> status);
 
   // Body of finish_frame(). Not noexcept: it is the coroutine, and its frame
   // allocation is what finish_frame() catches on its behalf.
-  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
   finish_frame_impl(InvokeStatus<void> result,
                     std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
 
@@ -576,7 +580,7 @@ private:
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
-  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   resolve_runtime(ContractAddress const &addr);
 
   // Commit the last call frame, if the last call frame succeeds.

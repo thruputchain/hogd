@@ -42,7 +42,7 @@ public:
   // Parses a contract-supplied byte span, which may be unaligned.
   // InvalidSyscallInput when the length is not a multiple of sizeof(uint32_t)
   // or an id repeats.
-  static SyscallStatus<ValidatedAuthTokens>
+  [[nodiscard]] static SyscallStatus<ValidatedAuthTokens>
   parse(std::span<const std::byte> bytes)
   {
     if (bytes.size() % sizeof(uint32_t) != 0) {

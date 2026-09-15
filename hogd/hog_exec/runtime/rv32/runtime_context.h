@@ -39,7 +39,7 @@ public:
                                   hogd::PreparedContract &out) const override;
   using hogd::RuntimeContext::verify_contract;
 
-  x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 

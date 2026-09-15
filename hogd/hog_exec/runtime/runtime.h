@@ -74,7 +74,7 @@ public:
   InvokeErrorCode verify_contract(Contract const &contract,
                                   NetworkConfigParams const &params) const;
 
-  virtual x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
+  [[nodiscard]] virtual x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const = 0;
 };
