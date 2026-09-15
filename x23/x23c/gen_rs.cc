@@ -545,7 +545,7 @@ impl {0}_{1}_Client {{
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
     // Encode the arguments straight into a CallBuf so the driver frames the
     // call in place instead of copying the payload behind its header.
-    prtop("         let mut call = ::rpc_api::CallBuf::new();\n");
+    prtop("         let mut call = self.handle.call_buf();\n");
     prtop("         call.encode(&({})).map_err(|_| "
           "::rpc_api::RpcError::GarbageArguments)?;\n",
           join(call_args, ", "));
