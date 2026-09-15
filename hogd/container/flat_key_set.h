@@ -43,11 +43,9 @@ public:
 
   // Leave the source empty and reusable after moving its storage.
   FlatKeySet(FlatKeySet &&other) noexcept
-    : tags_(std::move(other.tags_)),
-      payloads_(std::move(other.payloads_)),
+    : tags_(std::move(other.tags_)), payloads_(std::move(other.payloads_)),
       capacity_(std::exchange(other.capacity_, 0)),
-      mask_(std::exchange(other.mask_, 0)),
-      size_(std::exchange(other.size_, 0))
+      mask_(std::exchange(other.mask_, 0)), size_(std::exchange(other.size_, 0))
   {}
 
   FlatKeySet &operator=(FlatKeySet &&other) noexcept
