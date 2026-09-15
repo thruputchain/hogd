@@ -7,20 +7,10 @@
 
 namespace hogd {
 
-// flat_key_set.h - an insert-only, open-addressed set of keys that carry
-// their own hash. Built for SystemCallHandler::loaded_keys_, the per-tx set
-// behind the first-touch load charge, where std::unordered_set's node layout
-// cost two dependent cache misses per probe.
-//
-// Hashes live in one contiguous array and key bytes in another, so a probe
-// reads the small hash array first and touches key bytes only on a match.
-// Membership is exact: the hash chooses where to look, the byte compare
-// decides equality, so a collision costs a compare, never an under-charge.
-// No erase and no iteration.
-//
-// Key requirements: `key.hash()` returning a size_t, and `key.bytes()`
-// returning a `Key::Bytes const &`, the std::array equality is decided on.
-// FrameItemKey is the intended key.
+// Insert-only open-addressed set of hash-carrying keys; hashes and key bytes
+// live in separate arrays. Membership is exact: the hash picks the slot, the
+// byte compare decides equality. Requires `Key::hash()` and `Key::bytes()`
+// (a `Key::Bytes const &`). No erase or iteration.
 template<typename Key> class FlatKeySet {
 public:
   FlatKeySet() = default;
