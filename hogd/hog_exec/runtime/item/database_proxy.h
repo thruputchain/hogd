@@ -76,20 +76,20 @@ public:
   // damage scales with how much work sits between two database reads, which
   // is why it showed up first as multiexec_interface throughput falling off
   // as batch_size rose.
-  x23::Async<SystemStatus<std::optional<WireStorageItem>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::optional<WireStorageItem>>>
   get_snapshot_item(BlockID block_id, AddressAndKey addrkey);
 
-  x23::Async<SystemStatus<std::optional<Contract>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::optional<Contract>>>
   get_contract(BlockID block_id, SHA256Hash const &contract_hash);
 
-  x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
   get_deployment(BlockID block_id, ContractAddress const &addr);
 
-  x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
   get_next_retrocausal_queue_block(BlockID block_id, AddressAndKey addrkey,
                                    uint64_t search_start_number);
 
-  x23::Async<SystemStatus<std::optional<QueueEntry>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::optional<QueueEntry>>>
   get_concurrent_retrocausal_queue_entry(BlockID block_id,
                                          AddressAndKey addrkey, uint32_t index);
 
@@ -102,30 +102,32 @@ public:
   // the caller must keep the referent alive until the call completes.  The
   // batch is far too large to copy per push, which is why it stays a
   // reference; PerTransactionDatabaseProxy owns both for the whole call.
-  x23::Async<SystemStatus<bool>>
+  [[nodiscard]] x23::Async<SystemStatus<bool>>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch,
                               DbConflictResult *conflict_out = nullptr);
 
   // [new_contracts] is borrowed across the suspension; see above.
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   commit_transaction(BlockID block_id, TransactionID tx_id,
                      BorrowedContractBatch const &new_contracts);
 
-  x23::Async<SystemStatus<void>> abort_transaction(BlockID block_id,
-                                                   TransactionID tx_id);
+  [[nodiscard]] x23::Async<SystemStatus<void>>
+  abort_transaction(BlockID block_id, TransactionID tx_id);
 
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   pop_subtransactions(BlockID block_id, TransactionID tx_id, uint32_t count);
 
   // `block_height` is the height the block was opened with; the server
   // serves the committed tip at that height minus one, or refuses once the
   // chain has moved to or past `block_height` (see executor_to_db_rpc.x).
-  x23::Async<SystemStatus<DbTip>> get_db_tip(BlockID block_id,
-                                             BlockHeight block_height);
+  [[nodiscard]] x23::Async<SystemStatus<DbTip>>
+  get_db_tip(BlockID block_id, BlockHeight block_height);
 
-  x23::Async<SystemStatus<ViewingSnapshot>> open_viewing_snapshot();
-  x23::Async<SystemStatus<void>> close_viewing_snapshot(BlockID block_id);
+  [[nodiscard]] x23::Async<SystemStatus<ViewingSnapshot>>
+  open_viewing_snapshot();
+  [[nodiscard]] x23::Async<SystemStatus<void>>
+  close_viewing_snapshot(BlockID block_id);
 
 private:
   // The async multiclient: a DB read suspends the calling coroutine instead of
@@ -180,14 +182,16 @@ public:
   // Defined out of line: GCC emits an inline coroutine's ramp even where it is
   // unused, so a header definition would make every includer's link need
   // DatabaseProxy.
-  x23::Async<SystemStatus<bool>> try_push_current_subtransaction();
+  [[nodiscard]] x23::Async<SystemStatus<bool>>
+  try_push_current_subtransaction();
 
-  x23::Async<SystemStatus<void>> pop_subtransactions(uint32_t count)
+  [[nodiscard]] x23::Async<SystemStatus<void>>
+  pop_subtransactions(uint32_t count)
   {
     return db_proxy_.pop_subtransactions(block_id_, tx_id_, count);
   }
 
-  x23::Async<SystemStatus<void>> commit_transaction()
+  [[nodiscard]] x23::Async<SystemStatus<void>> commit_transaction()
   {
     static const BorrowedContractBatch::hash_set_t kEmptyHashes;
     static const BorrowedContractBatch::contract_map_t kEmptyContracts;
@@ -198,13 +202,13 @@ public:
 
   // [new_contracts] is borrowed for the duration of the call; the caller owns
   // it (see DatabaseProxy::commit_transaction).
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   commit_transaction(BorrowedContractBatch const &new_contracts)
   {
     return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);
   }
 
-  x23::Async<SystemStatus<void>> abort_transaction()
+  [[nodiscard]] x23::Async<SystemStatus<void>> abort_transaction()
   {
     return db_proxy_.abort_transaction(block_id_, tx_id_);
   }

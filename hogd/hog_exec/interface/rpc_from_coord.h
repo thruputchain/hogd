@@ -120,12 +120,12 @@ private:
   // value means there is no usable context (not initialized, not found, or a
   // mode mismatch); an error means a late event-server error surfaced while
   // releasing during a mode-mismatch cleanup and must be propagated.
-  x23::Async<SystemStatus<PerThreadARC<ExecutorContext> *>>
+  [[nodiscard]] x23::Async<SystemStatus<PerThreadARC<ExecutorContext> *>>
   try_get_context(BlockID block_id, ExecutionMode mode);
   // Releases the caller's reference. If this was the last reference, runs the
   // deferred gc and returns its result so a late event-server error can be
   // folded into the in-flight transaction's result.
-  x23::MaybeAsync<SystemStatus<void>>
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<void>>
   release_context(BlockID block_id, PerThreadARC<ExecutorContext> *ctx);
 
   struct TxIDAllocator {
