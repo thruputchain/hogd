@@ -322,10 +322,11 @@ DBStatus<void>
 load_log_file(
     LogletAllocator &allocator, Directory &dir, const FileMetadata &file,
     uint64_t &cur_lsn, std::optional<uint64_t> target_lsn, bool is_last_file,
+    bool truncate_tail,
     const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func)
 {
-  DBStatus<File> f =
-      dir.openat(file.path_, O_RDWR).transform_error(to_db_error);
+  DBStatus<File> f = dir.openat(file.path_, truncate_tail ? O_RDWR : O_RDONLY)
+                         .transform_error(to_db_error);
   if (!f) {
     warn("couldn't open logfile `{}`: {}", file.path_, f.error());
     return DBError(DBCode::kCorruption);
@@ -495,6 +496,11 @@ eof:
     return {};
 
   if (is_last_file) {
+    if (!truncate_tail) {
+      info("{} has uncommitted records from offset {}; open() truncates them",
+           file.path_, uncommitted_off);
+      return {};
+    }
     info("truncating uncommitted records from {} starting at offset {}",
          file.path_, uncommitted_off);
     ErrnoStatus<void> trunc_ret = f->ftruncate(uncommitted_off),
@@ -578,7 +584,7 @@ DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn,
       [this](std::vector<UniqueLoglet> &&log) {
         return apply_changes(std::move(log));
       },
-      target_lsn, &lsn, max_snapshot_end_lsn);
+      target_lsn, /*truncate_tail=*/true, &lsn, max_snapshot_end_lsn);
   // Recovery is all or nothing (see load_database). Uncommitted records after
   // the last commit are truncated by load_log_file, not reported here.
   if (!ret)
@@ -594,7 +600,7 @@ DiskReader::verify(Directory &dir)
   DBStatus<void> ret = load_database(
       dir,
       [](std::vector<UniqueLoglet> && /*log*/) -> DBStatus<void> { return {}; },
-      std::nullopt, &lsn);
+      std::nullopt, /*truncate_tail=*/false, &lsn);
   if (!ret)
     return ret.error();
   return lsn;
@@ -677,8 +683,8 @@ DBStatus<void>
 DiskReader::load_database(
     Directory &dir,
     const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
-    std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn,
-    uint64_t *max_snapshot_end_lsn)
+    std::optional<uint64_t> target_lsn, bool truncate_tail,
+    uint64_t *loaded_lsn, uint64_t *max_snapshot_end_lsn)
 {
   uint64_t cur_lsn = 0;
   uint64_t max_snap_end = 0;
@@ -715,7 +721,7 @@ DiskReader::load_database(
 
     uint64_t tmp = cur_lsn;
     ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn,
-                        left_to_process == 0, func);
+                        left_to_process == 0, truncate_tail, func);
     if (!ret) {
       // Recovery is all or nothing: a record that fails validation anywhere
       // in the stream aborts it, so the caller never sees a partial prefix.

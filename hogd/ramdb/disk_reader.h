@@ -55,11 +55,14 @@ private:
   // dir. It stops when target_lsn is reached or there is a failure. Recovery
   // is all or nothing: on success it sets loaded_lsn to the last LSN loaded;
   // on failure nothing is published and the database must not be used.
+  // With truncate_tail the last file is opened for writing and an uncommitted
+  // tail is cut off (load); without it every file is opened read-only and the
+  // tail is left in place (verify).
   DBStatus<void> load_database(
       Directory &dir,
       const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
-      std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn = nullptr,
-      uint64_t *max_snapshot_end_lsn = nullptr);
+      std::optional<uint64_t> target_lsn, bool truncate_tail,
+      uint64_t *loaded_lsn = nullptr, uint64_t *max_snapshot_end_lsn = nullptr);
 
   // apply_changes loads a buffer of changes into map_.
   DBStatus<void> apply_changes(std::vector<UniqueLoglet> &&log);
