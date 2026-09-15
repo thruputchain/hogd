@@ -34,6 +34,7 @@ public:
   static constexpr size_t kPayloadBytes = sizeof(StorageKeyContractData);
   static constexpr size_t kBytes = kAddressBytes + kTypeBytes + kPayloadBytes;
   static_assert(kAddressBytes == 32 && kPayloadBytes == 32);
+  using Bytes = std::array<uint8_t, kBytes>;
 
   static FrameItemKey from(AddressAndKey const &addrkey)
   {
@@ -70,6 +71,9 @@ public:
   }
 
   size_t hash() const noexcept { return hash_; }
+  // The laid-out bytes, for a container that stores keys by their parts
+  // (FlatKeySet).
+  Bytes const &bytes() const noexcept { return bytes_; }
 
   bool operator==(FrameItemKey const &other) const noexcept
   {
@@ -77,8 +81,6 @@ public:
   }
 
 private:
-  using Bytes = std::array<uint8_t, kBytes>;
-
   explicit FrameItemKey(Bytes const &bytes)
     : bytes_(bytes),
       hash_(SipHash24::get_default()(std::as_bytes(std::span(bytes_))))
