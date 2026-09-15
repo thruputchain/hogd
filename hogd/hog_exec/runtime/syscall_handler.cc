@@ -1707,6 +1707,16 @@ SystemCallHandler::note_item_load(FrameItemKey const &key)
   return loaded_keys_.insert(key).second ? kDBRPCCost : 0;
 }
 
+GasAmount
+SystemCallHandler::note_contract_load(SHA256Hash const &contract_hash)
+{
+  // Tx-local hashes need no snapshot lookup, so they are free.
+  if (newly_created_contracts_.get_contract_code(contract_hash) != nullptr) {
+    return 0;
+  }
+  return loaded_contract_hashes_.insert(contract_hash).second ? kDBRPCCost : 0;
+}
+
 x23::Async<
     SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,

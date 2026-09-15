@@ -44,6 +44,11 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_contract_hash,
                              ContractAddress &output_deployed_address)
 {
+  // Charge the hash lookup deploy_contract() performs, on the recoverable-miss
+  // path too (#4054); see note_contract_load().
+  const WrappedGasAmount resolve_gas{
+      syscall_handler.note_contract_load(input_contract_hash)};
+
   auto status = co_await syscall_handler.deploy_contract(input_nonce,
                                                          input_contract_hash);
   if (!status) {
@@ -52,8 +57,7 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   }
   auto &deploy_status = *status;
   if (!deploy_status) {
-    co_return SyscallInnerResult{deploy_status.error().code(),
-                                 WrappedGasAmount{0}};
+    co_return SyscallInnerResult{deploy_status.error().code(), resolve_gas};
   }
   output_deployed_address = *deploy_status;
 
@@ -65,7 +69,7 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               resolve_gas};
 }
 
 } // namespace hogd

@@ -1644,6 +1644,95 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
       << "lowered artifact did not return cleanly — check trace status above";
 }
 
+// #4054: each distinct absent hash a DeployContract misses costs kDBRPCCost;
+// repeats are free.
+TEST_F(Rv32RuntimeContextTest,
+       MissingDeployContractLookupsChargeContractLoadGas)
+{
+  constexpr uint32_t kMemoryBytes = 256;
+  constexpr uint32_t kNonceAddress = 64;
+  constexpr std::array<uint32_t, 2> kHashAddresses = {96, 128};
+  constexpr uint32_t kOutputAddress = 192;
+
+  SHA256Hash nonce{};
+  nonce[0] = 0xa5;
+  std::array<SHA256Hash, 2> missing_hashes{};
+  for (size_t i = 0; i < missing_hashes.size(); ++i) {
+    missing_hashes[i].fill(static_cast<uint8_t>(0x31 + i));
+  }
+
+  std::vector<uint8_t> initial_memory(kMemoryBytes);
+  std::ranges::copy(nonce, initial_memory.begin() + kNonceAddress);
+  for (size_t i = 0; i < missing_hashes.size(); ++i) {
+    std::ranges::copy(missing_hashes[i],
+                      initial_memory.begin() + kHashAddresses[i]);
+  }
+
+  // Resolve two distinct absent hashes, then repeat the first: the repeat is
+  // served from the negative cache and must not be charged again.
+  const std::array<uint32_t, 3> call_hash_addresses = {kHashAddresses[0],
+                                                       kHashAddresses[1],
+                                                       kHashAddresses[0]};
+  std::vector<uint32_t> program;
+  for (const uint32_t hash_address : call_hash_addresses) {
+    append_syscall(program, {static_cast<int32_t>(SyscallNo::kDeployContract),
+                             static_cast<int32_t>(kNonceAddress),
+                             static_cast<int32_t>(hash_address),
+                             static_cast<int32_t>(kOutputAddress)});
+  }
+  append_syscall(program,
+                 {static_cast<int32_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0});
+
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, rv32::RuntimeContractImage{
+                             .program = make_program(program),
+                             .initial_memory = std::move(initial_memory),
+                             .memory_bytes = kMemoryBytes,
+                         }}});
+  auto contract = make_rv32_contract_xdr();
+  install_contract(contract);
+
+  // Misses cost kDBRPCCost, so give the tx headroom to reach Return.
+  auto handler =
+      make_new_system_call_handler(make_root_transaction(kStorageReadGas),
+                                   rv32_context);
+  handler.enable_tracing();
+  const auto result = handler.root_invoke()();
+
+  ASSERT_TRUE(result.is_root_success());
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  auto const &calls = handler.get_trace()->system_calls;
+  ASSERT_EQ(calls.size(), 4U);
+
+  // The three DeployContract misses each return a recoverable invalid-input
+  // error and let execution continue to the final Return.
+  const std::array<SHA256Hash, 3> expected_hashes = {missing_hashes[0],
+                                                     missing_hashes[1],
+                                                     missing_hashes[0]};
+  for (size_t i = 0; i < expected_hashes.size(); ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(calls[i].body.syscall_number(), SyscallNo::kDeployContract);
+    EXPECT_EQ(calls[i].status.error(), HostFnErrorCode::NoneOrRecoverable);
+    EXPECT_EQ(calls[i].status.syscall_return_code(),
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+    EXPECT_EQ(calls[i].body.deploy_contract().inputs.contract_hash,
+              expected_hashes[i]);
+  }
+  EXPECT_EQ(calls[3].body.syscall_number(), SyscallNo::kReturn);
+
+  // Host gas per syscall includes the fixed kSyscallBaseCost crossing; only the
+  // two distinct hashes add kDBRPCCost, the repeat adds nothing.
+  const auto host_gas = [&](size_t i) {
+    return calls[i].gas_remaining_at_start - calls[i].gas_remaining_at_end;
+  };
+  EXPECT_EQ(host_gas(0), kDBRPCCost + kSyscallBaseCost);
+  EXPECT_EQ(host_gas(1), kDBRPCCost + kSyscallBaseCost);
+  EXPECT_EQ(host_gas(2), kSyscallBaseCost);
+}
+
 } // namespace
 } // namespace hogd
 
