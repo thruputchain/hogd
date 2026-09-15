@@ -7,7 +7,6 @@
 #include <optional>
 #include <span>
 #include <type_traits>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -23,12 +22,14 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
+#include "hogd/container/flat_key_set.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
@@ -516,7 +517,7 @@ private:
 
   // Keys this transaction has loaded, rolled-back frames included. See
   // note_item_load().
-  std::unordered_set<FrameItemKey, FrameItemKeyHash> loaded_keys_;
+  FlatKeySet<FrameItemKey> loaded_keys_;
 
   inline static bool debug_force_commit_abort_{false};
 

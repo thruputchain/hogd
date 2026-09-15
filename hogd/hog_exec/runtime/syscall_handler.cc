@@ -1701,7 +1701,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
 GasAmount
 SystemCallHandler::note_item_load(FrameItemKey const &key)
 {
-  return loaded_keys_.insert(key).second ? kDBRPCCost : 0;
+  return loaded_keys_.insert(key) ? kDBRPCCost : 0;
 }
 
 x23::Async<
