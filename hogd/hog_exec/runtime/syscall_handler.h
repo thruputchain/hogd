@@ -23,6 +23,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
@@ -354,6 +355,11 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<ContractAddress>>>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
+  // Cost of resolving [contract_hash] against the block snapshot cache during a
+  // DeployContract: kDBRPCCost the first distinct time in a transaction, 0
+  // after, and 0 for a tx-local hash (which needs no snapshot lookup).
+  [[nodiscard]] GasAmount note_contract_load(SHA256Hash const &contract_hash);
+
   bool is_read_only() const
   {
     return invocation_frame_stack_.is_active_frame_read_only();
@@ -517,6 +523,9 @@ private:
   // Keys this transaction has loaded, rolled-back frames included. See
   // note_item_load().
   std::unordered_set<FrameItemKey, FrameItemKeyHash> loaded_keys_;
+
+  // Hashes resolved this transaction; see note_contract_load().
+  std::unordered_set<SHA256Hash, SipHash24Hasher> loaded_contract_hashes_;
 
   inline static bool debug_force_commit_abort_{false};
 
