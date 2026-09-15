@@ -8,35 +8,19 @@
 namespace hogd {
 
 // flat_key_set.h - an insert-only, open-addressed set of keys that carry
-// their own hash.
+// their own hash. Built for SystemCallHandler::loaded_keys_, the per-tx set
+// behind the first-touch load charge, where std::unordered_set's node layout
+// cost two dependent cache misses per probe.
 //
-// Built for SystemCallHandler::loaded_keys_, the per-transaction set that
-// decides whether a storage load is the transaction's first touch of a key.
-// std::unordered_set costs that probe two dependent cache misses -- the
-// bucket, then the node -- and a node allocation on top. With tens of
-// thousands of distinct keys in one transaction (the sweep in
-// rv32_syscall_entry_bench goes to 262144), that was measured at 100-240 ns
-// per key, the whole of the wall-clock cost #3906 added to a loading read.
-//
-// This stores the hashes in one contiguous array and the key bytes in another,
-// both power-of-two sized, and probes linearly. A lookup reads the hash array
-// first, which for 65536 keys is 1 MB and stays in L2; the key array is
-// touched only on a hash match, so a miss (a true first touch) usually costs
-// one L2 hit and a hit costs one cache miss. Measured against the std set on
-// the same 76-byte keys, 4096 to 262144 of them: 2-3x cheaper on a hit, 4-6x
-// on a miss, 2-4x on an insert.
-//
-// Membership is exact. The hash decides where to look, never whether two keys
-// are equal: a probe is a hit only when the stored key compares equal, so a
-// hash collision costs a compare, not an under-charge. That matters because
-// the gas this set gates is consensus-visible.
-//
-// No erase and no iteration: the one use only grows within a transaction and
-// dies with it, so there are no tombstones to reason about.
+// Hashes live in one contiguous array and key bytes in another, so a probe
+// reads the small hash array first and touches key bytes only on a match.
+// Membership is exact: the hash chooses where to look, the byte compare
+// decides equality, so a collision costs a compare, never an under-charge.
+// No erase and no iteration.
 //
 // Key requirements: `key.hash()` returning a size_t, and `key.bytes()`
-// returning a `Key::Bytes const &` -- a std::array of the key's bytes, which
-// is what equality is decided on. FrameItemKey is the intended key.
+// returning a `Key::Bytes const &`, the std::array equality is decided on.
+// FrameItemKey is the intended key.
 template<typename Key> class FlatKeySet {
 public:
   FlatKeySet() = default;
@@ -111,11 +95,8 @@ public:
 private:
   using Bytes = typename Key::Bytes;
 
-  // An unoccupied slot. A key whose hash is 0 is stored under tag 1; the tag
-  // is only a filter ahead of the byte compare, so folding one value onto
-  // another costs a compare in 2^-64 of probes and nothing else. Every probe
-  // -- insert, lookup, and the reinsert in grow() -- starts from the tag, not
-  // the hash, so the two stay in step for that key.
+  // Tag value marking an unoccupied slot; a hash of 0 is stored as 1. Every
+  // probe, grow()'s reinsert included, starts from the tag, not the hash.
   static constexpr uint64_t kEmpty = 0;
   static constexpr size_t kInitialCapacity = 16;
 

@@ -14,11 +14,8 @@
 namespace hogd {
 namespace {
 
-// The shape FlatKeySet expects of its key, as FrameItemKey has it: the bytes
-// equality is decided on, plus a hash computed once and carried along. The
-// hash is a parameter here so the tests can hand the table the cases a real
-// hasher makes rare: every key hashing to 0, or all keys sharing a handful of
-// hashes.
+// Minimal key matching FrameItemKey's shape, with a settable hash so tests
+// can force collisions.
 struct TestKey {
   static constexpr size_t kBytes = 68;
   using Bytes = std::array<uint8_t, kBytes>;
@@ -136,10 +133,8 @@ TEST(FlatKeySetTest, DistinguishesKeysThatShareAHash)
   EXPECT_FALSE(set.insert(b));
 }
 
-// Membership matches the std set exactly, over a run long enough to grow the
-// table many times, with repeats mixed in so both arms of insert() run at
-// every size. Under each hash mode: the production one, the one that
-// collides with the empty tag, and one that makes every probe a compare.
+// Membership must match std::unordered_set across growth, under each hash
+// mode.
 class FlatKeySetDifferentialTest : public ::testing::TestWithParam<HashMode> {};
 
 TEST_P(FlatKeySetDifferentialTest, MatchesUnorderedSetAcrossGrowth)
