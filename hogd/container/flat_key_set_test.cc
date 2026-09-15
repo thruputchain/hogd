@@ -198,12 +198,15 @@ TEST(FlatKeySetTest, MovedFromSetsCanBeReused)
     source.insert(key_of(i));
   }
   FlatKeySet<TestKey> moved(std::move(source));
+  // The moved-from state is the subject of this test, not an accident.
+  // NOLINTBEGIN(bugprone-use-after-move)
   EXPECT_TRUE(source.empty());
   EXPECT_EQ(source.size(), 0U);
   EXPECT_EQ(source.capacity(), 0U);
   EXPECT_FALSE(source.contains(key_of(0)));
   EXPECT_TRUE(source.insert(key_of(200)));
   EXPECT_TRUE(source.contains(key_of(200)));
+  // NOLINTEND(bugprone-use-after-move)
 
   // Assignment must also release the destination's old contents.
   source = std::move(moved);
@@ -212,12 +215,14 @@ TEST(FlatKeySetTest, MovedFromSetsCanBeReused)
   for (uint64_t i = 0; i < 100; ++i) {
     EXPECT_TRUE(source.contains(key_of(i)));
   }
+  // NOLINTBEGIN(bugprone-use-after-move)
   EXPECT_TRUE(moved.empty());
   EXPECT_EQ(moved.size(), 0U);
   EXPECT_EQ(moved.capacity(), 0U);
   EXPECT_FALSE(moved.contains(key_of(0)));
   EXPECT_TRUE(moved.insert(key_of(300)));
   EXPECT_TRUE(moved.contains(key_of(300)));
+  // NOLINTEND(bugprone-use-after-move)
 }
 
 TEST(FlatKeySetTest, MoveAssignmentFromEmptyAndSelf)
@@ -235,6 +240,8 @@ TEST(FlatKeySetTest, MoveAssignmentFromEmptyAndSelf)
   EXPECT_EQ(set.capacity(), 0U);
   EXPECT_FALSE(set.contains(key_of(1)));
   EXPECT_TRUE(set.insert(key_of(2)));
+  // Reusing the moved-from source is what this line checks.
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_TRUE(empty.insert(key_of(3)));
 }
 
