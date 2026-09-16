@@ -54,7 +54,27 @@ INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
 # the groundhog project, so run from this script's directory regardless of the
 # caller's working directory. Pass remaining args through to cargo.
 cd "${SCRIPT_DIR}"
-OUTPUT=$(groundhog build -p "${TARGET_NAME}" --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@")
+
+# Run with errexit off so a failure reaches the reporting below: under `set -e`
+# the script died on this assignment, so a failed build named neither the
+# contract nor groundhog's own error.
+# Keep stdout (the --json result) apart from stderr, which carries cargo's
+# progress output and would break the jq parse below.
+BUILD_ERR="$(mktemp)"
+trap 'rm -f "${BUILD_ERR}"' EXIT
+
+set +e
+OUTPUT=$(groundhog build -p "${TARGET_NAME}" --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@" 2>"${BUILD_ERR}")
+STATUS=$?
+set -e
+
+cat "${BUILD_ERR}" >&2
+
+if [ "${STATUS}" -ne 0 ]; then
+    echo "error: groundhog build failed for ${TARGET_NAME} (exit ${STATUS})" >&2
+    printf '%s' "$OUTPUT" | jq -r '.error.message // empty' >&2
+    exit 1
+fi
 
 # Parse output paths from JSON
 RV32_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.rv32')
