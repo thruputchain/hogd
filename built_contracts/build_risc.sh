@@ -55,11 +55,8 @@ INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
 # caller's working directory. Pass remaining args through to cargo.
 cd "${SCRIPT_DIR}"
 
-# Run with errexit off so a failure reaches the reporting below: under `set -e`
-# the script died on this assignment, so a failed build named neither the
-# contract nor groundhog's own error.
-# Keep stdout (the --json result) apart from stderr, which carries cargo's
-# progress output and would break the jq parse below.
+# Disable errexit so a build failure reports the contract name below.
+# Redirect stderr so cargo progress output doesn't break the jq parse.
 BUILD_ERR="$(mktemp)"
 trap 'rm -f "${BUILD_ERR}"' EXIT
 
