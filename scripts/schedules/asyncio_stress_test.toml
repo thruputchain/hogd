@@ -34,10 +34,15 @@ echo 'build gcc debug'
 # covered by the gcc-debug/llvm-debug/gcc-release CI (cpp-namespace-optimized).
 RCQ_DBHASH_SLOW='ConsumeCapErrorAgreesProposalAndValidationDbHash'
 
+# Excluded from this pass only: a ~6 MB upload stalls past the 100s timeout
+# under X23_RCVBUF=1 (#4072). X23_SNDBUF=1 throttles replies, not the upload,
+# and the normal CI builds still cover this test.
+SIZE_CAP_BULK_SLOW='SizeCapIgnoresSignedTransactionWrapper'
+
 export X23_RCVBUF=1
 
 echo 'run gcc tests RCVBUF=1'
-ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "rpcstress_writebuf|${RCQ_DBHASH_SLOW}"
+ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "rpcstress_writebuf|${RCQ_DBHASH_SLOW}|${SIZE_CAP_BULK_SLOW}"
 
 unset X23_RCVBUF
 
