@@ -109,6 +109,24 @@ TEST(EventFaults, PollInterruptionIsRetriedButOtherErrorsPropagate)
   EXPECT_NO_THROW(cp.check(0));
 }
 
+TEST(EventFaults, GenerationAndInactivePoisonDoNotRegisterWithEpoll)
+{
+  ThreadPool pool(8);
+  int fds[2];
+  ASSERT_EQ(pipe(fds), 0);
+  UniqueFd reader(fds[0]), writer(fds[1]);
+  ManualPoll cp(pool);
+  ctl_operation = EPOLL_CTL_ADD;
+  ctl_error = EIO;
+  auto generation = cp.generation(reader);
+  EXPECT_EQ(ctl_error.exchange(0), EIO);
+  ctl_operation = EPOLL_CTL_DEL;
+  ctl_error = EIO;
+  cp.poison(reader, generation);
+  EXPECT_EQ(ctl_error.exchange(0), EIO);
+  EXPECT_EQ(cp.read_wait(cp.read_clear(reader))(), EBADF);
+}
+
 TEST(EventFaults, DeleteFailureStillCompletesPendingWait)
 {
   ThreadPool pool(8);
@@ -122,7 +140,7 @@ TEST(EventFaults, DeleteFailureStillCompletesPendingWait)
     ctl_operation = EPOLL_CTL_DEL;
     ctl_error = EIO;
     if (poison)
-      cp.poison(reader, cp.generation(reader, false));
+      cp.poison(reader, cp.generation(reader));
     else
       cp.reset(reader);
     EXPECT_EQ(ctl_error.load(), 0);

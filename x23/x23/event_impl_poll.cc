@@ -39,10 +39,10 @@ CoroPollImpl::~CoroPollImpl()
 bool
 CoroPollImpl::time_to_stop()
 {
-  if (!stop_requested() || !state_->empty())
+  if (!stop_requested() || !state_->fds.empty())
     return false;
   pool_.drain();
-  return state_->empty();
+  return state_->fds.empty();
 }
 
 RefPtr<ReadBuffer>
@@ -51,7 +51,7 @@ CoroPollImpl::get_reader(BorrowedFd fd)
   auto s = state_.take();
   if (stop_requested())
     return nullptr;
-  auto &f = (*s)[fd.get()];
+  auto &f = s->fds[fd.get()];
   if (f.poisoned)
     return nullptr;
   return f.reader();
@@ -63,7 +63,7 @@ CoroPollImpl::get_writer(BorrowedFd fd)
   auto s = state_.take();
   if (stop_requested())
     return nullptr;
-  auto &f = (*s)[fd.get()];
+  auto &f = s->fds[fd.get()];
   if (f.poisoned)
     return nullptr;
   return f.writer();
@@ -73,8 +73,8 @@ RefPtr<WriteBuffer>
 CoroPollImpl::take_writer(BorrowedFd fd)
 {
   auto s = state_.take();
-  auto it = s->find(fd.get());
-  return it == s->end() ? nullptr : it->second.writer_.take();
+  auto it = s->fds.find(fd.get());
+  return it == s->fds.end() ? nullptr : it->second.writer_.take();
 }
 
 std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
@@ -83,7 +83,7 @@ CoroPollImpl::get_rw(BorrowedFd fd)
   auto s = state_.take();
   if (stop_requested())
     return {nullptr, nullptr};
-  auto &f = (*s)[fd.get()];
+  auto &f = s->fds[fd.get()];
   if (f.poisoned)
     return {nullptr, nullptr};
   return {f.reader(), f.writer()};
@@ -95,9 +95,9 @@ CoroPollImpl::check(int timeout)
   std::vector<struct pollfd> pollfds;
   {
     auto ptr = state_.take();
-    pollfds.reserve(ptr->size() + 1);
+    pollfds.reserve(ptr->fds.size() + 1);
     pollfds.push_back({selfpipe_[0].get(), pollflags[0], 0});
-    for (const auto &kv : *ptr) {
+    for (const auto &kv : ptr->fds) {
       const FdState &f = kv.second;
       short events;
       if (f.poisoned || !(events = f.events()))
@@ -123,8 +123,8 @@ CoroPollImpl::check(int timeout)
   auto ptr = state_.take();
   std::vector<ThreadPool::Job> cbs;
   for (auto pfd = pollfds.begin() + 1; pfd != pollfds.end(); ++pfd) {
-    auto it = ptr->find(pfd->fd);
-    if (it == ptr->end())
+    auto it = ptr->fds.find(pfd->fd);
+    if (it == ptr->fds.end())
       continue;
     FdState &f = it->second;
     if (f.poisoned)
@@ -143,9 +143,9 @@ int
 CoroPollImpl::get_max_fd()
 {
   auto ptr = state_.take();
-  if (ptr->empty())
+  if (ptr->fds.empty())
     return 0;
-  return 1 + std::ranges::max(*ptr | std::views::keys);
+  return 1 + std::ranges::max(ptr->fds | std::views::keys);
 }
 
 std::vector<ThreadPool::Job>
@@ -166,13 +166,13 @@ CoroPollImpl::poison(BorrowedFd fd)
   auto s = state_.take();
   // The shutdown deadlock triggers under the following sequence:
   // 1. ~CoroPoll() runs, which then calls reset() on all file descriptors
-  // 2. reset() removes the file descriptor from state_
+  // 2. reset() removes the file descriptor from the map
   // 3. poison() is called, which, without the if (stop_requested())) check,
-  //    would add back the fd state to state_
+  //    would add back the fd state to the map
   // 4. ~CoroPoll() then waits for time_to_stop() to return true (which only
-  //     happens if state_ is empty)
+  //     happens if the map is empty)
   //
-  // The check prevents this case, as the entry for fd is only added to state_
+  // The check prevents this case, as the entry for fd is only added to the map
   // (via operator[]) if we are not shutting down.
   //
   // We need to check stop_requested() while the state_ lock is held
@@ -181,15 +181,14 @@ CoroPollImpl::poison(BorrowedFd fd)
   // have a situation where one thread calls poison(), then before it
   // can acquire the state_ lock, another thread calls ~CoroPoll() and
   // reset().  When the first thread makes progress it would add the
-  // fd state back to state_ again, causing a deadlock. Note that
+  // fd state back to the map again, causing a deadlock. Note that
   // request_stop() also acquires the state_ lock, so once we acquire
   // state_ we can be sure we will not race with another thread on
   // this stop_requested() check.
   if (stop_requested())
     return;
-  auto &f = (*s)[fd.get()];
+  auto &f = s->fds[fd.get()];
   f.poisoned = true;
-  f.generation = 0;
   auto work = report_badfd(f);
   s.reset();
   pool_.go(std::move(work));
@@ -201,14 +200,10 @@ CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
   auto s = state_.take();
   if (stop_requested())
     return;
-  auto it = s->find(fd.get());
-  if (it == s->end())
+  if (s->fd_generation(fd) != genno)
     return;
-  auto &f = it->second;
-  if (f.generation != genno)
-    return;
+  auto &f = s->fds[fd.get()];
   f.poisoned = true;
-  f.generation = 0;
   auto work = report_badfd(f);
   s.reset();
   pool_.go(std::move(work));
@@ -218,9 +213,10 @@ void
 CoroPollImpl::reset(BorrowedFd fd)
 {
   auto ptr = state_.take();
-  if (auto it = ptr->find(fd.get()); it != ptr->end()) {
+  ++ptr->fd_generation(fd);
+  if (auto it = ptr->fds.find(fd.get()); it != ptr->fds.end()) {
     auto work = report_badfd(it->second);
-    ptr->erase(it);
+    ptr->fds.erase(it);
     // Note we must always wake, even when the events are not empty
     // and no stop is requested.  The reason is that poll keeps a
     // reference to sockets, which means closing a file descriptor
@@ -233,14 +229,20 @@ CoroPollImpl::reset(BorrowedFd fd)
   }
 }
 
+uint64_t &
+CoroPollImpl::State::fd_generation(BorrowedFd fd)
+{
+  x23assert(fd.get() >= 0);
+  if (static_cast<size_t>(fd.get()) >= generations.size())
+    generations.resize(fd.get() + 1UZ, 1);
+  return generations[fd.get()];
+}
+
 uint64_t
-CoroPollImpl::generation(BorrowedFd fd, bool make)
+CoroPollImpl::generation(BorrowedFd fd)
 {
   auto ptr = state_.take();
-  if (make && !stop_requested())
-    return (*ptr)[fd.get()].generation;
-  auto it = ptr->find(fd.get());
-  return it == ptr->end() ? 0 : it->second.generation;
+  return ptr->fd_generation(fd);
 }
 
 void
@@ -256,7 +258,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
     pool_.make_callback(cb, EBADF);
     return;
   }
-  auto &f = (*ptr)[fd.get()];
+  auto &f = ptr->fds[fd.get()];
   x23assert(!f.callbacks[write]);
   if (f.poisoned) {
     pool_.make_callback(cb, EBADF);
@@ -281,8 +283,8 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
     auto ptr = state_.take();
     if (stop_requested())
       return;
-    auto it = ptr->find(fd.get());
-    if (it == ptr->end())
+    auto it = ptr->fds.find(fd.get());
+    if (it == ptr->fds.end())
       return;
     FdState &f = it->second;
     if (f.callbacks[write])

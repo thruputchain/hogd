@@ -137,7 +137,8 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
   using enum FdState::Mode;
 
   FdState::Mode old_mode = fdp->mode_;
-  if (mode == old_mode || (mode == kActive && old_mode == kPoisoned))
+  if ((mode == old_mode && mode != kFree) ||
+      (mode == kActive && old_mode == kPoisoned))
     return;
 
   while ((old_mode = fdp->mode_.exchange(kLocked)) == kLocked)
@@ -150,12 +151,13 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     fdp->mode_.notify_all();
   });
 
-  if (mode == old_mode ||
+  if ((mode == old_mode && mode != kFree) ||
       (mode == kActive && (old_mode == kPoisoned || stop_requested())))
     return;
 
   unlock_mode = mode;
-  fdp->generation_.fetch_add(1, std::memory_order_relaxed);
+  if (mode == kFree)
+    fdp->generation_.fetch_add(1, std::memory_order_relaxed);
 
   if (mode == kActive) {
 #if X23_FD_TRACE
@@ -342,41 +344,39 @@ CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
   using enum FdState::Mode;
   if (fdp->generation_.load(std::memory_order_relaxed) != genno)
     return;
+  FdState::Mode mode;
   for (;;) {
-    FdState::Mode m = kActive;
-    if (fdp->mode_.compare_exchange_strong(m, kLocked))
-      break;
-    if (m != kLocked)
+    mode = fdp->mode();
+    if (mode == kPoisoned)
       return;
-    fdp->mode_.wait(kLocked);
+    if (fdp->mode_.compare_exchange_strong(mode, kLocked))
+      break;
   }
   if (fdp->generation_.load(std::memory_order_relaxed) != genno) {
-    fdp->mode_ = kActive;
+    fdp->mode_ = mode;
     fdp->mode_.notify_all();
     return;
   }
 
   Defer unlock([&] {
-    fdp->generation_.fetch_add(1, std::memory_order_relaxed);
     fdp->mode_ = kPoisoned;
     fdp->mode_.notify_all();
   });
 
   fdp->ready_ = 0; // because EPOLLERR is sticky
-  if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd.get(), nullptr) == -1)
-    if (errno != ENOENT && errno != EBADF)
-      debug.err("EPOLL_CTL_DEL fd {}: {}", fd.get(), Errno{}, stacktrace());
+  if (mode == kActive) {
+    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd.get(), nullptr) == -1)
+      if (errno != ENOENT && errno != EBADF)
+        debug.err("EPOLL_CTL_DEL fd {}: {}", fd.get(), Errno{}, stacktrace());
+  }
   unlock.reset();
   docbs(fdp);
 }
 
 uint64_t
-CoroPollImpl::generation(BorrowedFd fd, bool make)
+CoroPollImpl::generation(BorrowedFd fd)
 {
-  using enum FdState::Mode;
   auto fdp = getfd(fd);
-  if (make && fdp->mode() == kFree && !stop_requested())
-    setmode(fdp, kActive);
   return fdp->generation_.load(std::memory_order_relaxed);
 }
 

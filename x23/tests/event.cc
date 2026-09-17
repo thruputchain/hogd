@@ -128,7 +128,7 @@ test_stale_poison_generation(CoroPoll &cp)
   done.acquire();
   if (result != 0)
     throw std::runtime_error("stale generation poisoned recycled fd");
-  if (cp.generation(readfd, false) != generation)
+  if (cp.generation(readfd) != generation)
     throw std::runtime_error("stale poison changed fd generation");
   cp.reset(readfd);
 }
@@ -160,25 +160,21 @@ test_matching_poison_generation_race(CoroPoll &cp)
   constexpr unsigned attempts = 100000;
   for (unsigned i = 0; i < attempts; ++i) {
     cp.reset(readfd);
-    uint64_t old_generation = cp.generation(readfd, false);
 
     activate.release();
 
-    // setmode() increments generation_ while mode_ is still kLocked.
-    // Wait until that point, then race the generation-qualified poison
-    // against the remainder of the activation.
-    uint64_t generation;
-    while ((generation = cp.generation(readfd, false)) == old_generation)
-      std::this_thread::yield();
-
+    // Poison must stick whether it runs before, during, or after
+    // activation by the other thread.
+    uint64_t generation = cp.generation(readfd);
     cp.poison(readfd, generation);
     activated.acquire();
 
-    // A successful matching-generation poison advances the generation.
-    // If it is unchanged, poison() observed kLocked, lost its one-shot
-    // compare_exchange, and silently returned even though this generation
-    // is still current.
-    if (cp.generation(readfd, false) == generation) {
+    auto pending = cp.read_wait(cp.read_clear(readfd));
+    bool ready = pending.operator co_await().await_ready();
+    if (!ready)
+      cp.reset(readfd);
+    Errno result = pending();
+    if (!ready || result != EBADF || cp.generation(readfd) != generation) {
       activator.request_stop();
       activate.release();
       std::println(stderr,

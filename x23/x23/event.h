@@ -43,6 +43,7 @@
 #else // !USE_EPOLL
 #include <poll.h>
 #include <unordered_map>
+#include <vector>
 #endif // !USE_EPOLL
 
 #ifndef X23_FD_TRACE
@@ -302,27 +303,25 @@ public:
   }
 
   // You must reset a file descriptor before closing it if you have
-  // ever called read_clear(), write_clear(), or poison() on it, even
-  // if there are not any currently active callbacks.  This is
-  // required to remove any epoll events.  If you don't call reset,
-  // there could still be epoll events registered, or if you called
-  // poison(), the file descriptor number could still be poisoned when
-  // it is recycled by another socket.
+  // ever called read_clear(), write_clear(), poison(), or
+  // generation() on it, even if there are not any currently active
+  // callbacks.  (reset() after generation() is only necessary if you
+  // need to invalidate the returned generation number.)  In addition
+  // to bumping the generation number, reset() removes any registered
+  // epoll events.  If you don't call reset, there could still be
+  // epoll events registered, or if you called poison(), the file
+  // descriptor number could still be poisoned after it has been
+  // recycled by another socket.
   void reset(BorrowedFd fd);
 
-  // The generation number (if non-zero) changes every time a file
-  // descriptor is recycled.  If a file descriptor is in a reset state
-  // and make is true (the default), generation will activate the file
-  // descriptor (which may involve memory allocation or setting edge
-  // triggered modes in epoll).  make can be set to false to read the
-  // generation number without activating the file descriptor.
-  uint64_t generation(BorrowedFd fd, bool make = true);
+  // The generation number starts at 1 and increases on reset().
+  uint64_t generation(BorrowedFd fd);
 
   // Make any pending and future callbacks return with EBADF until
   // reset() is called.  Pending callbacks are made asynchronously, so
   // may still be running after poison() returns.  The second version
   // poisons the file descriptor only if generation() is still
-  // generation_number.
+  // generation_number, even if the descriptor has not been activated.
   void poison(BorrowedFd fd);
   void poison(BorrowedFd fd, uint64_t generation_number);
 
@@ -368,7 +367,7 @@ private:
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
     std::atomic_uint32_t ready_{0};
-    std::atomic_uint64_t generation_{0};
+    std::atomic_uint64_t generation_{1};
     // callbacks: [0] = reader, [1] = writer
     std::array<AtomicWorkItem, 2> callbacks_{};
 #if X23_FD_TRACE
@@ -457,8 +456,6 @@ private:
                                                 POLLOUT | POLLHUP | POLLERR};
   struct FdState : BufHolder {
     bool poisoned{false};
-    uint64_t generation =
-        std::chrono::steady_clock::now().time_since_epoch().count();
     std::array<WorkItem, 2> callbacks;
     short events() const
     {
@@ -469,7 +466,13 @@ private:
       return ret;
     }
   };
-  MVar<std::unordered_map<int, FdState>> state_;
+  struct State {
+    std::unordered_map<int, FdState> fds;
+    std::vector<uint64_t> generations;
+
+    uint64_t &fd_generation(BorrowedFd fd);
+  };
+  MVar<State> state_;
   UniqueFd selfpipe_[2];
 
   std::vector<ThreadPool::Job> report_badfd(FdState &fds);

@@ -47,6 +47,83 @@ struct SocketPair {
 
 } // namespace
 
+TEST(EventEdges, GenerationChangesOnlyOnReset)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  EXPECT_EQ(cp.generation(sockets.a), 1U);
+  EXPECT_EQ(cp.generation(sockets.b), 1U);
+  cp.reset(sockets.b);
+  EXPECT_EQ(cp.generation(sockets.b), 2U);
+  EXPECT_EQ(cp.generation(sockets.a), 1U);
+
+  for (bool conditional : {false, true}) {
+    auto generation = cp.generation(sockets.a);
+    auto pending = cp.read_wait(cp.read_clear(sockets.a));
+    cp.write_clear(sockets.a);
+    EXPECT_EQ(cp.generation(sockets.a), generation);
+    if (conditional)
+      cp.poison(sockets.a, generation);
+    else
+      cp.poison(sockets.a);
+    EXPECT_EQ(pending(), EBADF);
+    EXPECT_EQ(cp.generation(sockets.a), generation);
+    cp.poison(sockets.a, generation);
+    EXPECT_EQ(cp.read_wait(cp.read_clear(sockets.a))(), EBADF);
+    EXPECT_EQ(cp.generation(sockets.a), generation);
+    cp.reset(sockets.a);
+    EXPECT_EQ(cp.generation(sockets.a), generation + 1);
+  }
+
+  cp.reset(sockets.a);
+  EXPECT_EQ(cp.generation(sockets.a), 4U);
+}
+
+TEST(EventEdges, ConditionalPoisonBeforeActivation)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  for (unsigned i = 0; i < 2; ++i) {
+    auto generation = cp.generation(sockets.a);
+    cp.poison(sockets.a, generation);
+    auto pending = cp.read_wait(cp.read_clear(sockets.a));
+    EXPECT_TRUE(pending.operator co_await().await_ready());
+    EXPECT_EQ(cp.generation(sockets.a), generation);
+    cp.reset(sockets.a);
+    EXPECT_EQ(pending(), EBADF);
+  }
+}
+
+TEST(EventEdges, ResetInvalidatesGenerationBeforeActivation)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  auto generation = cp.generation(sockets.a);
+  cp.reset(sockets.a);
+  cp.poison(sockets.a, generation);
+  auto pending = cp.read_wait(cp.read_clear(sockets.a));
+  EXPECT_FALSE(pending.operator co_await().await_ready());
+  ASSERT_EQ(::write(sockets.b.get(), "x", 1), 1);
+  cp.check(0);
+  EXPECT_EQ(pending(), 0);
+  EXPECT_EQ(cp.generation(sockets.a), generation + 1);
+}
+
+TEST(EventEdges, GenerationDoesNotPreventShutdown)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  auto generation = cp.generation(sockets.a);
+  cp.request_stop();
+  cp.poison(sockets.a, generation + 1);
+  EXPECT_EQ(cp.generation(sockets.a), generation);
+  EXPECT_TRUE(cp.time_to_stop());
+}
+
 TEST(EventEdges, ReadBufferHandlesZeroLengthReadAheadAndErrors)
 {
   SocketPair sockets;
@@ -362,13 +439,13 @@ TEST(EventEdges, UnpollableDescriptorFailsWaitAndCanBeReset)
   ManualPoll cp(pool);
   auto token = cp.read_clear(fd);
   EXPECT_EQ(cp.read_wait(token)(), EBADF);
-  auto generation = cp.generation(fd, false);
+  auto generation = cp.generation(fd);
   cp.poison(fd, generation);
-  EXPECT_EQ(cp.generation(fd, false), generation);
+  EXPECT_EQ(cp.generation(fd), generation);
   cp.reset(fd);
-  generation = cp.generation(fd, false);
+  generation = cp.generation(fd);
   cp.poison(fd, generation);
-  EXPECT_EQ(cp.generation(fd, false), generation);
+  EXPECT_EQ(cp.generation(fd), generation);
 }
 
 TEST(EventEdges, SignalDumpIncludesPendingReadAndWrite)
