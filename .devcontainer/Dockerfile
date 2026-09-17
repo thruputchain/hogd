@@ -38,6 +38,7 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     $SUDO apt-get update && $SUDO apt-get install -y --no-install-recommends \
     build-essential \
+    sudo \
     cmake \
     make \
     ninja-build \
@@ -51,12 +52,14 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     clang-format-21 \
     clang-tidy-21 \
     clang-tools-21 \
+    libclang-rt-21-dev \
     libc++-21-dev \
     libc++abi-21-dev \
     lld-21 \
     llvm-21 \
     gcc-15 \
     g++-15 \
+    pkg-config \
     python3 \
     python3-flake8 \
     shfmt \
@@ -73,6 +76,21 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     libbz2-dev \
     libzstd-dev \
     && $SUDO rm -rf /var/lib/apt/lists/*
+
+# apt.llvm's compiler-rt package stores architecture-suffixed runtimes under
+# lib/linux, while its clang driver searches un-suffixed names under the target
+# triple. Supply the missing compatibility links for ASan and libFuzzer.
+RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
+    RESOURCE_DIR="$(clang-21 --print-resource-dir)" \
+    && TARGET_TRIPLE="$(clang-21 --print-target-triple)" \
+    && TARGET_ARCH="${TARGET_TRIPLE%%-*}" \
+    && $SUDO mkdir -p "${RESOURCE_DIR}/lib/${TARGET_TRIPLE}" \
+    && for runtime in "${RESOURCE_DIR}/lib/linux"/libclang_rt.*-"${TARGET_ARCH}".*; do \
+        name="$(basename "${runtime}")"; \
+        linked_name="$(printf '%s\n' "${name}" | sed "s/-${TARGET_ARCH}//")"; \
+        $SUDO ln -sf "../linux/${name}" \
+          "${RESOURCE_DIR}/lib/${TARGET_TRIPLE}/${linked_name}"; \
+    done
 
 # Set up update-alternatives for clang-21 as default
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
