@@ -34,10 +34,9 @@ echo 'build gcc debug'
 # covered by the gcc-debug/llvm-debug/gcc-release CI (cpp-namespace-optimized).
 RCQ_DBHASH_SLOW='ConsumeCapErrorAgreesProposalAndValidationDbHash'
 
-# Excluded from this pass only: the test pushes ~6 MB of SignedTransaction, and
-# X23_RCVBUF=1 clamps the executor's sockets to the kernel minimum receive
-# buffer, stalling it past the 100s timeout (#4072). X23_SNDBUF=1 throttles
-# replies rather than the bulk upload, and the normal CI builds cover it.
+# Excluded from this pass only: a ~6 MB upload stalls past the 100s timeout
+# under X23_RCVBUF=1 (#4072). X23_SNDBUF=1 throttles replies, not the upload,
+# and the normal CI builds still cover this test.
 SIZE_CAP_BULK_SLOW='SizeCapIgnoresSignedTransactionWrapper'
 
 export X23_RCVBUF=1
