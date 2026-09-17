@@ -432,6 +432,11 @@ private:
   void inject_invalid_instruction()
   {
     auto section = code();
+    // Preserve partial instructions for parser validation without selecting a
+    // word from an empty range.
+    if (section.size() < rv32::kInstructionBytes) {
+      return;
+    }
     const size_t word_offset =
         random_inrange(section.size() / rv32::kInstructionBytes) *
         rv32::kInstructionBytes;
