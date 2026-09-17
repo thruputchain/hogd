@@ -131,6 +131,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     $SUDO mkdir -p /usr/local/rustup /usr/local/cargo \
     && $SUDO chmod 777 /usr/local/rustup /usr/local/cargo \
+    && printf '[registry]\nglobal-credential-providers = ["cargo:token"]\n' \
+      | $SUDO tee /usr/local/cargo/config.toml >/dev/null \
     && wget -qO- https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0 --profile minimal \
     && rustup component add clippy rustfmt --toolchain 1.93.0 \
     && rustup toolchain install 1.96.0 --profile minimal \
@@ -146,7 +148,7 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
 # fail there and are unnecessary.
 RUN if [ "$(id -u)" = "0" ]; then \
         useradd -m -s /bin/bash builder \
-        && mkdir -p /home/builder/.cache/ccache /home/builder/.ssh \
+    && mkdir -p /home/builder/.cache/ccache /home/builder/.cargo /home/builder/.ssh \
         && ssh-keyscan github.com >> /home/builder/.ssh/known_hosts 2>/dev/null \
         && chmod 700 /home/builder/.ssh \
         && chmod 600 /home/builder/.ssh/known_hosts \
