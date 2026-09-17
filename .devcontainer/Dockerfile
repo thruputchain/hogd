@@ -148,7 +148,7 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
 # fail there and are unnecessary.
 RUN if [ "$(id -u)" = "0" ]; then \
         useradd -m -s /bin/bash builder \
-    && mkdir -p /home/builder/.cache/ccache /home/builder/.cargo /home/builder/.ssh \
+        && mkdir -p /home/builder/.cache/ccache /home/builder/.cargo /home/builder/.ssh \
         && ssh-keyscan github.com >> /home/builder/.ssh/known_hosts 2>/dev/null \
         && chmod 700 /home/builder/.ssh \
         && chmod 600 /home/builder/.ssh/known_hosts \

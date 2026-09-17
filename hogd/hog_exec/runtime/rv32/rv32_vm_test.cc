@@ -403,10 +403,7 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
 
 TEST(Rv32ArtifactTest, acceptsOnlyRegisteredGasSchedulePairs)
 {
-  // Gas version and digest are one consensus identity, not independently
-  // supported fields. Pin the transitional compatibility window and reject
-  // cross-pairing so an attacker cannot select one schedule's version with
-  // another schedule's prices.
+  // Gas version and digest are one identity; reject cross-paired schedules.
   auto transitional = valid_artifact_bytes();
   store_u32_at(transitional, kArtifactGasVersionOffset,
                kTransitionalGasTableVersion);
@@ -431,9 +428,7 @@ TEST(Rv32ArtifactTest, acceptsOnlyRegisteredGasSchedulePairs)
 
 TEST(Rv32ArtifactTest, rejectsExtremeHeaderIntegersWithoutWrapping)
 {
-  // Hostile headers use UINT32_MAX to try to bypass limit, placement, and
-  // physical-layout arithmetic. Every public parser must reject these values
-  // before forming an overflowing section range or allocating from the claim.
+  // Reject extreme sizes before forming section ranges or allocating memory.
   struct ExtremeFieldCase {
     size_t offset;
     ArtifactError error;
@@ -480,9 +475,7 @@ TEST(Rv32ArtifactTest, rejectsExtremeHeaderIntegersWithoutWrapping)
 
 TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
 {
-  // Caller limits are adversarial configuration inputs too. Check zero,
-  // one-below, and exact boundaries so neither parser silently rounds a limit
-  // up or rejects the smallest valid zero-memory configuration.
+  // Check zero, one-below, and exact caller limits without rounding.
   const auto artifact = valid_artifact_bytes();
   const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
   const uint32_t memory_size =
@@ -527,10 +520,7 @@ TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
 
 TEST(Rv32ArtifactTest, defersMisalignedCodeOnlyOnThreadedParsePath)
 {
-  // The structural threaded parser intentionally returns zero-copy section
-  // spans before production pre-instantiation decodes them. For every partial
-  // instruction width, verify canonical parsing rejects immediately while the
-  // threaded path rejects at its documented validation boundary.
+  // The threaded parser defers alignment checks to pre-instantiation.
   for (const uint32_t malformed_code_size : {1U, 2U, 3U}) {
     SCOPED_TRACE(malformed_code_size);
     auto artifact = valid_artifact_bytes();
@@ -840,10 +830,7 @@ TEST(Rv32ArtifactTest, materializesInitialMemoryAtStartOffset)
 
 TEST(Rv32ThreadedHostileInput, translatesCodeAtExactVmCeiling)
 {
-  // Translation expands each four-byte guest instruction into a 16-byte host
-  // slot. Exercise the largest admitted input so a size calculation overflow,
-  // accidental strict comparison, or unbounded extra pass cannot hide behind
-  // the much smaller default-code tests.
+  // Each four-byte guest instruction expands into a 16-byte host slot.
   std::vector<uint8_t> code;
   code.reserve(kCodeCeilingBytes);
   while (code.size() < kCodeCeilingBytes) {
@@ -862,11 +849,8 @@ TEST(Rv32ThreadedHostileInput, translatesCodeAtExactVmCeiling)
 TEST(Rv32ThreadedHostileInput,
      retainsMultipleRaisedLimitTranslationsIndependently)
 {
-  // A transaction or snapshot cache can retain several translated contracts
-  // at once. Keep multiple above-default code and memory images alive together
-  // and execute each afterward, catching aliasing or lifetime bugs under
-  // aggregate host-memory pressure without making routine CI allocate several
-  // full 4 MiB ceiling programs.
+  // Retain several translations to catch aliasing and lifetime bugs, using
+  // above-default sizes to limit CI memory use compared with ceiling programs.
   constexpr size_t kRetainedPrograms = 4;
   constexpr uint32_t kLargeCodeBytes = 256 * 1024;
   constexpr uint32_t kLargeMemoryBytes = 256 * 1024;
@@ -901,9 +885,7 @@ TEST(Rv32ThreadedHostileInput,
 
 TEST(Rv32ThreadedHostileInput, boundsMemoryPoolAtIdleSlotCapacity)
 {
-  // Deep invocation bursts can exceed the eight-slot idle pool. Hold nine
-  // machines simultaneously to prove live memory never aliases, then release
-  // them and verify only the bounded number of clean reusable buffers remains.
+  // Exceed the idle-pool capacity, then check bounded reuse of clean buffers.
   memory_slot_pool() = MemorySlotPool{};
   const auto code = code_from_words({addi(0, 0, 0)});
   auto pre = ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
@@ -944,9 +926,7 @@ TEST(Rv32ThreadedHostileInput, boundsMemoryPoolAtIdleSlotCapacity)
 
 TEST(Rv32ThreadedHostileInput, resetRestoresAllMutableExecutionState)
 {
-  // Reset is used to reuse translated code after suspension and terminal
-  // outcomes. Dirty memory, suspend at ECALL, then trap and halt on later runs;
-  // every reset must restore the image and clear all frame-local state.
+  // Reset restores the image and clears state after ECALL, trap, or halt.
   const auto code =
       code_from_words({addi(1, 0, 7), 0x00000073U, addi(3, 0, 9)});
   constexpr std::array<uint8_t, 4> kStored = {1, 2, 3, 4};
@@ -1661,9 +1641,7 @@ TEST(Rv32ExecutionTest, jalr_clears_low_target_bit)
 
 TEST(Rv32ExecutionTest, jalrTargetArithmeticWrapsInRv32AddressSpace)
 {
-  // JALR address addition is RV32 modular arithmetic. Pin both wrap directions:
-  // UINT32_MAX+1 may legally land on PC 0, while 0-1 clears bit zero to an
-  // invalid 0xfffffffe target and must trap before writing the link register.
+  // JALR arithmetic wraps; invalid targets must trap before writing the link.
   {
     const auto program = make_program({jalr(5, 1, 1)});
     Machine machine(program, 16, 100);
@@ -1741,9 +1719,7 @@ TEST(Rv32ExecutionTest, fetch_and_data_memory_access_semantics)
 
 TEST(Rv32ExecutionTest, zeroSeededStackUnderflowTrapsWithoutMemoryMutation)
 {
-  // Entry ABI v3 deliberately seeds sp to zero and requires the guest to place
-  // its own stack. A hostile prologue that decrements sp first wraps to the top
-  // of RV32 space; its store must trap rather than alias low guest memory.
+  // ABI v3 seeds sp to zero; decrementing it wraps, so the store must trap.
   const auto words = std::array{
       addi(1, 0, 0x7f),
       addi(2, 2, -4),
@@ -1960,9 +1936,7 @@ TEST(Rv32GasTest, out_of_gas_saturates_remaining_gas_to_zero)
 
 TEST(Rv32GasTest, repeatedEcallsStopBeforeAnUnfundedHostCall)
 {
-  // A hostile guest can loop over ECALL forever. Give exactly two complete
-  // ecall/host/jump cycles and verify both engines exhaust instruction gas
-  // before a third host effect, with identical call counts and return state.
+  // Fund two ECALL cycles; both engines must stop before a third host call.
   struct CountingGasHost final : Host {
     explicit CountingGasHost(uint64_t gas_per_call) : gas_per_call(gas_per_call)
     {}

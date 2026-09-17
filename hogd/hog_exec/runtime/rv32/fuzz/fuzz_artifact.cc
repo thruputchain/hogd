@@ -20,14 +20,10 @@ namespace {
 namespace rv32 = hogd::rv32;
 namespace fuzz = hogd::rv32::fuzz;
 
-// A format-aware mutator complements libFuzzer's raw byte mutations. Most
-// random changes to an artifact die at magic, layout, or digest validation and
-// never reach instruction decoding. This mutator starts from a canonical
-// envelope, then either preserves all earlier invariants to target a deeper
-// check or deliberately breaks one named layer of the format.
+// Repair the artifact envelope so mutations can reach instruction decoding,
+// or deliberately break one parser layer while preserving earlier invariants.
 class ArtifactMutator {
 public:
-  // Borrow the current libFuzzer unit and seed a deterministic mutation stream.
   ArtifactMutator(std::span<const uint8_t> input, size_t max_size,
                   unsigned int seed)
     : input_(input), max_size_(max_size), random_state_(seed)
@@ -157,25 +153,20 @@ private:
     return static_cast<size_t>(next_random() % exclusive_upper);
   }
 
-  // Make an unbiased binary choice from one random bit.
   bool random_flip() { return (next_random() & 1U) != 0; }
 
-  // Select a low-frequency branch with probability 1 / denominator.
   bool random_one_in(size_t denominator)
   {
     return random_inrange(denominator) == 0;
   }
 
-  // Produce a byte without exposing PRNG truncation at mutation call sites.
   uint8_t random_byte() { return static_cast<uint8_t>(next_random()); }
 
-  // Choose one bit in an unsigned integer type for a focused bit flip.
   template<typename T> T random_bit()
   {
     return T{1} << random_inrange(std::numeric_limits<T>::digits);
   }
 
-  // Choose an existing byte in the canonical artifact.
   size_t random_artifact_pos() { return random_inrange(artifact_.size()); }
 
   // Choose a byte boundary, including the position after the final byte.
@@ -184,25 +175,21 @@ private:
     return random_inrange(artifact_.size() + 1);
   }
 
-  // Choose one member of a fixed collection of meaningful values.
   template<typename T, size_t N> T choose(const std::array<T, N> &values)
   {
     return values[random_inrange(values.size())];
   }
 
-  // Read a little-endian header field from the canonical working artifact.
   uint32_t load_u32(size_t offset) const
   {
     return rv32::load_u32_le(std::span<const uint8_t>(artifact_), offset);
   }
 
-  // Overwrite a 32-bit header field without changing neighboring fields.
   void set_u32(size_t offset, uint32_t value)
   {
     rv32::store_u32_le(std::span<uint8_t>(artifact_), offset, value);
   }
 
-  // Overwrite a 64-bit header field without changing neighboring fields.
   void set_u64(size_t offset, uint64_t value)
   {
     rv32::store_u64_le(std::span<uint8_t>(artifact_), offset, value);
@@ -313,14 +300,12 @@ private:
     rv32::test_artifact::append_bytes(artifact_, memory);
   }
 
-  // Return the code section described by the normalized header.
   std::span<uint8_t> code()
   {
     return std::span<uint8_t>(artifact_).subspan(
         rv32::kArtifactHeaderBytes, load_u32(rv32::kArtifactCodeSizeOffset));
   }
 
-  // Return the initial-memory section described by the normalized header.
   std::span<uint8_t> memory()
   {
     const size_t code_size = load_u32(rv32::kArtifactCodeSizeOffset);
