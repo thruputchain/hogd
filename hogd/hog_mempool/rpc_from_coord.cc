@@ -65,7 +65,7 @@ namespace hogd {
 
 namespace {
 
-enum class CommitMetricsOutcome { kOk, kBlockNotFound };
+enum class CommitMetricsOutcome { kOk, kBlockNotFound, kConcurrent };
 
 template<typename T>
 void
@@ -2772,6 +2772,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
     case CommitMetricsOutcome::kBlockNotFound:
       MempoolMetrics::instance().commit_block_not_found_count.increment();
       break;
+    case CommitMetricsOutcome::kConcurrent:
+      MempoolMetrics::instance().commit_concurrent_count.increment();
+      break;
     }
     MempoolMetrics::instance().commit_reenqueued_tx_count.increment(
         reenqueue_size);
@@ -2782,6 +2785,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   if (!(co_await close_validation_gate())) {
     // This is a concurrent call to [close_validation_gate()], so there must be
     // another RPC that is already trying to commit the block.
+    emit_commit_stats(CommitMetricsOutcome::kConcurrent,
+                      /*reenqueue_size=*/0,
+                      /*remove_from_scheduler_size=*/0);
     co_return SchedulerCommitOutcome::SchedulerConcurrentCommit;
   }
 
