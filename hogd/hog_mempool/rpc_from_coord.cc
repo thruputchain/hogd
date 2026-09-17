@@ -2779,7 +2779,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         remove_from_scheduler_size);
   };
 
-  co_await close_validation_gate();
+  if (!(co_await close_validation_gate())) {
+    // This is a concurrent call to [close_validation_gate()], so there must be
+    // another RPC that is already trying to commit the block.
+    co_return SchedulerCommitOutcome::SchedulerConcurrentCommit;
+  }
+
   x23::Defer reopen_validation_gate([this]() noexcept {
     try {
       open_validation_gate();

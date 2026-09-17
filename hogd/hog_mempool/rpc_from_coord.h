@@ -719,11 +719,15 @@ private:
     co_return;
   }
 
-  x23::Async<void> close_validation_gate()
+  x23::Async<bool> close_validation_gate()
   {
     while (true) {
       int64_t current_validations = num_validations_in_progress_.load();
-      CHECK_GE(current_validations, 0L);
+      CHECK_GE(current_validations, -1L);
+      if (current_validations == -1) {
+        // This is a concurrent call to [close_validation_gate()].
+        co_return false;
+      }
 
       bool closed = false;
       num_validations_in_progress_.rmw([&closed](int64_t &count) {
@@ -734,7 +738,7 @@ private:
       });
       if (closed) {
         MempoolMetrics::instance().validation_in_progress_count.record(0);
-        co_return;
+        co_return true;
       }
       co_await num_validations_in_progress_.wait(current_validations);
     }
