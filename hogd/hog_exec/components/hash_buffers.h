@@ -21,11 +21,12 @@ public:
     : max_buffers_(max_buffers), max_buffer_bytes_(max_buffer_bytes)
   {}
 
-  SyscallStatus<SHA256Hash> finalize(uint32_t index,
-                                     size_t *output_size = nullptr);
-  SyscallStatus<void> update(uint32_t index, std::span<const std::byte> data,
-                             bool reset);
-  SyscallStatus<void> copy(uint32_t src_index, uint32_t dst_index);
+  [[nodiscard]] SyscallStatus<SHA256Hash>
+  finalize(uint32_t index, size_t *output_size = nullptr);
+  [[nodiscard]] SyscallStatus<void>
+  update(uint32_t index, std::span<const std::byte> data, bool reset);
+  [[nodiscard]] SyscallStatus<void> copy(uint32_t src_index,
+                                         uint32_t dst_index);
 
 private:
   // One incremental hash in progress: a streaming SHA-256 midstate plus the
@@ -40,8 +41,8 @@ private:
     size_t size = 0;
   };
 
-  SyscallStatus<void> update_existing_stream(uint32_t index,
-                                             std::span<const std::byte> data);
+  [[nodiscard]] SyscallStatus<void>
+  update_existing_stream(uint32_t index, std::span<const std::byte> data);
 
   std::unordered_map<uint32_t, Stream> streams_;
 

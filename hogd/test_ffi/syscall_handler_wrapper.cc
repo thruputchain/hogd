@@ -368,20 +368,13 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // error() log, which can throw.
   auto admitted =
       to_handler().validate_new_invocation(invocation.invoked_address,
-                                           frame_flags,
-                                           std::span<uint32_t const>{});
-  // Reading the depth bound off the tip failed: a system error, which is not
-  // one of the caller's admission refusals.
+                                           frame_flags, ValidatedAuthTokens{});
   if (!admitted.has_value()) {
-    error("mock invocation frame admission failed: {}", admitted.error());
-    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
-  }
-  if (!admitted->has_value()) {
-    finish_pending_trace(admitted->error().code());
-    error("mock invocation frame refused: {}", admitted->error().code());
+    finish_pending_trace(admitted.error().code());
+    error("mock invocation frame refused: {}", admitted.error().code());
     // Not a test-API misuse: the caller asked for something production
     // refuses, and gets production's answer with no FFI error.
-    return {.syscall_error_code = std::to_underlying(admitted->error().code()),
+    return {.syscall_error_code = std::to_underlying(admitted.error().code()),
             .ffi_error_code = kTestFFIErrorCodeNone};
   }
 
@@ -405,7 +398,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // closed above.
   auto stashed_parent_trace =
       to_handler().start_frame(std::move(frame_invocation), frame_flags,
-                               std::span<uint32_t const>{});
+                               ValidatedAuthTokens{});
   if (!stashed_parent_trace.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back, so the handler has no new frame; skip publishing the mock-runtime

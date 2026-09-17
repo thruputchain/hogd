@@ -35,7 +35,8 @@ public:
   // A coroutine: the syscall it routes to may suspend on a database read, so
   // native contract bodies await this rather than blocking a thread on it.
   template<SyscallNo Syscall, typename... Args>
-  x23::Async<HostFnStatus<SyscallErrorCode>> syscall(Args &&...args)
+  [[nodiscard]] x23::Async<HostFnStatus<SyscallErrorCode>>
+  syscall(Args &&...args)
   {
     using Meta = SyscallMeta<Syscall>;
     using syscall_t =
@@ -68,7 +69,7 @@ public:
   // Out of line: an inline coroutine here would emit a body referencing the
   // handler into every translation unit that includes this header, including
   // ones whose libraries do not link the runtime.
-  x23::Async<SystemStatus<SyscallStatus<int128_t>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<int128_t>>>
   native_token_balance(ContractAddress const &address);
 
   GasAmount gas_remaining() const

@@ -94,6 +94,7 @@ add_library(runtime_test_objects OBJECT
   sha256_incremental_test.cc
   interleaving_tests.cc
   invocation_frame_test.cc
+  validated_auth_tokens_test.cc
   invoke_error_handling_test.cc
   invoke_malformed_tokens_rv32_test.cc
   invoke_tx_leak_test.cc

@@ -467,7 +467,7 @@ public:
             .gas_limit = kPlentyOfGas,
             .calldata = Calldata{},
         },
-        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
+        std::to_underlying(InvokeFlag::None), ValidatedAuthTokens{});
   }
 
   // Finish the top frame. A successful child merges its modified items into
