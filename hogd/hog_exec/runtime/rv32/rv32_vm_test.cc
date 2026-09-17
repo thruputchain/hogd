@@ -413,8 +413,8 @@ TEST(Rv32ArtifactTest, acceptsOnlyRegisteredGasSchedulePairs)
   store_u64_at(transitional, kArtifactGasDigestOffset,
                kTransitionalGasScheduleDigest);
   EXPECT_TRUE(parse_artifact(transitional, Rv32Limits::defaults()).has_value());
-  EXPECT_TRUE(
-      parse_threaded_artifact(transitional, Rv32Limits::defaults()).has_value());
+  EXPECT_TRUE(parse_threaded_artifact(transitional, Rv32Limits::defaults())
+                  .has_value());
 
   auto current_version_transitional_digest = valid_artifact_bytes();
   store_u64_at(current_version_transitional_digest, kArtifactGasDigestOffset,
@@ -441,8 +441,7 @@ TEST(Rv32ArtifactTest, rejectsExtremeHeaderIntegersWithoutWrapping)
   constexpr std::array<ExtremeFieldCase, 4> kCases = {{
       {kArtifactMemoryBytesOffset, ArtifactError::kMemorySizeInvalid},
       {kArtifactCodeSizeOffset, ArtifactError::kCodeSizeInvalid},
-      {kArtifactInitialMemorySizeOffset,
-       ArtifactError::kInitialMemoryTooLarge},
+      {kArtifactInitialMemorySizeOffset, ArtifactError::kInitialMemoryTooLarge},
       {kArtifactInitialMemoryStartOffset,
        ArtifactError::kInitialMemoryTooLarge},
   }};
@@ -485,8 +484,7 @@ TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
   // one-below, and exact boundaries so neither parser silently rounds a limit
   // up or rejects the smallest valid zero-memory configuration.
   const auto artifact = valid_artifact_bytes();
-  const uint32_t code_size =
-      load_u32_le(artifact, kArtifactCodeSizeOffset);
+  const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
   const uint32_t memory_size =
       load_u32_le(artifact, kArtifactMemoryBytesOffset);
 
@@ -506,17 +504,18 @@ TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
 
   expect_both({.max_code_bytes = 0, .max_memory_bytes = memory_size}, false,
               ArtifactError::kCodeSizeInvalid);
-  expect_both(
-      {.max_code_bytes = code_size - 1, .max_memory_bytes = memory_size}, false,
-      ArtifactError::kCodeSizeInvalid);
-  expect_both(
-      {.max_code_bytes = code_size, .max_memory_bytes = memory_size - 1}, false,
-      ArtifactError::kMemorySizeInvalid);
+  expect_both({.max_code_bytes = code_size - 1,
+               .max_memory_bytes = memory_size},
+              false, ArtifactError::kCodeSizeInvalid);
+  expect_both({.max_code_bytes = code_size,
+               .max_memory_bytes = memory_size - 1},
+              false, ArtifactError::kMemorySizeInvalid);
   expect_both({.max_code_bytes = code_size, .max_memory_bytes = memory_size},
               true, ArtifactError::kTooSmall);
 
-  const auto zero_memory = test_artifact::build_artifact(
-      {addi(0, 0, 0)}, std::span<const uint8_t>{});
+  const auto zero_memory =
+      test_artifact::build_artifact({addi(0, 0, 0)},
+                                    std::span<const uint8_t>{});
   const Rv32Limits zero_memory_limit = {
       .max_code_bytes = kInstructionBytes,
       .max_memory_bytes = 0,
@@ -537,12 +536,14 @@ TEST(Rv32ArtifactTest, defersMisalignedCodeOnlyOnThreadedParsePath)
     auto artifact = valid_artifact_bytes();
     const uint32_t original_code_size =
         load_u32_le(artifact, kArtifactCodeSizeOffset);
-    artifact.erase(
-        artifact.begin() + kArtifactHeaderBytes + malformed_code_size,
-        artifact.begin() + kArtifactHeaderBytes + original_code_size);
+    artifact.erase(artifact.begin() + kArtifactHeaderBytes +
+                       malformed_code_size,
+                   artifact.begin() + kArtifactHeaderBytes +
+                       original_code_size);
     store_u32_at(artifact, kArtifactCodeSizeOffset, malformed_code_size);
-    const auto malformed_code = std::span<const uint8_t>(artifact).subspan(
-        kArtifactHeaderBytes, malformed_code_size);
+    const auto malformed_code =
+        std::span<const uint8_t>(artifact).subspan(kArtifactHeaderBytes,
+                                                   malformed_code_size);
     store_digest_at(artifact, kArtifactCodeDigestOffset,
                     artifact_digest(malformed_code));
 
@@ -553,10 +554,12 @@ TEST(Rv32ArtifactTest, defersMisalignedCodeOnlyOnThreadedParsePath)
     const auto threaded =
         parse_threaded_artifact(artifact, Rv32Limits::defaults());
     ASSERT_TRUE(threaded.has_value());
-    const auto pre = ThreadedMachinePreInstantiation::create(
-        threaded->code, threaded->initial_memory,
-        threaded->initial_memory_start, threaded->memory_bytes,
-        /*trace=*/false);
+    const auto pre =
+        ThreadedMachinePreInstantiation::create(threaded->code,
+                                                threaded->initial_memory,
+                                                threaded->initial_memory_start,
+                                                threaded->memory_bytes,
+                                                /*trace=*/false);
     ASSERT_FALSE(pre.has_value());
     EXPECT_EQ(pre.error(), ProgramError::kCodeSizeNotAligned);
   }
@@ -848,9 +851,11 @@ TEST(Rv32ThreadedHostileInput, translatesCodeAtExactVmCeiling)
   }
   ASSERT_EQ(code.size(), kCodeCeilingBytes);
 
-  const auto pre = ThreadedMachinePreInstantiation::create(
-      code, /*memory=*/{}, /*memory_start=*/0, /*total_memory_size=*/0,
-      /*trace=*/false);
+  const auto pre =
+      ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                              /*memory_start=*/0,
+                                              /*total_memory_size=*/0,
+                                              /*trace=*/false);
   EXPECT_TRUE(pre.has_value());
 }
 
@@ -876,10 +881,11 @@ TEST(Rv32ThreadedHostileInput,
     while (code.size() < kLargeCodeBytes) {
       append_u32(code, addi(0, 0, 0));
     }
-    std::vector<uint8_t> memory(kLargeMemoryBytes,
-                                static_cast<uint8_t>(i + 1));
-    auto pre = ThreadedMachinePreInstantiation::create(
-        code, memory, /*memory_start=*/0, kLargeMemoryBytes, /*trace=*/false);
+    std::vector<uint8_t> memory(kLargeMemoryBytes, static_cast<uint8_t>(i + 1));
+    auto pre = ThreadedMachinePreInstantiation::create(code, memory,
+                                                       /*memory_start=*/0,
+                                                       kLargeMemoryBytes,
+                                                       /*trace=*/false);
     ASSERT_TRUE(pre.has_value());
     retained.emplace_back(std::move(*pre));
   }
@@ -900,9 +906,10 @@ TEST(Rv32ThreadedHostileInput, boundsMemoryPoolAtIdleSlotCapacity)
   // them and verify only the bounded number of clean reusable buffers remains.
   memory_slot_pool() = MemorySlotPool{};
   const auto code = code_from_words({addi(0, 0, 0)});
-  auto pre = ThreadedMachinePreInstantiation::create(
-      code, /*memory=*/{}, /*memory_start=*/0, /*total_memory_size=*/64,
-      /*trace=*/false);
+  auto pre = ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                                     /*memory_start=*/0,
+                                                     /*total_memory_size=*/64,
+                                                     /*trace=*/false);
   ASSERT_TRUE(pre.has_value());
 
   {
@@ -943,9 +950,10 @@ TEST(Rv32ThreadedHostileInput, resetRestoresAllMutableExecutionState)
   const auto code =
       code_from_words({addi(1, 0, 7), 0x00000073U, addi(3, 0, 9)});
   constexpr std::array<uint8_t, 4> kStored = {1, 2, 3, 4};
-  auto pre = ThreadedMachinePreInstantiation::create(
-      code, kStored, /*memory_start=*/4, /*total_memory_size=*/16,
-      /*trace=*/false);
+  auto pre =
+      ThreadedMachinePreInstantiation::create(code, kStored, /*memory_start=*/4,
+                                              /*total_memory_size=*/16,
+                                              /*trace=*/false);
   ASSERT_TRUE(pre.has_value());
   ThreadedMachine machine(*pre, /*gas=*/100);
 
@@ -961,8 +969,8 @@ TEST(Rv32ThreadedHostileInput, resetRestoresAllMutableExecutionState)
   EXPECT_FALSE(machine.halted());
   EXPECT_FALSE(machine.pending_ecall().has_value());
   EXPECT_EQ(machine.memory().front(), 0U);
-  EXPECT_TRUE(std::ranges::equal(machine.memory().subspan(4, kStored.size()),
-                                 kStored));
+  EXPECT_TRUE(
+      std::ranges::equal(machine.memory().subspan(4, kStored.size()), kStored));
 
   ASSERT_EQ(machine.start(), StepResult::kEcall);
   EXPECT_EQ(machine.resume_from_ecall(HostResult::continue_with()),
@@ -1659,8 +1667,7 @@ TEST(Rv32ExecutionTest, jalrTargetArithmeticWrapsInRv32AddressSpace)
   {
     const auto program = make_program({jalr(5, 1, 1)});
     Machine machine(program, 16, 100);
-    MachineTestPeer::set_reg(machine, 1,
-                             std::numeric_limits<uint32_t>::max());
+    MachineTestPeer::set_reg(machine, 1, std::numeric_limits<uint32_t>::max());
     EXPECT_EQ(machine.step(), StepResult::kContinue);
     EXPECT_EQ(machine.pc(), 0U);
     EXPECT_EQ(machine.reg(5), 4U);
@@ -1754,9 +1761,10 @@ TEST(Rv32ExecutionTest, zeroSeededStackUnderflowTrapsWithoutMemoryMutation)
                                   [](uint8_t byte) { return byte == 0; }));
 
   const auto code = code_from_words(words);
-  auto pre = ThreadedMachinePreInstantiation::create(
-      code, /*memory=*/{}, /*memory_start=*/0, /*total_memory_size=*/16,
-      /*trace=*/false);
+  auto pre = ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                                     /*memory_start=*/0,
+                                                     /*total_memory_size=*/16,
+                                                     /*trace=*/false);
   ASSERT_TRUE(pre.has_value());
   ThreadedMachine threaded(*pre, /*gas=*/10);
   EXPECT_EQ(threaded.start(), StepResult::kTrap);
@@ -1956,12 +1964,10 @@ TEST(Rv32GasTest, repeatedEcallsStopBeforeAnUnfundedHostCall)
   // ecall/host/jump cycles and verify both engines exhaust instruction gas
   // before a third host effect, with identical call counts and return state.
   struct CountingGasHost final : Host {
-    explicit CountingGasHost(uint64_t gas_per_call)
-      : gas_per_call(gas_per_call)
+    explicit CountingGasHost(uint64_t gas_per_call) : gas_per_call(gas_per_call)
     {}
 
-    HostResult ecall(MachineView view,
-                     const EcallArgs &args) noexcept override
+    HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
     {
       (void)view;
       (void)args;
@@ -1978,8 +1984,7 @@ TEST(Rv32GasTest, repeatedEcallsStopBeforeAnUnfundedHostCall)
   constexpr uint64_t kCompletedCalls = 2;
   constexpr uint64_t kGasLimit =
       kCompletedCalls *
-      (kBaseInstructionGas + kHostGasPerCall +
-       kBaseInstructionGas);
+      (kBaseInstructionGas + kHostGasPerCall + kBaseInstructionGas);
   const auto words = std::array{0x00000073U, j_type(0, -4)};
 
   const auto program = make_program(words);
@@ -1992,9 +1997,10 @@ TEST(Rv32GasTest, repeatedEcallsStopBeforeAnUnfundedHostCall)
   EXPECT_EQ(canonical.reg(10), kCompletedCalls);
 
   const auto code = code_from_words(words);
-  auto pre = ThreadedMachinePreInstantiation::create(
-      code, /*memory=*/{}, /*memory_start=*/0, /*total_memory_size=*/16,
-      /*trace=*/false);
+  auto pre = ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                                     /*memory_start=*/0,
+                                                     /*total_memory_size=*/16,
+                                                     /*trace=*/false);
   ASSERT_TRUE(pre.has_value());
   ThreadedMachine threaded(*pre, kGasLimit);
   CountingGasHost threaded_host(kHostGasPerCall);
