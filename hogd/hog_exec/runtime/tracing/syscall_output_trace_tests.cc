@@ -262,11 +262,11 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
     SyscallTraceBody body(SyscallNo::kGetTransactionStatistics);
     body.get_transaction_statistics().inputs.statistic =
         TransactionStatistic::GasRemaining;
-    // GasRemaining is read live, so it reflects the crossing that the
-    // GetBlockHeight above has already paid.
+    // GasRemaining excludes both the preceding GetBlockHeight crossing and
+    // the crossing reserved for GetTransactionStatistics itself.
     body.get_transaction_statistics().outputs =
         SyscallGetTransactionStatisticsOutputs{.result = kGasLimit -
-                                                         kSyscallBaseCost};
+                                                         2 * kSyscallBaseCost};
     expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {

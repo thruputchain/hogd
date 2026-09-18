@@ -22,6 +22,7 @@
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -209,10 +210,10 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
                 .body.syscall_number(),
             SyscallNo::kReturn);
 
-  // Gas accounting: child frame gas_limit == parent gas at invoke point
-  // (some contracts might set <, but this contract delegates the full amount)
+  // This contract delegates its full remaining budget, after the parent
+  // reserves the invoke crossing charge.
   ASSERT_EQ(child_trace.invocation.gas_limit,
-            invoke_syscall->gas_remaining_at_start);
+            invoke_syscall->gas_remaining_at_start - kSyscallBaseCost);
 }
 
 TEST_F(TracingTest, NoSyscallTest)

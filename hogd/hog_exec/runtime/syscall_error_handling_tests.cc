@@ -113,13 +113,12 @@ public:
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
-    auto [syscall_res2, gas_consumed2] =
-        wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10),
-                                           kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                           0)();
+    auto [syscall_res2, gas_consumed2] = wrap_outer<ErrorSyscallMeta<Code>>(
+        handler, make_null_context(kSyscallBaseCost + 1), kNoTracingSyscall, 0,
+        0, 0, 0, 0, 0, 0)();
     ASSERT_FALSE(syscall_res2.has_value());
     ASSERT_EQ(syscall_res2.error().code(), Code);
-    ASSERT_EQ(gas_consumed2, 10);
+    ASSERT_EQ(gas_consumed2, kSyscallBaseCost + 1);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
@@ -146,21 +145,20 @@ public:
     ASSERT_EQ(syscall_res.error().code(), Code);
     ASSERT_EQ(gas_consumed, 1000 + kSyscallBaseCost);
 
-    auto [syscall_res2, gas_consumed2] =
-        wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10),
-                                           kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                           0)();
+    auto [syscall_res2, gas_consumed2] = wrap_outer<ErrorSyscallMeta<Code>>(
+        handler, make_null_context(kSyscallBaseCost + 1), kNoTracingSyscall, 0,
+        0, 0, 0, 0, 0, 0)();
     ASSERT_FALSE(syscall_res2.has_value());
     ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
-    ASSERT_EQ(gas_consumed2, 10);
+    ASSERT_EQ(gas_consumed2, kSyscallBaseCost + 1);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
 
-  // See the #1759 block at the bottom of this file. A frame with no gas left
-  // must not turn a transaction-fatal error into a frame-local out-of-gas
-  // that a parent frame could catch.
-  template<HostFnErrorCode Code> void run_fatal_error_at_zero_gas_test()
+  // With no budget for the crossing, the body never runs, so it cannot
+  // produce a transaction-fatal error. Fatal errors from bodies that do run
+  // still take precedence, as run_error_override_test checks above.
+  template<HostFnErrorCode Code> void run_fatal_body_at_zero_gas_test()
   {
     auto context = make_hog_exec_context();
     auto handler = make_new_system_call_handler(Transaction{}, *context);
@@ -176,7 +174,8 @@ public:
                                            kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
                                            0)();
     ASSERT_FALSE(syscall_res.has_value());
-    ASSERT_EQ(syscall_res.error().code(), Code);
+    ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
+    ASSERT_EQ(gas_consumed, 0);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
@@ -486,6 +485,68 @@ template<auto Func> struct FuncSyscallMeta {
 };
 
 static_assert(is_syscall_meta<FuncSyscallMeta<&bad_alloc_syscall_func>>);
+
+namespace {
+SyscallInnerResult
+unexpected_syscall_body()
+{
+  ADD_FAILURE() << "A syscall body ran without gas to cover the crossing";
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+SyscallInnerResult
+budget_checking_syscall_body(SystemCallHandler &, WrappedGasAmount available)
+{
+  EXPECT_EQ(available.get(), 17);
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{3}};
+}
+} // namespace
+
+TEST_F(SyscallErrorHandlingTest, UnaffordableCrossingDoesNotEnterBody)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               ValidatedAuthTokens{})
+                  .has_value());
+
+  for (GasAmount budget :
+       {GasAmount{0}, kSyscallBaseCost - 1, kSyscallBaseCost}) {
+    SCOPED_TRACE(budget);
+    auto [status, consumed] =
+        wrap_outer<FuncSyscallMeta<&unexpected_syscall_body>>(
+            handler, make_null_context(budget), kNoTracingSyscall, 0, 0, 0, 0,
+            0, 0, 0)();
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code(), HostFnErrorCode::OutOfGas);
+    EXPECT_EQ(consumed, budget);
+  }
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
+}
+
+TEST_F(SyscallErrorHandlingTest, BodyBudgetExcludesCrossingCharge)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               ValidatedAuthTokens{})
+                  .has_value());
+
+  auto [status, consumed] =
+      wrap_outer<FuncSyscallMeta<&budget_checking_syscall_body>>(
+          handler, make_null_context(kSyscallBaseCost + 17), kNoTracingSyscall,
+          0, 0, 0, 0, 0, 0, 0)();
+  ASSERT_TRUE(status.has_value());
+  EXPECT_EQ(*status, SyscallErrorCode::kSyscallErrorCodeNone);
+  EXPECT_EQ(consumed, kSyscallBaseCost + 3);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
+}
 
 // An exception escaping a syscall body (e.g. std::bad_alloc from an
 // allocating storage/cache insert) must be translated to a structured
@@ -846,23 +907,21 @@ TEST_F(SyscallErrorHandlingTest, ReportedGasNeverExceedsGasRemaining)
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
-// An exhausted frame is not a licence to downgrade a transaction-fatal error
-// into a frame-local out-of-gas: Abandon and friends stay themselves, so a
-// parent frame cannot catch them.
-TEST_F(SyscallErrorHandlingTest, AbandonAtZeroGasIsNotMaskedAsOutOfGas)
+// An exhausted frame cannot enter even a body that would produce a fatal
+// error. There is no body result to preserve when the crossing is rejected.
+TEST_F(SyscallErrorHandlingTest, AbandonBodyAtZeroGasIsNotEntered)
 {
-  run_fatal_error_at_zero_gas_test<HostFnErrorCode::Abandon>();
+  run_fatal_body_at_zero_gas_test<HostFnErrorCode::Abandon>();
 }
 
-TEST_F(SyscallErrorHandlingTest,
-       ValidationFailureAtZeroGasIsNotMaskedAsOutOfGas)
+TEST_F(SyscallErrorHandlingTest, ValidationFailureBodyAtZeroGasIsNotEntered)
 {
-  run_fatal_error_at_zero_gas_test<HostFnErrorCode::ValidationFailure>();
+  run_fatal_body_at_zero_gas_test<HostFnErrorCode::ValidationFailure>();
 }
 
-TEST_F(SyscallErrorHandlingTest, UnrecoverableAtZeroGasIsNotMaskedAsOutOfGas)
+TEST_F(SyscallErrorHandlingTest, UnrecoverableBodyAtZeroGasIsNotEntered)
 {
-  run_fatal_error_at_zero_gas_test<HostFnErrorCode::Unrecoverable>();
+  run_fatal_body_at_zero_gas_test<HostFnErrorCode::Unrecoverable>();
 }
 
 // The same boundary, driven through the real syscall implementations rather
@@ -989,11 +1048,11 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyStillMeteredOnResume)
 
   auto [syscall_res, gas_consumed] =
       wrap_outer<FuncSyscallMeta<&suspending_syscall_func>>(
-          handler, make_null_context(10), kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-          0)();
+          handler, make_null_context(kSyscallBaseCost + 1), kNoTracingSyscall,
+          0, 0, 0, 0, 0, 0, 0)();
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
-  ASSERT_EQ(gas_consumed, 10);
+  ASSERT_EQ(gas_consumed, kSyscallBaseCost + 1);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
