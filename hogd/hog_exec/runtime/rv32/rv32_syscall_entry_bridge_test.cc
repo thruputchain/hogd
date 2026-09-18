@@ -19,6 +19,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -380,8 +381,8 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  rv32::HostResult result =
-      call_bridge(memory, handler, 0, make_ecall_args(arg_words));
+  rv32::HostResult result = call_bridge(memory, handler, kSyscallBaseCost + 1,
+                                        make_ecall_args(arg_words));
   finish_frame(handler, std::move(stashed_trace),
                std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
 
@@ -400,11 +401,13 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
   std::ranges::copy(input, memory.begin() + kInputAddress);
   const std::vector<uint8_t> before = memory;
 
+  // Afford entry so SHA256 runs, but leave too little gas for its body cost.
+  constexpr GasAmount kBudget = kSyscallBaseCost + 1;
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
   ExecutionContext context{
       .memory = std::as_writable_bytes(std::span<uint8_t>(memory)),
-      .gas_remaining = 0,
+      .gas_remaining = kBudget,
   };
   const auto result =
       syscall_entry(&handler, context,
@@ -416,7 +419,9 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
 
   ASSERT_FALSE(result.first.has_value());
   EXPECT_EQ(result.first.error().code(), HostFnErrorCode::OutOfGas);
-  EXPECT_EQ(result.second, 0U);
+  EXPECT_EQ(result.second, kBudget);
+  // Once entry is affordable, SHA256 still writes its live output before
+  // the final accounting rejects its body charge.
   EXPECT_NE(memory, before);
   const SHA256Hash expected = sha256(input);
   EXPECT_TRUE(
@@ -438,10 +443,11 @@ TEST_F(Rv32SyscallEntryBridgeTest,
   // The divergence in the discarded frame memory is therefore WAI, not a bug
   // (issue #3780): after OutOfGas the whole frame is thrown away.
   constexpr std::string_view input = "out of gas";
-  // Four argument-load instructions plus the ecall, each kBaseInstructionGas:
-  // the instruction stream consumes the whole budget, so the syscall body
-  // starts with zero gas remaining and is charged into OutOfGas.
-  constexpr uint64_t kExactBudget = 5 * rv32::kBaseInstructionGas;
+  // Cover the four argument loads, ecall, crossing, and SHA256 body exactly.
+  // The body runs, then the inclusive final gas check reports OutOfGas.
+  constexpr uint64_t kExactBudget = (5 * rv32::kBaseInstructionGas) +
+                                    kSyscallBaseCost +
+                                    GasCost::sha256_hash(input.size());
 
   std::vector<uint8_t> code;
   uint8_t reg = 10; // a0

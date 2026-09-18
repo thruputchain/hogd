@@ -27,8 +27,8 @@ set -x
 
 echo "Installing groundhog-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-cli@0.17.0
+  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-cli@0.17.5
 
 echo "Installing groundhog-rv32-lower..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-rv32-lower@0.17.0
+  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-rv32-lower@0.17.5

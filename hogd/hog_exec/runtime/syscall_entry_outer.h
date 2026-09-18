@@ -498,6 +498,19 @@ translate_syscall_body_exception(SyscallNo syscall_no,
                             WrappedGasAmount{0}};
 }
 
+namespace detail {
+
+inline GasAmount
+saturating_add(GasAmount a, GasAmount b)
+{
+  auto [val, of] = overflowing_add(a, b);
+  if (of) {
+    return UINT64_MAX;
+  }
+  return val;
+}
+} // namespace detail
+
 // report_dropped_syscall_trace() lives in syscall_types.h so the per-syscall
 // inner bodies (which also materialize optional XDR trace outputs and must not
 // panic on allocation failure) can share it.
@@ -624,8 +637,16 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
       }
     }
 
+    // Reserve the crossing before entering the body. An exhausted frame
+    // cannot run even a zero-cost body.
+    if (gas_remaining <= kSyscallBaseCost) {
+      return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
+                                WrappedGasAmount{0}};
+    }
+
     auto extra_args =
-        syscall_t::extra_args(handler, WrappedGasAmount{gas_remaining});
+        syscall_t::extra_args(handler, WrappedGasAmount{gas_remaining -
+                                                        kSyscallBaseCost});
 
     // Invoke the inner syscall
     // template only required because we can't do auto [...handler] =
@@ -652,7 +673,6 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
         return translate_syscall_body_exception(kSyscall, args);
       }
     }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
-
     return res;
   }(std::make_index_sequence<syscall_t::kNumArgs>{});
 
@@ -671,15 +691,10 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
   }
 
   auto [syscall_result, gas_consumed] = std::move(body_result);
-
-  // The crossing, charged here rather than in each body: a syscall added later
-  // cannot forget it, and a call that faulted or errored still used the entry
-  // path. Saturating, so a body that already billed the maximum cannot wrap to
-  // something cheap; the out-of-gas check below then sees the total.
-  gas_consumed =
-      WrappedGasAmount{gas_consumed.get() > UINT64_MAX - kSyscallBaseCost
-                           ? UINT64_MAX
-                           : gas_consumed.get() + kSyscallBaseCost};
+  // Account for the reserved crossing on every path, including rejected calls
+  // and bodies that suspended or threw. Saturate to avoid wrapping the charge.
+  gas_consumed = WrappedGasAmount{
+      detail::saturating_add(gas_consumed.get(), kSyscallBaseCost)};
 
   if (runtime_log_level(LogLevel::kTrace)) {
     // The inner syscall has already run and written its outputs; formatting
