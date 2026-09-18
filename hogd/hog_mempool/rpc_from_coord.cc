@@ -1090,7 +1090,6 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   };
 
   struct ScheduleState {
-    x23::CoroGuard schedule_guard;
     x23::Vec<size_t> handle_end_indices;
     x23::Vec<ScheduledChunk> scheduled_chunks;
     x23::Vec<SummarizedChunk> summarized_chunks;
@@ -1113,7 +1112,6 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   nodes.nomination_cleanup =
       dag.cleanup("rollback scheduler nomination",
                   [&, state]() -> x23::Async<void> {
-                    state->schedule_guard.reset();
                     scheduler_->reenqueue_txs(cache.tx_hashes.begin(),
                                               cache.tx_hashes.end());
                     {
@@ -1126,11 +1124,11 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                   });
   const x23::DagCleanup nomination_cleanup = nodes.nomination_cleanup;
 
-  nodes.lock_scheduler =
-      dag.async<void>("lock scheduler nomination", std::move(scheduling_deps),
-                      [&, state, nomination_cleanup]() -> x23::Async<void> {
-                        co_await state->schedule_guard(
-                            scheduler_->global_lock_);
+  nodes.start_nomination =
+      dag.async<void>("start scheduler nomination", std::move(scheduling_deps),
+                      [&, nomination_cleanup]() -> x23::Async<void> {
+                        x23::CoroGuard scheduler_guard;
+                        co_await scheduler_guard(scheduler_->global_lock_);
                         scheduler_->start_pending_nomination(cache.block_id);
                         nomination_cleanup.arm();
                         co_return;
@@ -1138,7 +1136,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
 
   x23::DagNode<void> previous_schedule_node;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
-    x23::DagDeps deps = i == 0 ? dag.after(nodes.lock_scheduler)
+    x23::DagDeps deps = i == 0 ? dag.after(nodes.start_nomination)
                                : dag.after(previous_schedule_node);
     auto schedule_node =
         dag.async<void>("schedule nomination chunk", std::move(deps),
@@ -1146,9 +1144,13 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                           if (state->stopped) {
                             co_return;
                           }
-                          scheduler_->schedule(kMaxBlockSize /
-                                                   kNumSchedulerIterations,
-                                               cache.tx_hashes, cache.txs);
+                          {
+                            x23::CoroGuard scheduler_guard;
+                            co_await scheduler_guard(scheduler_->global_lock_);
+                            scheduler_->schedule(kMaxBlockSize /
+                                                     kNumSchedulerIterations,
+                                                 cache.tx_hashes, cache.txs);
+                          }
                           const size_t start = state->num_scheduled;
                           const size_t end = cache.tx_hashes.size();
                           if (end == start) {
@@ -1241,8 +1243,6 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
             CHECK_EQ(state->num_tx_outcomes_processed, cache.tx_hashes.size());
             CHECK_EQ(cache.result_tx_hashes.size(),
                      cache.result_tx_nominations.size());
-
-            state->schedule_guard.reset();
           }
           co_return;
         });

@@ -608,7 +608,7 @@ private:
     x23::DagNode<bool> initialized;
   };
   struct ScheduleNodes {
-    x23::DagNode<void> lock_scheduler;
+    x23::DagNode<void> start_nomination;
     x23::DagCleanup nomination_cleanup;
     x23::Vec<x23::DagNode<void>> schedule_chunks;
     x23::Vec<x23::DagNode<void>> propose_chunks;
