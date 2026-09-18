@@ -23,6 +23,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
@@ -66,7 +67,7 @@ TEST_F(Sha256IncrementalTest, OneShotChecksGasBeforeHashing)
                        ValidatedAuthTokens{})
           .has_value());
   handler.enable_transaction_stats();
-  for (uint32_t size : {0u, 55u, 56u, 63u, 64u, 65u, 4097u}) {
+  for (uint32_t size : {0U, 55U, 56U, 63U, 64U, 65U, 4097U}) {
     // The body itself leaves its output untouched, including when hashing an
     // empty input (whose byte counter alone cannot detect work).
     const std::vector<std::byte> input(size, std::byte{0xab});
@@ -137,7 +138,7 @@ TEST_F(Sha256IncrementalTest, UpdateChecksGasBeforeCreatingResettingOrAppending)
   handler.enable_transaction_stats();
   const std::array<std::byte, 3> prefix{std::byte{1}, std::byte{2},
                                         std::byte{3}};
-  for (uint32_t size : {0u, 63u, 64u, 65u, 4097u}) {
+  for (uint32_t size : {0U, 63U, 64U, 65U, 4097U}) {
     const GasAmount cost = kSyscallBaseCost + GasCost::sha256_update(size);
     for (bool existing : {false, true}) {
       for (bool reset : {false, true}) {
@@ -155,7 +156,8 @@ TEST_F(Sha256IncrementalTest, UpdateChecksGasBeforeCreatingResettingOrAppending)
               wrap_outer<SyscallMeta<SyscallNo::kSHA256Update>>(
                   handler,
                   ExecutionContext{.memory = memory, .gas_remaining = budget},
-                  SyscallNo::kSHA256Update, 0, 0, size, reset, 0, 0, 0)();
+                  SyscallNo::kSHA256Update, 0, 0, size,
+                  static_cast<uint32_t>(reset), 0, 0, 0)();
           if (budget <= cost) {
             ASSERT_FALSE(result.has_value());
             EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);

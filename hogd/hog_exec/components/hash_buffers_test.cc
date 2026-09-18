@@ -160,7 +160,7 @@ TEST(HashBuffersTest, EmptyUpdatesDoNotChangeDigest)
 
 TEST(HashBuffersTest, BeyondLegacySizeLimitMatchesOneShot)
 {
-  std::vector<uint8_t> whole(2 * kSHA256BufferMaxSize + 1);
+  std::vector<uint8_t> whole((2 * kSHA256BufferMaxSize) + 1);
   for (size_t i = 0; i < whole.size(); i++) {
     whole[i] = static_cast<uint8_t>((i * 31) + 5);
   }
