@@ -352,12 +352,9 @@ load_log_file(
 
     uncommitted_records = true;
 
-    // A crash mid-append can leave the file grown past the data that reached
-    // disk, and some filesystems expose that region as zeros. A zero header is
-    // never a valid record (key_len == 0), so in the last file treat it as the
-    // torn tail and truncate to the last commit, but only if nothing but
-    // zeros follows: a zeroed header ahead of live records is corruption, and
-    // so is any other invalid header.
+    // A zero header is never valid (key_len == 0). In the last file, treat it
+    // as a torn tail from a crash mid-append and truncate, but only if nothing
+    // but zeros follows; a zeroed header ahead of live records is corruption.
     if (is_last_file && all_zero(byte_view(tmp))) {
       if (!rest_is_zero(r)) {
         error("zeroed record ahead of later records in {}", file.path_);
