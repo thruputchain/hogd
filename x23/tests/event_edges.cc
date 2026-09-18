@@ -118,9 +118,10 @@ TEST(EventEdges, GenerationDoesNotPreventShutdown)
   SocketPair sockets;
   ManualPoll cp(pool);
   auto generation = cp.generation(sockets.a);
+  cp.reset(sockets.a);
   cp.request_stop();
-  cp.poison(sockets.a, generation + 1);
-  EXPECT_EQ(cp.generation(sockets.a), generation);
+  cp.poison(sockets.a, generation);
+  EXPECT_EQ(cp.generation(sockets.a), generation + 1);
   EXPECT_TRUE(cp.time_to_stop());
 }
 
