@@ -14,10 +14,7 @@ namespace hogd {
 
 namespace {
 
-// The limits these tests run under. A chain sets max_sha256_buffers and
-// max_sha256_buffer_bytes itself, so these are the test's own choice, not a
-// default; the byte limit is the protocol default so the size cases below
-// keep their meaning.
+// The active-stream limit is configured by the chain.
 constexpr uint32_t kMaxBuffers = 8;
 
 } // namespace
@@ -161,9 +158,9 @@ TEST(HashBuffersTest, EmptyUpdatesDoNotChangeDigest)
   EXPECT_EQ(hash.value(), sha256(data));
 }
 
-TEST(HashBuffersTest, MaxSizeBufferDigestMatchesOneShot)
+TEST(HashBuffersTest, BeyondLegacySizeLimitMatchesOneShot)
 {
-  std::vector<uint8_t> whole(kSHA256BufferMaxSize);
+  std::vector<uint8_t> whole(2 * kSHA256BufferMaxSize + 1);
   for (size_t i = 0; i < whole.size(); i++) {
     whole[i] = static_cast<uint8_t>((i * 31) + 5);
   }

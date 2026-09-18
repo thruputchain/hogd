@@ -16,13 +16,17 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
+#include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "network_config.hh"
@@ -44,6 +48,157 @@ public:
           TestDB::kHogDb, true)
   {}
 };
+
+// Exercise the generated syscall metadata and the outer wrapper too: the body
+// receives the budget after reserving the crossing, and exact exhaustion
+// faults.
+TEST_F(Sha256IncrementalTest, OneShotChecksGasBeforeHashing)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+  ASSERT_TRUE(
+      handler
+          .start_frame(Invocation{.invoked_address = make_contract_address(0),
+                                  .entrypoint = {},
+                                  .gas_limit = UINT64_MAX,
+                                  .calldata = {}},
+                       std::to_underlying(InvokeFlag::None),
+                       ValidatedAuthTokens{})
+          .has_value());
+  handler.enable_transaction_stats();
+  for (uint32_t size : {0u, 55u, 56u, 63u, 64u, 65u, 4097u}) {
+    // The body itself leaves its output untouched, including when hashing an
+    // empty input (whose byte counter alone cannot detect work).
+    const std::vector<std::byte> input(size, std::byte{0xab});
+    SHA256Hash digest;
+    digest.fill(0xab);
+    const auto sentinel = digest;
+    auto [inner_result, inner_charge] =
+        syscall_SHA256_inner(handler,
+                             WrappedGasAmount{GasCost::sha256_hash(size)},
+                             input, digest);
+    ASSERT_FALSE(inner_result.has_value());
+    EXPECT_EQ(inner_result.error().code(), HostFnErrorCode::OutOfGas);
+    EXPECT_EQ(inner_charge.get(), GasCost::sha256_hash(size));
+    EXPECT_EQ(digest, sentinel);
+    const GasAmount cost = kSyscallBaseCost + GasCost::sha256_hash(size);
+    for (GasAmount budget :
+         {GasAmount{0}, kSyscallBaseCost, cost - 1, cost, cost + 1}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "size=" << size << " budget=" << budget);
+      std::vector<std::byte> memory(size + sizeof(SHA256Hash), std::byte{0xab});
+
+      handler.get_transaction_stats()->sha256_total_bytes_processed = 0;
+      auto [result, charged] = wrap_outer<SyscallMeta<SyscallNo::kSHA256>>(
+          handler, ExecutionContext{.memory = memory, .gas_remaining = budget},
+          SyscallNo::kSHA256, 0, size, size, 0, 0, 0, 0)();
+      if (budget <= cost) {
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);
+        EXPECT_EQ(charged, budget);
+        // WritableOutput flushes its zero-initialized staging value on a
+        // frame fault; the digest itself must never be computed.
+        EXPECT_EQ(std::vector<std::byte>(memory.begin() + size, memory.end()),
+                  std::vector<std::byte>(sizeof(SHA256Hash), std::byte{0}));
+        EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed,
+                  0);
+      }
+      else {
+        ASSERT_TRUE(result.has_value());
+        EXPECT_EQ(*result, SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_EQ(charged, cost);
+        const auto expected = sha256(std::span(memory).first(size));
+        EXPECT_EQ(
+            std::vector<std::byte>(memory.begin() + size, memory.end()),
+            std::vector<std::byte>(std::as_bytes(std::span(expected)).begin(),
+                                   std::as_bytes(std::span(expected)).end()));
+        EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed,
+                  size);
+      }
+    }
+  }
+  EXPECT_TRUE(
+      handler.finish_frame(InvokeStatus<void>{}, nullptr)().has_value());
+}
+
+TEST_F(Sha256IncrementalTest, UpdateChecksGasBeforeCreatingResettingOrAppending)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+  ASSERT_TRUE(
+      handler
+          .start_frame(Invocation{.invoked_address = make_contract_address(0),
+                                  .entrypoint = {},
+                                  .gas_limit = UINT64_MAX,
+                                  .calldata = {}},
+                       std::to_underlying(InvokeFlag::None),
+                       ValidatedAuthTokens{})
+          .has_value());
+  handler.enable_transaction_stats();
+  const std::array<std::byte, 3> prefix{std::byte{1}, std::byte{2},
+                                        std::byte{3}};
+  for (uint32_t size : {0u, 63u, 64u, 65u, 4097u}) {
+    const GasAmount cost = kSyscallBaseCost + GasCost::sha256_update(size);
+    for (bool existing : {false, true}) {
+      for (bool reset : {false, true}) {
+        for (GasAmount budget :
+             {GasAmount{0}, kSyscallBaseCost, cost - 1, cost, cost + 1}) {
+          SCOPED_TRACE(::testing::Message()
+                       << "size=" << size << " existing=" << existing
+                       << " reset=" << reset << " budget=" << budget);
+          if (existing) {
+            ASSERT_TRUE(handler.sha256_update(0, prefix, true).has_value());
+          }
+          handler.get_transaction_stats()->sha256_total_bytes_processed = 0;
+          std::vector<std::byte> memory(size, std::byte{0xab});
+          auto [result, charged] =
+              wrap_outer<SyscallMeta<SyscallNo::kSHA256Update>>(
+                  handler,
+                  ExecutionContext{.memory = memory, .gas_remaining = budget},
+                  SyscallNo::kSHA256Update, 0, 0, size, reset, 0, 0, 0)();
+          if (budget <= cost) {
+            ASSERT_FALSE(result.has_value());
+            EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);
+            EXPECT_EQ(charged, budget);
+            EXPECT_EQ(
+                handler.get_transaction_stats()->sha256_total_bytes_processed,
+                0);
+            auto digest = handler.sha256_finalize(0);
+            EXPECT_EQ(digest.has_value(), existing);
+            if (existing) {
+              ASSERT_TRUE(digest.has_value());
+              EXPECT_EQ(*digest, sha256(prefix));
+            }
+          }
+          else if (!existing && !reset) {
+            ASSERT_TRUE(result.has_value());
+            EXPECT_EQ(*result,
+                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+            EXPECT_EQ(charged, kSyscallBaseCost);
+            EXPECT_FALSE(handler.sha256_finalize(0).has_value());
+          }
+          else {
+            ASSERT_TRUE(result.has_value());
+            EXPECT_EQ(*result, SyscallErrorCode::kSyscallErrorCodeNone);
+            EXPECT_EQ(charged, cost);
+            auto digest = handler.sha256_finalize(0);
+            ASSERT_TRUE(digest.has_value());
+            if (existing && !reset) {
+              memory.insert(memory.begin(), prefix.begin(), prefix.end());
+            }
+            EXPECT_EQ(*digest, sha256(memory));
+            // Finalize must not count bytes already processed by Update again.
+            EXPECT_EQ(
+                handler.get_transaction_stats()->sha256_total_bytes_processed,
+                size);
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(
+      handler.finish_frame(InvokeStatus<void>{}, nullptr)().has_value());
+}
 
 TEST_F(Sha256IncrementalTest, BasicUpdateAndFinalize)
 {
@@ -277,7 +432,7 @@ TEST_F(Sha256ConfiguredBufferLimitTest, GenesisValueBoundsOpenBuffers)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::array<uint8_t, 1> chunk = {0};
 
-        // The configured number of buffers opens; the stock value of 8 would
+        // The configured number of buffers opens; the stock value of 32 would
         // let this run well past kConfiguredMaxBuffers.
         for (uint32_t i = 0; i < kConfiguredMaxBuffers; i++) {
           auto opened = co_await ctx.syscall<SyscallNo::kSHA256Update>(

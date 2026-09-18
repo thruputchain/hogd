@@ -102,9 +102,26 @@ public:
   SyscallMiscTests() : SyscallMiscTestsBase(std::nullopt) {}
 };
 
+// This contract entrypoint deliberately opens nine streams and expects the
+// ninth to fail, so pin its network limit independently of the stock default.
+class SyscallMiscTestsEightHashBuffers : public SyscallMiscTestsBase {
+public:
+  SyscallMiscTestsEightHashBuffers() : SyscallMiscTestsBase(buffer_config()) {}
+
+private:
+  static NetworkConfig buffer_config()
+  {
+    auto config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                   8);
+    return config;
+  }
+};
+
 // max_cross_invoke_depth = 1 leaves room for the root frame and nothing else,
 // so every cross invoke a test entrypoint makes is over the bound. Stock
-// genesis sets 256, which no contract here comes close to.
+// genesis sets 16, which no contract here comes close to.
 class SyscallMiscTestsDepthOne : public SyscallMiscTestsBase {
 public:
   SyscallMiscTestsDepthOne() : SyscallMiscTestsBase(depth_one_config()) {}
@@ -534,7 +551,7 @@ TEST_F(SyscallMiscTests, TestSha256UpdateNoBuffer)
 
 // ── #26: SHA256Update (too many buffers) ────────────────────────────
 
-TEST_F(SyscallMiscTests, TestSha256UpdateTooManyBuffers)
+TEST_F(SyscallMiscTestsEightHashBuffers, TestSha256UpdateTooManyBuffers)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -548,21 +565,9 @@ TEST_F(SyscallMiscTests, TestSha256UpdateTooManyBuffers)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// ── #27: SHA256Update (buffer too large) ────────────────────────────
-
-TEST_F(SyscallMiscTests, TestSha256UpdateBufferTooLarge)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_sha256_update_buffer_too_large">(
-                  UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
+// The legacy buffer-too-large contract entrypoint is obsolete: incremental
+// hashing is now bounded by gas. Sha256IncrementalTest and HashBuffersTest
+// cover inputs beyond the former byte cap.
 
 // ── #28: SHA256Finalize (no buffer) ─────────────────────────────────
 
