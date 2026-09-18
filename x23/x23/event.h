@@ -431,7 +431,9 @@ private:
   std::string showfd(const FdPtr &fdp);
   void debug_dump();
 
-  void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
+  // A zero genno disables the generation check.
+  void setmode(const FdPtr &fd, FdState::Mode mode,
+               uint64_t genno = 0) noexcept;
   void docb(const FdPtr &fdp, bool write)
   {
     using enum FdState::Mode;

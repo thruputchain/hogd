@@ -132,9 +132,18 @@ CoroPollImpl::debug_dump()
 }
 
 void
-CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
+CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode,
+                      uint64_t genno) noexcept
 {
   using enum FdState::Mode;
+
+  if (genno) {
+    auto curgen = fdp->generation_.load(std::memory_order_relaxed);
+    if (curgen != genno) {
+      x23assert(genno < curgen);
+      return;
+    }
+  }
 
   FdState::Mode old_mode = fdp->mode_;
   if ((mode == old_mode && mode != kFree) ||
@@ -150,6 +159,10 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     fdp->mode_ = unlock_mode;
     fdp->mode_.notify_all();
   });
+
+  // Reset may have advanced the generation while we acquired the lock.
+  if (genno && fdp->generation_.load(std::memory_order_relaxed) != genno)
+    return;
 
   if ((mode == old_mode && mode != kFree) ||
       (mode == kActive && (old_mode == kPoisoned || stop_requested())))
@@ -322,17 +335,6 @@ CoroPollImpl::reset(BorrowedFd fd)
 }
 
 void
-CoroPollImpl::poison(BorrowedFd fd)
-{
-  auto fdp = getfd(fd);
-#if X23_FD_TRACE
-  *fdp->info_.take() =
-      std::format("fd {} poison stack trace\n{}", fd.get(), stacktrace());
-#endif // X23_FD_TRACE
-  setmode(fdp, FdState::Mode::kPoisoned);
-}
-
-void
 CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
 {
   auto fdp = getfd(fd);
@@ -341,36 +343,13 @@ CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
       std::format("fd {} poison stack trace\n{}", fd.get(), stacktrace());
 #endif // X23_FD_TRACE
 
-  using enum FdState::Mode;
-  if (fdp->generation_.load(std::memory_order_relaxed) != genno)
-    return;
-  FdState::Mode mode;
-  for (;;) {
-    mode = fdp->mode();
-    if (mode == kPoisoned)
-      return;
-    if (fdp->mode_.compare_exchange_strong(mode, kLocked))
-      break;
-  }
-  if (fdp->generation_.load(std::memory_order_relaxed) != genno) {
-    fdp->mode_ = mode;
-    fdp->mode_.notify_all();
-    return;
-  }
+  setmode(fdp, FdState::Mode::kPoisoned, genno);
+}
 
-  Defer unlock([&] {
-    fdp->mode_ = kPoisoned;
-    fdp->mode_.notify_all();
-  });
-
-  fdp->ready_ = 0; // because EPOLLERR is sticky
-  if (mode == kActive) {
-    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd.get(), nullptr) == -1)
-      if (errno != ENOENT && errno != EBADF)
-        debug.err("EPOLL_CTL_DEL fd {}: {}", fd.get(), Errno{}, stacktrace());
-  }
-  unlock.reset();
-  docbs(fdp);
+void
+CoroPollImpl::poison(BorrowedFd fd)
+{
+  poison(fd, 0);
 }
 
 uint64_t
