@@ -127,6 +127,42 @@ TEST(EventFaults, GenerationAndInactivePoisonDoNotRegisterWithEpoll)
   EXPECT_EQ(cp.read_wait(cp.read_clear(reader))(), EBADF);
 }
 
+TEST(EventFaults, ReadPoisonRegistrationFailurePoisonsWrites)
+{
+  ThreadPool pool(8);
+  int fds[2];
+  ASSERT_EQ(pipe(fds), 0);
+  UniqueFd reader(fds[0]), writer(fds[1]);
+  ManualPoll cp(pool);
+  ctl_operation = EPOLL_CTL_ADD;
+  ctl_error = EIO;
+  cp.read_poison(writer);
+  EXPECT_EQ(ctl_error.load(), 0);
+  EXPECT_EQ(cp.read_wait(cp.read_clear(writer))(), EBADF);
+  EXPECT_EQ(cp.write_wait(cp.write_clear(writer))(), EBADF);
+}
+
+TEST(EventFaults, ActiveReadPoisonDoesNotChangeEpollRegistration)
+{
+  ThreadPool pool(8);
+  for (int op : {EPOLL_CTL_ADD, EPOLL_CTL_MOD, EPOLL_CTL_DEL}) {
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+    UniqueFd reader(fds[0]), writer(fds[1]);
+    ManualPoll cp(pool);
+    auto reading = cp.read_wait(cp.read_clear(writer));
+    auto writing = cp.write_wait(cp.write_clear(writer));
+    ctl_operation = op;
+    ctl_error = EIO;
+    cp.read_poison(writer);
+    EXPECT_EQ(ctl_error.exchange(0), EIO);
+    EXPECT_EQ(reading(), EBADF);
+    EXPECT_EQ(cp.read_wait(cp.read_clear(writer))(), EBADF);
+    cp.check(0);
+    EXPECT_EQ(writing(), 0);
+  }
+}
+
 TEST(EventFaults, DeleteFailureStillCompletesPendingWait)
 {
   ThreadPool pool(8);

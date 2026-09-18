@@ -223,7 +223,7 @@ CoroPoll::close(UniqueFd fd)
   if (!fd)
     return;
   auto w = take_writer(fd);
-  abort(fd, false, EBADF);
+  read_poison(fd);
   if (w)
     w->close(*this, std::move(fd));
   else

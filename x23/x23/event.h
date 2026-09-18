@@ -303,7 +303,7 @@ public:
   }
 
   // You must reset a file descriptor before closing it if you have
-  // ever called read_clear(), write_clear(), poison(), or
+  // ever called read_clear(), write_clear(), read_poison(), poison(), or
   // generation() on it, even if there are not any currently active
   // callbacks.  (reset() after generation() is only necessary if you
   // need to invalidate the returned generation number.)  In addition
@@ -319,11 +319,14 @@ public:
 
   // Make any pending and future callbacks return with EBADF until
   // reset() is called.  Pending callbacks are made asynchronously, so
-  // may still be running after poison() returns.  The second version
-  // poisons the file descriptor only if generation() is still
-  // generation_number, even if the descriptor has not been activated.
-  void poison(BorrowedFd fd);
-  void poison(BorrowedFd fd, uint64_t generation_number);
+  // may still be running after poison() returns.  If genno is nonzero,
+  // poison only if generation() is still genno, even if the descriptor
+  // has not been activated.
+  void poison(BorrowedFd fd, uint64_t genno = 0);
+
+  // Like poison(), but only fail reads, allowing writes to finish.
+  // Neither clear nor read_poison can undo poisoning; only reset can.
+  void read_poison(BorrowedFd fd, uint64_t genno = 0);
 
   // If there's a callback for reading (write == false) or writing
   // (write == true) on file descriptor fd, then immediately make the
@@ -364,7 +367,8 @@ private:
   struct FdPtr;
   struct FdState : BufHolder {
     using AtomicWorkItem = CpuHinted<std::atomic<WorkItem::value_type>>;
-    enum Mode { kFree, kActive, kPoisoned, kLocked };
+    // Except for locking and reset, transitions only increase the mode.
+    enum Mode { kLocked = -1, kFree, kActive, kReadPoisoned, kPoisoned };
     std::atomic<Mode> mode_{kFree};
     std::atomic_uint32_t ready_{0};
     std::atomic_uint64_t generation_{1};
@@ -438,13 +442,14 @@ private:
   {
     using enum FdState::Mode;
     FdState::Mode mode = fdp->mode();
-    if ((fdp->ready_ & epflags[write]) || mode != kActive)
+    bool badfd = mode == kFree || mode >= kReadPoisoned + write;
+    if ((fdp->ready_ & epflags[write]) || badfd)
       if (WorkItem wi = fdp->callbacks_[write].exchange({})) {
         --numcoro_;
         // Need to run in another thread in case the callback needs a
         // shared resize_lock_ and someone is trying to lock it
         // exclusively.
-        pool_.make_callback(wi, mode == kActive ? 0 : EBADF);
+        pool_.make_callback(wi, badfd ? EBADF : 0);
       }
   }
   void docbs(const FdPtr &fdp)
@@ -457,13 +462,15 @@ private:
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLHUP | POLLERR};
   struct FdState : BufHolder {
-    bool poisoned{false};
+    // Free descriptors have no entry in State::fds.
+    enum Mode { kActive, kReadPoisoned, kPoisoned };
+    Mode mode{kActive};
     std::array<WorkItem, 2> callbacks;
     short events() const
     {
       short ret = 0;
       for (size_t write = 0; write < 2; ++write)
-        if (callbacks[write])
+        if (callbacks[write] && mode < kReadPoisoned + write)
           ret |= pollflags[write];
       return ret;
     }
@@ -477,7 +484,9 @@ private:
   MVar<State> state_;
   UniqueFd selfpipe_[2];
 
-  std::vector<ThreadPool::Job> report_badfd(FdState &fds);
+  void setmode(BorrowedFd fd, FdState::Mode mode, uint64_t genno = 0);
+  std::vector<ThreadPool::Job> report_badfd(FdState &fds,
+                                            bool read_only = false);
 #endif // !USE_EPOLL
 };
 

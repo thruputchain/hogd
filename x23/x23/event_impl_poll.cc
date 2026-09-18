@@ -52,7 +52,7 @@ CoroPollImpl::get_reader(BorrowedFd fd)
   if (stop_requested())
     return nullptr;
   auto &f = s->fds[fd.get()];
-  if (f.poisoned)
+  if (f.mode >= FdState::kReadPoisoned)
     return nullptr;
   return f.reader();
 }
@@ -64,7 +64,7 @@ CoroPollImpl::get_writer(BorrowedFd fd)
   if (stop_requested())
     return nullptr;
   auto &f = s->fds[fd.get()];
-  if (f.poisoned)
+  if (f.mode == FdState::kPoisoned)
     return nullptr;
   return f.writer();
 }
@@ -84,7 +84,7 @@ CoroPollImpl::get_rw(BorrowedFd fd)
   if (stop_requested())
     return {nullptr, nullptr};
   auto &f = s->fds[fd.get()];
-  if (f.poisoned)
+  if (f.mode >= FdState::kReadPoisoned)
     return {nullptr, nullptr};
   return {f.reader(), f.writer()};
 }
@@ -100,7 +100,7 @@ CoroPollImpl::check(int timeout)
     for (const auto &kv : ptr->fds) {
       const FdState &f = kv.second;
       short events;
-      if (f.poisoned || !(events = f.events()))
+      if (!(events = f.events()))
         continue;
       pollfds.push_back({kv.first, events, 0});
     }
@@ -127,10 +127,9 @@ CoroPollImpl::check(int timeout)
     if (it == ptr->fds.end())
       continue;
     FdState &f = it->second;
-    if (f.poisoned)
-      continue;
     for (int write = 0; write < 2; ++write)
-      if (f.callbacks[write] && (pfd->revents & pollflags[write]))
+      if (f.mode < FdState::kReadPoisoned + write && f.callbacks[write] &&
+          (pfd->revents & pollflags[write]))
         if (auto h = std::exchange(f.callbacks[write].value, nullptr)
                          .set_result_without_resuming(0))
           cbs.push_back({h, f.callbacks[write].cpuhint});
@@ -149,10 +148,10 @@ CoroPollImpl::get_max_fd()
 }
 
 std::vector<ThreadPool::Job>
-CoroPollImpl::report_badfd(FdState &f)
+CoroPollImpl::report_badfd(FdState &f, bool read_only)
 {
   std::vector<ThreadPool::Job> ret;
-  for (unsigned write = 0; write < 2; ++write)
+  for (unsigned write = 0; write < (read_only ? 1U : 2U); ++write)
     if (f.callbacks[write])
       if (auto h = std::exchange(f.callbacks[write].value, nullptr)
                        .set_result_without_resuming(EBADF))
@@ -161,7 +160,7 @@ CoroPollImpl::report_badfd(FdState &f)
 }
 
 void
-CoroPollImpl::poison(BorrowedFd fd)
+CoroPollImpl::setmode(BorrowedFd fd, FdState::Mode mode, uint64_t genno)
 {
   auto s = state_.take();
   // The shutdown deadlock triggers under the following sequence:
@@ -187,9 +186,18 @@ CoroPollImpl::poison(BorrowedFd fd)
   // this stop_requested() check.
   if (stop_requested())
     return;
+  if (genno) {
+    auto curgen = s->fd_generation(fd);
+    if (curgen != genno) {
+      x23assert(genno < curgen);
+      return;
+    }
+  }
   auto &f = s->fds[fd.get()];
-  f.poisoned = true;
-  auto work = report_badfd(f);
+  if (f.mode >= mode)
+    return;
+  f.mode = mode;
+  auto work = report_badfd(f, mode == FdState::kReadPoisoned);
   s.reset();
   pool_.go(std::move(work));
 }
@@ -197,16 +205,13 @@ CoroPollImpl::poison(BorrowedFd fd)
 void
 CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
 {
-  auto s = state_.take();
-  if (stop_requested())
-    return;
-  if (s->fd_generation(fd) != genno)
-    return;
-  auto &f = s->fds[fd.get()];
-  f.poisoned = true;
-  auto work = report_badfd(f);
-  s.reset();
-  pool_.go(std::move(work));
+  setmode(fd, FdState::kPoisoned, genno);
+}
+
+void
+CoroPollImpl::read_poison(BorrowedFd fd, uint64_t genno)
+{
+  setmode(fd, FdState::kReadPoisoned, genno);
 }
 
 void
@@ -260,7 +265,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
   }
   auto &f = ptr->fds[fd.get()];
   x23assert(!f.callbacks[write]);
-  if (f.poisoned) {
+  if (f.mode >= FdState::kReadPoisoned + write) {
     pool_.make_callback(cb, EBADF);
     return;
   }

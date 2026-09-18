@@ -148,6 +148,105 @@ TEST(EventEdges, ReadBufferHandlesZeroLengthReadAheadAndErrors)
   EXPECT_EQ(reader(sockets.a.get(), out.data(), 1), 0);
 }
 
+TEST(EventEdges, ReadPoisonBeforeActivationAllowsWrites)
+{
+  for (bool conditional : {false, true}) {
+    ThreadPool pool(8);
+    SocketPair sockets;
+    ManualPoll cp(pool);
+    auto generation = cp.generation(sockets.a);
+    if (conditional)
+      cp.read_poison(sockets.a, generation);
+    else
+      cp.read_poison(sockets.a);
+    EXPECT_EQ(cp.generation(sockets.a), generation);
+    EXPECT_EQ(cp.read_wait(cp.read_clear(sockets.a))(), EBADF);
+    auto writing = cp.write_wait(cp.write_clear(sockets.a));
+    cp.check(0);
+    EXPECT_EQ(writing(), 0);
+    EXPECT_EQ(cp.read_wait(cp.read_clear(sockets.a))(), EBADF);
+  }
+}
+
+TEST(EventEdges, ReadPoisonFailsPendingReadsAndPreservesPendingWrites)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  auto reading = cp.read_wait(cp.read_clear(sockets.a));
+  auto writing = cp.write_wait(cp.write_clear(sockets.a));
+  auto generation = cp.generation(sockets.a);
+  cp.read_poison(sockets.a);
+  EXPECT_EQ(reading(), EBADF);
+  EXPECT_FALSE(writing.operator co_await().await_ready());
+  cp.read_poison(sockets.a, generation);
+  EXPECT_EQ(cp.generation(sockets.a), generation);
+  ASSERT_EQ(::write(sockets.b.get(), "x", 1), 1);
+  cp.check(0);
+  EXPECT_EQ(writing(), 0);
+  EXPECT_EQ(cp.read_wait(cp.read_clear(sockets.a))(), EBADF);
+
+  auto pending = cp.write_wait(cp.write_clear(sockets.a));
+  cp.poison(sockets.a);
+  EXPECT_EQ(pending(), EBADF);
+  cp.read_poison(sockets.a);
+  cp.read_poison(sockets.a, generation);
+  EXPECT_EQ(cp.read_wait(cp.read_clear(sockets.a))(), EBADF);
+  EXPECT_EQ(cp.write_wait(cp.write_clear(sockets.a))(), EBADF);
+  EXPECT_EQ(cp.generation(sockets.a), generation);
+
+  cp.reset(sockets.a);
+  EXPECT_EQ(cp.generation(sockets.a), generation + 1);
+  cp.read_poison(sockets.a, generation);
+  auto fresh = cp.read_wait(cp.read_clear(sockets.a));
+  EXPECT_FALSE(fresh.operator co_await().await_ready());
+  ASSERT_EQ(::write(sockets.b.get(), "x", 1), 1);
+  cp.check(0);
+  EXPECT_EQ(fresh(), 0);
+}
+
+TEST(EventEdges, ReadPoisonRejectsBufferedReadsUntilReset)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  ASSERT_EQ(::write(sockets.b.get(), "xy", 2), 2);
+  Buf out;
+  ASSERT_EQ(cp.read(sockets.a, &out, 1)().value(), 1UZ);
+  cp.read_poison(sockets.a);
+  for (bool sync : {false, true}) {
+    auto res = cp.read(sockets.a, &out, 1, true, sync)();
+    ASSERT_FALSE(res);
+    EXPECT_EQ(res.error(), EBADF);
+  }
+  EXPECT_EQ(out, (Buf{'x'}));
+  EXPECT_EQ(cp.dwrite(sockets.a, Buf{'a'}), 0);
+  EXPECT_EQ(cp.awrite(sockets.a, Buf{'b'}), 0);
+  ASSERT_EQ(cp.write(sockets.a, Buf{'c'})().value(), 1UZ);
+  std::array<char, 3> received{};
+  ASSERT_EQ(::read(sockets.b.get(), received.data(), received.size()), 3);
+  EXPECT_EQ(std::string_view(received.data(), received.size()), "abc");
+
+  cp.reset(sockets.a);
+  ASSERT_EQ(::write(sockets.b.get(), "z", 1), 1);
+  ASSERT_EQ(cp.read(sockets.a, &out, 1)().value(), 1UZ);
+  EXPECT_EQ(out, (Buf{'x', 'z'}));
+}
+
+TEST(EventEdges, ReadPoisonDoesNotPreventShutdown)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  auto generation = cp.generation(sockets.a);
+  cp.reset(sockets.a);
+  cp.request_stop();
+  cp.read_poison(sockets.a, generation);
+  cp.read_poison(sockets.a);
+  EXPECT_EQ(cp.generation(sockets.a), generation + 1);
+  EXPECT_TRUE(cp.time_to_stop());
+}
+
 TEST(EventEdges, PoisonedReadAndWritesFailUntilReset)
 {
   ThreadPool pool(8);

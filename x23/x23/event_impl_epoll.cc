@@ -48,7 +48,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   using enum FdState::Mode;
   FdPtr fdp = getfd(fd);
   FdState::Mode mode = fdp->mode();
-  if (stop_requested() || mode == kPoisoned) {
+  if (stop_requested() || mode >= kReadPoisoned + write) {
     wi(EBADF);
     return;
   }
@@ -63,7 +63,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   x23assert(mode != kFree);
 #endif // !X23_FD_TRACE
 
-  if ((fdp->ready_ & epflags[write]) && mode == kActive) {
+  if (fdp->ready_ & epflags[write]) {
     wi(0);
     return;
   }
@@ -146,8 +146,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode,
   }
 
   FdState::Mode old_mode = fdp->mode_;
-  if ((mode == old_mode && mode != kFree) ||
-      (mode == kActive && old_mode == kPoisoned))
+  if (mode != kFree && old_mode >= mode)
     return;
 
   while ((old_mode = fdp->mode_.exchange(kLocked)) == kLocked)
@@ -164,30 +163,44 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode,
   if (genno && fdp->generation_.load(std::memory_order_relaxed) != genno)
     return;
 
-  if ((mode == old_mode && mode != kFree) ||
-      (mode == kActive && (old_mode == kPoisoned || stop_requested())))
+  if ((mode != kFree && old_mode >= mode) ||
+      (mode == kActive && stop_requested()))
     return;
 
   unlock_mode = mode;
   if (mode == kFree)
     fdp->generation_.fetch_add(1, std::memory_order_relaxed);
 
-  if (mode == kActive) {
+  if (mode == kReadPoisoned && old_mode == kActive) {
+    // Read callbacks check the mode, so leave the epoll registration alone.
+    unlock.reset();
+    docb(fdp, false);
+    return;
+  }
+
+  if (mode == kActive || mode == kReadPoisoned) {
 #if X23_FD_TRACE
     *fdp->info_.take() =
         std::format("fd {} activation stack trace\n{}", fd, stacktrace());
 #endif // X23_FD_TRACE
     struct epoll_event ev;
-    ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
+    ev.events = EPOLLOUT | EPOLLET;
+    if (mode == kActive)
+      ev.events |= EPOLLIN;
     ev.data.fd = fd;
-    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == 0)
+    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == 0) {
+      if (mode == kReadPoisoned) {
+        unlock.reset();
+        docb(fdp, false);
+      }
       return;
+    }
     debug.err("EPOLL_CTL_ADD fd {}: {}", fd, Errno{});
     unlock_mode = mode = kPoisoned;
   }
 
   fdp->ready_ = 0; // because EPOLLERR is sticky
-  if (old_mode == kActive) {
+  if (old_mode == kActive || old_mode == kReadPoisoned) {
     if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
       if (errno != ENOENT && errno != EBADF)
         debug.err("EPOLL_CTL_DEL fd {}: {}", fd, Errno{}, stacktrace());
@@ -245,7 +258,7 @@ RefPtr<ReadBuffer>
 CoroPollImpl::get_reader(BorrowedFd fd)
 {
   auto fdp = getfd(fd);
-  if (fdp->mode() == FdState::kPoisoned)
+  if (fdp->mode() >= FdState::kReadPoisoned)
     return nullptr;
   return fdp->reader();
 }
@@ -270,7 +283,7 @@ CoroPollImpl::get_rw(BorrowedFd fd)
 {
   std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>> ret;
   auto fdp = getfd(fd);
-  if (fdp->mode() != FdState::kPoisoned) {
+  if (fdp->mode() < FdState::kReadPoisoned) {
     ret.first = fdp->reader();
     ret.second = fdp->writer();
   }
@@ -312,7 +325,11 @@ CoroPollImpl::check(int timeout)
       if (evs[i].events & epflags[write]) {
         if (WorkItem wi = state_[fd].callbacks_[write].exchange({})) {
           --numcoro_;
-          if (CoroHandle h = wi->set_result_without_resuming(err))
+          auto mode = state_[fd].mode();
+          bool badfd =
+              mode == FdState::kFree || mode >= FdState::kReadPoisoned + write;
+          if (CoroHandle h =
+                  wi->set_result_without_resuming(badfd ? EBADF : err))
             coroqueue.emplace_back(h, wi.cpuhint);
         }
       }
@@ -347,9 +364,9 @@ CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
 }
 
 void
-CoroPollImpl::poison(BorrowedFd fd)
+CoroPollImpl::read_poison(BorrowedFd fd, uint64_t genno)
 {
-  poison(fd, 0);
+  setmode(getfd(fd), FdState::kReadPoisoned, genno);
 }
 
 uint64_t
