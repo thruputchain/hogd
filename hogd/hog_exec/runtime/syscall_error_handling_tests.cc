@@ -495,7 +495,8 @@ unexpected_syscall_body()
 }
 
 SyscallInnerResult
-budget_checking_syscall_body(SystemCallHandler &, WrappedGasAmount available)
+budget_checking_syscall_body(SystemCallHandler & /*handler*/,
+                             WrappedGasAmount available)
 {
   EXPECT_EQ(available.get(), 17);
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{3}};
