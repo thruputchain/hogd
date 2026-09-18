@@ -44,9 +44,15 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
                            std::span<const std::byte> input_buffer,
                            bool input_reset)
 {
+  WrappedGasAmount required_gas = WrappedGasAmount{GasCost::sha256_update(input_buffer.size())};
+
   auto r = handler.sha256_update(input_index, input_buffer, input_reset);
   if (!r.has_value()) {
     return {r.error().code(), WrappedGasAmount{0}};
+  }
+
+  if (auto* stats = handler.get_transaction_stats()) {
+    stats->sha256_total_bytes_processed += input_buffer.size();
   }
 
   // Whole blocks only, so this drops charges in two places: the carry from a
@@ -58,7 +64,7 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
   // and in GasCost::sha256_hash differ by at most two, so streaming never
   // undercuts the one-shot (Sha256GasModelTest pins that).
   return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{GasCost::sha256_update(input_buffer.size())}};
+          required_gas};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
