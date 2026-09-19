@@ -2650,10 +2650,7 @@ TEST(Mempool, GenerateBlockId)
 
 TEST(Mempool, GenerateBlockIdSurvivesClockRollback)
 {
-  // A realtime clock is not steady: it can repeat a reading, or step backward
-  // to one already issued, under ordinary host time correction. Neither may
-  // hand back an ID that already keys a block's DB snapshot, event block, or
-  // executor state.
+  // A rolled-back or repeated clock reading must still yield a fresh ID.
   constexpr uint64_t kFirst = 1'700'000'000'000'000'000UL;
   constexpr uint64_t kLater = kFirst + 25UL;
 
