@@ -28,6 +28,7 @@
 #include "hogd/hog_db/status.h"
 #include "retrocausal_queue.hh"
 #include "x23/testlock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 

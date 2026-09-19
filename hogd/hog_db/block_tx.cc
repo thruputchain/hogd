@@ -32,6 +32,7 @@
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
+#include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
