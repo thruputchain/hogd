@@ -8,6 +8,7 @@
 #include <memory>
 #include <thread>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "consensus.hh"
@@ -225,6 +226,63 @@ TEST(HogDbGatewayRpcTest, GetItemsWaitsOutCommitPublication)
   ASSERT_EQ(result.payload().items[0].error(), RPCError::kRPCNone);
   EXPECT_EQ(from_xdr(result.payload().items[0].item().nnint()),
             int128_t{12345});
+}
+
+// A batch at the cap is serviced; one item over the cap is rejected
+// wholesale before any reads (issue #4056).
+TEST(HogDbGatewayRpcTest, GetItemsRejectsBatchesOverCap)
+{
+  HogDbDAO dao = make_dao();
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+
+  // Zero address: nothing is seeded, so each item is a cheap miss.
+  ContractAddress addr{};
+
+  AddressAndKeyBatch batch;
+  for (std::size_t i = 0; i < HogDbGatewayRpc::kMaxBatchItems; ++i)
+    batch.push_back(make_balance_query(addr));
+
+  DbGatewayResult ok = gateway.dbgateway_get_items(batch)();
+  ASSERT_EQ(ok.error(), RPCError::kRPCNone);
+  EXPECT_EQ(ok.payload().items.size(), HogDbGatewayRpc::kMaxBatchItems);
+
+  // One more item exceeds the cap; the call above took its own copy.
+  batch.push_back(make_balance_query(addr));
+  DbGatewayResult rejected = gateway.dbgateway_get_items(batch)();
+  EXPECT_EQ(rejected.error(), RPCError::kRPCUnrecoverable);
+}
+
+// Item count alone doesn't bound response size; an oversized response is
+// rejected even when the item count stays under kMaxBatchItems (#4056).
+TEST(HogDbGatewayRpcTest, GetItemsRejectsResponseOverByteBudget)
+{
+  HogDbDAO dao = make_dao();
+
+  ContractAddress addr{};
+  addr[0] = 0x33;
+  StorageKey storage_key(StorageKeyType::ContractData);
+  storage_key.contract_data_key()[0] = 9;
+  AddressAndKey query{.address = addr, .key = storage_key};
+
+  // One large bytestring, duplicated just past the byte budget but under
+  // the count cap, so this exercises the byte budget, not the count cap.
+  constexpr std::size_t kValueBytes = 60000;
+  std::vector<std::byte> value(kValueBytes, std::byte{0xAB});
+  ASSERT_TRUE(dao.write_bytes(make_item_key(query), value).has_value());
+
+  const std::size_t count =
+      (HogDbGatewayRpc::kMaxResponseBytes / kValueBytes) + 2;
+  ASSERT_LT(count, HogDbGatewayRpc::kMaxBatchItems);
+
+  AddressAndKeyBatch batch;
+  for (std::size_t i = 0; i < count; ++i)
+    batch.push_back(query);
+
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
 }
 
 // Regression for #4060: dispatch owns the decoded argument only until serve

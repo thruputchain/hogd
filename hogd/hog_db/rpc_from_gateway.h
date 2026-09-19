@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 
 // generated x23 headers
 #include "db_gateway.hh"
@@ -29,6 +30,12 @@ public:
   using rpc_service = DbGateway1;
 
   explicit HogDbGatewayRpc(RPCContext &ctx) : ctx_(ctx) {}
+
+  // Caps on a single dbgateway_get_items batch, rejected outright when
+  // exceeded: kMaxBatchItems bounds the read count and result-vector size,
+  // kMaxResponseBytes the cumulative serialized size (items vary in size).
+  static constexpr std::size_t kMaxBatchItems = 16384;
+  static constexpr std::size_t kMaxResponseBytes = 15UL * 1024 * 1024;
 
   static DbGatewayIntroOutcome dbgateway_intro(ProtocolCommit const &protocol);
 

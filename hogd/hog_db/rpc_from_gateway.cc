@@ -157,6 +157,13 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch batch)
 {
   HogDbDAO &db = ctx_.get_db();
 
+  // Reject oversized batches before touching the db (see kMaxBatchItems).
+  if (batch.size() > kMaxBatchItems) {
+    error("dbgateway_get_items: batch of {} items exceeds cap of {}; rejecting",
+          batch.size(), kMaxBatchItems);
+    co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+  }
+
   // Snapshot the committed tip once up-front so every item in the response
   // is labeled with the same height.  This is a TOCTOU: a block that
   // commits between this snapshot and the reads below applies its data to
@@ -184,8 +191,18 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch batch)
     DbGatewayPayload payload;
     payload.block_height = tip.value.proposal_header.block_height;
     payload.items.reserve(batch.size());
-    for (AddressAndKey const &k : batch)
-      payload.items.push_back(read_one_item(db, k));
+    std::size_t response_bytes = 0;
+    for (AddressAndKey const &k : batch) {
+      DbGatewayItemResult item = read_one_item(db, k);
+      // Items are variable-sized, so bound the cumulative response size too.
+      response_bytes += x23::xdr_size(item);
+      if (response_bytes > kMaxResponseBytes) [[unlikely]] {
+        error("dbgateway_get_items: response exceeds {} bytes; rejecting",
+              kMaxResponseBytes);
+        co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+      }
+      payload.items.push_back(std::move(item));
+    }
 
     if (ctx_.is_committed_read_stale(tip)) [[unlikely]] {
       continue;
