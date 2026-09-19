@@ -198,7 +198,19 @@ private:
           d_.logger_.template log_server<ProcMeta>(rmsg);
           return make_record(rmsg);
         }
+        else if constexpr (serializes_like<dispatch_t, return_type>) {
+          // Serialize what the handler returned rather than converting it to
+          // return_type first, so a handler can answer with a borrowed view of
+          // bytes it already holds.  satisfies_rpc_return admits such a type
+          // and both awaitable paths below already honor it.  res outlives
+          // make_record, so a reply that owns a lifetime guard keeps the
+          // borrowed bytes alive until they have been written.
+          auto &&res = dispatch(argbytes);
+          d_.logger_.template log_server<ProcMeta>(rmsg, res);
+          return make_record(rmsg, res);
+        }
         else {
+          // Convertible to return_type but not equivalent on the wire.
           return_type res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
           return make_record(rmsg, res);

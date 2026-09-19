@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <sys/socket.h>
 #include <type_traits>
 
@@ -17,8 +18,116 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hogd/base/log.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/rpc_context.h"
+#include "retrocausal_queue.hh"
+#include "x23/serialize.h"
+#include "x23/vec.h"
+
+namespace hogd {
+
+// The get_concurrent_retrocausal_queue_entry reply, written to the wire
+// straight out of the lock's storage instead of through an owning
+// ExpectedQueueEntry.
+//
+// x23 serializes a handler's return value after the handler frame is gone, so
+// this carries the block-tx reference that keeps the borrowed bytes alive and
+// drops it when the reply is destroyed -- which happens once make_record() has
+// written them.  Move-only, because that reference must be released once.
+class BorrowedQueueEntryReply {
+public:
+  // A reply that borrows nothing and holds no reference.
+  explicit BorrowedQueueEntryReply(RPCError error) noexcept : error_(error) {}
+
+  // Takes over the reference RPCContext::get_block_tx acquired on [btx], which
+  // is null when the block tx was not found.  Answers kRPCNotFound until told
+  // otherwise.
+  BorrowedQueueEntryReply(RPCContext &ctx, PerThreadARC<BlockTX> *btx,
+                          BlockID block) noexcept
+    : ctx_(&ctx), btx_(btx), block_(block)
+  {}
+
+  BorrowedQueueEntryReply(BorrowedQueueEntryReply &&other) noexcept
+    : error_(other.error_), entry_(other.entry_), ctx_(other.ctx_),
+      btx_(other.btx_), block_(other.block_)
+  {
+    other.btx_ = nullptr;
+  }
+  BorrowedQueueEntryReply(const BorrowedQueueEntryReply &) = delete;
+  BorrowedQueueEntryReply &operator=(BorrowedQueueEntryReply &&) = delete;
+  BorrowedQueueEntryReply &operator=(const BorrowedQueueEntryReply &) = delete;
+
+  ~BorrowedQueueEntryReply()
+  {
+    try {
+      if (btx_ && btx_->release_reference()) {
+        ctx_->remove_shutdown_block_tx(block_);
+      }
+    } catch (...) {
+      std::terminate();
+    }
+  }
+
+  // Answer with [error] and no entry.
+  void fail(RPCError error) noexcept { error_ = error; }
+
+  // Answer with [entry], borrowed from the block tx this reply holds a
+  // reference to.
+  void set_entry(x23::BufView entry) noexcept
+  {
+    // Deserialization bounded every entry in added_entries_ when the insert
+    // arrived, so a longer one is a broken invariant, not bad input.
+    CHECK(entry.size() <= kQueueEntryMaxLen);
+    error_ = RPCError::kRPCNone;
+    entry_ = entry;
+  }
+
+  RPCError error() const noexcept { return error_; }
+  x23::BufView entry() const noexcept { return entry_; }
+
+private:
+  RPCError error_ = RPCError::kRPCNotFound;
+  x23::BufView entry_{};
+  // Set together: ctx_ is read only to release btx_.
+  RPCContext *ctx_ = nullptr;
+  PerThreadARC<BlockTX> *btx_ = nullptr;
+  BlockID block_ = 0;
+};
+
+// Mirrors how x23 writes the generated union: the discriminant, then the
+// active arm.  kRPCNone carries the entry as opaque<kQueueEntryMaxLen>; every
+// other discriminant selects the void arm.
+inline size_t
+xdr_size(const BorrowedQueueEntryReply &reply)
+{
+  size_t size = 4; // discriminant
+  if (reply.error() == RPCError::kRPCNone) {
+    size += x23::xdr_size(reply.entry());
+  }
+  return size;
+}
+
+inline void
+xdr_serialize(auto &serializer, const BorrowedQueueEntryReply &reply)
+{
+  serializer.put32(static_cast<uint32_t>(reply.error()));
+  if (reply.error() == RPCError::kRPCNone) {
+    serializer(reply.entry());
+  }
+}
+
+} // namespace hogd
+
+namespace x23 {
+// Declares BorrowedQueueEntryReply a stand-in for the ExpectedQueueEntry the
+// RPC interface declares.  Must precede the is_DatabaseToExecutorInterfaceV1
+// assertion below, which is what checks it.
+template<>
+struct serialize_equiv<hogd::ExpectedQueueEntry, hogd::BorrowedQueueEntryReply>
+  : std::true_type {};
+} // namespace x23
 
 namespace hogd {
 
@@ -47,7 +156,7 @@ public:
   ExpectedRetrocausalQueueBlock
   get_next_retrocausal_queue_block(BlockID block, AddressAndKey const &addrkey,
                                    uint64_t search_start_number);
-  ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
+  BorrowedQueueEntryReply get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
   // A coroutine: it may suspend to wait out a commit publication, and the

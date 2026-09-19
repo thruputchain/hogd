@@ -15,6 +15,7 @@
 #include "hogd/hog_db/status.h"
 #include "retrocausal_queue.hh"
 #include "x23/testlock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -66,6 +67,17 @@ public:
                                             ChangeSet &changes) const;
 
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
+
+  /// A view of the entry a transaction in the current block inserted at
+  /// [index], or nullopt past the end.
+  ///
+  /// The bytes outlive the mutex this takes.  QueueEntry owns a heap buffer,
+  /// so appending to added_entries_ relocates the QueueEntry objects but
+  /// carries that buffer along by pointer, and nothing erases added_entries_
+  /// during a block.  The view therefore stays valid as long as this lock
+  /// does; callers must keep it alive, which for RPC callers means holding a
+  /// reference to the owning BlockTX until the bytes have been read.
+  std::optional<x23::BufView> get_concurrent_entry_view(uint32_t index) const;
 
   HogDbStatus<RetrocausalQueueMetadata *>
   get_meta(const LockContext *ctx) const;

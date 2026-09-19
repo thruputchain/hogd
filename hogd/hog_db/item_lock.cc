@@ -580,6 +580,31 @@ ItemLock::get_concurrent_entry(uint32_t index) const
       lock_contents_);
 }
 
+std::optional<x23::BufView>
+ItemLock::get_concurrent_entry_view(uint32_t index) const
+{
+  auto lock_state = lock_state_.load(std::memory_order_acquire);
+  if (lock_state == kUncommitted) {
+    return std::nullopt;
+  }
+
+  return std::visit(
+      [index](auto const &lock) -> std::optional<x23::BufView> {
+        using lock_t = std::decay_t<decltype(lock)>;
+        if constexpr (std::is_same_v<lock_t,
+                                     PointerLock<RetrocausalQueueLock>>) {
+          return lock.get()->get_concurrent_entry_view(index);
+        }
+        else {
+          // Lock is in exclusive/deletion/other state (e.g. after a delete
+          // that was followed by RCQ operations in the same tx). No concurrent
+          // entries exist in this lock.
+          return std::nullopt;
+        }
+      },
+      lock_contents_);
+}
+
 HogDbStatus<void>
 ItemLock::stage_committed_changes(const LockContext &ctx,
                                   ChangeSet &changes) const

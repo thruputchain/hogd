@@ -612,6 +612,18 @@ RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
   return std::nullopt;
 }
 
+std::optional<x23::BufView>
+RetrocausalQueueLock::get_concurrent_entry_view(uint32_t index) const
+{
+  std::lock_guard lock(mtx_);
+
+  if (index < added_entries_.size()) {
+    auto const &entry = added_entries_[index];
+    return x23::BufView(entry.data(), entry.size());
+  }
+  return std::nullopt;
+}
+
 HogDbStatus<void>
 RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
                                           ChangeSet &changes,

@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <exception>
 #include <set>
 #include <span>
 #include <string>
@@ -38,7 +37,6 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "x23/async.h"
-#include "x23/cleanup.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -541,43 +539,34 @@ HogDbExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
   return out;
 }
 
-ExpectedQueueEntry
+BorrowedQueueEntryReply
 HogDbExecutorRpc::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
   PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block);
-  x23::Defer _d([&]() noexcept {
-    try {
-      if (btx && btx->release_reference()) {
-        ctx_.remove_shutdown_block_tx(block);
-      }
-    } catch (...) {
-      std::terminate();
-    }
-  });
+  // The reply owns the reference from here rather than a scope guard: x23
+  // writes the borrowed bytes after this frame is gone, and the reply is
+  // destroyed only once it has.
+  BorrowedQueueEntryReply reply(ctx_, btx, block);
+
   if (!btx || btx->get().is_invalidated()) [[unlikely]] {
-    return ExpectedQueueEntry(RPCError::kRPCBadBlockID);
+    reply.fail(RPCError::kRPCBadBlockID);
+    return reply;
   }
 
-  auto entry_res =
-      btx->get().get_concurrent_rcq_entry(make_item_key(addrkey), index);
-  if (!entry_res.has_value()) {
-    return ExpectedQueueEntry(to_rpc_error(entry_res.error()));
+  auto view_res =
+      btx->get().get_concurrent_rcq_entry_view(make_item_key(addrkey), index);
+  if (!view_res.has_value()) {
+    reply.fail(to_rpc_error(view_res.error()));
+    return reply;
+  }
+  if (!*view_res) {
+    reply.fail(RPCError::kRPCNotFound);
+    return reply;
   }
 
-  auto &maybe_entry = entry_res.value();
-
-  ExpectedQueueEntry ret;
-  if (maybe_entry) {
-    ret.error(RPCError::kRPCNone);
-    // Steal the buffer: QueueEntry is heap-backed and the optional is dead
-    // after this, so copying here would be a second allocation.
-    ret.queue_entry() = std::move(*maybe_entry);
-  }
-  else {
-    ret.error(RPCError::kRPCNotFound);
-  }
-  return ret;
+  reply.set_entry(**view_res);
+  return reply;
 }
 
 x23::Async<ExpectedDBTip>

@@ -245,6 +245,18 @@ BlockTX::get_concurrent_rcq_entry(const ItemKey &key, uint32_t index)
   return lock->get_concurrent_entry(index);
 }
 
+HogDbStatus<std::optional<x23::BufView>>
+BlockTX::get_concurrent_rcq_entry_view(const ItemKey &key, uint32_t index)
+{
+  auto *lock = item_locks_.get(key);
+  if (!lock) {
+    // Key was deleted and recreated as an RCQ in the same tx, or the lock
+    // doesn't exist yet. A freshly-created queue has no concurrent entries.
+    return std::nullopt;
+  }
+  return lock->get_concurrent_entry_view(index);
+}
+
 HogDbStatus<int128_t>
 BlockTX::read_nnint128_base(const ItemKey &key)
 {
