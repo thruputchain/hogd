@@ -14,8 +14,8 @@ namespace hogd {
 
 class HashBuffers {
 public:
-  // `max_buffers` is the chain's kConfigParamMaxSHA256Buffers
-  HashBuffers(uint32_t max_buffers) : max_buffers_(max_buffers) {}
+  // `max_buffers` is the chain's kConfigParamMaxSHA256Buffers.
+  explicit HashBuffers(uint32_t max_buffers) : max_buffers_(max_buffers) {}
 
   [[nodiscard]] SyscallStatus<SHA256Hash> finalize(uint32_t index);
   [[nodiscard]] SyscallStatus<void>

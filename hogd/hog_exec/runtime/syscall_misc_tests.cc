@@ -565,10 +565,6 @@ TEST_F(SyscallMiscTestsEightHashBuffers, TestSha256UpdateTooManyBuffers)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// The legacy buffer-too-large contract entrypoint is obsolete: incremental
-// hashing is now bounded by gas. Sha256IncrementalTest and HashBuffersTest
-// cover inputs beyond the former byte cap.
-
 // ── #28: SHA256Finalize (no buffer) ─────────────────────────────────
 
 TEST_F(SyscallMiscTests, TestSha256FinalizeNoBuffer)

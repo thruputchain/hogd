@@ -429,10 +429,8 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasDoesNotComputeHash)
 TEST_F(Rv32SyscallEntryBridgeTest,
        InterpretersAgreeOnObservableExactBudgetOutOfGas)
 {
-  // Both the scratch-buffer bridge and the direct threaded bridge reject
-  // exact exhaustion before hashing, agreeing on the consensus-visible trap
-  // and gas remaining. The direct bridge may flush zero-initialized outputs
-  // into frame-local memory that the trap discards.
+  // Both bridges reject exact exhaustion before hashing and agree on the
+  // trap and gas remaining.
   constexpr std::string_view input = "out of gas";
   // Cover the four argument loads, ecall, crossing, and SHA256 body exactly.
   // The preflight gas check reports OutOfGas before the hash is computed.
