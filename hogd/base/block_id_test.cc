@@ -25,8 +25,9 @@ TEST(BlockIdTest, Generate)
 TEST(BlockIdTest, SurvivesClockRollback)
 {
   // A rolled-back or repeated clock reading must still yield a fresh ID.
+  // Both readings are already in the lane, so they pass through verbatim.
   constexpr int64_t kFirst = 1'700'000'000'000'000'000;
-  constexpr int64_t kLater = kFirst + 25;
+  constexpr int64_t kLater = kFirst + 24;
 
   std::atomic<uint64_t> last = 0;
   const BlockIdLane kLane = BlockIdLane::kMempool;
@@ -36,7 +37,7 @@ TEST(BlockIdTest, SurvivesClockRollback)
   const uint64_t rolled_back = BlockIdGenerator::next(last, kLane, kFirst);
   const uint64_t stuck = BlockIdGenerator::next(last, kLane, kFirst);
 
-  // A clock that advances is reported verbatim, once snapped into the lane.
+  // A clock that advances is reported verbatim.
   EXPECT_EQ(first, static_cast<uint64_t>(kFirst));
   EXPECT_EQ(later, static_cast<uint64_t>(kLater));
 
@@ -62,6 +63,21 @@ TEST(BlockIdTest, SurvivesPreEpochClock)
   EXPECT_GT(repeated, first);
   EXPECT_GT(earlier, repeated);
   EXPECT_GT(corrected, earlier);
+}
+
+TEST(BlockIdTest, ReadingSnapsIntoLane)
+{
+  // A reading outside the lane floors to the largest one inside it, so an ID
+  // never lands in another generator's residue class.
+  constexpr int64_t kOdd = 1'700'000'000'000'000'001;
+
+  std::atomic<uint64_t> mempool_last = 0;
+  std::atomic<uint64_t> view_last = 0;
+
+  EXPECT_EQ(BlockIdGenerator::next(mempool_last, BlockIdLane::kMempool, kOdd),
+            static_cast<uint64_t>(kOdd) - 1);
+  EXPECT_EQ(BlockIdGenerator::next(view_last, BlockIdLane::kViewSnapshot, kOdd),
+            static_cast<uint64_t>(kOdd));
 }
 
 TEST(BlockIdTest, LanesStayDisjoint)
