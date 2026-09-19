@@ -143,13 +143,6 @@ public:
 
   // Stamps the surviving cache entries for [tx_hashes] as verified against
   // [height] and records [height] as the last auth change for [accounts].
-  //
-  // [MempoolCoordinatorRpc::auth_data_changed()] re-verifies an account's
-  // transactions through [get_txs_for_account()], which reports the runqueue
-  // only, so a cache entry that is off the runqueue during the callback is
-  // never re-verified. [schedule()] compares the two heights recorded here
-  // before putting a tx into a block, which catches such an entry if it
-  // returns to the runqueue afterwards.
   void record_auth_reverification(
       x23::span<const TransactionHash> tx_hashes,
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
@@ -249,21 +242,16 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
-    // The block height whose auth state [tx]'s signatures were verified
-    // against -- the height handed to [authmempool_verify_transactions()],
-    // which [AuthServer::lookup_auth_data()] resolves exactly. This describes
-    // the cached signature bytes, not the transaction body, so an entry reused
-    // by a later submission of the same body keeps the original height.
+    // Auth height these signature bytes were verified against; a reused entry
+    // keeps the original.
     BlockHeight verified_height = kNeverVerified;
   };
 
   struct AccountState {
     HogAge hog_age{};
     std::map<TxKey, std::shared_ptr<TxValue>> txs;
-    // The most recent height at which this account's auth data changed and its
-    // transactions were re-verified, or [kNeverVerified] if that has not
-    // happened. Every tx scheduled for the account must carry a
-    // [TxValue::verified_height] at least this new.
+    // Last height this account's auth data changed; scheduled txs must be
+    // verified at least this new.
     BlockHeight last_auth_change = kNeverVerified;
   };
 

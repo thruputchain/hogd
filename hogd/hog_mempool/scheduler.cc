@@ -445,9 +445,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // into the scheduler again. This can happen if the tx was originally added
   // to the scheduler, then removed during nomination by [schedule()], and a
   // different validated block was committed instead. An existing entry keeps
-  // its own [verified_height]: the signature bytes on the runqueue are the
-  // cached ones, so the stamp has to describe those rather than the
-  // resubmission that was verified here.
+  // its own [verified_height], which describes the cached signature bytes.
   const auto [tx_ptr, txs_lock] = txs_.find_or_insert(
       tx_hash, std::make_shared<TxValue>(
                    TxValue{.tx = tx, .verified_height = verified_height}));
@@ -485,11 +483,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   // [read_average_hog_ages] on a separate thread.
   const auto &[found, missing] = co_await read_average_hog_ages(txs);
 
-  // The caller verifies these signatures against
-  // [MempoolCoordinatorRpc]'s [scheduler_->current_block()] while holding
-  // [commit_lock_], and still holds it here, so the scheduler's current block
-  // is the height the auth server resolved. Read it once so every tx in the
-  // batch carries the same stamp.
+  // Read once under [commit_lock_] so every tx in the batch gets the same
+  // stamp.
   const BlockHeight verified_height = current_block();
 
   const std::vector<ChunkRange> chunks =
@@ -567,14 +562,10 @@ Scheduler::record_auth_reverification(
     (*tx_value_ptr)->verified_height = height;
   }
 
-  // Everything the callback re-verified now carries [height]. Recording the
-  // same height on the account gives [schedule()] the baseline it compares a
-  // tx against, so an entry that missed the re-verification above is caught
-  // before it can become block content.
+  // The same height on the account gives [schedule()] its comparison
+  // baseline.
   for (const ContractAddress &account : accounts) {
-    // Most rotating accounts have no scheduler state at all. Skip those rather
-    // than creating an entry: a tx submitted later is verified against a
-    // height at or after this one anyway.
+    // Skip accounts with no scheduler state rather than creating an entry.
     auto [account_state, lock] = accounts_.find(account);
     if (account_state == nullptr) {
       continue;
@@ -1063,12 +1054,8 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
             to_xdr(hogs_available - tx.tx.invocation.gas_limit);
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
 
-        // The tx is about to become block content, so its signatures must have
-        // been verified against auth state at least as new as the account's
-        // last auth change. [auth_data_changed()] re-verifies only what
-        // [get_txs_for_account()] reports, so an entry that sat off the
-        // runqueue across that callback and returned afterwards arrives here
-        // with a stale height. One compare against state already held.
+        // A tx entering a block must have been verified against auth state at
+        // least as new as the account's last auth change.
         CHECK_GE(it->second->verified_height, account_state->last_auth_change);
 
         tx_hashes.push_back(tx_hash);
