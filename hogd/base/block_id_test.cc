@@ -25,8 +25,8 @@ TEST(BlockIdTest, Generate)
 TEST(BlockIdTest, SurvivesClockRollback)
 {
   // A rolled-back or repeated clock reading must still yield a fresh ID.
-  constexpr uint64_t kFirst = 1'700'000'000'000'000'000UL;
-  constexpr uint64_t kLater = kFirst + 25UL;
+  constexpr int64_t kFirst = 1'700'000'000'000'000'000;
+  constexpr int64_t kLater = kFirst + 25;
 
   std::atomic<uint64_t> last = 0;
 
@@ -36,13 +36,35 @@ TEST(BlockIdTest, SurvivesClockRollback)
   const uint64_t stuck = BlockIdGenerator::next(last, kFirst);
 
   // A clock that advances is reported verbatim.
-  EXPECT_EQ(first, kFirst);
-  EXPECT_EQ(later, kLater);
+  EXPECT_EQ(first, static_cast<uint64_t>(kFirst));
+  EXPECT_EQ(later, static_cast<uint64_t>(kLater));
 
   // A clock that steps back to an already-issued reading, and one that stays
   // there, both keep handing out fresh IDs.
   EXPECT_GT(rolled_back, later);
   EXPECT_GT(stuck, rolled_back);
+}
+
+TEST(BlockIdTest, SurvivesPreEpochClock)
+{
+  // A host clock set before the epoch reads negative. Taken as unsigned that
+  // would land at the top of the ID range, stranding the counter there and
+  // reissuing IDs once the clock was corrected.
+  std::atomic<uint64_t> last = 0;
+
+  const uint64_t first = BlockIdGenerator::next(last, -1);
+  const uint64_t repeated = BlockIdGenerator::next(last, -1);
+  const uint64_t earlier = BlockIdGenerator::next(last, -1'000'000'000);
+  const uint64_t corrected =
+      BlockIdGenerator::next(last, 1'700'000'000'000'000'000);
+
+  // Pre-epoch readings land at the bottom of the range, not the top.
+  EXPECT_LT(first, 1'000UL);
+
+  // They still advance, and a corrected clock keeps going forward.
+  EXPECT_GT(repeated, first);
+  EXPECT_GT(earlier, repeated);
+  EXPECT_GT(corrected, earlier);
 }
 
 TEST(BlockIdTest, UniqueUnderContention)
