@@ -518,12 +518,8 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
   // Build the new block by filtering out consumed entries BY VALUE.
   // This is necessary because ItemView prioritizes Self entries over Concurrent
   // entries, so the consumed entries may not be at the front of added_entries_.
-  //
-  // Both sides are sorted into contiguous vectors and walked in lockstep, so
-  // each consumed copy cancels exactly one inserted copy — the same multiset
-  // semantics as matching against a std::multiset, without the per-entry node
-  // allocation and tree descent. The survivors come out already sorted, which
-  // is the order blocks are stored in, so the result needs no separate sort.
+  // A sorted lockstep walk cancels one inserted copy per consumed copy and
+  // leaves the survivors sorted, so the block needs no separate sort.
   x23::Vec<QueueEntry> remaining_entries;
   if (consume_delta_ && !consume_delta_->current_block_consumed.empty()) {
     std::vector<QueueEntry> sorted_added(added_entries_.begin(),
@@ -535,10 +531,8 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
         consume_delta_->current_block_consumed.end());
     std::ranges::sort(sorted_consumed);
 
-    // has_unmatched_entries() above rejected any entry consumed more times
-    // than it was inserted, so the consumed entries are a sub-multiset of the
-    // inserted ones and this difference cannot underflow. Like the CHECK
-    // below, this guards against logic errors — it should never fire.
+    // has_unmatched_entries() guarantees consumed is a sub-multiset of added,
+    // so this cannot underflow.
     CHECK_LE(sorted_consumed.size(), sorted_added.size());
     remaining_entries.reserve(sorted_added.size() - sorted_consumed.size());
 

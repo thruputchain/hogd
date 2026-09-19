@@ -2869,11 +2869,8 @@ TEST_F(HogDbTest, RCQInsertAndCurrentBlockConsumeSameBlock)
   });
 }
 
-// A value inserted several times and consumed once in the same block must
-// leave exactly the surplus copies behind. This is the case where the
-// current-block consume filter has to honour multiset semantics rather than
-// treating an entry as merely present-or-absent, and where the surviving
-// entries are not a prefix or suffix of added_entries_.
+// Duplicate inserts with a single same-block consume must leave the surplus
+// copies behind.
 TEST_F(HogDbTest, RCQPartialDuplicateCurrentBlockConsume)
 {
   Address addr = make_address(kAddress + 36);
