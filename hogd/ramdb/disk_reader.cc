@@ -164,7 +164,10 @@ struct SafeItemHeader {
   // returns an ItemHeader if it is valid.
   std::optional<ItemHeader> operator()() const
   {
-    if (storage > std::to_underlying(ItemStorage::kCommit))
+    // kBig is in range but unimplemented on disk and no producer writes it;
+    // reject it so a tampered header can't reach the panic in load_log_file.
+    if (storage > std::to_underlying(ItemStorage::kCommit) ||
+        storage == std::to_underlying(ItemStorage::kBig))
       return std::nullopt;
     if (key_len == 0)
       return std::nullopt;
@@ -429,12 +432,6 @@ load_log_file(
         info("couldn't read item: {}", ret.error());
         return DBError(DBCode::kCorruption);
       }
-      break;
-    }
-
-    case kBig:
-    {
-      panic("not implemented yet");
       break;
     }
 

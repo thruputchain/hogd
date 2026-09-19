@@ -445,6 +445,35 @@ TEST_F(DatabaseTest, RecoveryRejectsGarbageTail)
   EXPECT_EQ(ret.error(), DBCode::kCorruption);
 }
 
+// Flipping only the storage byte of a committed record to the unsupported
+// kBig tag must be rejected as corruption, not dispatched to a panic.
+TEST_F(DatabaseTest, RecoveryRejectsTamperedBigStorage)
+{
+  insert_n(1);
+  DBStatus<uint64_t> lsn = db_->sync();
+  ASSERT_TRUE(lsn);
+  db_.reset();
+
+  // The first on-disk record is the committed normal item; storage is its
+  // first byte. Overwrite it with the unsupported kBig tag.
+  {
+    ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY);
+    ASSERT_TRUE(static_cast<bool>(f));
+    ASSERT_TRUE(
+        static_cast<bool>(f->lseek(offsetof(ItemHeader, storage),
+                                   SEEK_SET))); // NOLINT(misc-include-cleaner)
+    auto storage = static_cast<uint8_t>(std::to_underlying(ItemStorage::kBig));
+    ASSERT_TRUE(static_cast<bool>(
+        write_full(*f, std::as_bytes(std::span(&storage, 1)))));
+  }
+
+  size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+}
+
 // Database::check must not modify the files it checks: it reports the last
 // committed LSN and leaves an uncommitted tail for open() to truncate.
 TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
