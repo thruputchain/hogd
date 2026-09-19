@@ -89,8 +89,8 @@ private:
   BlockID block_ = 0;
 };
 
-// As x23 writes the generated union: discriminant, then the active arm --
-// the entry on kRPCNone, nothing otherwise.
+// As x23 writes the generated union: discriminant, then the active arm.
+// That arm is the entry on kRPCNone, nothing otherwise.
 inline size_t
 xdr_size(const BorrowedQueueEntryReply &reply)
 {
