@@ -14,10 +14,10 @@ namespace hogd {
 
 TEST(BlockIdTest, Generate)
 {
-  uint64_t first = BlockIdGenerator::generate();
+  uint64_t first = BlockIdGenerator::generate(BlockIdLane::kMempool);
   EXPECT_NE(first, 0UL);
 
-  uint64_t second = BlockIdGenerator::generate();
+  uint64_t second = BlockIdGenerator::generate(BlockIdLane::kMempool);
   EXPECT_NE(second, 0UL);
   EXPECT_NE(first, second);
 }
@@ -29,13 +29,14 @@ TEST(BlockIdTest, SurvivesClockRollback)
   constexpr int64_t kLater = kFirst + 25;
 
   std::atomic<uint64_t> last = 0;
+  const BlockIdLane kLane = BlockIdLane::kMempool;
 
-  const uint64_t first = BlockIdGenerator::next(last, kFirst);
-  const uint64_t later = BlockIdGenerator::next(last, kLater);
-  const uint64_t rolled_back = BlockIdGenerator::next(last, kFirst);
-  const uint64_t stuck = BlockIdGenerator::next(last, kFirst);
+  const uint64_t first = BlockIdGenerator::next(last, kLane, kFirst);
+  const uint64_t later = BlockIdGenerator::next(last, kLane, kLater);
+  const uint64_t rolled_back = BlockIdGenerator::next(last, kLane, kFirst);
+  const uint64_t stuck = BlockIdGenerator::next(last, kLane, kFirst);
 
-  // A clock that advances is reported verbatim.
+  // A clock that advances is reported verbatim, once snapped into the lane.
   EXPECT_EQ(first, static_cast<uint64_t>(kFirst));
   EXPECT_EQ(later, static_cast<uint64_t>(kLater));
 
@@ -49,20 +50,46 @@ TEST(BlockIdTest, SurvivesPreEpochClock)
 {
   // Pre-epoch readings must clamp low, not wrap high.
   std::atomic<uint64_t> last = 0;
+  const BlockIdLane kLane = BlockIdLane::kMempool;
 
-  const uint64_t first = BlockIdGenerator::next(last, -1);
-  const uint64_t repeated = BlockIdGenerator::next(last, -1);
-  const uint64_t earlier = BlockIdGenerator::next(last, -1'000'000'000);
+  const uint64_t first = BlockIdGenerator::next(last, kLane, -1);
+  const uint64_t repeated = BlockIdGenerator::next(last, kLane, -1);
+  const uint64_t earlier = BlockIdGenerator::next(last, kLane, -1'000'000'000);
   const uint64_t corrected =
-      BlockIdGenerator::next(last, 1'700'000'000'000'000'000);
+      BlockIdGenerator::next(last, kLane, 1'700'000'000'000'000'000);
 
-  // Pre-epoch readings land at the bottom of the range, not the top.
   EXPECT_LT(first, 1'000UL);
-
-  // They still advance, and a corrected clock keeps going forward.
   EXPECT_GT(repeated, first);
   EXPECT_GT(earlier, repeated);
   EXPECT_GT(corrected, earlier);
+}
+
+TEST(BlockIdTest, LanesStayDisjoint)
+{
+  // The mempool and hog_db generators run in separate processes, so they
+  // cannot share a counter. Feeding both the same clock readings must still
+  // produce disjoint IDs.
+  constexpr int64_t kStart = 1'700'000'000'000'000'000;
+
+  std::atomic<uint64_t> mempool_last = 0;
+  std::atomic<uint64_t> view_last = 0;
+  std::unordered_set<uint64_t> seen;
+
+  for (int64_t offset = 0; offset < 200; offset++) {
+    const int64_t now_ns = kStart + offset;
+    const uint64_t mempool_id =
+        BlockIdGenerator::next(mempool_last, BlockIdLane::kMempool, now_ns);
+    const uint64_t view_id =
+        BlockIdGenerator::next(view_last, BlockIdLane::kViewSnapshot, now_ns);
+
+    EXPECT_EQ(mempool_id % kBlockIdLaneCount,
+              static_cast<uint64_t>(BlockIdLane::kMempool));
+    EXPECT_EQ(view_id % kBlockIdLaneCount,
+              static_cast<uint64_t>(BlockIdLane::kViewSnapshot));
+
+    EXPECT_TRUE(seen.insert(mempool_id).second) << "reused " << mempool_id;
+    EXPECT_TRUE(seen.insert(view_id).second) << "reused " << view_id;
+  }
 }
 
 TEST(BlockIdTest, UniqueUnderContention)
@@ -81,7 +108,8 @@ TEST(BlockIdTest, UniqueUnderContention)
       per_thread[i].reserve(kIdsPerThread);
       start.arrive_and_wait();
       for (size_t j = 0; j < kIdsPerThread; j++) {
-        per_thread[i].push_back(BlockIdGenerator::generate());
+        per_thread[i].push_back(
+            BlockIdGenerator::generate(BlockIdLane::kMempool));
       }
     });
   }
@@ -93,6 +121,8 @@ TEST(BlockIdTest, UniqueUnderContention)
   for (const std::vector<uint64_t> &ids : per_thread) {
     for (uint64_t id : ids) {
       EXPECT_TRUE(seen.insert(id).second) << "duplicate block ID " << id;
+      EXPECT_EQ(id % kBlockIdLaneCount,
+                static_cast<uint64_t>(BlockIdLane::kMempool));
     }
   }
   EXPECT_EQ(seen.size(), kThreads * kIdsPerThread);

@@ -627,7 +627,7 @@ HogDbExecutorRpc::get_db_tip(BlockID block_id, BlockHeight block_height)
 x23::Async<ExpectedViewingSnapshot>
 HogDbExecutorRpc::open_viewing_snapshot()
 {
-  BlockID block_id = BlockIdGenerator::generate();
+  BlockID block_id = BlockIdGenerator::generate(BlockIdLane::kViewSnapshot);
   auto res = co_await ctx_.open_viewing_snapshot(block_id);
   if (!res) {
     co_return ExpectedViewingSnapshot(to_rpc_error(res.error()));
