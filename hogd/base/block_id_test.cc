@@ -47,9 +47,7 @@ TEST(BlockIdTest, SurvivesClockRollback)
 
 TEST(BlockIdTest, SurvivesPreEpochClock)
 {
-  // A host clock set before the epoch reads negative. Taken as unsigned that
-  // would land at the top of the ID range, stranding the counter there and
-  // reissuing IDs once the clock was corrected.
+  // Pre-epoch readings must clamp low, not wrap high.
   std::atomic<uint64_t> last = 0;
 
   const uint64_t first = BlockIdGenerator::next(last, -1);

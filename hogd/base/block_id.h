@@ -26,10 +26,8 @@ public:
   // Returns the next ID after [last], given clock reading [now_ns]. Exposed
   // so tests can drive the clock.
   //
-  // [now_ns] stays signed because a clock counting from an epoch reads
-  // negative before it: converting that to unsigned would land at the top of
-  // the ID range and strand the counter there. A pre-epoch reading counts as
-  // the bottom of the range instead.
+  // [now_ns] is signed so a pre-epoch reading clamps to the bottom of the ID
+  // range rather than wrapping to the top, which would strand the counter.
   static uint64_t next(std::atomic<uint64_t> &last, int64_t now_ns)
   {
     const uint64_t reading = now_ns < 0 ? 0 : static_cast<uint64_t>(now_ns);
