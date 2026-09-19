@@ -445,7 +445,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // into the scheduler again. This can happen if the tx was originally added
   // to the scheduler, then removed during nomination by [schedule()], and a
   // different validated block was committed instead. An existing entry keeps
-  // its own [verified_height], which describes the cached signature bytes.
+  // its own [verified_height].
   const auto [tx_ptr, txs_lock] = txs_.find_or_insert(
       tx_hash, std::make_shared<TxValue>(
                    TxValue{.tx = tx, .verified_height = verified_height}));
@@ -562,9 +562,7 @@ Scheduler::record_auth_reverification(
     (*tx_value_ptr)->verified_height = height;
   }
 
-  // The same height on the account gives [schedule()] its comparison
-  // baseline. Use [accounts_.find()] rather than [get_account_state()], which
-  // panics on the accounts in [key_changes] the mempool has never seen.
+  // Use [accounts_.find()]; [get_account_state()] panics on unknown accounts.
   for (const ContractAddress &account : accounts) {
     auto [account_state, lock] = accounts_.find(account);
     if (account_state == nullptr) {
