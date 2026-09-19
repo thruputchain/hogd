@@ -150,24 +150,14 @@ make_record(const rpc_msg &msg, const X &...x)
 // the rpc_msg, whose leading field is the xid), so callers need not thread the
 // originating request through.  `reply` must be make_record output (>= 8
 // bytes); a reply within the cap is returned untouched.
-//
-// noexcept: this runs on the noexcept SRPC input path and the async Detached
-// reply path, so an allocation failure while building the small SYSTEM_ERR
-// reply must not escape and terminate the process.  On failure the reply is
-// dropped (an empty Buf writes nothing); the client's call for this xid fails
-// when the stream is later torn down, and other calls are unaffected.
 inline Buf
-cap_server_reply(Buf reply, size_t max_message_size) noexcept
+cap_server_reply(Buf reply, size_t max_message_size)
 {
   if (reply.size() - 4 <= max_message_size) [[likely]]
     return reply;
-  try {
-    rpc_msg err{.xid = getbe<std::uint32_t>(reply.data() + 4)};
-    msg_set_reply_stat(&err, accept_stat::SYSTEM_ERR);
-    return make_record(err);
-  } catch (const std::exception &) {
-    return Buf{};
-  }
+  rpc_msg err{.xid = getbe<std::uint32_t>(reply.data() + 4)};
+  msg_set_reply_stat(&err, accept_stat::SYSTEM_ERR);
+  return make_record(err);
 }
 
 inline bool
