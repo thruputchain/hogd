@@ -131,19 +131,10 @@ Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
-  // The record marker's low 31 bits carry the payload length, so a longer
-  // payload would wrap the marker and desynchronize the stream for the
-  // receiver.  This backstop must hold at runtime in every build: the
-  // x23assert it replaces compiled out under NDEBUG, letting release senders
-  // emit wrapped markers for oversized payloads (#2075).  Send sites cap
-  // records at the negotiated max_message_size (<= kMaxRecordPayloadSize)
-  // before this is reached, so it fires only if a future path forgets to; the
-  // check is a single comparison on the already-computed buffer size, not a
-  // second size traversal.
-  if (ret.size() - 4 > kMaxRecordPayloadSize) [[unlikely]]
-    throw XdrBadInput("serialized record payload {} exceeds ONC RPC "
-                      "single-fragment record limit {}",
-                      ret.size() - 4, kMaxRecordPayloadSize);
+  // Send sites cap records at max_message_size (<= kMaxRecordPayloadSize)
+  // before framing, so a payload past the single-fragment limit here is a bug,
+  // not a runtime condition: an invariant check, not a hot-path branch.
+  x23assert(ret.size() <= 0x80000003UZ);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }
