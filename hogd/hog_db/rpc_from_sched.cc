@@ -462,9 +462,8 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
         }
       },
       [&](ContractAddress const &address, DeployedContractHash const &hash) {
-        // The all-zero address is reserved as the address where nothing
-        // lives; a genesis deploying there would make every zero-address
-        // sentinel a live contract.
+        // Reject genesis deploys at the null address; it must stay the
+        // "nothing lives here" sentinel.
         if (address == kNullContractAddress) {
           error("genesis deploys a contract at the reserved null address");
           failure = true;
