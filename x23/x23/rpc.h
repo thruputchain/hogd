@@ -201,7 +201,7 @@ private:
         else {
           // res outlives make_record, so a reply may borrow bytes it guards.
           static_assert(serializes_like<dispatch_t, return_type>);
-          auto &&res = dispatch(argbytes);
+          decltype(auto) res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
           return make_record(rmsg, res);
         }
