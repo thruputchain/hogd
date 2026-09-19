@@ -137,11 +137,8 @@ make_record(const rpc_msg &msg, const X &...x)
   return ret;
 }
 
-// Downgrade an over-cap framed reply to a SYSTEM_ERR reply with the same xid,
-// so an oversized handler result is a clean per-call error rather than an
-// over-cap record the peer rejects.  The xid follows the 4-byte record marker;
-// `reply` must be make_record output.  A reply within the cap is returned
-// as-is.
+// Downgrade an over-cap framed reply (make_record output) to a SYSTEM_ERR
+// reply with the same xid; replies within the cap pass through unchanged.
 inline Buf
 cap_server_reply(Buf reply, size_t max_message_size)
 {
