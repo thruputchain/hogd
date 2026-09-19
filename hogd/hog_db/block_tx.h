@@ -88,14 +88,11 @@ public:
 
   // return entry from an RCQ that was created by a transaction in the current
   // block if it exists.
-  HogDbStatus<std::optional<QueueEntry>>
-  get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
-
-  // As get_concurrent_rcq_entry, but borrows the entry instead of copying it.
-  // The view stays valid while the caller holds a reference to this BlockTX;
-  // see RetrocausalQueueLock::get_concurrent_entry_view.
+  // Borrows the entry rather than copying it; the view stays valid while the
+  // caller holds a reference to this BlockTX.  See
+  // RetrocausalQueueLock::get_concurrent_entry.
   HogDbStatus<std::optional<x23::BufView>>
-  get_concurrent_rcq_entry_view(const ItemKey &key, uint32_t index);
+  get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
   // Stage all finalized lock changes into a ChangeSet and compute the hash
   // delta. Returns the final db hash. Must be called before commit().

@@ -28,7 +28,6 @@
 #include "hogd/hog_db/item_lock/deletion_lock.h"
 #include "hogd/hog_db/item_lock/pointer_lock.h"
 #include "hogd/hog_db/status.h"
-#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
@@ -234,7 +233,7 @@ BlockTX::commit_change(const ItemKey &key, ItemChange change)
   return r;
 }
 
-HogDbStatus<std::optional<QueueEntry>>
+HogDbStatus<std::optional<x23::BufView>>
 BlockTX::get_concurrent_rcq_entry(const ItemKey &key, uint32_t index)
 {
   auto *lock = item_locks_.get(key);
@@ -244,18 +243,6 @@ BlockTX::get_concurrent_rcq_entry(const ItemKey &key, uint32_t index)
     return std::nullopt;
   }
   return lock->get_concurrent_entry(index);
-}
-
-HogDbStatus<std::optional<x23::BufView>>
-BlockTX::get_concurrent_rcq_entry_view(const ItemKey &key, uint32_t index)
-{
-  auto *lock = item_locks_.get(key);
-  if (!lock) {
-    // Key was deleted and recreated as an RCQ in the same tx, or the lock
-    // doesn't exist yet. A freshly-created queue has no concurrent entries.
-    return std::nullopt;
-  }
-  return lock->get_concurrent_entry_view(index);
 }
 
 HogDbStatus<int128_t>

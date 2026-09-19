@@ -198,17 +198,12 @@ private:
           d_.logger_.template log_server<ProcMeta>(rmsg);
           return make_record(rmsg);
         }
-        else if constexpr (serializes_like<dispatch_t, return_type>) {
+        else {
           // Serialize the handler's own return type so it can answer with a
           // borrowed view; res outlives make_record, so a reply owning a
           // lifetime guard keeps those bytes alive until they are written.
+          static_assert(serializes_like<dispatch_t, return_type>);
           auto &&res = dispatch(argbytes);
-          d_.logger_.template log_server<ProcMeta>(rmsg, res);
-          return make_record(rmsg, res);
-        }
-        else {
-          // Convertible to return_type but not equivalent on the wire.
-          return_type res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
           return make_record(rmsg, res);
         }

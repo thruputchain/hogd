@@ -66,14 +66,12 @@ public:
   HogDbStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 
-  std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
-
   /// A view of the entry a transaction in the current block inserted at
   /// [index], or nullopt past the end.  Outlives the mutex this takes, since
   /// QueueEntry's buffer is heap-owned and appends relocate the QueueEntry
   /// objects but not the bytes.  It dies with this lock, so callers must hold
   /// a reference to the owning BlockTX.
-  std::optional<x23::BufView> get_concurrent_entry_view(uint32_t index) const;
+  std::optional<x23::BufView> get_concurrent_entry(uint32_t index) const;
 
   HogDbStatus<RetrocausalQueueMetadata *>
   get_meta(const LockContext *ctx) const;

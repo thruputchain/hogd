@@ -555,7 +555,7 @@ HogDbExecutorRpc::get_concurrent_retrocausal_queue_entry(
   }
 
   auto view_res =
-      btx->get().get_concurrent_rcq_entry_view(make_item_key(addrkey), index);
+      btx->get().get_concurrent_rcq_entry(make_item_key(addrkey), index);
   if (!view_res.has_value()) {
     reply.fail(to_rpc_error(view_res.error()));
     return reply;
