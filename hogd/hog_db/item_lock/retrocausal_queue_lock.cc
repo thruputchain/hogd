@@ -604,6 +604,8 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
 std::optional<x23::BufView>
 RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 {
+  // Safe past the unlock: QueueEntry's buffer is heap-owned, so appending to
+  // added_entries_ relocates the QueueEntry objects but never the bytes.
   std::lock_guard lock(mtx_);
 
   if (index < added_entries_.size()) {

@@ -29,10 +29,8 @@
 namespace hogd {
 
 // Reply for get_concurrent_retrocausal_queue_entry that borrows the lock's
-// bytes instead of copying them into an owning ExpectedQueueEntry.  x23
-// serializes a return value after the handler frame is gone, so this holds the
-// block-tx reference keeping those bytes alive until its own destructor runs.
-// Move-only: that reference must be released exactly once.
+// bytes and holds the block-tx reference keeping them alive until x23 has
+// serialized them.  Move-only: that reference must be released exactly once.
 class BorrowedQueueEntryReply {
 public:
   // A reply that borrows nothing and holds no reference.

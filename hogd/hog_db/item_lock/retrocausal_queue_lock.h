@@ -67,10 +67,8 @@ public:
                                             ChangeSet &changes) const;
 
   /// A view of the entry a transaction in the current block inserted at
-  /// [index], or nullopt past the end.  Outlives the mutex this takes, since
-  /// QueueEntry's buffer is heap-owned and appends relocate the QueueEntry
-  /// objects but not the bytes.  It dies with this lock, so callers must hold
-  /// a reference to the owning BlockTX.
+  /// [index], or nullopt past the end.  Valid for this lock's lifetime, so
+  /// callers must keep the owning BlockTX alive.
   std::optional<x23::BufView> get_concurrent_entry(uint32_t index) const;
 
   HogDbStatus<RetrocausalQueueMetadata *>

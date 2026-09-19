@@ -428,10 +428,8 @@ TEST_F(RpcFromExecDiagnosticsTest, MalformedContractRowReportsCorruption)
   EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
 }
 
-// BorrowedQueueEntryReply answers get_concurrent_retrocausal_queue_entry in
-// place of the declared ExpectedQueueEntry, so it has to put the same bytes on
-// the wire for every arm and every length, including the ones that need XDR
-// padding.  See #2035.
+// BorrowedQueueEntryReply must put the same bytes on the wire as the
+// ExpectedQueueEntry it stands in for, on every arm and length (#2035).
 TEST(BorrowedQueueEntryReplyTest, MatchesExpectedQueueEntryOnTheWire)
 {
   static_assert(
