@@ -3243,7 +3243,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     changed_accounts.insert(change.address);
   }
   // [AuthServer::lookup_auth_data()] resolves this height exactly, so it is
-  // the auth state the results below describe. Keep it to stamp the survivors.
+  // the auth state the results below describe.
   const BlockHeight verify_height = scheduler_->current_block();
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(verify_height,

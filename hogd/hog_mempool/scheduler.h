@@ -213,8 +213,7 @@ public:
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
   size_t tx_cache_size() { return txs_.size(); }
 
-  // [TxValue::verified_height] for a cache entry no auth verification has
-  // stamped yet.
+  // Sentinel for a cache entry that has never been auth-verified.
   static constexpr BlockHeight kNeverVerified = -1;
 
   // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age

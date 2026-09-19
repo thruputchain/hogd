@@ -563,9 +563,9 @@ Scheduler::record_auth_reverification(
   }
 
   // The same height on the account gives [schedule()] its comparison
-  // baseline.
+  // baseline. Use [accounts_.find()] rather than [get_account_state()], which
+  // panics on the accounts in [key_changes] the mempool has never seen.
   for (const ContractAddress &account : accounts) {
-    // Skip accounts with no scheduler state rather than creating an entry.
     auto [account_state, lock] = accounts_.find(account);
     if (account_state == nullptr) {
       continue;
