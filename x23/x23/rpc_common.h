@@ -131,25 +131,17 @@ Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
-  // Send sites cap records at max_message_size (<= kMaxRecordPayloadSize)
-  // before framing, so a payload past the single-fragment limit here is a bug,
-  // not a runtime condition: an invariant check, not a hot-path branch.
+  // Senders cap at max_message_size, so an over-limit payload here is a bug.
   x23assert(ret.size() <= 0x80000003UZ);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }
 
-// Downgrade a framed server reply that exceeds the negotiated per-message cap
-// to a SYSTEM_ERR reply carrying the same xid.  A server must never frame a
-// reply larger than the peer will accept: the peer's reader fails the whole
-// connection on an over-cap record, and a payload past kMaxRecordPayloadSize
-// wraps its 31-bit length marker and desynchronizes the stream.  Capping on
-// the send side turns an oversized handler result into a clean per-call error
-// instead of a dropped connection, mirroring the client send_call guard.  The
-// xid is the first wire field of a framed reply (a 4-byte record marker then
-// the rpc_msg, whose leading field is the xid), so callers need not thread the
-// originating request through.  `reply` must be make_record output (>= 8
-// bytes); a reply within the cap is returned untouched.
+// Downgrade an over-cap framed reply to a SYSTEM_ERR reply with the same xid,
+// so an oversized handler result is a clean per-call error rather than an
+// over-cap record the peer rejects.  The xid follows the 4-byte record marker;
+// `reply` must be make_record output.  A reply within the cap is returned
+// as-is.
 inline Buf
 cap_server_reply(Buf reply, size_t max_message_size)
 {

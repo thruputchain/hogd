@@ -30,9 +30,8 @@ struct AsyncServer {
 };
 static_assert(is_blank_rpc_v1<AsyncServer *, Async>);
 
-// Servers whose echo handler always replies with a payload larger than the
-// per-message cap the test configures, regardless of the (small) request, so
-// the oversized data is on the reply path rather than the request path.
+// Echo handlers that always reply larger than the configured cap, so the
+// oversized data is on the reply path, not the request path.
 struct SyncBigReplyServer {
   using rpc_service = blank_rpc_v1;
   void null() {}
@@ -210,12 +209,8 @@ TEST(MaxMessageSize, ClientCreationRejectsCapAboveRecordLimit)
   EXPECT_THROW(cc->client<blank_rpc_v1>(), XdrBadInput);
 }
 
-// A server handler that produces a reply larger than the stream's per-message
-// cap must not frame it: an over-cap record makes the client's reader fail the
-// whole connection, and a payload past the 31-bit record limit wraps its
-// length marker and desynchronizes the stream (#2075).  The server downgrades
-// the oversized reply to a SYSTEM_ERR reply the client surfaces as
-// XdrCallFailed, and the stream stays usable for the next call.
+// An over-cap server reply is downgraded to SYSTEM_ERR (XdrCallFailed on the
+// client) and the stream stays usable (#2075).
 TEST(MaxMessageSize, SrpcServerCapsOversizedReply)
 {
   SyncBigReplyServer server;

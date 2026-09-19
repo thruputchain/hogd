@@ -378,12 +378,8 @@ TEST(RpcRecordRegression, SmallRecordFramesWithIntactMarker)
   EXPECT_EQ(static_cast<size_t>(marker & 0x7fffffffU), record.size() - 4UZ);
 }
 
-// A server must never frame a reply larger than the negotiated per-message
-// cap: the peer's reader fails the whole connection on an over-cap record, and
-// a payload past the 31-bit limit wraps its marker and desynchronizes the
-// stream (#2075).  cap_server_reply() downgrades an over-cap reply to a
-// SYSTEM_ERR reply carrying the same xid, so an oversized handler result
-// becomes a clean per-call error; a reply within the cap is returned intact.
+// cap_server_reply() downgrades an over-cap reply to SYSTEM_ERR with the same
+// xid; a reply within the cap is returned untouched (#2075).
 TEST(RpcRecordRegression, OverCapServerReplyDowngradesToSystemErr)
 {
   using enum accept_stat;
