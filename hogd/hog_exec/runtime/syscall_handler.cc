@@ -2347,13 +2347,8 @@ SyscallStatus<SHA256Hash>
 SystemCallHandler::sha256_finalize(uint32_t input_index)
 {
   assert(!invocation_frame_stack_.empty());
-  size_t output_size = 0;
-  auto r = invocation_frame_stack_.get_active_frame_hash_buffers().finalize(
-      input_index, &output_size);
-  if (auto *stats = get_transaction_stats()) {
-    stats->sha256_total_bytes_processed += output_size;
-  }
-  return r;
+  return invocation_frame_stack_.get_active_frame_hash_buffers().finalize(
+      input_index);
 }
 
 // == Block statistics syscalls ==

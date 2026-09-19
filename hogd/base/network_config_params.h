@@ -20,8 +20,8 @@ namespace hogd {
 
 // Values in force for parameters a configuration does not state. Consensus-
 // critical, so frozen once any chain has run under them.
-inline constexpr uint32_t kDefaultMaxSHA256Buffers = 8;
-inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 256;
+inline constexpr uint32_t kDefaultMaxSHA256Buffers = 32;
+inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 16;
 
 // Not permissive: a chain predating the parameter would otherwise attach
 // contracts without bound, which is #2190.

@@ -44,9 +44,9 @@ InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  AuthTokenIdSet &&owned_auth_token_ids,
                                  uint32_t inherited_try_invoke_depth,
                                  NetworkConfigParams const &params)
-  : hash_buffers_(params.max_sha256_buffers, params.max_sha256_buffer_bytes),
-    address_(address), calldata_(std::forward<Calldata>(calldata)),
-    flags_(flags), event_count_(event_count),
+  : hash_buffers_(params.max_sha256_buffers), address_(address),
+    calldata_(std::forward<Calldata>(calldata)), flags_(flags),
+    event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
     owned_auth_token_ids_(std::move(owned_auth_token_ids))
 {}

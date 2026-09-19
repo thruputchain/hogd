@@ -438,27 +438,24 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// Pins every contract-observable behavior of the incremental-hash buffers in
-// one traced sequence: interleaved independent indexes, the append-overflow
-// error leaving the buffer intact, finalize consuming its buffer, index reuse
-// via reset, and the finalize byte counts feeding
-// sha256_total_bytes_processed. The exact trace (inputs, digests, error
-// statuses, gas) must not move when the buffer representation changes.
+// Check the incremental hash lifecycle's trace and byte counts.
 TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
 {
   const std::array<uint8_t, 3> abc = {'a', 'b', 'c'};
   const std::array<uint8_t, 4> wxyz = {'w', 'x', 'y', 'z'};
   const std::array<uint8_t, 3> def = {'d', 'e', 'f'};
   const std::array<uint8_t, 5> fresh = {'f', 'r', 'e', 's', 'h'};
-  const std::vector<uint8_t> oversized(kSHA256BufferMaxSize, 0xEE);
+  const std::vector<uint8_t> large_chunk(kSHA256BufferMaxSize, 0xEE);
 
   const SHA256Hash hash_wxyz = sha256(std::span(wxyz));
-  const SHA256Hash hash_abcdef =
-      sha256(std::vector<uint8_t>{'a', 'b', 'c', 'd', 'e', 'f'});
+  std::vector<uint8_t> whole(abc.begin(), abc.end());
+  whole.insert(whole.end(), large_chunk.begin(), large_chunk.end());
+  whole.insert(whole.end(), def.begin(), def.end());
+  const SHA256Hash hash_whole = sha256(whole);
   const SHA256Hash hash_fresh = sha256(std::span(fresh));
 
   auto context = make_single_contract_context(
-      [abc, wxyz, def, fresh, oversized, hash_wxyz, hash_abcdef, hash_fresh](
+      [abc, wxyz, def, fresh, large_chunk, hash_wxyz, hash_whole, hash_fresh](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto expect = [](auto r, SyscallErrorCode code) {
           return r.has_value() && r.value() == code;
@@ -477,11 +474,10 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
                     kOk)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // Overflowing append: rejected, and index 0 keeps hashing as if the
-        // call never happened.
+        // Streaming past the former cumulative byte cap succeeds when funded.
         if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
-                        0U, std::as_bytes(std::span(oversized)), false),
-                    kInvalid)) {
+                        0U, std::as_bytes(std::span(large_chunk)), false),
+                    kOk)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
@@ -498,7 +494,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
         }
         if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
                     kOk) ||
-            out != hash_abcdef) {
+            out != hash_whole) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Finalize consumed index 0.
@@ -555,10 +551,10 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(update_entry(0, abc, true, ok_status()));
   expected.push_back(update_entry(1, wxyz, true, ok_status()));
-  expected.push_back(update_entry(0, oversized, false, invalid));
+  expected.push_back(update_entry(0, large_chunk, false, ok_status()));
   expected.push_back(update_entry(0, def, false, ok_status()));
   expected.push_back(finalize_entry(1, hash_wxyz, ok_status()));
-  expected.push_back(finalize_entry(0, hash_abcdef, ok_status()));
+  expected.push_back(finalize_entry(0, hash_whole, ok_status()));
   expected.push_back(finalize_entry(0, std::nullopt, invalid));
   expected.push_back(update_entry(0, fresh, true, ok_status()));
   expected.push_back(finalize_entry(0, hash_fresh, ok_status()));
@@ -567,10 +563,10 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  // Byte counts flow through finalize into the transaction stats: 4 (wxyz) +
-  // 6 (abcdef) + 5 (fresh); the failed append and failed finalize add nothing.
+  // Each successful update counts its bytes once; finalize adds nothing.
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
-  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed, 15U);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed,
+            15U + large_chunk.size());
 
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
@@ -578,7 +574,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
 // Pins the contract-observable behavior of SHA256Copy in one traced sequence:
 // forking an in-progress stream, both forks diverging independently to their
 // one-shot digests, and the missing-source error. The copy itself contributes
-// nothing to sha256_total_bytes_processed; only finalized bytes count.
+// nothing to sha256_total_bytes_processed; only updated bytes count.
 TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
 {
   const std::array<uint8_t, 3> abc = {'a', 'b', 'c'};
@@ -688,9 +684,10 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  // 6 (abcdef) + 6 (abcxyz) finalized bytes; the copy adds nothing.
+  // 3 (abc) + 3 (def) + 3 (xyz) processed bytes; copying the prefix and
+  // finalizing either stream adds nothing.
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
-  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed, 12U);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed, 9U);
 
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }

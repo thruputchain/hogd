@@ -13,14 +13,11 @@
 namespace hogd {
 
 SyscallStatus<SHA256Hash>
-HashBuffers::finalize(uint32_t index, size_t *output_size)
+HashBuffers::finalize(uint32_t index)
 {
   auto it = streams_.find(index);
   if (it == streams_.end()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  if (output_size) {
-    *output_size = it->second.size;
   }
   auto out = it->second.hasher.finalize();
   streams_.erase(it);
@@ -32,12 +29,6 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
 {
   if (!reset) {
     return update_existing_stream(index, data);
-  }
-
-  // Validate before touching any state: a rejected reset must leave an
-  // existing stream hashing as if the call never happened.
-  if (data.size() > max_buffer_bytes_) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto it = streams_.find(index);
@@ -52,7 +43,6 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
     it->second = Stream{};
   }
   it->second.hasher.update(data);
-  it->second.size = data.size();
   return {};
 }
 
@@ -91,13 +81,7 @@ HashBuffers::update_existing_stream(uint32_t index,
   if (it == streams_.end()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  // Reject before absorbing: a failed append must leave the stream hashing
-  // as if the call never happened.
-  if (it->second.size + data.size() > max_buffer_bytes_) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
   it->second.hasher.update(data);
-  it->second.size += data.size();
   return {};
 }
 

@@ -390,7 +390,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
   EXPECT_EQ(memory, before);
 }
 
-TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
+TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasDoesNotComputeHash)
 {
   // Rv32Runtime::invoke_internal calls syscall_entry with ExecutionContext
   // memory backed directly by ThreadedMachine memory; unlike
@@ -399,9 +399,10 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
   std::vector<uint8_t> memory(256, 0xCC);
   constexpr std::string_view input = "out of gas";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  const std::vector<uint8_t> before = memory;
+  auto expected_memory = memory;
+  std::fill_n(expected_memory.begin() + kOutputAddress, sizeof(SHA256Hash), 0);
 
-  // Afford entry so SHA256 runs, but leave too little gas for its body cost.
+  // Afford entry, but leave too little gas to hash the input.
   constexpr GasAmount kBudget = kSyscallBaseCost + 1;
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
@@ -420,31 +421,19 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
   ASSERT_FALSE(result.first.has_value());
   EXPECT_EQ(result.first.error().code(), HostFnErrorCode::OutOfGas);
   EXPECT_EQ(result.second, kBudget);
-  // Once entry is affordable, SHA256 still writes its live output before
-  // the final accounting rejects its body charge.
-  EXPECT_NE(memory, before);
-  const SHA256Hash expected = sha256(input);
-  EXPECT_TRUE(
-      std::ranges::equal(expected, std::span<const uint8_t>(memory).subspan(
-                                       kOutputAddress, expected.size())));
+  // The output adapter flushes its zero-initialized staging value on a
+  // frame fault, but no hash is computed.
+  EXPECT_EQ(memory, expected_memory);
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest,
        InterpretersAgreeOnObservableExactBudgetOutOfGas)
 {
-  // At an exact gas boundary the SHA256 syscall body runs but is then charged
-  // into OutOfGas. The canonical per-instruction Machine runs the syscall
-  // against a scratch buffer (discarded on OutOfGas) while the threaded
-  // interpreter runs it against live guest memory (which retains the staged
-  // output) -- so the two interpreters' final guest memory legitimately
-  // differs. That memory is frame-local state a trap discards (see
-  // threaded_machine.h); what consensus observes is the (trap classification,
-  // gas_remaining) pair, and this test pins that both interpreters agree on it.
-  // The divergence in the discarded frame memory is therefore WAI, not a bug
-  // (issue #3780): after OutOfGas the whole frame is thrown away.
+  // Both bridges reject exact exhaustion before hashing and agree on the
+  // trap and gas remaining.
   constexpr std::string_view input = "out of gas";
   // Cover the four argument loads, ecall, crossing, and SHA256 body exactly.
-  // The body runs, then the inclusive final gas check reports OutOfGas.
+  // The preflight gas check reports OutOfGas before the hash is computed.
   constexpr uint64_t kExactBudget = (5 * rv32::kBaseInstructionGas) +
                                     kSyscallBaseCost +
                                     GasCost::sha256_hash(input.size());
@@ -511,6 +500,9 @@ TEST_F(Rv32SyscallEntryBridgeTest,
   EXPECT_EQ(threaded_result, rv32::StepResult::kTrap);
   EXPECT_EQ(threaded.trap(), rv32::Trap::kOutOfGas);
   EXPECT_EQ(threaded.gas_remaining(), 0U);
+  auto expected_memory = initial_memory;
+  std::fill_n(expected_memory.begin() + kOutputAddress, sizeof(SHA256Hash), 0);
+  EXPECT_TRUE(std::ranges::equal(threaded.memory(), expected_memory));
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
