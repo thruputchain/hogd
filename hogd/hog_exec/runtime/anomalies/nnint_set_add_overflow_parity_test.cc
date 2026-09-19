@@ -42,6 +42,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -53,6 +54,7 @@
 
 #include "db_conflict.hh"
 #include "exec_result.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -206,12 +208,9 @@ public:
       if (conflict.level() != DbDiagnosticLevel::kDbDiagnosticAll) {
         return false;
       }
-      for (auto const &c : conflict.conflicts()) {
-        if (c.code == DbConflictCode::kDbConflictOverflow) {
-          return true;
-        }
-      }
-      return false;
+      return std::ranges::any_of(conflict.conflicts(), [](auto const &c) {
+        return c.code == DbConflictCode::kDbConflictOverflow;
+      });
     }
     else {
       return conflict.level() == DbDiagnosticLevel::kDbDiagnosticFirst &&
