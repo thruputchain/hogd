@@ -570,7 +570,9 @@ HogDbExecutorRpc::get_concurrent_retrocausal_queue_entry(
   ExpectedQueueEntry ret;
   if (maybe_entry) {
     ret.error(RPCError::kRPCNone);
-    ret.queue_entry() = *maybe_entry;
+    // Steal the buffer: QueueEntry is heap-backed and the optional is dead
+    // after this, so copying here would be a second allocation.
+    ret.queue_entry() = std::move(*maybe_entry);
   }
   else {
     ret.error(RPCError::kRPCNotFound);
