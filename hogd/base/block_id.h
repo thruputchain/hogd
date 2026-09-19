@@ -9,9 +9,8 @@
 
 namespace hogd {
 
-// The generators that mint block IDs. Each runs in its own process, so they
-// cannot share a counter; instead each owns a residue class of the ID space
-// and never emits an ID belonging to another.
+// Each generator runs in its own process, so they cannot share a counter;
+// each owns one residue class of the ID space instead.
 enum class BlockIdLane : uint64_t {
   // [MempoolCoordinatorRpc] nomination and validation blocks.
   kMempool = 0,
@@ -32,8 +31,10 @@ public:
   // never equal to an ID minted for a different lane. Thread-safe.
   static uint64_t generate(BlockIdLane lane)
   {
-    static std::atomic<uint64_t> counters[kBlockIdLaneCount]{};
-    return next(counters[static_cast<uint64_t>(lane)], lane,
+    // One counter serves every lane, so hog-devnode, which hosts both
+    // servers, still hands each base out once.
+    static std::atomic<uint64_t> last = 0;
+    return next(last, lane,
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::system_clock::now().time_since_epoch())
                     .count());
@@ -47,36 +48,24 @@ public:
   static uint64_t next(std::atomic<uint64_t> &last, BlockIdLane lane,
                        int64_t now_ns)
   {
-    const auto residue = static_cast<uint64_t>(lane);
-    const uint64_t reading =
-        now_ns < 0 ? residue
-                   : lane_floor(static_cast<uint64_t>(now_ns), residue);
+    // [last] holds a base, always a multiple of the lane count; the lane is
+    // an offset onto it, so stepping by the lane count keeps every ID in its
+    // own residue class.
+    const uint64_t reading = now_ns < 0
+                                 ? 0
+                                 : static_cast<uint64_t>(now_ns) /
+                                       kBlockIdLaneCount * kBlockIdLaneCount;
 
     uint64_t prev = last.load(std::memory_order_relaxed);
     while (true) {
-      // Stepping by the lane count, from a [prev] already in the lane, keeps
-      // every ID in its own residue class.
-      const uint64_t candidate =
-          std::max(reading, lane_floor(prev, residue) + kBlockIdLaneCount);
-      // A failed exchange reloads [prev], so the retry's candidate accounts
-      // for whatever ID the winning thread just published.
+      const uint64_t base = std::max(reading, prev + kBlockIdLaneCount);
       if (last.compare_exchange_weak(
               /*expected=*/prev,
-              /*desired=*/candidate,
+              /*desired=*/base,
               /*order=*/std::memory_order_relaxed)) {
-        return candidate;
+        return base + static_cast<uint64_t>(lane);
       }
     }
-  }
-
-private:
-  // Largest value at or below [value] that belongs to the lane [residue].
-  static uint64_t lane_floor(uint64_t value, uint64_t residue)
-  {
-    if (value < residue) {
-      return residue;
-    }
-    return value - ((value - residue) % kBlockIdLaneCount);
   }
 };
 

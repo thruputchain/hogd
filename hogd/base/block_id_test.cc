@@ -80,11 +80,10 @@ TEST(BlockIdTest, ReadingSnapsIntoLane)
             static_cast<uint64_t>(kOdd));
 }
 
-TEST(BlockIdTest, LanesStayDisjoint)
+TEST(BlockIdTest, LanesStayDisjointAcrossProcesses)
 {
-  // The mempool and hog_db generators run in separate processes, so they
-  // cannot share a counter. Feeding both the same clock readings must still
-  // produce disjoint IDs.
+  // The mempool and hog_db run as separate processes with separate counters.
+  // Feeding both the same clock readings must still produce disjoint IDs.
   constexpr int64_t kStart = 1'700'000'000'000'000'000;
 
   std::atomic<uint64_t> mempool_last = 0;
@@ -97,6 +96,32 @@ TEST(BlockIdTest, LanesStayDisjoint)
         BlockIdGenerator::next(mempool_last, BlockIdLane::kMempool, now_ns);
     const uint64_t view_id =
         BlockIdGenerator::next(view_last, BlockIdLane::kViewSnapshot, now_ns);
+
+    EXPECT_EQ(mempool_id % kBlockIdLaneCount,
+              static_cast<uint64_t>(BlockIdLane::kMempool));
+    EXPECT_EQ(view_id % kBlockIdLaneCount,
+              static_cast<uint64_t>(BlockIdLane::kViewSnapshot));
+
+    EXPECT_TRUE(seen.insert(mempool_id).second) << "reused " << mempool_id;
+    EXPECT_TRUE(seen.insert(view_id).second) << "reused " << view_id;
+  }
+}
+
+TEST(BlockIdTest, LanesStayDisjointWithinOneProcess)
+{
+  // hog-devnode hosts both servers, so one counter feeds both lanes. Each
+  // base is handed out once, so the IDs stay distinct and stay in lane.
+  constexpr int64_t kStart = 1'700'000'000'000'000'000;
+
+  std::atomic<uint64_t> last = 0;
+  std::unordered_set<uint64_t> seen;
+
+  for (int64_t offset = 0; offset < 200; offset++) {
+    const int64_t now_ns = kStart + offset;
+    const uint64_t mempool_id =
+        BlockIdGenerator::next(last, BlockIdLane::kMempool, now_ns);
+    const uint64_t view_id =
+        BlockIdGenerator::next(last, BlockIdLane::kViewSnapshot, now_ns);
 
     EXPECT_EQ(mempool_id % kBlockIdLaneCount,
               static_cast<uint64_t>(BlockIdLane::kMempool));
