@@ -554,8 +554,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
 void
 Scheduler::record_auth_reverification(
     x23::span<const TransactionHash> tx_hashes,
-    [[maybe_unused]] const std::unordered_set<ContractAddress, SipHash24Hasher>
-        &accounts,
+    const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
     BlockHeight height)
 {
   for (const TransactionHash &tx_hash : tx_hashes) {
@@ -568,23 +567,20 @@ Scheduler::record_auth_reverification(
     (*tx_value_ptr)->verified_height = height;
   }
 
-#ifndef NDEBUG
-  // Everything cached for one of [accounts] should have been re-verified
-  // above, because [auth_data_changed()] sources this from
-  // [get_txs_for_account()]. An older stamp means the cache holds a tx the
-  // runqueue did not report, so the auth change never re-checked it -- the
-  // stranded-cache-entry shape that let a revoked tx stay schedulable.
-  txs_.for_each([&accounts, height](const auto &entry) {
-    const std::shared_ptr<TxValue> &tx_value = entry.second;
-    if (tx_value == nullptr) {
-      return;
+  // Everything the callback re-verified now carries [height]. Recording the
+  // same height on the account gives [schedule()] the baseline it compares a
+  // tx against, so an entry that missed the re-verification above is caught
+  // before it can become block content.
+  for (const ContractAddress &account : accounts) {
+    // Most rotating accounts have no scheduler state at all. Skip those rather
+    // than creating an entry: a tx submitted later is verified against a
+    // height at or after this one anyway.
+    auto [account_state, lock] = accounts_.find(account);
+    if (account_state == nullptr) {
+      continue;
     }
-    if (!accounts.contains(tx_value->tx.tx.invocation.invoked_address)) {
-      return;
-    }
-    DCHECK_GE(tx_value->verified_height, height);
-  });
-#endif
+    account_state->last_auth_change = height;
+  }
 }
 
 void
@@ -1066,6 +1062,14 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         hog_ages->num_hogs[kHogAgeGroupToSchedule] =
             to_xdr(hogs_available - tx.tx.invocation.gas_limit);
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
+
+        // The tx is about to become block content, so its signatures must have
+        // been verified against auth state at least as new as the account's
+        // last auth change. [auth_data_changed()] re-verifies only what
+        // [get_txs_for_account()] reports, so an entry that sat off the
+        // runqueue across that callback and returned afterwards arrives here
+        // with a stale height. One compare against state already held.
+        CHECK_GE(it->second->verified_height, account_state->last_auth_change);
 
         tx_hashes.push_back(tx_hash);
         txs.push_back(tx);
