@@ -32,7 +32,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hog_exec/common/block_id_util.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_auth.h"

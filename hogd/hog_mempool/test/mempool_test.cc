@@ -41,6 +41,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/common/block_id_util.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
