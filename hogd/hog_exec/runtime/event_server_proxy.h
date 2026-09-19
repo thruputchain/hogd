@@ -40,10 +40,10 @@ public:
     return EventServerProxy(host_port);
   }
 
-  x23::Async<SystemStatus<void>> open_block(BlockID block_id);
-  x23::Async<SystemStatus<void>> close_block(BlockID block_id);
+  [[nodiscard]] x23::Async<SystemStatus<void>> open_block(BlockID block_id);
+  [[nodiscard]] x23::Async<SystemStatus<void>> close_block(BlockID block_id);
 
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   emit_event(BlockID block_id, TransactionID tx_id,
              TxEventLog const &tx_event_log,
              ProposedTransaction const &proposed_tx);
@@ -80,7 +80,7 @@ public:
   PerTransactionEventServerProxy &
   operator=(PerTransactionEventServerProxy &&) = delete;
 
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   emit_events(TxEventLog const &tx_event_log,
               ProposedTransaction const &proposed_tx);
 

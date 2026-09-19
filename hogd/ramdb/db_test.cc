@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -355,6 +356,137 @@ TEST_F(DatabaseTest, SyncAndLoad)
   if (!ret) {
     EXPECT_EQ(ret.error(), DBCode::kCorruption);
   }
+}
+
+// A crash mid-append can leave zeros past the last commit. Recovery treats a
+// zero header in the last file, followed only by zeros, as the torn tail and
+// truncates the file back to the last commit.
+TEST_F(DatabaseTest, RecoveryTruncatesZeroFilledTail)
+{
+  insert_n(kInsertions);
+  DBStatus<uint64_t> lsn = db_->sync();
+  ASSERT_TRUE(lsn);
+  db_.reset();
+
+  off_t committed_size = 0; // NOLINT(misc-include-cleaner)
+  {
+    ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY | O_APPEND);
+    ASSERT_TRUE(static_cast<bool>(f));
+    ErrnoStatus<off_t> size =
+        f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
+    ASSERT_TRUE(static_cast<bool>(size));
+    committed_size = *size;
+    std::array<std::byte, 2 * sizeof(ItemHeader)> zeros{};
+    ASSERT_TRUE(static_cast<bool>(write_full(*f, zeros)));
+  }
+
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  check_integrity();
+
+  ErrnoStatus<File> f = dir_.openat("0.log", O_RDONLY);
+  ASSERT_TRUE(static_cast<bool>(f));
+  ErrnoStatus<off_t> size =
+      f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
+  ASSERT_TRUE(static_cast<bool>(size));
+  EXPECT_EQ(*size, committed_size);
+}
+
+// A zeroed header with committed records after it is corruption, not a torn
+// tail; recovery must not truncate the later commits away.
+TEST_F(DatabaseTest, RecoveryRejectsInteriorZeros)
+{
+  uint64_t lsn = 0;
+  sync_n(1, lsn);
+  off_t first_commit_end = 0; // NOLINT(misc-include-cleaner)
+  {
+    ErrnoStatus<File> f = dir_.openat("0.log", O_RDONLY);
+    ASSERT_TRUE(static_cast<bool>(f));
+    ErrnoStatus<off_t> size =
+        f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
+    ASSERT_TRUE(static_cast<bool>(size));
+    first_commit_end = *size;
+  }
+  sync_n(2, lsn);
+  db_.reset();
+
+  {
+    ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY);
+    ASSERT_TRUE(static_cast<bool>(f));
+    ASSERT_TRUE(static_cast<bool>(
+        f->lseek(first_commit_end, SEEK_SET))); // NOLINT(misc-include-cleaner)
+    std::array<std::byte, sizeof(ItemHeader)> zeros{};
+    ASSERT_TRUE(static_cast<bool>(write_full(*f, zeros)));
+  }
+
+  DBStatus<void> ret = open_db();
+  ASSERT_FALSE(static_cast<bool>(ret));
+  EXPECT_EQ(ret.error(), DBCode::kCorruption);
+}
+
+// Any other invalid header after the last commit is corruption, and recovery
+// does not fall back to the committed prefix.
+TEST_F(DatabaseTest, RecoveryRejectsGarbageTail)
+{
+  insert_n(kInsertions);
+  DBStatus<uint64_t> lsn = db_->sync();
+  ASSERT_TRUE(lsn);
+  db_.reset();
+
+  {
+    ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY | O_APPEND);
+    ASSERT_TRUE(static_cast<bool>(f));
+    std::array<std::byte, sizeof(ItemHeader)> garbage{};
+    garbage.fill(std::byte{0xff});
+    ASSERT_TRUE(static_cast<bool>(write_full(*f, garbage)));
+  }
+
+  DBStatus<void> ret = open_db();
+  ASSERT_FALSE(static_cast<bool>(ret));
+  EXPECT_EQ(ret.error(), DBCode::kCorruption);
+}
+
+// Database::check must not modify the files it checks: it reports the last
+// committed LSN and leaves an uncommitted tail for open() to truncate.
+TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
+{
+  insert_n(kInsertions);
+  DBStatus<uint64_t> lsn = db_->sync();
+  ASSERT_TRUE(lsn);
+  db_.reset();
+
+  off_t committed_size = 0; // NOLINT(misc-include-cleaner)
+  {
+    ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY | O_APPEND);
+    ASSERT_TRUE(static_cast<bool>(f));
+    ErrnoStatus<off_t> size =
+        f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
+    ASSERT_TRUE(static_cast<bool>(size));
+    committed_size = *size;
+    std::array<std::byte, 2 * sizeof(ItemHeader)> zeros{};
+    ASSERT_TRUE(static_cast<bool>(write_full(*f, zeros)));
+  }
+  const off_t appended_size = // NOLINT(misc-include-cleaner)
+      committed_size + static_cast<off_t>(2 * sizeof(ItemHeader));
+
+  auto file_size = [this] {
+    ErrnoStatus<File> f = dir_.openat("0.log", O_RDONLY);
+    EXPECT_TRUE(static_cast<bool>(f));
+    ErrnoStatus<off_t> size =
+        f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
+    EXPECT_TRUE(static_cast<bool>(size));
+    return size.value_or(-1);
+  };
+
+  size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_TRUE(checked);
+  EXPECT_EQ(*checked, *lsn);
+  EXPECT_EQ(file_size(), appended_size);
+
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  check_integrity();
+  EXPECT_EQ(file_size(), committed_size);
 }
 
 TEST_F(DatabaseTest, Compact)

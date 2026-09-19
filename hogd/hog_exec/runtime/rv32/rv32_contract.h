@@ -74,7 +74,7 @@ public:
                                   PreparedContract &out) const override;
   using RuntimeContext::verify_contract;
 
-  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
+  [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 };

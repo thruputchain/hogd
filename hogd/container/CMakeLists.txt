@@ -3,6 +3,7 @@ add_subdirectory(merkle)
 # create container module test binary
 add_executable(
   container_test
+  flat_key_set_test.cc
   synchronized_map_test.cc
   concurrent_map_test.cc
   concurrent_set_test.cc

@@ -17,7 +17,6 @@
 #include <utility>
 #include <vector>
 
-#include "hog_exec_constants.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -467,7 +466,7 @@ public:
             .gas_limit = kPlentyOfGas,
             .calldata = Calldata{},
         },
-        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
+        std::to_underlying(InvokeFlag::None), ValidatedAuthTokens{});
   }
 
   // Finish the top frame. A successful child merges its modified items into
@@ -1277,8 +1276,7 @@ bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
   const std::array<std::byte, 32> data{};
   int64_t copies = 0;
   for (auto _ : state) {
-    HashBuffers buffers(occupancy + 1,
-                        static_cast<uint32_t>(kSHA256BufferMaxSize));
+    HashBuffers buffers(occupancy + 1);
     auto seeded = buffers.update(0, data, /*reset=*/true);
     benchmark::DoNotOptimize(seeded);
     for (uint32_t slot = 1; slot <= occupancy; ++slot) {
@@ -1305,8 +1303,7 @@ bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
   const std::array<std::byte, 32> data{};
   int64_t creations = 0;
   for (auto _ : state) {
-    HashBuffers buffers(occupancy + 1,
-                        static_cast<uint32_t>(kSHA256BufferMaxSize));
+    HashBuffers buffers(occupancy + 1);
     for (uint32_t slot = 0; slot < occupancy; ++slot) {
       auto created = buffers.update(slot, data, /*reset=*/true);
       benchmark::DoNotOptimize(created);
@@ -1667,14 +1664,8 @@ register_benchmarks()
   benchmark::RegisterBenchmark("vm/SHA256/1024", bm_syscall_vm,
                                sha256_call(1024));
 
-  // The incremental family. Same sweep as the one-shot up to
-  // kSHA256BufferMaxSize, which is where HashBuffers::update stops accepting a
-  // buffer -- so the comparison against SHA256 at the same size is direct, and
-  // the point it is making is that one of the two is free.
-  for (const uint32_t bytes : {0U, 32U, 256U, 1024U, 4096U}) {
-    if (bytes > kSHA256BufferMaxSize) {
-      continue;
-    }
+  // Compare incremental and one-shot hashing at the same input sizes.
+  for (const uint32_t bytes : {0U, 32U, 256U, 1024U, 4096U, 16384U, 32768U}) {
     benchmark::RegisterBenchmark(
         ("entry/SHA256Update/" + std::to_string(bytes)).c_str(),
         bm_syscall_entry, sha256_update_call(bytes));

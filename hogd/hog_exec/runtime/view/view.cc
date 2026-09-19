@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -18,6 +19,7 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -95,10 +97,32 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     forwarded_token_ids.push_back(token_id.value());
   }
 
+  // Freshly minted ids never repeat, so this only fails on a broken registry.
+  auto forwarded_auth_tokens =
+      ValidatedAuthTokens::parse(std::as_bytes(std::span(forwarded_token_ids)));
+  if (!forwarded_auth_tokens.has_value()) {
+    error("unrecoverable: view forwarded-token ids repeat");
+    co_return ExpectedViewResult{TransactionViewStatus::InternalError};
+  }
+
+  // Admission checks invoke() expects its caller to have run.
+  auto admitted =
+      syscall_handler.validate_new_invocation(query.invocation.invoked_address,
+                                              query.invoke_flags,
+                                              *forwarded_auth_tokens);
+  if (!admitted.has_value()) {
+    info("view transaction failed with SyscallErrorCode::{}",
+         admitted.error().code());
+    ExpectedViewResult result(TransactionViewStatus::InvalidInput);
+    result.error_code() = admitted.error().code();
+    co_return result;
+  }
+
   auto [res, gas_consumed] = co_await syscall_handler.invoke(
       query.invocation.invoked_address,
       sdk_method_id(query.invocation.entrypoint), query.invocation.gas_limit,
-      query.invocation.calldata, query.invoke_flags, forwarded_token_ids);
+      query.invocation.calldata, query.invoke_flags,
+      std::move(*forwarded_auth_tokens));
 
   if (!res.has_value()) {
     switch (res.error().code()) {

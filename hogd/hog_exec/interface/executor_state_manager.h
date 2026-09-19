@@ -53,7 +53,8 @@ public:
   // draining straggler event callbacks (Abandon is treated as
   // working-as-intended and reported as success), or success if the final
   // drain was clean.
-  x23::Async<SystemStatus<void>> gc_executor_context(BlockID block_id);
+  [[nodiscard]] x23::Async<SystemStatus<void>>
+  gc_executor_context(BlockID block_id);
 
 private:
   // Taken by value, not by reference: these are coroutines, and a reference

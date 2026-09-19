@@ -145,6 +145,7 @@ public:
   Metrics::Counter commit_attempt_count;
   Metrics::Counter commit_success_count;
   Metrics::Counter commit_block_not_found_count;
+  Metrics::Counter commit_concurrent_count;
   Metrics::Counter commit_reenqueued_tx_count;
   Metrics::Counter commit_removed_tx_count;
 
@@ -291,6 +292,10 @@ MempoolMetrics::init()
       kComponent, "commit_block_not_found_count",
       "Commit requests for blocks that were not nominated or validated by "
       "this mempool.");
+  commit_concurrent_count = metrics.per_thread_counter(
+      kComponent, "commit_concurrent_count",
+      "Commit requests rejected because another commit holds the validation "
+      "gate closed.");
   commit_reenqueued_tx_count = metrics.per_thread_counter(
       kComponent, "commit_reenqueued_tx_count",
       "Transactions returned to the scheduler after another block committed.");

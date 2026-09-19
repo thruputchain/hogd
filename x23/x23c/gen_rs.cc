@@ -543,11 +543,14 @@ impl {0}_{1}_Client {{
     }
     prtop("    pub async fn {}({}) -> Result<{}, ::rpc_api::RpcError> {{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
-    prtop("         let data = xdrs::txs::encode(&({})).map_err(|_| "
+    // Encode the arguments straight into a CallBuf so the driver frames the
+    // call in place instead of copying the payload behind its header.
+    prtop("         let mut call = self.handle.call_buf();\n");
+    prtop("         call.encode(&({})).map_err(|_| "
           "::rpc_api::RpcError::GarbageArguments)?;\n",
           join(call_args, ", "));
     prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
-          "&data).await?;\n",
+          "call).await?;\n",
           proc.val);
     prtop("         xdrs::txs::decode(&buf).map_err(|_| "
           "::rpc_api::RpcError::SystemError)\n");

@@ -67,6 +67,13 @@ require_text("${rust}" "pub struct Record")
 require_text("${rust}" "pub next: Option<Box<Record>>")
 require_text("${rust}" "pub payload: BytesM<LIMIT>")
 require_text("${rust}" "#[derive(ReadXDR, WriteXDR, ConstXDRSize)]")
+# Generated clients encode into a CallBuf taken from the sender and pass it
+# to send_call by value, for zero-, one- and two-argument procedures.
+require_text("${rust}" "let mut call = self.handle.call_buf();")
+require_text("${rust}" "call.encode(&()).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;")
+require_text("${rust}" "call.encode(&(arg0)).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;")
+require_text("${rust}" "call.encode(&(arg0, arg1)).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;")
+require_text("${rust}" "let buf = self.handle.send_call(Self::prog_vers(), 2, call).await?;")
 string(FIND "${rust}" "::serde::" serde_pos)
 if(NOT serde_pos EQUAL -1)
   message(FATAL_ERROR "--rust-no-feature serde did not disable serde")

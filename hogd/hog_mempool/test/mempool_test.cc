@@ -1628,6 +1628,41 @@ TEST(Mempool, CommitBlockNotFound)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
 }
 
+TEST(Mempool, ConcurrentCommitRejected)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+
+  const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  const SchedulerProposalResult nomination =
+      propose_block(server, tip.db_tip());
+  ASSERT_EQ(nomination.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &block = nomination.proposed_block();
+  const ConsensusValue value = consensus_value(tip.db_tip(), block.proposal);
+
+  // Hold a lock that is acquired *after* the validation gate is closed in the
+  // [schedulercoord_commit_block()] path so that the first commit keeps the
+  // validation gate closed until the second commit has tried to enter.
+  x23::CoroGuard guard;
+  [&]() -> x23::Async<void> {
+    co_await guard(rpc.scheduler()->pending_hog_age_update_lock_);
+  }()();
+
+  x23::Async<SchedulerCommitOutcome> first =
+      rpc.schedulercoord_commit_block(block.block_id, value);
+  const SchedulerCommitOutcome second =
+      rpc.schedulercoord_commit_block(block.block_id, value)();
+
+  // Release the lock so that the first commit can complete.
+  guard.reset();
+
+  EXPECT_EQ(second, SchedulerCommitOutcome::SchedulerConcurrentCommit);
+  EXPECT_EQ(first(), SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
 TEST(Mempool, Validate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

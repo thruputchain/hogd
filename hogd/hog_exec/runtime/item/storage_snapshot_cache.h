@@ -75,19 +75,19 @@ public:
   // same bytes again. Borrowed -- node-stable and valid for the block, so it
   // outlives any transaction's runtimes. Returns nullptr (wrapped) for a
   // negative lookup.
-  x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
   try_get_contract_entry(SHA256Hash const &hash);
-  x23::MaybeAsync<SystemStatus<const DeployedContract *>>
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const DeployedContract *>>
   try_get_deployed_contract(ContractAddress const &addr);
   // The snapshot item under `key`, probed with the hash the key already
   // carries. The syscall path hands over the FrameItemKey it built for its
   // frame probe, so a first touch lays out and hashes the key once for the
   // frames and this cache together.
-  x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
   try_get_snapshot_item(FrameItemKey const &key);
   // The XDR-keyed form, for a caller holding no frame key. Lays out and
   // hashes the key here; nothing on the syscall path should take this.
-  x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
   try_get_snapshot_item(AddressAndKey const &addrkey)
   {
     return try_get_snapshot_item(FrameItemKey::from(addrkey));
@@ -97,7 +97,7 @@ public:
   // before any other thread starts accessing this object. Fails with
   // Unrecoverable if the tip disagrees with the height the block was opened
   // with; every later height read is then a plain load.
-  x23::Async<SystemStatus<void>> load_db_tip();
+  [[nodiscard]] x23::Async<SystemStatus<void>> load_db_tip();
 
   // Pins a tip the caller already holds (the view gateway fetches one when it
   // opens its snapshot), under load_db_tip()'s threading contract. The
@@ -162,11 +162,11 @@ private:
   // Miss paths for the lookups above.  Each takes its key BY VALUE so the key
   // is copied into the coroutine frame and stays valid across the database
   // read.
-  x23::Async<SystemStatus<const ContractCacheEntry *>>
+  [[nodiscard]] x23::Async<SystemStatus<const ContractCacheEntry *>>
   load_contract_entry(SHA256Hash hash);
-  x23::Async<SystemStatus<const DeployedContract *>>
+  [[nodiscard]] x23::Async<SystemStatus<const DeployedContract *>>
   load_deployed_contract(ContractAddress addr);
-  x23::Async<SystemStatus<const SnapshotStorageItem *>>
+  [[nodiscard]] x23::Async<SystemStatus<const SnapshotStorageItem *>>
   load_snapshot_item(FrameItemKey key);
 
   // Note: the contract_cache_ does not need to be reset (although it is not

@@ -80,6 +80,23 @@ validate_rcq_metadata(const RetrocausalQueueMetadata &meta)
   return HogDbError(HogDbCode::kCorruption);
 }
 
+// validate_address_metadata rejects a contract_type outside the enum. XDR
+// decodes enums by cast, so only this check keeps a corrupt row from reaching
+// the panic in StorageCostModel::get_deployment_cost (#2964).
+HogDbStatus<void>
+validate_address_metadata(const DeployedContractHash &hash)
+{
+  switch (hash.contract_type) {
+  case ContractType::kNative:
+  case ContractType::kMockTest:
+  case ContractType::kRv32:
+    return {};
+  }
+  error("corrupt address metadata: contract_type {}",
+        std::to_underlying(hash.contract_type));
+  return HogDbError(HogDbCode::kCorruption);
+}
+
 } // namespace
 
 StorageLongHash
@@ -292,6 +309,8 @@ HogDbDAO::read_address_metadata(const Address &addr)
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
   }
+  if (auto v = validate_address_metadata(deployed_contract_hash); !v)
+    return v.error();
   return deployed_contract_hash;
 }
 
@@ -698,6 +717,8 @@ HogDbDAO::get_charged_storage_cost_and_cache_data(
         error("failed to deserialize deployed contract hash: {}", e.what());
         return HogDbError(HogDbCode::kInternal);
       }
+      if (auto v = validate_address_metadata(deployed_contract_hash); !v)
+        return v.error();
       return std::make_pair(cost_model->get_deployment_cost(
                                 deployed_contract_hash),
                             ItemLockCacheData::from_none());

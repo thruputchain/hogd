@@ -6,6 +6,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -23,10 +24,15 @@ namespace hogd {
 // Computes the SHA256 hash of the input buffer and returns the gas cost
 // Returns: Status code and gas cost for the operation
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_SHA256_inner(SystemCallHandler &handler,
+syscall_SHA256_inner(SystemCallHandler &handler, WrappedGasAmount remaining_gas,
                      std::span<const std::byte> input_buffer,
                      SHA256Hash &output_hash)
 {
+  const WrappedGasAmount required_gas{
+      GasCost::sha256_hash(input_buffer.size())};
+  if (remaining_gas.get() <= required_gas.get()) {
+    return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
+  }
   output_hash = sha256(input_buffer);
 
   if (auto *stats = handler.get_transaction_stats()) {
@@ -35,18 +41,30 @@ syscall_SHA256_inner(SystemCallHandler &handler,
   if (auto *trace_data = handler.get_syscall_trace_data<SyscallNo::kSHA256>()) {
     trace_data->outputs.emplace(SyscallSHA256Outputs{.hash = output_hash});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{GasCost::sha256_hash(input_buffer.size())}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, required_gas};
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
+syscall_SHA256Update_inner(SystemCallHandler &handler,
+                           WrappedGasAmount remaining_gas, uint32_t input_index,
                            std::span<const std::byte> input_buffer,
                            bool input_reset)
 {
+  const WrappedGasAmount required_gas{
+      GasCost::sha256_update(input_buffer.size())};
+  // Exact exhaustion also faults in the outer wrapper. Reject before hashing
+  // or resetting a stream, and charge the remaining body budget.
+  if (remaining_gas.get() <= required_gas.get()) {
+    return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
+  }
+
   auto r = handler.sha256_update(input_index, input_buffer, input_reset);
   if (!r.has_value()) {
     return {r.error().code(), WrappedGasAmount{0}};
+  }
+
+  if (auto *stats = handler.get_transaction_stats()) {
+    stats->sha256_total_bytes_processed += input_buffer.size();
   }
 
   // Whole blocks only, so this drops charges in two places: the carry from a
@@ -57,8 +75,7 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
   // block is worth. Splitting cannot exploit it either: the block counts here
   // and in GasCost::sha256_hash differ by at most two, so streaming never
   // undercuts the one-shot (Sha256GasModelTest pins that).
-  return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{GasCost::sha256_update(input_buffer.size())}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, required_gas};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
