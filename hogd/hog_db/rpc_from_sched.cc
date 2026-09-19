@@ -37,6 +37,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/block_tx.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
@@ -461,6 +462,14 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
         }
       },
       [&](ContractAddress const &address, DeployedContractHash const &hash) {
+        // The all-zero address is reserved as the address where nothing
+        // lives; a genesis deploying there would make every zero-address
+        // sentinel a live contract.
+        if (address == kNullContractAddress) {
+          error("genesis deploys a contract at the reserved null address");
+          failure = true;
+          return;
+        }
         if (auto r = ctx_.get_db().write_address_metadata(address, hash); !r) {
           error("failed to write genesis deployment: {}", r.error());
           failure = true;
