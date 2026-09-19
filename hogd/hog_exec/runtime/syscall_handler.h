@@ -260,7 +260,8 @@ public:
   // (forged observation or replay) aborts the transaction and returns
   // ExecResultTxNonDeterministicError; otherwise returns success_result.
   x23::Async<ExecResult> commit_body_discarded(ExecResult success_result);
-  // Emit the transaction's event log to the event server.
+  // Emit the transaction's event log, including the gas the root result
+  // consumed, to the event server.
   // Called for all deterministic outcomes (OK, DeterministicError, Reverted).
   //
   // [proposed_tx] is the full transaction body forwarded to the event server

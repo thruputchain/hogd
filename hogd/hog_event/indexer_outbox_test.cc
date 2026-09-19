@@ -221,6 +221,7 @@ make_committed_payload_golden_fixture()
   event.exec_result = ExecResult::ExecResultTxRootFrameReverted;
   event.root_output.status_code(InvocationFrameStatusCode::Abort);
   event.root_output.abort_buffer() = {0xfa, 0xce, 0xb0, 0x0c, 0x01};
+  event.gas_consumed = 0x0f0e0d0c0b0a0908;
   TxEmittedEvent emitted;
   emitted.contract_address.fill(0);
   emitted.contract_address[0] = 0x41;
@@ -1110,12 +1111,14 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
       make_committed_payload_golden_fixture();
   ASSERT_TRUE(validate_indexer_committed_payload(payload)().has_value());
   const x23::Buf encoded = x23::serialize(payload);
-  constexpr size_t kExpectedByteLength = 576;
-  const SHA256Hash kExpectedDigest{0xe9, 0xc4, 0x05, 0xd0, 0x1e, 0x83, 0xc7,
-                                   0x40, 0x7d, 0x5e, 0x61, 0xdb, 0x19, 0xd9,
-                                   0x46, 0x32, 0x86, 0xb4, 0xae, 0x06, 0xd6,
-                                   0xcc, 0x13, 0x02, 0x58, 0x80, 0x1d, 0x42,
-                                   0x43, 0xdf, 0x31, 0x88};
+  // The golden moved when gas_consumed joined TxEventLog: eight more bytes in
+  // the one event log, between its root output and its events.
+  constexpr size_t kExpectedByteLength = 584;
+  const SHA256Hash kExpectedDigest{0xc1, 0x3a, 0x73, 0xe8, 0x42, 0x6f, 0x15,
+                                   0x4c, 0x1c, 0x7b, 0xc8, 0xf3, 0x1f, 0xc7,
+                                   0xfc, 0x93, 0x60, 0xad, 0x3b, 0x6e, 0xda,
+                                   0x1b, 0x37, 0x16, 0x87, 0x17, 0x8b, 0x88,
+                                   0x48, 0x68, 0x9a, 0xde};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
@@ -1770,6 +1773,21 @@ TEST_F(IndexerOutboxTest,
   changed_signatures.signed_tx.signatures.push_back(DecoratedSignature{});
   EXPECT_EQ(compute_indexer_outbox_event_root({event}, {changed_signatures}),
             baseline);
+}
+
+TEST_F(IndexerOutboxTest, EventRootBindsGasConsumed)
+{
+  // gas_consumed is inside the trie leaf: a block whose executor reports a
+  // different figure for the same transaction closes to a different root.
+  ProposedTransaction body = make_body(12);
+  TxEventLog event = make_event(body, 0xbb);
+  event.gas_consumed = 1000;
+  const EventsHash baseline =
+      compute_indexer_outbox_event_root({event}, {body});
+
+  TxEventLog changed_gas = event;
+  changed_gas.gas_consumed = 1001;
+  EXPECT_NE(compute_indexer_outbox_event_root({changed_gas}, {body}), baseline);
 }
 
 TEST_F(IndexerOutboxTest, EventLeafSerializesEventBeforeNondeterministicData)

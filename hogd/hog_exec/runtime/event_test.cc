@@ -213,6 +213,8 @@ TEST_F(EventTest, EventSuccess)
   auto tx_event_log = get_tx_event_log(tx_id)();
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log.value().events.size(), 2);
+  // The log commits to the gas the root result reported.
+  EXPECT_EQ(tx_event_log->gas_consumed, res.gas_consumed_);
   ASSERT_EQ(tx_event_log.value().events[0].contract_address, addr_emitter);
   ASSERT_EQ(tx_event_log.value().events[1].contract_address, addr_emitter);
 
