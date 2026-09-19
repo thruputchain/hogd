@@ -86,8 +86,8 @@ public:
                                             ChangeSet &changes) const;
 
   // A view of the concurrently-inserted entry at [index], or nullopt if this
-  // lock has no such entry.  Only a finalized lock can, and its contents are
-  // never reset.  See RetrocausalQueueLock::get_concurrent_entry_view.
+  // lock is unfinalized or holds no RCQ.  See
+  // RetrocausalQueueLock::get_concurrent_entry.
   std::optional<x23::BufView> get_concurrent_entry(uint32_t index) const;
 
   bool is_finalized() const

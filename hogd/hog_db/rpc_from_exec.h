@@ -36,9 +36,8 @@ public:
   // A reply that borrows nothing and holds no reference.
   explicit BorrowedQueueEntryReply(RPCError error) noexcept : error_(error) {}
 
-  // Takes over the reference RPCContext::get_block_tx acquired on [btx], which
-  // is null when the block tx was not found.  Answers kRPCNotFound until told
-  // otherwise.
+  // Takes over the reference get_block_tx acquired on [btx], which is null
+  // when no block tx was found.  Answers kRPCNotFound until told otherwise.
   BorrowedQueueEntryReply(RPCContext &ctx, PerThreadARC<BlockTX> *btx,
                           BlockID block) noexcept
     : ctx_(&ctx), btx_(btx), block_(block)
@@ -68,12 +67,11 @@ public:
   // Answer with [error] and no entry.
   void fail(RPCError error) noexcept { error_ = error; }
 
-  // Answer with [entry], borrowed from the block tx this reply holds a
-  // reference to.
+  // Answer with [entry], borrowed from the block tx this reply holds.
   void set_entry(x23::BufView entry) noexcept
   {
-    // Deserialization bounded every entry in added_entries_ when the insert
-    // arrived, so a longer one is a broken invariant, not bad input.
+    // Deserialization bounded this on the way in, so a longer entry is a
+    // broken invariant rather than bad input.
     CHECK(entry.size() <= kQueueEntryMaxLen);
     error_ = RPCError::kRPCNone;
     entry_ = entry;
@@ -91,9 +89,8 @@ private:
   BlockID block_ = 0;
 };
 
-// Mirrors how x23 writes the generated union: the discriminant, then the
-// active arm.  kRPCNone carries the entry as opaque<kQueueEntryMaxLen>; every
-// other discriminant selects the void arm.
+// As x23 writes the generated union: discriminant, then the active arm --
+// the entry on kRPCNone, nothing otherwise.
 inline size_t
 xdr_size(const BorrowedQueueEntryReply &reply)
 {

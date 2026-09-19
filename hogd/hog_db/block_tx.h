@@ -86,11 +86,8 @@ public:
   HogDbStatus<int128_t> read_nnint128_base(const ItemKey &key);
   HogDbStatus<int128_t> read_balance_base(const Address &addr);
 
-  // return entry from an RCQ that was created by a transaction in the current
-  // block if it exists.
-  // Borrows the entry rather than copying it; the view stays valid while the
-  // caller holds a reference to this BlockTX.  See
-  // RetrocausalQueueLock::get_concurrent_entry.
+  // Borrowed view of a current-block RCQ entry; valid while the caller holds
+  // this BlockTX.
   HogDbStatus<std::optional<x23::BufView>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 

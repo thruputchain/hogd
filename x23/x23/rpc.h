@@ -199,9 +199,7 @@ private:
           return make_record(rmsg);
         }
         else {
-          // Serialize the handler's own return type so it can answer with a
-          // borrowed view; res outlives make_record, so a reply owning a
-          // lifetime guard keeps those bytes alive until they are written.
+          // res outlives make_record, so a reply may borrow bytes it guards.
           static_assert(serializes_like<dispatch_t, return_type>);
           auto &&res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
