@@ -48,13 +48,10 @@ public:
   static uint64_t next(std::atomic<uint64_t> &last, BlockIdLane lane,
                        int64_t now_ns)
   {
-    // [last] holds a base, always a multiple of the lane count; the lane is
-    // an offset onto it, so stepping by the lane count keeps every ID in its
-    // own residue class.
-    const uint64_t reading = now_ns < 0
-                                 ? 0
-                                 : static_cast<uint64_t>(now_ns) /
-                                       kBlockIdLaneCount * kBlockIdLaneCount;
+    // [last] holds a base, always a multiple of the lane count; stepping by
+    // that count and adding the lane keeps every ID in its own residue class.
+    const uint64_t ns = now_ns < 0 ? 0 : static_cast<uint64_t>(now_ns);
+    const uint64_t reading = ns - (ns % kBlockIdLaneCount);
 
     uint64_t prev = last.load(std::memory_order_relaxed);
     while (true) {
