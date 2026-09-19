@@ -378,6 +378,11 @@ TEST(RpcRecordRegression, SmallRecordFramesWithIntactMarker)
   EXPECT_EQ(static_cast<size_t>(marker & 0x7fffffffU), record.size() - 4UZ);
 }
 
+// cap_server_reply runs on the noexcept SRPC input path and the async Detached
+// reply path, so it must contain any allocation failure rather than escape.
+static_assert(noexcept(cap_server_reply(Buf{}, size_t{0})),
+              "cap_server_reply must be noexcept on the reply paths");
+
 // A server must never frame a reply larger than the negotiated per-message
 // cap: the peer's reader fails the whole connection on an over-cap record, and
 // a payload past the 31-bit limit wraps its marker and desynchronizes the
