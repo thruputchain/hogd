@@ -438,9 +438,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// Pin interleaved independent streams, appends beyond the legacy byte cap,
-// finalize consuming its stream, index reuse via reset, and update byte counts.
-// Check the exact inputs, digests, error statuses, and gas in the trace.
+// Check the incremental hash lifecycle's trace and byte counts.
 TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
 {
   const std::array<uint8_t, 3> abc = {'a', 'b', 'c'};

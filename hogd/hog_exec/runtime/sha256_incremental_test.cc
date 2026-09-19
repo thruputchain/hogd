@@ -50,9 +50,7 @@ public:
   {}
 };
 
-// Exercise the generated syscall metadata and the outer wrapper too: the body
-// receives the budget after reserving the crossing, and exact exhaustion
-// faults.
+// Exact gas exhaustion returns OutOfGas before hashing.
 TEST_F(Sha256IncrementalTest, OneShotChecksGasBeforeHashing)
 {
   auto context = make_hog_exec_context();
