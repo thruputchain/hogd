@@ -9,9 +9,8 @@ namespace hogd {
 
 namespace detail {
 
-// Returns the next ID after every ID [last] has handed out, for the clock
-// reading [now_ns]. Split out from [generate_block_id] so tests can drive a
-// clock sequence.
+// Returns the next ID after [last], given clock reading [now_ns]. Split out
+// so tests can drive the clock.
 inline uint64_t
 next_block_id(std::atomic<uint64_t> &last, uint64_t now_ns)
 {
@@ -31,11 +30,8 @@ next_block_id(std::atomic<uint64_t> &last, uint64_t now_ns)
 
 } // namespace detail
 
-// Generates a new block ID. This block ID is guaranteed to be unique for
-// the lifetime of this process. This function is thread-safe.
-//
-// IDs track wall-clock nanoseconds, but never repeat even if the host clock
-// steps backward.
+// Generates a new block ID: wall-clock nanoseconds, unique for the lifetime
+// of this process even if the host clock steps backward. Thread-safe.
 inline uint64_t
 generate_block_id()
 {
