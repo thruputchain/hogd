@@ -53,14 +53,15 @@ struct BenchmarkState : public CommonBenchState {
     auto fibonacci_contract = std::make_shared<Contract>(ContractType::kRv32);
     fibonacci_contract->rv32_contract() = load_contract_blob("fibonacci.rv32a");
     using client_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
-    genesis_builder.add_initial_config(
+    genesis_builder.add_distribution(
         fibonacci_contract, SHA256Hash{},
         client_meta_t::entrypoint<u8"fibonacci">(),
         client_meta_t::make_calldata<u8"fibonacci">(uint32_t{5}),
         1'000'000'000);
 
-    contract_addr_ = GenesisConfigurationLoader::calculate_deployed_address(
-        sha256(*fibonacci_contract), SHA256Hash{});
+    contract_addr_ =
+        calculate_genesis_deployment_address(sha256(*fibonacci_contract),
+                                             SHA256Hash{});
 
     run_genesis_configuration(genesis_builder);
   }
@@ -98,7 +99,7 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
                                 base_height, static_cast<uint64_t>(i))}};
         auto handler =
             bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
-        auto r = handler.root_invoke();
+        auto r = handler.root_invoke()();
         if (!r.is_root_success()) {
           panic("Failed to invoke transaction");
         }
@@ -160,29 +161,30 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
       int offset = i * ntx_per_thread;
       int cur_count = std::min(ntx_per_thread, num_txs - offset);
 
-      futures.emplace_back(exec_pool.submit([&bs, &tx, do_commit, offset,
-                                             cur_count, base_height]() -> void {
-        auto runtime_context = make_hog_exec_context();
-        // Copy the invocation once per thread; only the uniquifier varies, so
-        // we don't re-encode calldata inside the timed loop.
-        auto local_tx = tx;
-        for (int j = 0; j < cur_count; j++) {
-          int k = offset + j;
-          local_tx.tx.uniquifier =
-              CommonBenchState::bench_uniquifier(base_height,
-                                                 static_cast<uint64_t>(k));
-          auto handler = bs.make_handler(local_tx, k, *runtime_context);
-          if (!handler.root_invoke().is_root_success()) {
-            error("Failed to invoke transaction");
-            panic("Failed to invoke transaction");
-          }
-          if (do_commit) {
-            if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
-              panic("failed to perform commit operation");
+      futures.emplace_back(exec_pool.submit(
+          [&bs, &tx, do_commit, offset, cur_count, base_height]() -> void {
+            auto runtime_context = make_hog_exec_context();
+            // Copy the invocation once per thread; only the uniquifier varies,
+            // so we don't re-encode calldata inside the timed loop.
+            auto local_tx = tx;
+            for (int j = 0; j < cur_count; j++) {
+              int k = offset + j;
+              local_tx.tx.uniquifier =
+                  CommonBenchState::bench_uniquifier(base_height,
+                                                     static_cast<uint64_t>(k));
+              auto handler = bs.make_handler(local_tx, k, *runtime_context);
+              if (!handler.root_invoke()().is_root_success()) {
+                error("Failed to invoke transaction");
+                panic("Failed to invoke transaction");
+              }
+              if (do_commit) {
+                if (handler.try_commit_transaction()() !=
+                    ExecResult::ExecResultOK) {
+                  panic("failed to perform commit operation");
+                }
+              }
             }
-          }
-        }
-      }));
+          }));
     }
     for (auto &f : futures) {
       f.wait();

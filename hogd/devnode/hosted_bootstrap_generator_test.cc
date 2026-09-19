@@ -23,12 +23,15 @@
 #include "contract.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hosted_bootstrap_generator.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "types.hh"
 
 #ifndef HOG_HOSTED_BOOTSTRAP_BINARY
@@ -129,7 +132,6 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
 
   EXPECT_EQ(artifact.accounts.size(), 2UL);
   EXPECT_EQ(artifact.initialization_txs.size(), 1UL);
-  EXPECT_EQ(artifact.genesis_configuration.initial_config.size(), 2UL);
 
   std::expected<json::Value, json::ParseError> genesis =
       json::parse(artifact.genesis_json);
@@ -140,13 +142,36 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
                 require_field(require_field(*genesis, "storage_cost_model"),
                               "bytestring_cost_per_byte")),
             "10");
+  // The genesis artifact has to carry the execution parameters too: a
+  // consumer that rebuilds the configuration without them would compute a
+  // different config hash and fail genesis load.
+  const json::Value &network_config = require_field(*genesis, "network_config");
+  const auto &params =
+      require_field(require_field(require_field(network_config, "0"), "v0"),
+                    "params");
+  ASSERT_EQ(params.type(), json::Value::Type::kArray);
+  const auto encoded_params = params.as_array();
+  const auto &stated_params =
+      artifact.genesis_configuration.network_config.v0().params;
+  ASSERT_EQ(encoded_params.size(), stated_params.size());
+  // Names are pinned in network_config_params_test; check that each stated
+  // parameter reaches the artifact under its name.
+  for (std::size_t i = 0; i < stated_params.size(); ++i) {
+    const ConfigParam &param = stated_params[i];
+    const auto &body =
+        require_field(encoded_params[i], std::format("{}", param.param()));
+    EXPECT_EQ(
+        require_field(body, config_param_name(param.param())).as_integer(),
+        std::int64_t{config_param_value(param)});
+  }
+  EXPECT_EQ(network_config.find("max_sha256_buffers"), nullptr);
+
   const json::Value &default_wallet = require_field(*genesis, "default_wallet");
   // Genesis-JSON hashes are unprefixed hex (see contract_hash above);
   // hex_string prepends 0x.
   EXPECT_EQ(std::format("0x{}",
                         require_string(require_field(default_wallet, "hash"))),
-            hex_string(
-                GenesisConfigurationLoader::native_default_wallet_hash().hash));
+            hex_string(native_default_wallet_hash().hash));
   EXPECT_EQ(require_field(default_wallet, "contract_size").as_integer(),
             std::optional<std::int64_t>{0});
   EXPECT_EQ(require_string(require_field(default_wallet, "contract_type")),
@@ -169,8 +194,6 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
             "hog-hosted-bootstrap");
   EXPECT_EQ(require_string(require_field(*metadata, "networkHash")),
             "0000000000000000000000000000000000000000000000000000000000000001");
-  EXPECT_EQ(require_string(require_field(*metadata, "genesisHash")),
-            hex_string(artifact.genesis_hash));
   EXPECT_EQ(require_field(*metadata, "bootstrapAccounts").as_array().size(),
             2UL);
   for (const json::Value &account :
@@ -231,7 +254,6 @@ TEST(HostedBootstrapGenerator, GeneratesExplicitFaucetWallet)
   HostedFaucetMetadata const &second_faucet = second.faucet.value();
   EXPECT_EQ(first.accounts.size(), 2UL);
   EXPECT_EQ(first.initialization_txs.size(), 1UL);
-  EXPECT_EQ(first.genesis_configuration.initial_config.size(), 3UL);
   EXPECT_EQ(first_faucet.public_key, faucet_public_key);
   EXPECT_EQ(first_faucet.initial_storage_tokens, 987654321UL);
   EXPECT_EQ(second_faucet.wallet_address, first_faucet.wallet_address);
@@ -269,6 +291,53 @@ TEST(HostedBootstrapGenerator, RejectsInvalidFaucetAllocation)
 
   config.faucet->public_key =
       derive_bootstrap_account_keypair(config.bootstrap_config.seed, 0).first;
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator, RejectsAggregateAllocationAboveTokenSupply)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+  config.bootstrap_config.storage_tokens = kTokenSupply / 2;
+  config.faucet = HostedFaucetConfig{
+      .public_key =
+          derive_bootstrap_account_keypair("independent-faucet-seed", 0).first,
+      .storage_tokens = kTokenSupply - (kTokenSupply / 2),
+  };
+
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator, AcceptsAllocationAtTokenSupplyLimit)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  const auto ceremony_funding = static_cast<std::uint64_t>(
+      (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
+      cost_model.get_replay_cache_cost(1));
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+  config.bootstrap_config.storage_tokens = kTokenSupply - ceremony_funding;
+
+  EXPECT_NO_THROW(build_hosted_bootstrap_artifact(config));
+}
+
+TEST(HostedBootstrapGenerator, CountsFundingForEveryCeremonyTransaction)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  const auto ceremony_funding = static_cast<std::uint64_t>(
+      (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
+      cost_model.get_replay_cache_cost(1));
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 17;
+  config.bootstrap_config.storage_tokens =
+      (kTokenSupply - ceremony_funding) / config.bootstrap_config.count;
+
   EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
 }
 
@@ -395,7 +464,6 @@ TEST(HostedBootstrapGenerator, AllowsZeroBootstrapAccounts)
 
   EXPECT_TRUE(artifact.accounts.empty());
   EXPECT_EQ(artifact.initialization_txs.size(), 1UL);
-  EXPECT_TRUE(artifact.genesis_configuration.initial_config.empty());
 
   std::expected<json::Value, json::ParseError> metadata =
       json::parse(artifact.metadata_json);

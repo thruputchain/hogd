@@ -20,6 +20,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -61,9 +62,13 @@ make_test_contract()
 {
   NativeContractBuilder builder;
   builder.add<TestContract, u8"return_ok_void">(
-      []() -> InvokeStatus<void> { return {}; });
+      []() -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
   builder.add<TestContract, u8"return_ok_int">(
-      []() -> InvokeStatus<int32_t> { return {123}; });
+      []() -> x23::Async<InvokeStatus<int32_t>> {
+        co_return InvokeStatus<int32_t>{123};
+      });
   return builder.build();
 }
 
@@ -74,28 +79,30 @@ make_caller_contract()
 
   // Call return_ok_void method from TestContract
   builder.add<CallerContract, u8"call_return_ok_void">(
-      [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         test_contract_client_t client(kTestContractAddr);
-        auto result = client.template invoke_opt<u8"return_ok_void">(ctx);
+        auto result =
+            co_await client.template invoke_opt<u8"return_ok_void">(ctx);
         if (!result.has_value() || !result.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   // Call return_ok_int method from TestContract
   builder.add<CallerContract, u8"call_return_ok_int">(
-      [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         test_contract_client_t client(kTestContractAddr);
-        auto result = client.template invoke_opt<u8"return_ok_int">(ctx);
+        auto result =
+            co_await client.template invoke_opt<u8"return_ok_int">(ctx);
         if (!result.has_value() || !result.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (result.value().value() != 123) {
           ADD_FAILURE() << "Return value is not the expected value";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   return builder.build();
@@ -163,12 +170,13 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkVoid)
           .tx =
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
-                                  u8"call_return_ok_void">(1000)}},
+                                  u8"call_return_ok_void">(1000),
+                          .uniquifier = make_new_uniquifier()}},
       *context_);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -181,12 +189,13 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkInt)
           .tx =
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
-                                  u8"call_return_ok_int">(1000)}},
+                                  u8"call_return_ok_int">(1000),
+                          .uniquifier = make_new_uniquifier()}},
       *context_);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 

@@ -34,6 +34,7 @@
 #include "hogd/hog_mempool/rpc_from_db.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_exec.h"
+#include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/shared.h"
 #include "transaction.hh"
 #include "x23/async.h"
@@ -47,6 +48,7 @@ public:
 
   HogDevnodeNode(
       std::string bind_host, std::uint16_t requested_scheduler_port,
+      HogDevnodeDirectories directories,
       LocalBootstrapConfig const &bootstrap_config = {},
       std::optional<std::filesystem::path> const &data_dir = std::nullopt,
       NetworkHash network_hash = {},
@@ -59,9 +61,14 @@ public:
   HogDevnodeNode &operator=(HogDevnodeNode &&) = delete;
 
   std::string const &bind_host() const { return bind_host_; }
-  // The supervisor calls this the scheduler endpoint; hogd exposes it through
-  // the coordinator-facing SchedulerCoord1 RPC server.
+  // Coordinator control-plane endpoint used by the local block driver.
   std::uint16_t scheduler_port() const { return mempool_coord_server_.port(); }
+  // Public scheduler gateway endpoint used for transaction submission and
+  // pending-state reads.
+  std::uint16_t scheduler_gateway_port() const
+  {
+    return mempool_gateway_server_.port();
+  }
   // Advertised in the runtime manifest as the `indexer` endpoint.
   std::uint16_t read_port() const
   {
@@ -86,15 +93,11 @@ public:
   {
     return genesis_configuration_;
   }
-  GenesisConfigurationV2 const &genesis_configuration_v2() const
-  {
-    return genesis_configuration_v2_;
-  }
   bool recovered_existing_chain() const noexcept
   {
     return recovered_existing_chain_;
   }
-  std::string const &runtime_dir() const { return runtime_dir_.directory(); }
+  std::string const &runtime_dir() const { return dirs_.runtime.directory(); }
 
 private:
   // ONC RPC single-fragment record limit; x23 cannot frame a larger message.
@@ -133,16 +136,12 @@ private:
   LocalBootstrapConfig bootstrap_config_;
   const std::size_t ramdb_bytes_;
   GenesisConfiguration genesis_configuration_;
-  GenesisConfigurationV2 genesis_configuration_v2_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
   bool recovered_existing_chain_ = false;
 
-  HogDevnodeTmpDir runtime_dir_;
-  HogDevnodeTmpDir db_dir_;
-  // Declaration order matters: event_ctx_ borrows event_dir_.directory(),
+  // Declaration order matters: event_ctx_ borrows dirs_.event.directory(),
   // and the event RPC servers below borrow event_ctx_.
-  HogDevnodeTmpDir event_dir_;
-  HogDevnodeTmpDir indexer_dir_;
+  HogDevnodeDirectories dirs_;
   // Validate persistent HogDb before constructing runtime services. A corrupt
   // DbTip must not unwind partially constructed RPC/executor lifetimes.
   std::optional<HogDbDAO> opened_db_;
@@ -180,10 +179,12 @@ private:
   // [mempool_auth_server_->impl()], so it must be declared first and would
   // otherwise be destroyed last -- after the coordinator -- letting an
   // in-flight callback race the coordinator's destructor. Hold it behind a
-  // pointer so the failed-construction cleanup can drain it (via [~RpcServer],
-  // which waits for in-flight handlers) before the coordinator is torn down.
-  // See [prepare_for_failed_construction]. (The normal ~HogDevnodeNode path
-  // instead drains via the DB subscription manager in [ctx_.reset()].)
+  // pointer so failed-construction cleanup can disconnect the coordinator's
+  // callback and close this server before member destruction reaches the
+  // coordinator. See [prepare_for_failed_construction]. (The normal
+  // ~HogDevnodeNode path instead drains DB forwards via the subscription
+  // manager in [ctx_.reset()] before the coordinator disconnects the callback
+  // during member destruction.)
   std::unique_ptr<RpcServer<MempoolAuthRpc>> mempool_auth_server_ =
       std::make_unique<RpcServer<MempoolAuthRpc>>();
   RpcServer<MempoolDbRpc> sched_db_server_;
@@ -191,6 +192,7 @@ private:
       RpcServer<MempoolCoordinatorRpc>(
           sched_db_server_->impl(), mempool_auth_server_->impl(), network_hash_,
           MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
+  MempoolGatewayServer mempool_gateway_server_{mempool_coord_server_.impl()};
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 

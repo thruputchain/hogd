@@ -17,8 +17,8 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -26,12 +26,15 @@
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -44,8 +47,9 @@ class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
-                  std::span<uint32_t const> owned_auth_token_ids,
-                  uint32_t inherited_try_invoke_depth);
+                  AuthTokenIdSet &&owned_auth_token_ids,
+                  uint32_t inherited_try_invoke_depth,
+                  NetworkConfigParams const &params);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -75,7 +79,7 @@ public:
 
   // Mark the current frame as failed.
   // Used to clean up failed try_invoke frames.
-  SystemStatus<void>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
@@ -120,35 +124,37 @@ public:
     return try_invoke_frame_count_;
   }
 
-  bool depth_cap_reached() const
+  bool depth_cap_reached(NetworkConfigParams const &params) const
   {
-    // Reserve one savepoint slot for the root commit frame, which always
-    // pushes a subtransaction through the same HogDb path.
-    return total_try_invoke_depth_ >= kMaxSavepointDepth - 1;
+    // One slot is reserved for the root commit's subtransaction push; a depth
+    // of 0 leaves none for a TryInvoke.
+    return params.max_savepoint_depth == 0 ||
+           total_try_invoke_depth_ >= params.max_savepoint_depth - 1;
   }
 
   // returned pointer is invalidated by any call to add_item_view
   // Does not create a new view if it does not exist
-  auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
+  auto *get_item_view(this auto &self, FrameItemKey const &key)
   {
-    auto it = self.modified_items_.find(addrkey);
+    auto it = self.modified_items_.find(key);
     if (it != self.modified_items_.end()) {
       return &(it->second);
     }
     return static_cast<decltype(&(it->second))>(nullptr);
   }
   // returns pointer to the newly created view
-  ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
+  ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
-  SystemStatus<bool> try_acquire_frame_locks(
+  [[nodiscard]] x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
       std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
 
-  // Validation-mode counterpart for a successful TryInvoke. Bumps the
-  // intra-transaction depth counter without pushing a HogDb subtransaction
-  // (validation does not use per-frame subtransactions). Precondition:
-  // !depth_cap_reached().
-  void note_validation_try_invoke_success();
+  // Records a successful child TryInvoke against the depth cap. finish_frame
+  // calls this once a child's success is settled in any execution mode, so
+  // the cap counts the same frames whether the mode probed locks (proposal),
+  // replayed a bit (validation), or defaulted one (viewing). Precondition:
+  // !depth_cap_reached(params).
+  void note_try_invoke_success(NetworkConfigParams const &params);
 
   void
   collect_storage_deltas(x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
@@ -218,18 +224,17 @@ public:
 
   HashBuffers hash_buffers_;
 
-  void set_child_restore_auth_tokens(std::span<uint32_t const> token_ids)
+  // Ids stay in this frame's owned set until the child commits successfully.
+  void
+  set_child_forwarded_auth_tokens(std::vector<uint32_t> &&token_ids) noexcept
   {
-    assert(most_recent_child_frame_forwarded_auth_tokens_.empty());
-    most_recent_child_frame_forwarded_auth_tokens_.reserve(token_ids.size());
-    for (auto token_id : token_ids) {
-      most_recent_child_frame_forwarded_auth_tokens_.push_back(token_id);
-    }
+    assert(child_forwarded_auth_tokens_.empty());
+    child_forwarded_auth_tokens_ = std::move(token_ids);
   }
 
   std::span<const uint32_t> get_child_forwarded_auth_tokens() const
   {
-    return most_recent_child_frame_forwarded_auth_tokens_;
+    return child_forwarded_auth_tokens_;
   }
 
   void
@@ -258,16 +263,18 @@ private:
   uint32_t total_try_invoke_depth_;
 
   // elements modified during the current call frame (and child frames)
-  std::unordered_map<AddressAndKey, ItemView> modified_items_;
+  // Keyed by the flat, pre-hashed form: a first touch probes every open frame
+  // with one key, and the hash is computed once for all of them.
+  std::unordered_map<FrameItemKey, ItemView, FrameItemKeyHash> modified_items_;
 
   // newly deployed contracts during the current call frame (and child frames)
   std::unordered_map<ContractAddress, DeployedContractHash, SipHash24Hasher>
       new_contract_deployments_;
 
-  std::unordered_set<uint32_t> owned_auth_token_ids_;
-  std::vector<uint32_t>
-      most_recent_child_frame_forwarded_auth_tokens_; // refunded if the frame
-                                                      // reverts
+  AuthTokenIdSet owned_auth_token_ids_;
+  // Forwarded to the running child; leaves owned_auth_token_ids_ only when
+  // that child commits successfully.
+  std::vector<uint32_t> child_forwarded_auth_tokens_;
 };
 
 static_assert(std::is_nothrow_move_constructible_v<InvocationFrame>);
@@ -275,10 +282,13 @@ static_assert(std::is_nothrow_move_constructible_v<InvocationFrame>);
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
+  // `config_params` are the pinned tip's; one reference serves every frame.
   InvocationFrameStack(
       std::function<void(InvocationFrame &&)> last_frame_action,
-      PerTransactionDatabaseProxy &db_proxy)
-    : last_frame_action_(std::move(last_frame_action)), db_proxy_(db_proxy)
+      PerTransactionDatabaseProxy &db_proxy,
+      NetworkConfigParams const &config_params)
+    : last_frame_action_(std::move(last_frame_action)), db_proxy_(db_proxy),
+      config_params_(config_params)
   {}
 
   ContractAddress const &get_current_address() const
@@ -303,18 +313,12 @@ public:
     return frame_stack_.back().event_count();
   }
 
-  // It MUST be the case that the owned_auth_token_ids are owned by the parent
-  // frame. Caller is responsible for checking as much.
-  //
-  // Admitting a child frame runs throwing STL allocations. On allocation
-  // failure the call is a clean no-op — any parent state touched is rolled
-  // back — and an Unrecoverable SystemError is returned, so the noexcept caller
-  // (SystemCallHandler::start_frame) never lets the exception terminate the
-  // executor (#3058).
+  // The tokens MUST be owned by the parent frame; the caller checks. Consumes
+  // the list; the parent's owned set is untouched until the child commits.
+  // Admission failure is a clean no-op that returns Unrecoverable (#3058).
   [[nodiscard]] SystemStatus<void>
   start_frame(ContractAddress const &address, Calldata &&calldata,
-              InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids);
+              InvokeFlagSet flags, ValidatedAuthTokens &&owned_auth_tokens);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode
@@ -325,7 +329,7 @@ public:
   // is still popped and an Unrecoverable SystemError is returned, so the
   // noexcept caller (SystemCallHandler::finish_frame) is never terminated
   // (#3378).
-  SystemStatus<std::pair<InvokeResult, bool>>
+  [[nodiscard]] x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data,
                DbConflictResult *try_invoke_conflict_out = nullptr);
@@ -418,6 +422,17 @@ public:
   // The returned pointer is never null
   ItemView *get_item_view(StorageKeyContractData const &data_key);
   ItemView *get_item_view(AddressAndKey const &addrkey);
+  ItemView *get_item_view(FrameItemKey const &key);
+
+  // The frame key for `data_key` under the active frame's address, laid out
+  // and hashed once. A syscall that may reach the snapshot cache builds this,
+  // probes the frames with it, and hands the same key to UnmodifiedItem::load,
+  // so the key is hashed once per syscall rather than once per structure.
+  FrameItemKey frame_item_key(StorageKeyContractData const &data_key) const
+  {
+    assert(!frame_stack_.empty());
+    return FrameItemKey::contract_data(frame_stack_.back().address(), data_key);
+  }
 
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {
@@ -427,7 +442,8 @@ public:
   }
 
   AuthToken const *lookup_auth_token(uint32_t token_id) const;
-  SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
+  [[nodiscard]] SyscallStatus<uint32_t>
+  mint_auth_token(AuthToken const &auth_token);
 
   struct ConsumeAuthTokenResult {
     AuthTokenPayload const *payload;
@@ -435,9 +451,11 @@ public:
     uint32_t new_token_id_start;
     uint32_t new_token_id_count;
   };
-  SyscallStatus<ConsumeAuthTokenResult> consume_auth_token(uint32_t token_id);
+  [[nodiscard]] SyscallStatus<ConsumeAuthTokenResult>
+  consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
 
   size_t size() const { return frame_stack_.size(); }
 
@@ -445,6 +463,7 @@ private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;
+  NetworkConfigParams const &config_params_;
   AuthTokenRegistry auth_token_registry_;
 };
 

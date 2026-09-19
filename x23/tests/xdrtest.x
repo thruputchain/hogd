@@ -41,6 +41,20 @@ struct contains_test_recursive {
   test_recursive t;
 };
 
+// Non-recursive transport envelopes must not change the payload's depth bound.
+struct recursive_envelope {
+  int tag;
+  contains_test_recursive payload;
+  int trailer;
+};
+
+union recursive_union_envelope switch (bool present) {
+case TRUE:
+  recursive_envelope payload;
+case FALSE:
+  void;
+};
+
 // Mutually recursive structs (inline struct in union with forward ref)
 %struct MutualFrame;
 
@@ -175,6 +189,17 @@ program blank_rpc
   = 1;
 }
 = 3123124;
+
+program CompatProbe {
+  version CompatProbe1 {
+    void ping(void) = 0;
+  } = 1;
+
+  version CompatProbe2 {
+    void ping(void) = 0;
+    void added(int) = 1;
+  } = 2;
+} = 0x7ee7aafe;
 
 struct MultilineComment {
   hyper value;

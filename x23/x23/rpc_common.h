@@ -130,20 +130,43 @@ template<is_xdr_serializable... X>
 Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
+  Buf ret = serialize(std::uint32_t{}, msg, x...);
   // The record marker's low 31 bits carry the payload length, so a longer
   // payload would wrap the marker and desynchronize the stream for the
-  // receiver.  Reject on the computed size before serializing, so an
-  // oversized payload is never materialized.  This must hold at runtime in
-  // every build: the x23assert it replaces compiled out under NDEBUG,
-  // letting release senders emit wrapped markers for oversized payloads.
-  size_t payload_size = xdr_size(msg) + (size_t{0} + ... + xdr_size(x));
-  if (payload_size > kMaxRecordPayloadSize) [[unlikely]]
+  // receiver.  This backstop must hold at runtime in every build: the
+  // x23assert it replaces compiled out under NDEBUG, letting release senders
+  // emit wrapped markers for oversized payloads (#2075).  Send sites cap
+  // records at the negotiated max_message_size (<= kMaxRecordPayloadSize)
+  // before this is reached, so it fires only if a future path forgets to; the
+  // check is a single comparison on the already-computed buffer size, not a
+  // second size traversal.
+  if (ret.size() - 4 > kMaxRecordPayloadSize) [[unlikely]]
     throw XdrBadInput("serialized record payload {} exceeds ONC RPC "
                       "single-fragment record limit {}",
-                      payload_size, kMaxRecordPayloadSize);
-  Buf ret = serialize(std::uint32_t{}, msg, x...);
+                      ret.size() - 4, kMaxRecordPayloadSize);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
+}
+
+// Downgrade a framed server reply that exceeds the negotiated per-message cap
+// to a SYSTEM_ERR reply carrying the same xid.  A server must never frame a
+// reply larger than the peer will accept: the peer's reader fails the whole
+// connection on an over-cap record, and a payload past kMaxRecordPayloadSize
+// wraps its 31-bit length marker and desynchronizes the stream.  Capping on
+// the send side turns an oversized handler result into a clean per-call error
+// instead of a dropped connection, mirroring the client send_call guard.  The
+// xid is the first wire field of a framed reply (a 4-byte record marker then
+// the rpc_msg, whose leading field is the xid), so callers need not thread the
+// originating request through.  `reply` must be make_record output (>= 8
+// bytes); a reply within the cap is returned untouched.
+inline Buf
+cap_server_reply(Buf reply, size_t max_message_size)
+{
+  if (reply.size() - 4 <= max_message_size) [[likely]]
+    return reply;
+  rpc_msg err{.xid = getbe<std::uint32_t>(reply.data() + 4)};
+  msg_set_reply_stat(&err, accept_stat::SYSTEM_ERR);
+  return make_record(err);
 }
 
 inline bool
@@ -359,6 +382,8 @@ struct RpcCsvLogger {
 
   void log_client_fail(std::uint32_t xid, std::string_view text)
   {
+    if (logfd_ < 0)
+      return;
     auto logmsg =
         std::format("{:.9f},CLIENT,REPLY,{}{}\n", timestamp(), xid, srcdest_);
     [[maybe_unused]] size_t r = write(logfd_, logmsg.data(), logmsg.size());

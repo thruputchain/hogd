@@ -14,9 +14,13 @@ concurrency:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  # Published crates and pinned submodules retain the legacy registry identity.
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
-  CARGO_REGISTRIES_GROUNDHOG_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
-  CARGO_REGISTRIES_GROUNDHOG_SOURCE: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_INDEX: sparse+https://crates.thruput.network/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_SOURCE: sparse+https://crates.thruput.network/api/v1/crates/
   CARGO_BUILD_JOBS: "6"
 
 jobs:
@@ -63,6 +67,25 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cache/cargo-install
+
+      - name: Configure Build Caches
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume, so every run started cold (933 of 1010 compiles
+          # missed). Point it at the cached path, as the Linux workflows do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+
+          # cargo install writes to ~/.cargo/bin, which the cache volume does not
+          # cover, so groundhog-cli and groundhog-rv32-lower were compiled from
+          # source on every run. Install into a cached root instead. ~/.cargo/bin
+          # itself is left alone because rustup's proxies live there.
+          echo "CARGO_INSTALL_ROOT=$HOME/.cache/cargo-install" >> "$GITHUB_ENV"
+          echo "$HOME/.cache/cargo-install/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.cache/cargo-install/bin"
+          echo "Cached cargo-install binaries:"
+          ls -l "$HOME/.cache/cargo-install/bin"
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -95,9 +118,6 @@ jobs:
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
-      - name: Cargo Fetch
-        run: ./scripts/fetch.sh
-      
       - name: Use CommandLineTools SDK
         run: |
           # Homebrew LLVM is incompatible with some Xcode SDK versions (e.g. 26.1.1).
@@ -107,11 +127,32 @@ jobs:
             echo "Switched to CommandLineTools SDK: $(xcrun --show-sdk-path)"
           fi
 
+      # macos-setup.sh ends by running scripts/fetch.sh (cargo fetch plus the
+      # groundhog tool installs), so there is no separate Cargo Fetch step here.
       - name: Setup Environment
-        run: ./scripts/macos-setup.sh
+        run: |
+          ./scripts/macos-setup.sh
+          # ccache is not in the runner image; macos-setup.sh installs it via
+          # Homebrew, so this is the first point it can run. Zero the persisted
+          # counters so "Show ccache stats" reports this run only.
+          ccache -z
 
       - name: Build Clang Debug
-        run: ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror"
+        run: |
+          ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror" \
+            -x "-DENABLE_TEST_FFI=ON"
+
+      # test_ffi is built on Linux by test_bindings.yml, but nothing built it
+      # on macOS outside release_test_ffi.yml, so linker differences reached us
+      # only at release time -- a header-inline thread_local with dynamic
+      # initialization links on Linux and is a duplicate symbol under macOS ld.
+      # Link the targets here; running them stays with the Linux job, since
+      # what differs across platforms is the link, not the behavior.
+      - name: Link test_ffi targets
+        run: |
+          cmake --build build/clang --parallel "$(sysctl -n hw.ncpu)" \
+            --target test_ffi test_ffi_test test_ffi_mock_syscall_test \
+            test_ffi_first_call_test
 
       - name: Pre-build Rust Test Binaries
         run: |
@@ -138,7 +179,13 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            echo "ccache is not installed (Setup Environment did not complete)"
+            exit 0
+          fi
+          ccache -p | grep -E 'cache_dir|max_size|base_dir' || true
+          ccache -s
 
       - name: Print Log Download Instructions
         if: always()

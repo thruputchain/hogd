@@ -26,6 +26,7 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -45,6 +46,7 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -82,41 +84,41 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_storage;
     fns_storage.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
-          auto [res, _gas] = syscall_BytestringSet_inner(
+          auto [res, _gas] = co_await syscall_BytestringSet_inner(
               ctx.handler(), key, std::as_bytes(std::span(calldata)),
               std::to_underlying(StorageDeltaFlags::None));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE()
                 << "ReadWriteBytestring: Failed to set bytestring in method 0";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns_storage.emplace(
-        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
-          auto res = ctx.handler().get_bytestring(key);
+          auto res = co_await ctx.handler().get_bytestring(key);
           if (!res.has_value()) {
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
           }
-          if (!res.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!res.value().result.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
+          auto const *bs = res.value().result.value();
 
           ReturnBuffer out;
-          out.resize(res.value().value()->size());
+          out.resize(bs->size());
           if (!out.empty()) {
-            std::memcpy(out.data(), res.value().value()->data(),
-                        res.value().value()->size());
+            std::memcpy(out.data(), bs->data(), bs->size());
           }
 
           ctx.handler().set_return_buffer(std::move(out), false);
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_storage =
         std::make_unique<NativeContract>(std::move(fns_storage));
@@ -125,63 +127,61 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
     fns_orch.emplace(
         0,
         [addr_storage](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto calldata = ctx.handler().get_calldata();
 
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(addr_storage,
-                                                   ctx.handler().get_calldata(),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                addr_storage, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
 
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(addr_storage,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                addr_storage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
 
           if (!r1.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto returned_buffer = ctx.handler().get_return_buffer();
           if (!returned_buffer.has_value() ||
               !returned_buffer.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           auto const &returned_buffer_data = returned_buffer.value().value();
 
           if (returned_buffer_data->size() != calldata.size()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           if (!returned_buffer_data->empty()) {
             if (std::memcmp(returned_buffer_data->data(), calldata.data(),
                             calldata.size()) != 0) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_orch));
@@ -214,10 +214,10 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
       }};
   auto handler = make_new_system_call_handler(signed_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_TRUE(r == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -236,10 +236,10 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(signed_tx2, *context);
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
 
-  auto r2 = handler2.try_commit_transaction();
+  auto r2 = handler2.try_commit_transaction()();
   ASSERT_TRUE(r2 == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler2.emit_events(ExecResult::ExecResultOK,
@@ -256,19 +256,19 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_writer;
     fns_writer.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
-          auto [res, _gas] = syscall_BytestringSet_inner(
+          auto [res, _gas] = co_await syscall_BytestringSet_inner(
               ctx.handler(), key, std::as_bytes(std::span{"hello"}),
               std::to_underlying(StorageDeltaFlags::None));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "TryInvokeGoodWorkflow: Failed to set "
                              "bytestring on writer";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_writer =
         std::make_unique<NativeContract>(std::move(fns_writer));
@@ -276,29 +276,28 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_caller;
     fns_caller.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto r0 = [&]() {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                   ctx.handler().get_calldata(),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
 
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_caller =
         std::make_unique<NativeContract>(std::move(fns_caller));
@@ -331,10 +330,10 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_TRUE(r == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -364,147 +363,139 @@ std::unique_ptr<RuntimeContext>
 make_try_invoke_handle_errors_context()
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
-  fns_w.emplace(0,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto key =
-                      NativeContractTestFramework::make_storage_key("test");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
-                                     "bytestring in method 0";
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
-  fns_w.emplace(1,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto key =
-                      NativeContractTestFramework::make_storage_key("test");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span{"world"}),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
-                                     "bytestring in method 1";
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
+  fns_w.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = NativeContractTestFramework::make_storage_key("test");
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
+            ctx.handler(), key, std::as_bytes(std::span{"hello"}),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
+                           "bytestring in method 0";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  fns_w.emplace(
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = NativeContractTestFramework::make_storage_key("test");
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
+            ctx.handler(), key, std::as_bytes(std::span{"world"}),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
+                           "bytestring in method 1";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract_writer =
       std::make_unique<NativeContract>(std::move(fns_w));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r0 = [&]() {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kTryInvokeHandleErrorsWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kTryInvokeHandleErrorsWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r0.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kTryInvokeHandleErrorsWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kTryInvokeHandleErrorsWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_o.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r0 = [&]() {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kTryInvokeHandleErrorsWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kTryInvokeHandleErrorsWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r0.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
   auto native_contract_orchestrator =
       std::make_unique<NativeContract>(std::move(fns_o));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_f;
   fns_f.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r0 = [&]() {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kTryInvokeHandleErrorsWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kTryInvokeHandleErrorsWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r0.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
   auto native_contract_fault =
       std::make_unique<NativeContract>(std::move(fns_f));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
   fns_b.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r0 = [&]() {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kTryInvokeHandleErrorsFault,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kTryInvokeHandleErrorsFault, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r0.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kTryInvokeHandleErrorsWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kTryInvokeHandleErrorsWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_bridge =
       std::make_unique<NativeContract>(std::move(fns_b));
@@ -551,9 +542,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -600,9 +591,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.result_); // Should return error
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   // transaction should not commit
   ASSERT_TRUE(commit_res == ExecResult::ExecResultTxDeterministicError);
   advance_block();
@@ -646,9 +637,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -685,25 +676,25 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_callee;
     fns_callee.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           if (calldata.size() != 1) {
             ADD_FAILURE() << "calldata should have size 1";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto key = make_storage_key("test");
           // Interpret calldata bytes as int8_t for set_value and add_value
           auto add_value = static_cast<int8_t>(calldata[0]);
 
           auto system_res =
-              ctx.handler().set_nnint(key, std::nullopt, add_value,
-                                      std::to_underlying(
-                                          StorageDeltaFlags::None));
+              co_await ctx.handler().set_nnint(key, std::nullopt, add_value,
+                                               std::to_underlying(
+                                                   StorageDeltaFlags::None));
 
           if (!system_res.has_value()) {
             ADD_FAILURE() << "set_nnint should have succeeded";
             // System-level error during async operation
-            return system_res.error().to_invoke_error();
+            co_return system_res.error().to_invoke_error();
           }
 
           auto const &syscall_res = system_res.value();
@@ -711,10 +702,10 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
             ADD_FAILURE() << "set_nnint should have succeeded";
             // Syscall itself reported an error (e.g., invalid arguments
             // for set_nnint)
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {}; // Success
+          co_return InvokeStatus<void>{}; // Success
         });
     auto native_contract_callee =
         std::make_unique<NativeContract>(std::move(fns_callee));
@@ -722,24 +713,25 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_caller;
     fns_caller.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Invoke callee method 0 in try_invoke frame with arguments [-5]
           Calldata args = {static_cast<uint8_t>(-5)};
           CopyableInvokeOutputs r0_outputs{};
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressCallee, args,
-                                                   std::span<uint32_t>{},
-                                                   inputs, r0_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressCallee, args, std::span<uint32_t>{}, inputs,
+                r0_outputs);
           }();
 
           if (!r0.has_value()) {
             ADD_FAILURE() << "try_invoke should have failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // The child frame ran, so the syscall returns
@@ -748,11 +740,11 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
           if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
               r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // Return a deterministic error to make the transaction fail
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
     auto native_contract_caller =
         std::make_unique<NativeContract>(std::move(fns_caller));
@@ -783,12 +775,12 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   // The transaction should fail because the caller returns a deterministic
   // error (after observing that the try_invoke of the callee did not succeed).
   ASSERT_FALSE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   // The transaction should not commit because it failed
   ASSERT_TRUE(commit_res == ExecResult::ExecResultTxDeterministicError);
 
@@ -836,84 +828,84 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // try_invoke writer with "foo" (exclusive lock), then return error.
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
-    fns_w.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto const &calldata = ctx.handler().get_calldata();
-                    auto key = make_storage_key("test");
-                    auto [res, _gas] = syscall_BytestringSet_inner(
-                        ctx.handler(), key, std::as_bytes(std::span(calldata)),
-                        std::to_underlying(StorageDeltaFlags::None));
-                    if (!res.has_value() ||
-                        res.value() !=
-                            SyscallErrorCode::kSyscallErrorCodeNone) {
-                      ADD_FAILURE() << "Failed to set bytestring in method 0";
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    return {};
-                  });
+    fns_w.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("test");
+          auto [res, _gas] = co_await syscall_BytestringSet_inner(
+              ctx.handler(), key, std::as_bytes(std::span(calldata)),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!res.has_value() ||
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to set bytestring in method 0";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
     auto native_contract_writer =
         std::make_unique<NativeContract>(std::move(fns_w));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
     fns_o.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Try invoke writer method 0 with "hello"
           Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args_hello,
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, args_hello, std::span<uint32_t>{}, inputs,
+                CopyableInvokeOutputs{});
           }();
           if (!r0.has_value() ||
               r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // Try invoke writer method 0 with "world"
           Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args_world,
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, args_world, std::span<uint32_t>{}, inputs,
+                CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns_o.emplace(
-        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Try invoke writer method 0 with "foo" (should fail due to
           // exclusive lock)
           Calldata args_foo = {'f', 'o', 'o'};
           CopyableInvokeOutputs r0_outputs{};
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args_foo,
-                                                   std::span<uint32_t>{},
-                                                   inputs, r0_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, args_foo, std::span<uint32_t>{}, inputs,
+                r0_outputs);
           }();
           if (!r0.has_value()) {
             ADD_FAILURE() << "should not have system error";
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           // The child frame ran (lock acquisition failed and was
@@ -924,11 +916,11 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
           if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
               r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // Return a deterministic error to make the transaction fail
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_o));
@@ -961,7 +953,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet (keeps the exclusive lock)
 
@@ -977,7 +969,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 }
 
@@ -1011,84 +1003,84 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   // try_invoke writer with "foo" (exclusive lock), then return error.
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
-    fns_w.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto const &calldata = ctx.handler().get_calldata();
-                    auto key = make_storage_key("test");
-                    auto [res, _gas] = syscall_BytestringSet_inner(
-                        ctx.handler(), key, std::as_bytes(std::span(calldata)),
-                        std::to_underlying(StorageDeltaFlags::None));
-                    if (!res.has_value() ||
-                        res.value() !=
-                            SyscallErrorCode::kSyscallErrorCodeNone) {
-                      ADD_FAILURE() << "Failed to set bytestring in method 0";
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    return {};
-                  });
+    fns_w.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("test");
+          auto [res, _gas] = co_await syscall_BytestringSet_inner(
+              ctx.handler(), key, std::as_bytes(std::span(calldata)),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!res.has_value() ||
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to set bytestring in method 0";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
     auto native_contract_writer =
         std::make_unique<NativeContract>(std::move(fns_w));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
     fns_o.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Try invoke writer method 0 with "hello"
           Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args_hello,
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, args_hello, std::span<uint32_t>{}, inputs,
+                CopyableInvokeOutputs{});
           }();
           if (!r0.has_value() ||
               r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // Try invoke writer method 0 with "world"
           Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args_world,
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, args_world, std::span<uint32_t>{}, inputs,
+                CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns_o.emplace(
-        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Try invoke writer method 0 with "foo" (should fail due to
           // exclusive lock)
           Calldata args_foo = {'f', 'o', 'o'};
           CopyableInvokeOutputs r0_outputs{};
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args_foo,
-                                                   std::span<uint32_t>{},
-                                                   inputs, r0_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, args_foo, std::span<uint32_t>{}, inputs,
+                r0_outputs);
           }();
           if (!r0.has_value()) {
             ADD_FAILURE() << "should not have system error";
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           // The child frame ran (lock acquisition failed and was
@@ -1099,11 +1091,11 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
           if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
               r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "try_invoke should have failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // Return a deterministic error to make the transaction fail
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_o));
@@ -1136,7 +1128,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet (keeps the exclusive lock)
 
@@ -1153,10 +1145,10 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
   handler2.enable_tracing();
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 
-  auto commit_res2 = handler2.try_commit_transaction();
+  auto commit_res2 = handler2.try_commit_transaction()();
   // transaction should not commit
   ASSERT_TRUE(commit_res2 == ExecResult::ExecResultTxDeterministicError);
 
@@ -1200,7 +1192,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   }
 
   // Now commit the first transaction (should succeed)
-  auto commit_res1 = handler1.try_commit_transaction();
+  auto commit_res1 = handler1.try_commit_transaction()();
   ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
 
   advance_block();
@@ -1247,58 +1239,59 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   // writer with [1], expect success.
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
-    fns_w.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto const &calldata = ctx.handler().get_calldata();
-                    if (calldata.size() != 1) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    auto key = make_storage_key("test");
-                    // Interpret calldata bytes as int8_t for add_value
-                    auto add_value = static_cast<int8_t>(calldata[0]);
+    fns_w.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          if (calldata.size() != 1) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto key = make_storage_key("test");
+          // Interpret calldata bytes as int8_t for add_value
+          auto add_value = static_cast<int8_t>(calldata[0]);
 
-                    auto system_res =
-                        ctx.handler().set_nnint(key, std::nullopt, add_value,
-                                                std::to_underlying(
-                                                    StorageDeltaFlags::None));
+          auto system_res =
+              co_await ctx.handler().set_nnint(key, std::nullopt, add_value,
+                                               std::to_underlying(
+                                                   StorageDeltaFlags::None));
 
-                    if (!system_res.has_value()) {
-                      // System-level error during async operation
-                      return system_res.error().to_invoke_error();
-                    }
+          if (!system_res.has_value()) {
+            // System-level error during async operation
+            co_return system_res.error().to_invoke_error();
+          }
 
-                    auto const &syscall_res = system_res.value();
-                    if (!syscall_res.has_value()) {
-                      // Syscall itself reported an error (e.g., invalid
-                      // arguments for set_nnint)
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
+          auto const &syscall_res = system_res.value();
+          if (!syscall_res.has_value()) {
+            // Syscall itself reported an error (e.g., invalid
+            // arguments for set_nnint)
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                    return {}; // Success
-                  });
+          co_return InvokeStatus<void>{}; // Success
+        });
     auto native_contract_writer =
         std::make_unique<NativeContract>(std::move(fns_w));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
     fns_o.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Invoke writer method 0 in try_invoke frame with arguments
           // [-5]
           Calldata args = {static_cast<uint8_t>(-5)};
           CopyableInvokeOutputs r0_outputs{};
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter, args,
-                                                   std::span<uint32_t>{},
-                                                   inputs, r0_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, args, std::span<uint32_t>{}, inputs,
+                r0_outputs);
           }();
 
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           // The child frame ran, so the syscall returns
@@ -1307,38 +1300,39 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
           // frame_status != Return.
           if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
               r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           // Return a deterministic error to make the transaction fail
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
-    fns_o.emplace(1,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    // Invoke writer method 0 with arguments [1]
-                    Calldata args = {1};
-                    auto r0 = [&]() {
-                      CopyableInvokeInputs inputs{
-                          .entrypoint_id = 0,
-                          .gas_limit = UINT64_MAX,
-                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
-                      };
-                      return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressWriter, args, std::span<uint32_t>{}, inputs,
-                          CopyableInvokeOutputs{});
-                    }();
+    fns_o.emplace(
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          // Invoke writer method 0 with arguments [1]
+          Calldata args = {1};
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 0,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressWriter, args, std::span<uint32_t>{}, inputs,
+                CopyableInvokeOutputs{});
+          }();
 
-                    if (!r0.has_value()) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
+          if (!r0.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                    // Check that the invocation succeeds
-                    if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
+          // Check that the invocation succeeds
+          if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                    return {};
-                  });
+          co_return InvokeStatus<void>{};
+        });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_o));
 
@@ -1370,7 +1364,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet
 
@@ -1385,15 +1379,15 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 
-  auto commit_res2 = handler2.try_commit_transaction();
+  auto commit_res2 = handler2.try_commit_transaction()();
   // Transaction should not commit because handler2 returned a failure
   ASSERT_EQ(commit_res2, ExecResult::ExecResultTxDeterministicError);
 
   // Now commit the first transaction (should succeed)
-  auto commit_res1 = handler1.try_commit_transaction();
+  auto commit_res1 = handler1.try_commit_transaction()();
   ASSERT_EQ(commit_res1, ExecResult::ExecResultOK);
 
   advance_block();
@@ -1442,30 +1436,30 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     fns_o.emplace(
         0,
         [writer_addr](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           if (calldata.size() != 2) { // Expecting two booleans
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           bool expect_first_succeeds = static_cast<bool>(calldata[0]);
           bool expect_second_succeeds = static_cast<bool>(calldata[1]);
 
           Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
           CopyableInvokeOutputs r0_outputs{};
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(writer_addr,
-                                                   args_first_invoke,
-                                                   std::span<uint32_t>{},
-                                                   inputs, r0_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                writer_addr, args_first_invoke, std::span<uint32_t>{}, inputs,
+                r0_outputs);
           }();
 
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran whenever the syscall returns kSyscallErrorCodeNone;
           // it committed iff frame_status == Return.
@@ -1473,25 +1467,25 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
               (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
                r0_outputs.frame_status == InvocationFrameStatusCode::Return);
           if (first_succeeded != expect_first_succeeds) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           Calldata args_second_invoke = {5, 10};
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(writer_addr,
-                                                   args_second_invoke,
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                writer_addr, args_second_invoke, std::span<uint32_t>{}, inputs,
+                r1_outputs);
           }();
 
           if (!r1.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran whenever the syscall returns kSyscallErrorCodeNone;
           // it committed iff frame_status == Return.
@@ -1499,36 +1493,37 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
               (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
                r1_outputs.frame_status == InvocationFrameStatusCode::Return);
           if (second_succeeded != expect_second_succeeds) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns_o.emplace(
         1,
         [writer_addr](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           if (calldata.size() != 1) { // Expecting one boolean
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
 
           Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
           CopyableInvokeOutputs r0_outputs{};
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(writer_addr, args_invoke,
-                                                   std::span<uint32_t>{},
-                                                   inputs, r0_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                writer_addr, args_invoke, std::span<uint32_t>{}, inputs,
+                r0_outputs);
           }();
 
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // The child ran whenever the syscall returns kSyscallErrorCodeNone;
@@ -1537,46 +1532,46 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
               (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
                r0_outputs.frame_status == InvocationFrameStatusCode::Return);
           if (invoke_succeeded != expect_invoke_succeeds) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     return std::make_unique<NativeContract>(std::move(fns_o));
   };
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
-    fns_w.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto const &calldata = ctx.handler().get_calldata();
-                    if (calldata.size() != 2) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    auto key = make_storage_key("test");
-                    // Interpret calldata bytes as int8_t for set_value and
-                    // add_value
-                    auto set_value = static_cast<int8_t>(calldata[0]);
-                    auto add_value = static_cast<int8_t>(calldata[1]);
+    fns_w.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          if (calldata.size() != 2) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto key = make_storage_key("test");
+          // Interpret calldata bytes as int8_t for set_value and
+          // add_value
+          auto set_value = static_cast<int8_t>(calldata[0]);
+          auto add_value = static_cast<int8_t>(calldata[1]);
 
-                    auto system_res =
-                        ctx.handler().set_nnint(key, set_value, add_value,
-                                                std::to_underlying(
-                                                    StorageDeltaFlags::None));
+          auto system_res =
+              co_await ctx.handler().set_nnint(key, set_value, add_value,
+                                               std::to_underlying(
+                                                   StorageDeltaFlags::None));
 
-                    if (!system_res.has_value()) {
-                      // System-level error during async operation
-                      return system_res.error().to_invoke_error();
-                    }
+          if (!system_res.has_value()) {
+            // System-level error during async operation
+            co_return system_res.error().to_invoke_error();
+          }
 
-                    auto const &syscall_res = system_res.value();
-                    if (!syscall_res.has_value()) {
-                      // Syscall itself reported an error (e.g., invalid
-                      // arguments for set_nnint)
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
+          auto const &syscall_res = system_res.value();
+          if (!syscall_res.has_value()) {
+            // Syscall itself reported an error (e.g., invalid
+            // arguments for set_nnint)
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                    return {}; // Success
-                  });
+          co_return InvokeStatus<void>{}; // Success
+        });
     auto native_contract_writer =
         std::make_unique<NativeContract>(std::move(fns_w));
 
@@ -1619,7 +1614,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc1_handler =
       make_new_system_call_handler(tc1_handler_tx, *context);
   {
-    auto res = tc1_handler.root_invoke();
+    auto res = tc1_handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
   }
 
@@ -1639,16 +1634,16 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc1_handler2 =
       make_new_system_call_handler(tc1_handler2_tx, *context);
   {
-    auto res = tc1_handler2.root_invoke();
+    auto res = tc1_handler2.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc1_handler2.try_commit_transaction();
+    auto commit_res = tc1_handler2.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   }
 
   // TC1.3: Then commit the first transaction (releasing the exclusive lock to a
   // set_typeclass lock).
   {
-    auto commit_res = tc1_handler.try_commit_transaction();
+    auto commit_res = tc1_handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   }
 
@@ -1665,9 +1660,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc1_handler3 =
       make_new_system_call_handler(tc1_handler3_tx, *context);
   {
-    auto res = tc1_handler3.root_invoke();
+    auto res = tc1_handler3.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc1_handler3.try_commit_transaction();
+    auto commit_res = tc1_handler3.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc1_handler3.emit_events(ExecResult::ExecResultOK,
                                          ProposedTransaction{
@@ -1703,9 +1698,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc2_handler1 =
       make_new_system_call_handler(tc2_handler1_tx, *context);
   {
-    auto res = tc2_handler1.root_invoke();
+    auto res = tc2_handler1.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc2_handler1.try_commit_transaction();
+    auto commit_res = tc2_handler1.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc2_handler1.emit_events(ExecResult::ExecResultOK,
                                          ProposedTransaction{
@@ -1724,9 +1719,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc2_handler2 =
       make_new_system_call_handler(tc2_handler2_tx, *context);
   {
-    auto res = tc2_handler2.root_invoke();
+    auto res = tc2_handler2.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc2_handler2.try_commit_transaction();
+    auto commit_res = tc2_handler2.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc2_handler2.emit_events(ExecResult::ExecResultOK,
                                          ProposedTransaction{
@@ -1766,94 +1761,93 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   // (succeeds).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
   fns_w.emplace(
-      0, [str_abc](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0,
+      [str_abc](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
 
-        auto res = ctx.syscall<SyscallNo::kBytestringSet>(
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key0, std::as_bytes(std::span(str_abc)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring in "
                            "writer method 0";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_w.emplace(1,
-                [str_abc, str_def](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [str_abc, str_def](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
                   auto key0 = make_storage_key("test0");
                   auto key1 = make_storage_key("test1");
-                  auto res0 = ctx.syscall<SyscallNo::kBytestringSet>(
+                  auto res0 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
                       key0, std::as_bytes(std::span(str_abc)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res0.has_value() ||
                       res0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "StorageCostAccounting: Failed to set "
                                      "bytestring in writer method 1 (key0)";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  auto res1 = ctx.syscall<SyscallNo::kBytestringSet>(
+                  auto res1 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
                       key1, std::as_bytes(std::span(str_def)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res1.has_value() ||
                       res1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "StorageCostAccounting: Failed to set "
                                      "bytestring in writer method 1 (key1)";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   auto native_contract_writer =
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // First, try_invoke writer method 1 (should fail)
         CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r1_outputs);
         }();
         if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The child ran, so the syscall returns kSyscallErrorCodeNone; it
         // should have rolled back (not enough tokens for two writes), reported
         // via frame_status != Return.
         if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Then, try_invoke writer method 0 (should succeed)
         CopyableInvokeOutputs r0_outputs{};
-        auto r0 = [&]() {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r0_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r0_outputs);
         }();
         // The child should have run and committed, reported via
         // frame_status == Return.
         if (!r0.has_value() ||
             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r0_outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_orchestrator =
       std::make_unique<NativeContract>(std::move(fns_o));
@@ -1886,9 +1880,9 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1947,119 +1941,116 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   // Orchestrator: 0 — try_invoke writer 0, then 1, then 2 (third fails).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
   fns_w.emplace(0,
-                [str_abc](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [str_abc](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
                   auto key0 = make_storage_key("test0");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
+                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key0, std::as_bytes(std::span(str_abc)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
                                      "bytestring in writer method 0";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   fns_w.emplace(1,
-                [str_def](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [str_def](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
                   auto key1 = make_storage_key("test1");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
+                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key1, std::as_bytes(std::span(str_def)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
                                      "bytestring in writer method 1";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   fns_w.emplace(2,
-                [str_ghi](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [str_ghi](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
                   auto key2 = make_storage_key("test2");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
+                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key2, std::as_bytes(std::span(str_ghi)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
                                      "bytestring in writer method 2";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   auto native_contract_writer =
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0
         CopyableInvokeOutputs r0_outputs{};
-        auto r0 = [&]() {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r0_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r0_outputs);
         }();
         // The child should have run and committed, reported via
         // frame_status == Return.
         if (!r0.has_value() ||
             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r0_outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 1
         CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r1_outputs);
         }();
         // The child should have run and committed, reported via
         // frame_status == Return.
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 2 (should fail)
         CopyableInvokeOutputs r2_outputs{};
-        auto r2 = [&]() {
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 2,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r2_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r2_outputs);
         }();
         if (!r2.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The child ran, so the syscall returns kSyscallErrorCodeNone; it
         // should have rolled back (not enough tokens for third write),
         // reported via frame_status != Return.
         if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_orchestrator =
       std::make_unique<NativeContract>(std::move(fns_o));
@@ -2092,9 +2083,9 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2167,24 +2158,25 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   // Orchestrator: 0 — try_invoke writer 0, then 1, then 2 (third fails).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
   fns_w.emplace(
-      0, [str_short](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0,
+      [str_short](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key0, std::as_bytes(std::span(str_short)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeAccounting: Failed to set bytestring "
                            "in writer method 0";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_w.emplace(1,
-                [str_medium](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [str_medium](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
                   auto key0 = make_storage_key("test0");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
+                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key0, std::as_bytes(std::span(str_medium)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
@@ -2192,93 +2184,91 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                     ADD_FAILURE()
                         << "CostChangeAccounting: Failed to set bytestring "
                            "in writer method 1";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   fns_w.emplace(
-      2, [str_long](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      2,
+      [str_long](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key0, std::as_bytes(std::span(str_long)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeAccounting: Failed to set bytestring "
                            "in writer method 2";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_writer =
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0 (short)
         CopyableInvokeOutputs r0_outputs{};
-        auto r0 = [&]() {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r0_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r0_outputs);
         }();
         // The child should have run and committed, reported via
         // frame_status == Return.
         if (!r0.has_value() ||
             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r0_outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 1 (medium)
         CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r1_outputs);
         }();
         // The child should have run and committed, reported via
         // frame_status == Return.
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 2 (long) -- should fail
         CopyableInvokeOutputs r2_outputs{};
-        auto r2 = [&]() {
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 2,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r2_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r2_outputs);
         }();
         if (!r2.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The child ran, so the syscall returns kSyscallErrorCodeNone; it
         // should have rolled back (expects an error), reported via
         // frame_status != Return.
         if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_orchestrator =
       std::make_unique<NativeContract>(std::move(fns_o));
@@ -2311,9 +2301,9 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2370,71 +2360,71 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   // (short).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
   fns_w.emplace(
-      0, [str_long](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0,
+      [str_long](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key0, std::as_bytes(std::span(str_long)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
                            "bytestring in writer method 0";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_w.emplace(
-      1, [str_short](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      1,
+      [str_short](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key0, std::as_bytes(std::span(str_short)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
                            "bytestring in writer method 1";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_writer =
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0 (long)
-        auto r0 = [&]() {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r0.has_value() ||
             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Try invoke writer method 1 (short)
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_orchestrator =
       std::make_unique<NativeContract>(std::move(fns_o));
@@ -2467,9 +2457,9 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2534,112 +2524,111 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   // kAddressTryInvokeThenError:0 (expects failure).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
   fns_w.emplace(
-      0, [str_long](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0,
+      [str_long](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto res = ctx.syscall<SyscallNo::kBytestringSet>(
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key0, std::as_bytes(std::span(str_long)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
                            "bytestring in writer method 0";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_w.emplace(
-      1, [str_short](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      1,
+      [str_short](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto res = ctx.syscall<SyscallNo::kBytestringSet>(
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key0, std::as_bytes(std::span(str_short)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
                            "bytestring in writer method 1";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_writer =
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_tie;
   fns_tie.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 1 (short write)
         CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r1_outputs);
         }();
         // The child should have run and committed, reported via
         // frame_status == Return.
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // Now, return an error. This will cause this frame's
+        // Now, co_return an error. This will cause this frame's
         // effects to be rolled back.
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
   auto native_contract_try_invoke_then_error =
       std::make_unique<NativeContract>(std::move(fns_tie));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0 (long write)
         CopyableInvokeOutputs r0_outputs{};
-        auto r0 = [&]() {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r0_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r0_outputs);
         }();
         // The child should have run and committed, reported via
         // frame_status == Return.
         if (!r0.has_value() ||
             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r0_outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Regular invoke on intermediate contract (old method 2)
         CopyableInvokeOutputs r2_outputs{};
-        auto r2 = [&]() {
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressTryInvokeThenError,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r2_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressTryInvokeThenError, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r2_outputs);
         }();
         if (!r2.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The child ran, so the syscall returns kSyscallErrorCodeNone; we
         // expect the intermediate to have failed (it returns a deterministic
         // error), reported via frame_status != Return.
         if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_orchestrator =
       std::make_unique<NativeContract>(std::move(fns_o));
@@ -2677,9 +2666,9 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2762,44 +2751,44 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   fns_sender.emplace(
       0,
       [token_contract_addr, receiver_addr, write_cost, replay_reserve](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto native_token_client =
             ContractTraitClient<itc_erc20::ERC20>(token_contract_addr);
 
         uint128_t amount = write_cost;
 
-        auto r_transfer =
-            native_token_client.invoke_opt<u8"transfer">(ctx, receiver_addr,
-                                                         make_amount(amount));
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, receiver_addr, make_amount(amount));
 
         auto transfer_result = check_result(r_transfer);
         if (!transfer_result.is_ok()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Invoke receiver contract to use the tokens
-        auto r_receive = [&]() {
+        auto r_receive =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(receiver_addr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              receiver_addr, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         [[maybe_unused]] auto g_receive = GasAmount{0};
 
         if (!r_receive.has_value() ||
             r_receive.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r_balance = native_token_client.invoke_opt<u8"get_balance">(ctx);
+        auto r_balance =
+            co_await native_token_client.invoke_opt<u8"get_balance">(ctx);
         auto balance_result = check_result(r_balance);
         if (!balance_result.is_ok()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto res = balance_result.ok();
@@ -2807,10 +2796,10 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
             uint128_t{std::get<0>(res)} << 64 | uint128_t{std::get<1>(res)};
 
         if (balance_unsigned_int != replay_reserve) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto sender_contract =
       std::make_unique<NativeContract>(std::move(fns_sender));
@@ -2819,9 +2808,10 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       fns_receiver;
   fns_receiver.emplace(
-      0, [str_hello](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0,
+      [str_hello](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("test");
-        auto res = ctx.syscall<SyscallNo::kBytestringSet>(
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key, std::as_bytes(std::span(str_hello)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
@@ -2829,9 +2819,9 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
           ADD_FAILURE()
               << "TransferAndUseStorageWithinTransaction: Failed to set "
                  "bytestring in receiver contract method 0";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto receiver_contract =
       std::make_unique<NativeContract>(std::move(fns_receiver));
@@ -2878,10 +2868,10 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2948,52 +2938,52 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
     builder_writer.add<NativeContractBuilder::kDefaultSerializationFormat>(
         0,
         [](NativeSyscallContext &ctx, int64_t set_amount,
-           int64_t add_amount) -> InvokeStatus<void> {
+           int64_t add_amount) -> x23::Async<InvokeStatus<void>> {
           int128_t set_128 = set_amount;
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kKey, &set_128, add_amount,
               std::to_underlying(StorageDeltaFlags::None));
 
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // perform a add_nnint
     builder_writer.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1,
         [](NativeSyscallContext &ctx,
-           int64_t add_amount) -> InvokeStatus<void> {
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+           int64_t add_amount) -> x23::Async<InvokeStatus<void>> {
+          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kKey, nullptr, add_amount,
               std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     builder_writer.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        3, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // reset contract state
           int128_t set_value = 35;
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kKey, &set_value, 0,
               std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     NativeContractBuilder builder_orchestrator;
     builder_orchestrator.add<
         NativeContractBuilder::kDefaultSerializationFormat>(
-        0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // perform an add_nnint on the writer, then a set_add_nnint with the
           // same set value on the writer in a try_invoke frame
           auto calldata0 =
@@ -3001,20 +2991,19 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                   serialize<int64_t>(100)
                       .value();
 
-          auto r0 = [&]() {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kNNIntInterleavingWriter,
-                                                   calldata0,
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kNNIntInterleavingWriter, calldata0, std::span<uint32_t>{},
+                inputs, CopyableInvokeOutputs{});
           }();
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // tolerate try_invoke failure
 
@@ -3023,24 +3012,23 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                   serialize<int64_t, int64_t>(100, -100)
                       .value();
 
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kNNIntInterleavingWriter,
-                                                   calldata1,
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kNNIntInterleavingWriter, calldata1, std::span<uint32_t>{},
+                inputs, CopyableInvokeOutputs{});
           }();
           if (!r1.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // tolerate try_invoke failure
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     auto native_contract_writer = builder_writer.build();
@@ -3094,12 +3082,12 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                               .uniquifier = self->make_new_uniquifier()}};
           auto handler =
               self->make_new_system_call_handler(handler_tx, *context);
-          auto res = handler.root_invoke();
+          auto res = handler.root_invoke()();
           if (!res.is_root_success()) {
             panic("root invoke 0 failed");
           }
           co_await set.bg();
-          auto commit_res = handler.try_commit_transaction();
+          auto commit_res = handler.try_commit_transaction()();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
             panic("try_commit_transaction error: {}", x23::show(commit_res));
@@ -3128,12 +3116,12 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                   .uniquifier = self->make_new_uniquifier()}};
           auto handler =
               self->make_new_system_call_handler(handler_tx, *context);
-          auto res = handler.root_invoke();
+          auto res = handler.root_invoke()();
           co_await set.bg();
           if (!res.is_root_success()) {
             co_return;
           }
-          auto commit_res = handler.try_commit_transaction();
+          auto commit_res = handler.try_commit_transaction()();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
             panic("try_commit_transaction error: {}", x23::show(commit_res));
@@ -3153,9 +3141,9 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
               .uniquifier = make_new_uniquifier()}};
       auto handler = make_new_system_call_handler(handler_tx, *context);
 
-      auto res = handler.root_invoke();
+      auto res = handler.root_invoke()();
       ASSERT_TRUE(res.is_root_success());
-      auto commit_res = handler.try_commit_transaction();
+      auto commit_res = handler.try_commit_transaction()();
       ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
       ASSERT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -3220,22 +3208,23 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
 
   // Contract 0: always errors, consumes 100 gas
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_err;
-  fns_err.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    if (!ctx.consume_gas(100)) {
-                      return InvokeError{InvokeErrorCode::OutOfGas};
-                    }
-                    return InvokeError{InvokeErrorCode::Deterministic};
+  fns_err.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (!ctx.consume_gas(100)) {
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
+        }
+        co_return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  fns_err.emplace(1,
+                  [](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
+                    co_return InvokeStatus<void>{};
                   });
-  fns_err.emplace(1, [](NativeSyscallContext &) noexcept -> InvokeStatus<void> {
-    return {};
-  });
   auto error_contract = std::make_unique<NativeContract>(std::move(fns_err));
 
   // Contract 1: performs the four try_invoke error cases
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
-      0, [=](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [=](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         Calldata calldata = {};
         // 1. try_invoke on a missing contract
         {
@@ -3244,14 +3233,14 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               .gas_limit = 1000,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto res = ctx.syscall<SyscallNo::kInvoke>(
+          auto res = co_await ctx.syscall<SyscallNo::kInvoke>(
               missing_contract_addr, std::as_bytes(std::span(calldata)),
               std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
 
           if (!res.has_value() ||
               res.value() !=
                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
         // 2. try_invoke on error_contract, but with a method that does not
@@ -3263,7 +3252,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
           CopyableInvokeOutputs outputs{};
-          auto res = ctx.syscall<SyscallNo::kInvoke>(
+          auto res = co_await ctx.syscall<SyscallNo::kInvoke>(
               error_contract_addr, std::as_bytes(std::span(calldata)),
               std::span<uint32_t>{}, inputs, outputs);
           // The child frame ran and faulted (missing method), so the syscall
@@ -3271,7 +3260,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
               outputs.frame_status != InvocationFrameStatusCode::Fault) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
         // 3. try_invoke on error_contract, correct method, but with gas
@@ -3284,7 +3273,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
           CopyableInvokeOutputs outputs{};
-          auto res = ctx.syscall<SyscallNo::kInvoke>(
+          auto res = co_await ctx.syscall<SyscallNo::kInvoke>(
               error_contract_addr, std::as_bytes(std::span(calldata)),
               std::span<uint32_t>{}, inputs, outputs);
           auto gas_used = ctx.total_gas_consumed() - gas_before;
@@ -3294,10 +3283,12 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
               outputs.frame_status != InvocationFrameStatusCode::Fault) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (gas_used != 50) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          // The child's whole 50-gas limit, plus the crossing this invoke
+          // syscall pays on top of it.
+          if (gas_used != 50 + kSyscallBaseCost) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
         // 4. try_invoke on error_contract, correct method, with gas limit
@@ -3309,7 +3300,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
           CopyableInvokeOutputs outputs{};
-          auto res = ctx.syscall<SyscallNo::kInvoke>(
+          auto res = co_await ctx.syscall<SyscallNo::kInvoke>(
               error_contract_addr, std::as_bytes(std::span(calldata)),
               std::span<uint32_t>{}, inputs, outputs);
           // The child frame ran and faulted (deterministic error), so the
@@ -3317,7 +3308,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
               outputs.frame_status != InvocationFrameStatusCode::Fault) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
         // 5. try_invoke on error_contract, valid method, with gas limit
@@ -3328,16 +3319,16 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               .gas_limit = 1000,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto res = ctx.syscall<SyscallNo::kInvoke>(
+          auto res = co_await ctx.syscall<SyscallNo::kInvoke>(
               error_contract_addr, std::as_bytes(std::span(calldata)),
               std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller));
@@ -3372,9 +3363,9 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -3406,9 +3397,9 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   // Entry: 0 — try_invoke middle 0; try_invoke writer 1; return-buffer checks.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
   fns_w.emplace(0,
-                [str_hello, key](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto [res, _gas] = syscall_BytestringSet_inner(
+                [str_hello, key](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
+                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key, std::as_bytes(std::span(str_hello)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
@@ -3416,109 +3407,107 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                     ADD_FAILURE()
                         << "ManualRevertUndoesTryInvokeLocks: Failed to "
                            "set bytestring in writer method 0";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
-  fns_w.emplace(1,
-                [key](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto res = ctx.handler().get_bytestring(key);
-                  if (!res.has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  if (res.value().has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
+  fns_w.emplace(
+      1, [key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await ctx.handler().get_bytestring(key);
+        if (!res.has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (res.value().result.has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract_writer =
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_m;
-  fns_m.emplace(0,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  // Try invoke writer method 0
-                  auto r2 = [&]() {
-                    CopyableInvokeInputs inputs{
-                        .entrypoint_id = 0,
-                        .gas_limit = UINT64_MAX,
-                        .flags = std::to_underlying(InvokeFlag::TryInvoke),
-                    };
-                    return ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressWriter, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
-                  }();
-                  if (!r2.has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  // Writer method 0 should succeed in the try_invoke frame
-                  if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  // Now manually revert this frame, which should undo the locks
-                  // acquired by writer method 0
-                  ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-                  return {};
-                });
-  auto native_contract_middle =
-      std::make_unique<NativeContract>(std::move(fns_m));
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_e;
-  fns_e.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        // Try invoke middle method 0
-        CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
+  fns_m.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        // Try invoke writer method 0
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressMiddle,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+        }();
+        if (!r2.has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // Writer method 0 should succeed in the try_invoke frame
+        if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // Now manually revert this frame, which should undo the locks
+        // acquired by writer method 0
+        ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract_middle =
+      std::make_unique<NativeContract>(std::move(fns_m));
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_e;
+  fns_e.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        // Try invoke middle method 0
+        CopyableInvokeOutputs r1_outputs{};
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressMiddle, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r1_outputs);
         }();
         if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The middle frame ran, so the syscall returns kSyscallErrorCodeNone;
         // its manual revert is reported via frame_status Abort.
         if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Writer storage should not retain the write; verify via writer
         // method 1 (same contract that would have held the key).
-        auto r_w = [&]() {
+        auto r_w =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressWriter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressWriter, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r_w.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r_w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // assert that we can actually get a ReturnBuffer back
         auto return_buf = ctx.handler().get_return_buffer();
         if (!return_buf.has_value() || !return_buf.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         assert(**return_buf);
         if (!return_buf.value().value()->empty()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_entry =
       std::make_unique<NativeContract>(std::move(fns_e));
@@ -3554,9 +3543,9 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -3585,180 +3574,73 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_t;
-    fns_t.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto key = make_storage_key("rcq-self-consume");
-                    uint8_t entry = 0xA5;
-                    auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&entry, 1)));
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    return {};
-                  });
-    fns_t.emplace(1,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto key = make_storage_key("rcq-self-consume");
-                    auto res =
-                        ctx.handler().retrocausal_queue_consume(key, false);
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
+    fns_t.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("rcq-self-consume");
+          uint8_t entry = 0xA5;
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
+              key, std::as_bytes(std::span(&entry, 1)));
+          if (!res.has_value()) {
+            co_return res.error().to_invoke_error();
+          }
+          if (!res.value().has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns_t.emplace(
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("rcq-self-consume");
+          auto res =
+              co_await ctx.handler().retrocausal_queue_consume(key, false);
+          if (!res.has_value()) {
+            co_return res.error().to_invoke_error();
+          }
+          if (!res.value().has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                    auto const &entry = res.value().value();
-                    if (entry.size() != 1 || entry[0] != 0xA5) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    return {};
-                  });
-    auto native_contract_target =
-        std::make_unique<NativeContract>(std::move(fns_t));
-
-    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
-    fns_o.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto invoke_target = [&](Runtime::MethodID method) {
-                      CopyableInvokeInputs inputs{
-                          .entrypoint_id = method,
-                          .gas_limit = UINT64_MAX,
-                          .flags = std::to_underlying(InvokeFlag::TryInvoke),
-                      };
-                      return ctx.syscall<SyscallNo::kInvoke>(
-                          kAddressTarget, std::span<const std::byte>{},
-                          std::span<uint32_t>{}, inputs,
-                          CopyableInvokeOutputs{});
-                    };
-
-                    auto r0 = invoke_target(0);
-                    if (!r0.has_value() ||
-                        r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-
-                    auto r1 = invoke_target(1);
-                    if (!r1.has_value()) {
-                      if (r1.error().code() == HostFnErrorCode::Unrecoverable) {
-                        return InvokeError{InvokeErrorCode::Unrecoverable};
-                      }
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    return {};
-                  });
-    auto native_contract_orchestrator =
-        std::make_unique<NativeContract>(std::move(fns_o));
-
-    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(native_contract_target));
-    contract_map.emplace(1, std::move(native_contract_orchestrator));
-    return std::make_unique<NativeContext>(std::move(contract_map));
-  };
-
-  auto context = make_context();
-
-  ContractAddress addrs[] = {kAddressTarget, kAddressOrchestrator};
-  for (int i = 0; i < 2; ++i) {
-    auto c = make_native_contract(i);
-    write_contract(c);
-    write_deployment(addrs[i], c);
-    setup_grant_storage_token(addrs[i], 1'000'000'000);
-  }
-
-  auto handler_tx = SignedTransaction{
-      .tx =
-          Transaction{.invocation =
-                          Invocation{.invoked_address = kAddressOrchestrator,
-                                     .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
-                                     .calldata = {}},
-                      .uniquifier = make_new_uniquifier()}};
-  auto handler = make_new_system_call_handler(handler_tx, *context);
-
-  auto res = handler.root_invoke();
-  ASSERT_TRUE(res.is_root_success())
-      << "RCQ self-consume across TryInvoke frames must not be Unrecoverable";
-}
-
-TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
-{
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP()
-        << "HogDb-only: this exercises subtransaction narrow() behavior";
-  }
-
-  static constexpr ContractAddress kAddressTarget = make_contract_address(74);
-  static constexpr ContractAddress kAddressOrchestrator =
-      make_contract_address(75);
-
-  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_t;
-    fns_t.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto key = make_storage_key("rcq-multi");
-                    uint8_t entry = 0xBB;
-                    auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&entry, 1)));
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    return {};
-                  });
-    fns_t.emplace(1,
-                  [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                    auto key = make_storage_key("rcq-multi");
-                    auto res =
-                        ctx.handler().retrocausal_queue_consume(key, false);
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    return {};
-                  });
+          auto const &entry = res.value().value();
+          if (entry.size() != 1 || entry[0] != 0xA5) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
     auto native_contract_target =
         std::make_unique<NativeContract>(std::move(fns_t));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
     fns_o.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto invoke_target = [&](Runtime::MethodID method) {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto invoke_target = [&](Runtime::MethodID method)
+              -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = method,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressTarget,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressTarget, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           };
 
-          // insert -> consume -> insert (grow, shrink, grow)
-          for (auto method : {0, 1, 0}) {
-            auto r = invoke_target(method);
-            if (!r.has_value()) {
-              return r.error().code() == HostFnErrorCode::Unrecoverable
-                         ? InvokeError{InvokeErrorCode::Unrecoverable}
-                         : InvokeError{InvokeErrorCode::Deterministic};
-            }
-            if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-              return InvokeError{InvokeErrorCode::Deterministic};
-            }
+          auto r0 = co_await invoke_target(0);
+          if (!r0.has_value() ||
+              r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+
+          auto r1 = co_await invoke_target(1);
+          if (!r1.has_value()) {
+            if (r1.error().code() == HostFnErrorCode::Unrecoverable) {
+              co_return InvokeError{InvokeErrorCode::Unrecoverable};
+            }
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_o));
@@ -3789,7 +3671,113 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success())
+      << "RCQ self-consume across TryInvoke frames must not be Unrecoverable";
+}
+
+TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
+{
+  if (GetParam() != TestDB::kHogDb) {
+    GTEST_SKIP()
+        << "HogDb-only: this exercises subtransaction narrow() behavior";
+  }
+
+  static constexpr ContractAddress kAddressTarget = make_contract_address(74);
+  static constexpr ContractAddress kAddressOrchestrator =
+      make_contract_address(75);
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_t;
+    fns_t.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("rcq-multi");
+          uint8_t entry = 0xBB;
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
+              key, std::as_bytes(std::span(&entry, 1)));
+          if (!res.has_value()) {
+            co_return res.error().to_invoke_error();
+          }
+          if (!res.value().has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns_t.emplace(
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("rcq-multi");
+          auto res =
+              co_await ctx.handler().retrocausal_queue_consume(key, false);
+          if (!res.has_value()) {
+            co_return res.error().to_invoke_error();
+          }
+          if (!res.value().has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    auto native_contract_target =
+        std::make_unique<NativeContract>(std::move(fns_t));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
+    fns_o.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto invoke_target = [&](Runtime::MethodID method)
+              -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = method,
+                .gas_limit = UINT64_MAX,
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressTarget, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          };
+
+          // insert -> consume -> insert (grow, shrink, grow)
+          for (auto method : {0, 1, 0}) {
+            auto r = co_await invoke_target(method);
+            if (!r.has_value()) {
+              co_return r.error().code() == HostFnErrorCode::Unrecoverable
+                  ? InvokeError{InvokeErrorCode::Unrecoverable}
+                  : InvokeError{InvokeErrorCode::Deterministic};
+            }
+            if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
+    auto native_contract_orchestrator =
+        std::make_unique<NativeContract>(std::move(fns_o));
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_target));
+    contract_map.emplace(1, std::move(native_contract_orchestrator));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  auto context = make_context();
+
+  ContractAddress addrs[] = {kAddressTarget, kAddressOrchestrator};
+  for (int i = 0; i < 2; ++i) {
+    auto c = make_native_contract(i);
+    write_contract(c);
+    write_deployment(addrs[i], c);
+    setup_grant_storage_token(addrs[i], 1'000'000'000);
+  }
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kAddressOrchestrator,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *context);
+
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success())
       << "insert-consume-insert via TryInvoke must succeed";
 }
@@ -3805,16 +3793,16 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_noop;
-    fns_noop.emplace(0,
-                     [](NativeSyscallContext &) noexcept -> InvokeStatus<void> {
-                       return {};
-                     });
+    fns_noop.emplace(
+        0, [](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
+          co_return InvokeStatus<void>{};
+        });
     auto noop = std::make_unique<NativeContract>(std::move(fns_noop));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_looper;
     fns_looper.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           int successes = 0;
           for (int i = 0; i < kChildCap + 1; i++) {
             CopyableInvokeInputs inputs{
@@ -3823,13 +3811,11 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
             CopyableInvokeOutputs outputs{};
-            auto r =
-                ctx.syscall<SyscallNo::kInvoke>(kAddressNoop,
-                                                std::span<const std::byte>{},
-                                                std::span<uint32_t>{}, inputs,
-                                                outputs);
+            auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressNoop, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
             if (!r.has_value()) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
             // Every child runs (the depth-cap overflow is converted to a
             // deterministic failure, so the syscall still returns
@@ -3841,9 +3827,9 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
             }
           }
           if (successes != kChildCap) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto looper = std::make_unique<NativeContract>(std::move(fns_looper));
 
@@ -3873,7 +3859,7 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -3892,16 +3878,16 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_noop;
-    fns_noop.emplace(0,
-                     [](NativeSyscallContext &) noexcept -> InvokeStatus<void> {
-                       return {};
-                     });
+    fns_noop.emplace(
+        0, [](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
+          co_return InvokeStatus<void>{};
+        });
     auto noop = std::make_unique<NativeContract>(std::move(fns_noop));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_looper;
     fns_looper.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           int successes = 0;
           for (int i = 0; i < kChildCap + 1; i++) {
             CopyableInvokeInputs inputs{
@@ -3910,13 +3896,11 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
             CopyableInvokeOutputs outputs{};
-            auto r =
-                ctx.syscall<SyscallNo::kInvoke>(kAddressNoop,
-                                                std::span<const std::byte>{},
-                                                std::span<uint32_t>{}, inputs,
-                                                outputs);
+            auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressNoop, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
             if (!r.has_value()) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
             // Every child runs (the depth-cap overflow is converted to a
             // deterministic failure, so the syscall still returns
@@ -3928,9 +3912,9 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
             }
           }
           if (successes != kChildCap) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto looper = std::make_unique<NativeContract>(std::move(fns_looper));
 
@@ -3960,10 +3944,10 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 

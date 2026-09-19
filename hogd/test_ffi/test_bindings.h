@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 23
-#define TEST_FFI_VERSION_PATCH 0
+#define TEST_FFI_VERSION_MINOR 32
+#define TEST_FFI_VERSION_PATCH 2
 
 // THREADING CONTRACT
 // ==================
@@ -19,18 +19,40 @@ extern "C" {
 // contexts -- and drive them from different threads without data races or
 // undefined behavior (the DB is clean under ThreadSanitizer).
 //
-// DB lifecycle operations are guarded, but not serialized. advance_new_block()
-// and free_db() are rejected (kTestFFIErrorCodeUnrecoverableError) while any
-// syscall handler derived from that DB is open -- for the handler's whole
-// lifetime, from the moment open_syscall_handler() / open_mocked_syscall_
-// handler() begins constructing it (so a concurrent advance cannot replace
-// state a half-built handler is borrowing) through close_syscall_handler(). If
-// a close fails to abort its transaction, the DB is poisoned: advance_new_block
-// is refused thereafter and the DB can only be freed. Beyond that guarding the
-// harness does not order your operations: running transactions or the setup_*
-// mutators (setup_create_contract, setup_deploy_contract, ...) concurrently
-// against the same DB leaves the *result* unspecified -- sequence them yourself
-// if you need a deterministic outcome.
+// DB lifecycle operations are mutually exclusive with open handlers, and with
+// each other. advance_new_block() and free_db() are rejected
+// (kTestFFIErrorCodeUnrecoverableError) while any syscall handler derived from
+// that DB is open -- for the handler's whole lifetime, from the moment
+// open_syscall_handler() / open_mocked_syscall_handler() begins constructing it
+// (so a concurrent advance cannot replace state a half-built handler is
+// borrowing) through close_syscall_handler(). For advance_new_block() the
+// exclusion runs both ways: while an advance is in flight, opening a handler
+// on that DB is itself rejected with kTestFFIErrorCodeUnrecoverableError, so a
+// caller racing those two from different threads sees one of them fail rather
+// than a handler bound to a snapshot the advance is replacing. A rejected open
+// borrows nothing and returns a null handler; retry it once the advance
+// returns.
+//
+// get_snapshot_storage_item() takes that same exclusion for the length of the
+// read, since it queries the snapshot an advance replaces: whichever of the two
+// arrives second is rejected, and either is fine to retry.
+//
+// free_db() is weaker, and no in-library guard can make it otherwise: it
+// destroys the `db` handle itself, so a call that is already inside the
+// library -- an open_syscall_handler() still deserializing its argument, say --
+// has no object left to be rejected against. Every other call on that handle
+// must have returned before free_db() is called, and none may start after it;
+// the open-handler rejection above only catches a handler that has already
+// registered its borrow, and is not a substitute for sequencing the free
+// yourself.
+//
+// If a close fails to abort its transaction, the DB is poisoned:
+// advance_new_block is refused thereafter and the DB can only be freed. Beyond
+// that guarding the harness does not order your operations:
+// running transactions or the setup_* mutators (setup_create_contract,
+// setup_deploy_contract, ...) concurrently against the same DB leaves the
+// *result* unspecified -- sequence them yourself if you need a deterministic
+// outcome.
 //
 // A single runtime context or syscall handler is stateful and is itself NOT
 // internally synchronized -- drive each individual handle from one thread at a
@@ -52,10 +74,11 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeDeserializeError = 4,
   // Unrecoverable error of unknown type
   kTestFFIErrorCodeUnrecoverableError = 5,
-  // Contract failed wasm verification (e.g., memory exceeds limits)
+  // Contract failed runtime verification (e.g., an RV32 artifact that cannot
+  // be translated)
   kTestFFIErrorCodeContractVerificationFailed = 6,
   // An argument violated a documented precondition (e.g. a negative
-  // storage-token grant, or a mock invocation frame production would not admit)
+  // storage-token grant)
   kTestFFIErrorCodeInvalidArgument = 7,
 };
 
@@ -143,6 +166,11 @@ struct GetCostModelResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
+struct GetNetworkConfigResult {
+  struct FFIDataBuffer data;
+  enum TestFFIErrorCode ffi_error_code;
+};
+
 struct FFISerializedAddressAndKey {
   const uint8_t *data;
   uint32_t len;
@@ -154,16 +182,45 @@ struct GetSnapshotStorageItemResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
+// serialized_genesis_root_contract is an XDR-serialized Contract of any
+// deployable type, installed (without artifact verification) as the genesis
+// root deployment; it must be non-null and deserialize. Consumers execute
+// contract bodies through the mock trampoline, so the contract's code never
+// runs -- callers that never invoke real genesis code can pass a mock
+// contract.
+//
+// serialized_cost_model and serialized_network_config are optional: pass null
+// for either and genesis takes this build's stock values. Supply one to run
+// the chain under different parameters -- serialized_network_config is an
+// XDR-serialized NetworkConfig, and it changes the genesis config hash, so a
+// caller cannot mix a config in here with a hash computed elsewhere.
 struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
                                 uint32_t serialized_cost_model_len,
-                                const uint8_t *serialized_network_hash);
+                                const uint8_t *serialized_network_hash,
+                                const uint8_t *serialized_genesis_root_contract,
+                                uint32_t serialized_genesis_root_contract_len,
+                                const uint8_t *serialized_network_config,
+                                uint32_t serialized_network_config_len);
 enum TestFFIErrorCode free_db(void *ptr);
 
 struct GetCostModelResult get_cost_model(void *db);
+// The execution parameters the chain is running under, read off the committed
+// tip. Serialized NetworkConfig; free with free_ffi_data_buffer().
+struct GetNetworkConfigResult get_network_config(void *db);
 struct GetSnapshotStorageItemResult
 get_snapshot_storage_item(void *db, struct FFISerializedAddressAndKey addrkey);
 
-enum TestFFIErrorCode advance_new_block(void *db);
+// Opens the next block. `block_timepoint` is that block's timepoint in Unix
+// nanoseconds, as a real chain's header carries; NULL takes the current wall
+// clock. Pass a value to pin it, which is how a test drives contract logic
+// keyed on time.
+//
+// A block may not be older than the one it follows. A timepoint earlier than
+// the open block's is rejected with kTestFFIErrorCodeInvalidArgument and
+// advances nothing, so the DB is left exactly as it was and the caller can
+// retry. Equal is allowed.
+enum TestFFIErrorCode advance_new_block(void *db,
+                                        const uint64_t *block_timepoint);
 
 struct OpenRuntimeContextResult {
   void *context;
@@ -205,10 +262,13 @@ enum TestFFIErrorCode setup_create_contract(void *context, void *db,
                                             uint8_t const *contract_bytes,
                                             uint32_t contract_len);
 
-// setup_create_contract creates a contract that is _visible_ in the current
-// block.
+// setup_deploy_contract deploys a previously-created contract at an address so
+// it is _visible_ in the current block.
 // contract_hash must be a pointer to a 32-byte SHA256Hash.
 // contract_size is the size of the contract in bytes.
+// Native precompiles cannot be deployed this way
+// (kTestFFIErrorCodeInvalidArgument): they are installed at genesis, matching
+// the production deploy_contract() ban.
 enum TestFFIErrorCode setup_deploy_contract(void *db,
                                             const uint8_t *deployment_addr,
                                             const uint8_t *contract_hash,
@@ -245,13 +305,22 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     void *db, void *rc, struct FFISerializedAuthClaimData auth_claim_data,
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
-// Frames are admitted on production's terms, so two rules bind the caller:
+struct OpenMockInvocationFrameResult {
+  // SyscallErrorCode: why production refused the frame, none if it opened.
+  // Never set together with ffi_error_code.
+  int32_t syscall_error_code;
+  // FFI-level error code
+  enum TestFFIErrorCode ffi_error_code;
+};
+
+// Frames are admitted on production's terms, so three rules bind the caller:
 // invoke_flags may contain only defined, implemented bits (TryInvoke |
-// ReadOnly), and an address that already has a frame on the stack cannot be
-// invoked again -- nested frames need distinct invoked_addresses. Either
-// violation returns kTestFFIErrorCodeInvalidArgument and opens no frame, so the
-// handler stays usable and no finish_mock_invocation_frame() is owed.
-enum TestFFIErrorCode
+// ReadOnly); an address that already has a frame on the stack cannot be invoked
+// again -- nested frames need distinct invoked_addresses; and
+// max_cross_invoke_depth caps how many frames a transaction may hold open.
+// Breaking one is a refusal, not misuse: syscall_error_code names the rule, no
+// frame opens, and no finish_mock_invocation_frame() is owed.
+struct OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
                            int32_t invoke_flags);
@@ -319,7 +388,7 @@ struct VerifyAuthResultFromDBResult {
 struct VerifyAuthResultFromDBResult verify_signed_transaction_auth_from_db(
     void *db, struct FFISerializedSignedTransaction signed_tx);
 
-// Result of contract wasm verification.
+// Result of contract verification.
 struct VerifyContractResult {
   // 1 if contract is valid, 0 if invalid
   uint8_t success;

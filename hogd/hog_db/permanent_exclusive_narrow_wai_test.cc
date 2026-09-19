@@ -73,6 +73,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/status.h"
@@ -293,7 +294,8 @@ protected:
     ASSERT_TRUE(db_.write_address_metadata(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("seed"))),
-                             .contract_size = 10}));
+                             .contract_size = 10,
+                             .contract_type = ContractType::kRv32}));
   }
 
   HogDbDAO db_;
@@ -329,7 +331,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
   StorageLongHash base_hash = db_.compute_full_db_hash();
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -385,7 +388,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -434,7 +438,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -478,7 +483,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -523,7 +529,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -570,7 +577,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());

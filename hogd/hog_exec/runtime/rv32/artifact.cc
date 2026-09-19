@@ -38,7 +38,7 @@ struct ArtifactParseResults {
 
 [[nodiscard]]
 std::expected<ArtifactParseResults, ArtifactError>
-artifact_image_checks(std::span<const uint8_t> bytes)
+artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
 {
 
   if (bytes.size() < kArtifactHeaderBytes) {
@@ -90,18 +90,25 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   if (syscall_abi_version != kArtifactSyscallAbiVersion) {
     return std::unexpected(ArtifactError::kUnsupportedSyscallAbi);
   }
-  if (gas_schedule_version != kGasTableVersion) {
+  // Accepted as a (version, digest) pair; see kAcceptedGasSchedules for why the
+  // list can hold more than the current schedule and when to shrink it.
+  const auto *accepted =
+      std::ranges::find(kAcceptedGasSchedules, gas_schedule_version,
+                        &AcceptedGasSchedule::version);
+  if (accepted == kAcceptedGasSchedules.end()) {
     return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
   }
-  if (gas_digest != kGasScheduleDigest) {
+  if (gas_digest != accepted->digest) {
     return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
   }
   // memory_bytes == 0 is a valid degenerate: a zero-memory contract whose
-  // data accesses all fault. Only the upper bound is enforced.
-  if (memory_bytes > kMaxMemoryBytes) {
+  // data accesses all fault. Only the upper bound is enforced, and it is the
+  // caller's: the chain's configuration at attachment, the VM's ceiling for a
+  // deployed contract.
+  if (memory_bytes > limits.max_memory_bytes) {
     return std::unexpected(ArtifactError::kMemorySizeInvalid);
   }
-  if (code_size == 0 || code_size > kMaxCodeBytes) {
+  if (code_size == 0 || code_size > limits.max_code_bytes) {
     return std::unexpected(ArtifactError::kCodeSizeInvalid);
   }
 
@@ -189,9 +196,9 @@ artifact_digest(std::span<const uint8_t> bytes)
 }
 
 std::expected<ArtifactImage, ArtifactError>
-parse_artifact(std::span<const uint8_t> bytes)
+parse_artifact(std::span<const uint8_t> bytes, Rv32Limits limits)
 {
-  auto results = artifact_image_checks(bytes);
+  auto results = artifact_image_checks(bytes, limits);
   if (!results.has_value()) {
     return std::unexpected(results.error());
   }
@@ -214,9 +221,9 @@ parse_artifact(std::span<const uint8_t> bytes)
 }
 
 std::expected<ThreadedArtifactImage, ArtifactError>
-parse_threaded_artifact(std::span<const uint8_t> bytes)
+parse_threaded_artifact(std::span<const uint8_t> bytes, Rv32Limits limits)
 {
-  auto results = artifact_image_checks(bytes);
+  auto results = artifact_image_checks(bytes, limits);
   if (!results.has_value()) {
     return std::unexpected(results.error());
   }

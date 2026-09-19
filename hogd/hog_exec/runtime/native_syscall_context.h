@@ -18,12 +18,13 @@
 #include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
+#include "x23/async.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
 // Routes native contract syscalls through wrap_after_parse, so they get
-// read-only enforcement, tracing, and gas accounting -- just like wasm
+// read-only enforcement, tracing, and gas accounting -- just like guest
 // contracts.
 class NativeSyscallContext {
 public:
@@ -31,8 +32,11 @@ public:
     : handler_(h), initial_gas_amount_(gas_limit)
   {}
 
+  // A coroutine: the syscall it routes to may suspend on a database read, so
+  // native contract bodies await this rather than blocking a thread on it.
   template<SyscallNo Syscall, typename... Args>
-  HostFnStatus<SyscallErrorCode> syscall(Args &&...args)
+  [[nodiscard]] x23::Async<HostFnStatus<SyscallErrorCode>>
+  syscall(Args &&...args)
   {
     using Meta = SyscallMeta<Syscall>;
     using syscall_t =
@@ -46,18 +50,27 @@ public:
           std::forward<Args>(args))...};
     }(std::make_index_sequence<sizeof...(Args)>{});
 
-    // Native contract bodies are plain noexcept functions, so they block on
-    // the syscall rather than awaiting it; see the same note in
-    // Rv32Runtime::invoke_internal().
     auto [res, gas_consumed] =
-        wrap_after_parse<Meta>(guard.check(), handler_, gas_remaining(),
-                               Meta::kSyscallNo, std::move(parsed))();
+        co_await wrap_after_parse<Meta>(guard.check(), handler_,
+                                        gas_remaining(), Meta::kSyscallNo,
+                                        std::move(parsed));
 
     consume_gas(gas_consumed);
-    return res;
+    co_return res;
   }
 
   SystemCallHandler &handler() { return handler_; }
+
+  // Read [address]'s native token balance, charging this context for any
+  // database load it does. The native token precompile is the one caller that
+  // reaches the handler directly instead of going through syscall(), so this
+  // is where that load gets billed; call it rather than the handler's method.
+  //
+  // Out of line: an inline coroutine here would emit a body referencing the
+  // handler into every translation unit that includes this header, including
+  // ones whose libraries do not link the runtime.
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<int128_t>>>
+  native_token_balance(ContractAddress const &address);
 
   GasAmount gas_remaining() const
   {

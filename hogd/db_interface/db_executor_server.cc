@@ -241,27 +241,26 @@ DbExecutorRpc::get_concurrent_retrocausal_queue_entry(
 }
 
 ExpectedDBTip
-DbExecutorRpc::get_db_tip(BlockID block_id)
+DbExecutorRpc::get_db_tip(BlockID /*block_id*/, BlockHeight block_height)
 {
-  auto block_data = block_manager_->get_block_data(block_id);
-  if (!block_data) {
+  // Served off the manager's committed state alone, keyed on the height the
+  // caller opened its block with -- no per-block lookup, so this cannot race
+  // the block's own creation (executor_to_db_rpc.x). The block id is unused
+  // until a pipelined server holds more than one tentative tip.
+  if (block_manager_->committed_tip_height() != block_height - 1) {
     return ExpectedDBTip(RPCError::kRPCBadBlockID);
   }
 
-  // The mock does not track block height, so report the pre-genesis sentinel
-  // height (-1). At executing height 0 this makes the executor's replay-expiry
-  // gate a no-op, consistent with the mock not implementing the replay cache.
-  // The tip id is the committed parent -- distinct from block_id, which
-  // get_block_data() just confirmed is an open child (DatabaseProxy rejects a
-  // tip whose id equals the requested block).
   ExpectedDBTip out;
   out.error(RPCError::kRPCNone);
   ConsensusValue value{};
-  value.proposal_header.block_height = -1;
+  value.proposal_header.block_height = block_manager_->committed_tip_height();
+  value.proposal_header.network_hash = block_manager_->get_network_hash();
   out.db_tip() = DbTip{.id = block_manager_->committed_tip_id(),
                        .storage_long_hash = {},
                        .value = value,
-                       .default_wallet = block_manager_->get_default_wallet()};
+                       .default_wallet = block_manager_->get_default_wallet(),
+                       .network_config = block_manager_->get_network_config()};
   return out;
 }
 

@@ -5,20 +5,24 @@
 // These tests are just wrappers around the tests in the syscall_misc_tests
 // contract.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
 #include "built_contracts/syscall_misc_tests.h"
 #include "contract.hh"
 #include "exec_result.hh"
-#include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -26,20 +30,23 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "network_config.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize_cxs.h"
 
 namespace hogd {
 
-class SyscallMiscTests : public ::testing::Test,
-                         public NativeContractTestFramework {
+class SyscallMiscTestsBase : public ::testing::Test,
+                             public NativeContractTestFramework {
 public:
-  SyscallMiscTests()
+  explicit SyscallMiscTestsBase(
+      std::optional<NetworkConfig> const &genesis_network_config)
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          TestDB::kHogDb, true, std::nullopt, genesis_network_config)
   {}
 
 protected:
@@ -88,6 +95,47 @@ protected:
   uint64_t nonce_ = 0;
 };
 
+// Stock genesis, which is what every test here wants unless it is pinning
+// behaviour at a network-config edge.
+class SyscallMiscTests : public SyscallMiscTestsBase {
+public:
+  SyscallMiscTests() : SyscallMiscTestsBase(std::nullopt) {}
+};
+
+// This contract entrypoint deliberately opens nine streams and expects the
+// ninth to fail, so pin its network limit independently of the stock default.
+class SyscallMiscTestsEightHashBuffers : public SyscallMiscTestsBase {
+public:
+  SyscallMiscTestsEightHashBuffers() : SyscallMiscTestsBase(buffer_config()) {}
+
+private:
+  static NetworkConfig buffer_config()
+  {
+    auto config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                   8);
+    return config;
+  }
+};
+
+// max_cross_invoke_depth = 1 leaves room for the root frame and nothing else,
+// so every cross invoke a test entrypoint makes is over the bound. Stock
+// genesis sets 16, which no contract here comes close to.
+class SyscallMiscTestsDepthOne : public SyscallMiscTestsBase {
+public:
+  SyscallMiscTestsDepthOne() : SyscallMiscTestsBase(depth_one_config()) {}
+
+private:
+  static NetworkConfig depth_one_config()
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 1);
+    return config;
+  }
+};
+
 // ── Existing tests ──────────────────────────────────────────────────
 
 TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
@@ -100,7 +148,7 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
@@ -116,7 +164,7 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #1: GetMsgSender ────────────────────────────────────────────────
@@ -131,7 +179,7 @@ TEST_F(SyscallMiscTests, TestGetMsgSenderRoot)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #2: Invoke (contract not found) ─────────────────────────────────
@@ -147,7 +195,7 @@ TEST_F(SyscallMiscTests, TestInvokeContractNotFound)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #3: Invoke (frame reverted) ─────────────────────────────────────
@@ -165,7 +213,7 @@ TEST_F(SyscallMiscTests, TestInvokeFrameReverted)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #4: VerifySignature (bad scheme) ────────────────────────────────
@@ -181,7 +229,7 @@ TEST_F(SyscallMiscTests, TestVerifySigBadScheme)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #5: VerifySignature (bad key size) ──────────────────────────────
@@ -197,7 +245,7 @@ TEST_F(SyscallMiscTests, TestVerifySigBadKeySize)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #6: VerifySignature (bad signature) ─────────────────────────────
@@ -213,7 +261,7 @@ TEST_F(SyscallMiscTests, TestVerifySigBadSignature)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #7: BytestringGetLen (key not exist) ────────────────────────────
@@ -229,7 +277,7 @@ TEST_F(SyscallMiscTests, TestBsGetLenKeyNotExist)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #8: BytestringGetLen (wrong type) ───────────────────────────────
@@ -245,7 +293,7 @@ TEST_F(SyscallMiscTests, TestBsGetLenWrongType)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #9: BytestringGet (key not exist) ───────────────────────────────
@@ -261,7 +309,7 @@ TEST_F(SyscallMiscTests, TestBsGetKeyNotExist)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #10: BytestringGet (wrong type) ─────────────────────────────────
@@ -276,7 +324,7 @@ TEST_F(SyscallMiscTests, TestBsGetWrongType)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #11: BytestringSet (too long) ───────────────────────────────────
@@ -291,7 +339,7 @@ TEST_F(SyscallMiscTests, TestBsSetTooLong)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #12: BytestringSet (invalid flags) ──────────────────────────────
@@ -307,7 +355,7 @@ TEST_F(SyscallMiscTests, TestBsSetInvalidFlags)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #13: NonnegativeIntGet (key not exist) ──────────────────────────
@@ -323,7 +371,7 @@ TEST_F(SyscallMiscTests, TestNnintGetKeyNotExist)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #14: NonnegativeIntGet (wrong type) ─────────────────────────────
@@ -339,7 +387,7 @@ TEST_F(SyscallMiscTests, TestNnintGetWrongType)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #15: NonnegativeIntSetAdd (negative) ────────────────────────────
@@ -355,7 +403,7 @@ TEST_F(SyscallMiscTests, TestNnintSetAddNegative)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #16: NonnegativeIntSetAdd (invalid flags) ───────────────────────
@@ -371,7 +419,7 @@ TEST_F(SyscallMiscTests, TestNnintSetAddInvalidFlags)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #17: DeleteObject (invalid flags) ───────────────────────────────
@@ -387,7 +435,7 @@ TEST_F(SyscallMiscTests, TestDeleteInvalidFlags)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #18: RetrocausalQueueInsert (too large) ─────────────────────────
@@ -403,7 +451,7 @@ TEST_F(SyscallMiscTests, TestRcqInsertTooLarge)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #19: RetrocausalQueueInsert (wrong type) ────────────────────────
@@ -419,7 +467,7 @@ TEST_F(SyscallMiscTests, TestRcqInsertWrongType)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #20: RetrocausalQueueConsume (empty) ────────────────────────────
@@ -434,7 +482,7 @@ TEST_F(SyscallMiscTests, TestRcqConsumeEmpty)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #21: RetrocausalQueueConsume (wrong type) ───────────────────────
@@ -450,7 +498,7 @@ TEST_F(SyscallMiscTests, TestRcqConsumeWrongType)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #22: LogEvent (data too long) ───────────────────────────────────
@@ -466,7 +514,7 @@ TEST_F(SyscallMiscTests, TestLogEventDataTooLong)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #23: LogEvent (noncontinuous topics) ────────────────────────────
@@ -482,7 +530,7 @@ TEST_F(SyscallMiscTests, TestLogEventNoncontinuousTopics)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #25: SHA256Update (no buffer) ───────────────────────────────────
@@ -498,12 +546,12 @@ TEST_F(SyscallMiscTests, TestSha256UpdateNoBuffer)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #26: SHA256Update (too many buffers) ────────────────────────────
 
-TEST_F(SyscallMiscTests, TestSha256UpdateTooManyBuffers)
+TEST_F(SyscallMiscTestsEightHashBuffers, TestSha256UpdateTooManyBuffers)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -514,23 +562,7 @@ TEST_F(SyscallMiscTests, TestSha256UpdateTooManyBuffers)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-}
-
-// ── #27: SHA256Update (buffer too large) ────────────────────────────
-
-TEST_F(SyscallMiscTests, TestSha256UpdateBufferTooLarge)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_sha256_update_buffer_too_large">(
-                  UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #28: SHA256Finalize (no buffer) ─────────────────────────────────
@@ -546,7 +578,7 @@ TEST_F(SyscallMiscTests, TestSha256FinalizeNoBuffer)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #29: SHA256Finalize (double finalize) ───────────────────────────
@@ -562,7 +594,7 @@ TEST_F(SyscallMiscTests, TestSha256FinalizeDouble)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #30: GetTransactionStatistics (invalid) ─────────────────────────
@@ -578,7 +610,7 @@ TEST_F(SyscallMiscTests, TestGetTxStatsInvalid)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #31: ChangePublicKeyRegistration (index oob) ────────────────────
@@ -594,7 +626,7 @@ TEST_F(SyscallMiscTests, TestChangePubkeyIndexOob)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #33: DeployContract (not available) ─────────────────────────────
@@ -610,7 +642,7 @@ TEST_F(SyscallMiscTests, TestDeployContractNotAvailable)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #34: Return buffer too long ─────────────────────────────────────
@@ -628,7 +660,7 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // The Return length gate is strict (> kMaxReturnBufferLen): a child
@@ -649,7 +681,7 @@ TEST_F(SyscallMiscTests, TestReturnBufferExactMax)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #35: DeployContract (already deployed) ──────────────────────────
@@ -670,7 +702,7 @@ TEST_F(SyscallMiscTests, TestDeployContractAlreadyDeployed)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #36: Invoke (invalid flags) ─────────────────────────────────────
@@ -686,7 +718,7 @@ TEST_F(SyscallMiscTests, TestInvokeInvalidFlags)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── #36: Write syscall in read-only frame ───────────────────────────
@@ -704,16 +736,17 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// ── Wasm function that returns without calling the Return syscall ────
+// ── An entrypoint that returns without calling the Return syscall ────
 
 TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
 {
   // The contract invokes raw entrypoint 0xFF on the target, whose body
-  // returns without calling the Return syscall; on rv32 the contract asserts
-  // the child frame faults (the SDK dispatcher ebreaks on wrapper return).
+  // returns without calling the Return syscall. The contract asserts the
+  // child frame aborts and that the payload decodes as the SDK's typed
+  // LibraryExn::UnknownMethod.
   deploy_target();
 
   auto handler = make_new_system_call_handler(
@@ -725,7 +758,26 @@ TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+}
+
+// The contrast with InvokeNoReturnSyscall: a panicking entrypoint carries no
+// payload at all, so the child frame faults rather than aborting. The contract
+// asserts the frame status and that neither buffer came back.
+TEST_F(SyscallMiscTests, InvokePanicFaults)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_invoke_panic_faults">(
+                          UINT64_MAX, kTargetAddress),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── Return auth token edge cases ────────────────────────────────────
@@ -743,7 +795,7 @@ TEST_F(SyscallMiscTests, TestReturnMisalignedAuthTokens)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 TEST_F(SyscallMiscTests, TestReturnRevertWithAuthTokens)
@@ -759,7 +811,7 @@ TEST_F(SyscallMiscTests, TestReturnRevertWithAuthTokens)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 TEST_F(SyscallMiscTests, TestReturnWithEmptyAuthTokens)
@@ -775,7 +827,7 @@ TEST_F(SyscallMiscTests, TestReturnWithEmptyAuthTokens)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 TEST_F(SyscallMiscTests, TestReturnWithAuthTokenIds)
@@ -791,7 +843,7 @@ TEST_F(SyscallMiscTests, TestReturnWithAuthTokenIds)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // ── Error-code precedence pins ──────────────────────────────────────
@@ -813,9 +865,9 @@ TEST_F(SyscallMiscTests, RcqReadCapPrecedence)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
         *runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     // Commit so the reading transaction observes the entries as concurrent.
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler(
@@ -827,7 +879,7 @@ TEST_F(SyscallMiscTests, RcqReadCapPrecedence)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // #38: with no child return buffer, a misaligned restored-auth-token span
@@ -844,23 +896,24 @@ TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// #39: forwarding an unowned auth token on a self-invoke reports
-// kInvalidSyscallInput, not kReentrance: token ownership is checked before
-// reentrance.
-TEST_F(SyscallMiscTests, InvokeUnownedTokenBeatsReentrance)
+// #39: forwarding an unowned auth token on a self-invoke reports kReentrance,
+// not kInvalidSyscallInput: reentrance is checked ahead of token ownership
+// (#2973). A malformed or duplicated list still wins over reentrance -- those
+// checks run before admission, in the syscall body.
+TEST_F(SyscallMiscTests, InvokeUnownedTokenLosesToReentrance)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation = client_.make_invocation<
-              u8"test_invoke_unowned_token_beats_reentrance">(UINT64_MAX),
+              u8"test_invoke_unowned_token_loses_to_reentrance">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // #41: a mutable syscall with an out-of-bounds argument pointer inside a
@@ -879,7 +932,7 @@ TEST_F(SyscallMiscTests, ReadOnlyFaultBeatsReadOnlyRejection)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 TEST_F(SyscallMiscTests, OobSyscallArgumentIncrementsSyscallFaultCount)
@@ -894,7 +947,7 @@ TEST_F(SyscallMiscTests, OobSyscallArgumentIncrementsSyscallFaultCount)
                                    .nonce = nonce_++}},
       *runtime_context_);
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
   auto *stats = handler.get_transaction_stats();
   ASSERT_NE(stats, nullptr);
   EXPECT_EQ(stats->syscall_fault_count, 1);
@@ -902,9 +955,11 @@ TEST_F(SyscallMiscTests, OobSyscallArgumentIncrementsSyscallFaultCount)
 
 // A hand-written entrypoint record registered outside the #[contract] macro
 // (method id 0xFF) has a wrapper that returns without issuing the Return
-// syscall: verification passes, but dispatch ebreaks.
-TEST_F(SyscallMiscTests,
-       RootInvokeOfEntrypointWithoutReturnSyscallIsDeterministicFault)
+// syscall. The SDK dispatcher falls through to its unknown-method arm, so the
+// frame aborts with LibraryExn::UnknownMethod rather than trapping: the
+// transaction executes, and the caller can tell this apart from an OOB access
+// or a bad instruction by decoding the selector.
+TEST_F(SyscallMiscTests, RootInvokeOfEntrypointWithoutReturnSyscallAborts)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -919,9 +974,16 @@ TEST_F(SyscallMiscTests,
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  auto result = handler.root_invoke();
-  ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  auto result = handler.root_invoke()();
+  ASSERT_TRUE(result.is_root_success());
+
+  auto const output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Abort);
+
+  LibraryExn exn(LibraryExnKind::kLibraryExnUnknownMethod);
+  auto expected = x23::serialize_cxs(kLibraryExceptionSelector, exn);
+  ASSERT_TRUE(expected.has_value());
+  EXPECT_TRUE(std::ranges::equal(output.abort_buffer(), *expected));
 }
 
 // #40: reentrance beats resolution. The misc contract runs as the configured
@@ -948,13 +1010,16 @@ TEST_F(SyscallMiscDefaultWalletTest, ReentranceBeatsUnresolvableSelf)
   GenesisConfigurationBuilder builder;
   builder.set_default_wallet(
       NativeContractTestFramework::make_deployed_contract_hash(contract));
-  run_genesis_initialization(builder.build_or_panic(*get_default_cost_model()),
+  run_genesis_initialization(builder.build(NetworkHash{},
+                                           *get_default_cost_model(),
+                                           *load_stock_genesis_root_contract(),
+                                           stock_network_config()),
                              BlockExecutionMode::kBlockExecutionModeProposal);
   write_contract(contract);
 
   auto rv32_ctx = std::make_unique<Rv32Context>();
   MultiplexedContext ctx(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kRv32, {rv32_ctx.release(), true}},
       });
 
@@ -968,7 +1033,52 @@ TEST_F(SyscallMiscDefaultWalletTest, ReentranceBeatsUnresolvableSelf)
           .uniquifier = make_new_uniquifier()}};
 
   auto handler = make_new_system_call_handler(stx, ctx);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+}
+
+// ── #42: a misaligned auth-token span beats the cross-invoke depth bound ──
+//
+// The pair is the pin. The misaligned call must report the parse error even
+// though the bound would have rejected it too, and the control must show that
+// from this fixture the bound really is what rejects an otherwise-valid call
+// -- without it, the first test would read the same if the span check
+// swallowed every invoke.
+//
+// This ordering cannot be reached from a native caller: NativeSyscallContext's
+// syscall entry takes a typed span of uint32_t token ids, whose length is a
+// count of ids, so it is aligned by construction. cross_invoke_depth_test.cc
+// pins the orderings that a native caller can express.
+
+TEST_F(SyscallMiscTestsDepthOne, MisalignedAuthTokensBeatDepth)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation = client_.make_invocation<
+              u8"test_invoke_misaligned_tokens_beat_depth">(UINT64_MAX,
+                                                            kTargetAddress),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+}
+
+TEST_F(SyscallMiscTestsDepthOne, DepthRefusesAnOtherwiseValidInvoke)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_invoke_depth_refused">(
+                          UINT64_MAX, kTargetAddress),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 } // namespace hogd

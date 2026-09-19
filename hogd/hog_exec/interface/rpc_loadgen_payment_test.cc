@@ -9,7 +9,6 @@
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -18,6 +17,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
@@ -33,6 +33,15 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
+
+namespace {
+// Any consistent context will do, but it must be the same for every open of
+// a given block: open_block rejects a reopen whose context disagrees.
+constexpr hogd::BlockExecutionContext kTestBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1,
+};
+} // namespace
 
 namespace hogd {
 
@@ -115,7 +124,9 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto db_res = db_client_.dbsched_load_genesis_configuration_v2(
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(result.success().genesis_configuration);
+  auto db_res = db_client_.dbsched_load_genesis_configuration(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
@@ -125,10 +136,12 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
       .shards = x23::Vec<ShardCard>{make_shard_card()},
       .event = make_event_card(),
   };
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Open the proposal block
-  auto open_res = client_.executorsched_open_proposal_block(test_block_id);
+  auto open_res =
+      client_.executorsched_open_proposal_block(test_block_id,
+                                                kTestBlockExecution);
   ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
   // Open corresponding db block
@@ -143,7 +156,7 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
   ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
 
   SignedTransactionBatch txs;
-  parallel_batch_to_t(ext_result.success().work_txs, txs)();
+  parallel_batch_to_t(ext_result.success().work_txs, txs, kNoBatchSizeLimit)();
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Propose each transaction
@@ -178,7 +191,9 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto db_res = db_client_.dbsched_load_genesis_configuration_v2(
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(result.success().genesis_configuration);
+  auto db_res = db_client_.dbsched_load_genesis_configuration(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
@@ -188,10 +203,12 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
       .shards = x23::Vec<ShardCard>{make_shard_card()},
       .event = make_event_card(),
   };
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Open the proposal block
-  auto open_res = client_.executorsched_open_proposal_block(test_block_id);
+  auto open_res =
+      client_.executorsched_open_proposal_block(test_block_id,
+                                                kTestBlockExecution);
   ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
   // Open corresponding db block
@@ -206,7 +223,7 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
   ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
 
   SignedTransactionBatch txs;
-  parallel_batch_to_t(ext_result.success().work_txs, txs)();
+  parallel_batch_to_t(ext_result.success().work_txs, txs, kNoBatchSizeLimit)();
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Propose the batch (signatures included; the executor uses .tx).

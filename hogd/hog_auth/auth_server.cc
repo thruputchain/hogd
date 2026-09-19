@@ -18,9 +18,11 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_auth/status.h"
 #include "hogd/metrics/health.h"
+#include "integration.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -161,15 +163,6 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
       info("initializing auth server to height {}", current_height);
       current_height_futex_.broadcast(&default_threadpool());
       co_await Health::instance().set_current_block_height(current_height);
-      // No update callback is delivered for blocks that committed before this
-      // subscription was installed.  Tell the mempool which height the auth
-      // server initialized from so its downstream watermark cannot remain
-      // behind forever.  An empty batch is sufficient: a freshly initialized
-      // mempool has no cached transactions that need revalidation.
-      if (mempool_client_) {
-        co_await mempool_client_->mempoolauth_auth_data_changed(
-            current_height, KeyChangeBatch{});
-      }
     }
     else {
       info("auth server already initialized to height {} by concurrent "
@@ -200,6 +193,24 @@ AuthServer::populate_auth_data(BlockHeight height,
   co_return std::move(entry.value());
 }
 
+namespace {
+
+// Auth is the one place the whole SignedTransaction is measured; the executor
+// caps only the body (#3844).
+bool
+wrapper_over_cap(const SignedTransaction &tx)
+{
+  const size_t wrapper_size = x23::xdr_size(tx);
+  if (wrapper_size <= kMaxBytesSignedTransaction) {
+    return false;
+  }
+  trace("auth: rejecting over-cap transaction wrapper ({} bytes, cap {})",
+        wrapper_size, kMaxBytesSignedTransaction);
+  return true;
+}
+
+} // namespace
+
 x23::Async<AuthErrorCodeBatch>
 AuthServer::verify_transactions(BlockHeight height,
                                 std::span<const SignedTransaction> txs,
@@ -215,6 +226,10 @@ AuthServer::verify_transactions(BlockHeight height,
       auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
+    if (wrapper_over_cap(tx)) {
+      results[i] = AuthErrorCode::kAuthFailed;
+      continue;
+    }
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
       auto entry =
           co_await populate_auth_data(height, tx.tx.invocation.invoked_address);
@@ -278,6 +293,9 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
 {
   Ed25519SignatureVerifier signature_verifier;
   for (const auto &tx : txs) {
+    if (wrapper_over_cap(tx)) {
+      co_return AuthErrorCode::kAuthFailed;
+    }
     auto source_addr =
         co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
     if (!source_addr.has_value()) {

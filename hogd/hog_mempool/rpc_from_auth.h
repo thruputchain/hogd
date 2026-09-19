@@ -1,6 +1,6 @@
 #pragma once
 
-#include <string_view>
+#include <cstddef>
 #include <utility>
 
 #include "auth_card.hh"
@@ -11,8 +11,10 @@
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/x23/corosync.h"
 
 namespace hogd {
 
@@ -24,18 +26,49 @@ public:
 
   MempoolAuthRpc() = default;
 
-  void register_callback(auth_data_callback &&callback)
+  // A fresh scheduler has no cached transactions, so auth updates received
+  // before coordinator initialization only contribute a height watermark.
+  template<typename OnRegistered>
+  x23::Async<void> register_callback(auth_data_callback &&callback,
+                                     OnRegistered &&on_registered)
   {
+    x23::CoroGuard cg;
+    co_await cg(callback_lock_);
+
     CHECK(!callback_.has_value());
     callback_ = std::move(callback);
+    callback_set_.store(true);
+    callback_set_.broadcast(&default_threadpool());
+    std::forward<OnRegistered>(on_registered)();
+  }
+
+  // Stop admitting callbacks that can touch coordinator state, then wait for
+  // callbacks admitted before the close to finish. The coordinator calls this
+  // before destroying members captured by [callback_].
+  x23::Async<void> unregister_callback()
+  {
+    x23::CoroGuard cg;
+    co_await cg(callback_lock_);
+
+    callback_.reset();
+    callback_set_.store(false);
+    while (true) {
+      size_t callbacks_in_flight = callbacks_in_flight_.load();
+      if (callbacks_in_flight) {
+        cg.reset();
+        co_await callbacks_in_flight_.wait(callbacks_in_flight);
+        co_await cg(callback_lock_);
+        continue;
+      }
+      break;
+    }
   }
 
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
-    info("got {}, expected {}", card.protocol.c_str(),
-         version::kHogdProtocol());
-    if (std::string_view(card.protocol) !=
-        std::string_view(version::kHogdProtocol())) {
+    info("got {}, expected {}", protocol_text(card.protocol),
+         protocol_text(version::kHogdProtocol()));
+    if (card.protocol != version::kHogdProtocol()) {
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 
@@ -55,9 +88,37 @@ public:
   x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
                                                  KeyChangeBatch key_changes)
   {
-    CHECK(callback_.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    co_await (*callback_)(height, std::move(key_changes));
+    std::optional<auth_data_callback> callback;
+    while (true) {
+      x23::CoroGuard cg;
+      co_await cg(callback_lock_);
+
+      if (!callback_) {
+        info("Recording auth-data watermark {} before mempool coordinator "
+             "initialization; discarding {} key changes for an empty "
+             "scheduler",
+             height, key_changes.size());
+        cg.reset();
+        co_await callback_set_.wait(false);
+        continue;
+      }
+      callback = callback_;
+      callbacks_in_flight_.rmw([](size_t &count) { ++count; });
+      break;
+    }
+
+    co_await (*callback)(height, std::move(key_changes));
+
+    {
+      x23::CoroGuard cg;
+      co_await cg(callback_lock_);
+
+      callbacks_in_flight_.rmw([](size_t &count) {
+        CHECK_GT(count, size_t{0});
+        --count;
+      });
+      callbacks_in_flight_.broadcast(&default_threadpool());
+    }
   }
 
   static x23::Async<auth_sched_client_t> get_client()
@@ -75,7 +136,10 @@ public:
   }
 
 private:
+  x23::CoroLock callback_lock_;
   std::optional<auth_data_callback> callback_;
+  x23::CoroFutex<bool> callback_set_{false};
+  x23::CoroFutex<size_t> callbacks_in_flight_{0};
 };
 
 static_assert(is_MempoolAuth1<MempoolAuthRpc *, x23::Async>);

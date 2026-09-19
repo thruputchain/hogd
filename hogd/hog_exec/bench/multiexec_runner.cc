@@ -3,6 +3,7 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
@@ -34,7 +35,9 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/control_client.h"
+#include "hogd/hog_exec/bench/indexer_latency_probe.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "loadgen.hh"
@@ -52,6 +55,19 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
+
+namespace {
+// Must be the height the block will actually commit, since the executor
+// cross-checks it against the tip. The timepoint is a stand-in.
+constexpr hogd::BlockExecutionContext
+test_block_execution(uint64_t block_height)
+{
+  return hogd::BlockExecutionContext{
+      .block_height = static_cast<hogd::BlockHeight>(block_height),
+      .block_timepoint = 1,
+  };
+}
+} // namespace
 
 namespace hogd {
 
@@ -201,6 +217,13 @@ struct BlockValidationQueue {
   }
 };
 
+// hog-event defaults its indexer port to 0 (ephemeral), which leaves the
+// indexer with no address to dial. The bench owns its hosts outright, so
+// fixed ports are simpler here than plumbing the chosen port back out of the
+// event server's startup log.
+constexpr uint16_t kBenchEventIndexerPort = 8092;
+constexpr uint16_t kBenchIndexerBlockExplorerPort = 8093;
+
 using exec_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 using event_sched_client_t = decltype(connect_to_event_sched_server("address"));
@@ -210,7 +233,8 @@ void
 open_block(db_sched_client_t &db_sched_client,
            event_sched_client_t &event_sched_client,
            std::vector<exec_client_t> &exec_clients,
-           uint64_t parent_block_number, uint64_t block_number)
+           uint64_t parent_block_number, uint64_t block_number,
+           BlockHeight block_height)
 {
   info("opening block {}", block_number);
   auto start_time = x23::fastclock::get_ns();
@@ -219,13 +243,14 @@ open_block(db_sched_client_t &db_sched_client,
   std::atomic<size_t> n_remaining_execs = exec_clients.size();
 
   for (auto &exec_client : exec_clients) {
-    [](auto &exec_client, uint64_t block_number,
+    [](auto &exec_client, uint64_t block_number, BlockHeight block_height,
        std::atomic<size_t> &n_remaining_execs, auto &cb) -> x23::Detached {
-      co_await exec_client.executorsched_open_proposal_block(block_number);
+      co_await exec_client.executorsched_open_proposal_block(
+          block_number, test_block_execution(block_height));
       if (n_remaining_execs.fetch_sub(1, std::memory_order_relaxed) == 1) {
         cb();
       }
-    }(exec_client, block_number, n_remaining_execs, cb);
+    }(exec_client, block_number, block_height, n_remaining_execs, cb);
   }
 
   auto event_async = event_sched_client.eventsched_open_block(block_number);
@@ -253,7 +278,7 @@ void
 close_block(db_sched_client_t &db_sched_client,
             event_sched_client_t &event_sched_client,
             std::vector<exec_client_t> &exec_clients, uint64_t block_number,
-            ConsensusValue &prev_value)
+            ConsensusValue &prev_value, IndexerLatencyProbe *indexer_probe)
 {
   auto start_time = x23::fastclock::get_ns();
   info("closing block {}", block_number);
@@ -269,9 +294,9 @@ close_block(db_sched_client_t &db_sched_client,
       }
     }(exec_client, block_number, n_remaining_execs, cb);
   }
-  // We use [block_number] as the height as well.
+  const BlockHeight block_height = prev_value.proposal_header.block_height + 1;
   auto event_async =
-      event_sched_client.eventsched_close_block(block_number, block_number);
+      event_sched_client.eventsched_close_block(block_number, block_height);
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -279,7 +304,7 @@ close_block(db_sched_client_t &db_sched_client,
   }
   auto close_time = x23::fastclock::get_ns();
   ConsensusValue value{};
-  value.proposal_header.block_height = block_number;
+  value.proposal_header.block_height = block_height;
   auto commit_res =
       db_sched_client.dbsched_commit_snapshot(block_number, value);
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
@@ -301,8 +326,7 @@ close_block(db_sched_client_t &db_sched_client,
   // origin against the mock scheduler's genesis tip at registration.
   ConsensusValue event_value{};
   event_value.prev_hash = sha256(prev_value);
-  event_value.proposal_header.block_height =
-      static_cast<BlockHeight>(block_number);
+  event_value.proposal_header.block_height = block_height;
   event_value.proposal_header.events_hash = event_result.root_hash();
   auto event_commit_res =
       event_sched_client.eventsched_commit_block(block_number, event_value)();
@@ -311,6 +335,11 @@ close_block(db_sched_client_t &db_sched_client,
   }
   prev_value = event_value;
   auto event_commit_time = x23::fastclock::get_ns();
+  // Stamped from the same clock the probe stops on, so the recorded span is
+  // commit-return to query-visible with no second clock in it.
+  if (indexer_probe != nullptr) {
+    indexer_probe->record_commit(block_height, event_commit_time);
+  }
   std::println("closing: issue_time {} close_time {} commit_time {} "
                "done_time {} event_commit_time {}",
                issue_time - start_time, close_time - issue_time,
@@ -365,13 +394,16 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           std::vector<exec_client_t> &exec_clients,
           size_t n_coros_per_connection, size_t n_connections,
           size_t batch_size, uint64_t parent_block_number,
-          uint64_t current_block_number, ConsensusValue &prev_value)
+          uint64_t current_block_number, ConsensusValue &prev_value,
+          IndexerLatencyProbe *indexer_probe)
 {
   auto start_time = x23::fastclock::get_ns();
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
+  // Height comes off the previous committed value, never off a block number.
   open_block(db_sched_client, event_sched_client, exec_clients,
-             parent_block_number, current_block_number);
+             parent_block_number, current_block_number,
+             prev_value.proposal_header.block_height + 1);
 
   BlockValidationQueue block_validation_queue(txs, batch_size);
   x23::XdrVec<NondeterministicProposalData> nominations(txs->size());
@@ -393,7 +425,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   double elapsed_time = end_coros_time - start_coros_time;
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
   close_block(db_sched_client, event_sched_client, exec_clients,
-              current_block_number, prev_value);
+              current_block_number, prev_value, indexer_probe);
 
   auto end_block_time = x23::fastclock::get_ns();
   std::println("open_time {} middle_time {} close_time {} inner tps: {}",
@@ -414,9 +446,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     control_server_handles.emplace_back(server_addr);
   }
 
-  if (server_addrs.size() < 3) {
-    // 1 db, 1 event server, and the rest executors
-    panic("At least 3 servers are required");
+  if (server_addrs.size() < 4) {
+    // 1 event server, 1 db, 1 indexer, and the rest executors
+    panic("At least 4 servers are required");
   }
 
   RpcServer<SchedExecTest> sched_exec_test;
@@ -454,7 +486,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       "hogd/hog_event/hog-event",
       {"--bind-ip", hog_ip(server_addrs[server_idx]), "--mempool-addr",
        std::format("{}:{}", mempool_ip, sched_event_port), "--work-dir",
-       work_dir_str});
+       work_dir_str, "--indexer-port", std::to_string(kBenchEventIndexerPort)});
+  const std::string event_ip = hog_ip(server_addrs[server_idx]);
   server_idx++;
 
   EventCard event_card = sched_event_test->impl()->await_event_card();
@@ -467,6 +500,18 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
        std::format("{}:{}", mempool_ip, sched_db_port)});
   server_idx++;
 
+  // Started before the executors so it is already draining the outbox by
+  // the time the first block commits, which is the steady state the latency
+  // number is supposed to describe.
+  const std::string indexer_ip = hog_ip(server_addrs[server_idx]);
+  control_server_handles[server_idx].ci_client.start_server(
+      "hogd/hog_indexer/hog-indexer",
+      {"--bind-ip", indexer_ip, "--event-addr",
+       std::format("{}:{}", event_ip, kBenchEventIndexerPort), "--db-path",
+       work_dir_str, "--block-explorer-port",
+       std::to_string(kBenchIndexerBlockExplorerPort)});
+  server_idx++;
+
   for (; server_idx < server_addrs.size(); server_idx++) {
     control_server_handles[server_idx].ci_client.start_server(
         "hogd/hog_exec/hog-exec",
@@ -477,7 +522,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto db_cards = sched_db_test->impl()->await_shard_cards(1);
   sched_exec_test->impl()->register_shard_cards(db_cards);
   auto exec_cards =
-      sched_exec_test->impl()->await_executor_cards(server_addrs.size() - 2);
+      sched_exec_test->impl()->await_executor_cards(server_addrs.size() - 3);
+
+  IndexerLatencyProbe indexer_probe(
+      std::format("{}:{}", indexer_ip, kBenchIndexerBlockExplorerPort));
 
   auto event_sched_client =
       connect_to_event_sched_server(event_card.address_for_sched);
@@ -501,10 +549,12 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   auto write_genesis_configuration =
-      [&](const GenesisConfigurationV2 &genesis_configuration) {
+      [&](const GenesisConfiguration &genesis_configuration) {
         ConsensusValue genesis_value{};
         genesis_value.proposal_header.block_height = 0;
-        auto res = db_sched_client.dbsched_load_genesis_configuration_v2(
+        genesis_value.proposal_header.config_hash =
+            compute_config_hash(genesis_configuration);
+        auto res = db_sched_client.dbsched_load_genesis_configuration(
             genesis_configuration, genesis_value);
         if (res != DbSchedResult::DbSchedResultOK) {
           panic("Failed to write genesis block");
@@ -541,15 +591,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   run_block(&loadgen_result.success().genesis_ceremony_txs, db_sched_client,
             event_sched_client, coro_exec_clients, n_coros_per_connection,
             n_connections, batch_size, parent_block_number,
-            current_block_number, prev_value);
+            current_block_number, prev_value, &indexer_probe);
   parent_block_number = current_block_number;
   current_block_number++;
 
   for (auto const &init_block : loadgen_result.success().initialization_txs) {
     run_block(&init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
-              batch_size, parent_block_number, current_block_number,
-              prev_value);
+              batch_size, parent_block_number, current_block_number, prev_value,
+              &indexer_probe);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -563,7 +613,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     panic("Failed to extend loadgen experiment");
   }
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(work_txs_raw.success().work_txs, work_txs)();
+  parallel_batch_to_t(work_txs_raw.success().work_txs, work_txs,
+                      kNoBatchSizeLimit)();
   CHECK_EQ(work_txs.size(), num_txs_per_block);
 
   // The same work txs are replayed across every trial, so each must carry a
@@ -593,7 +644,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     auto ts = x23::fastclock::get_ns();
     run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
-              parent_block_number, current_block_number, prev_value);
+              parent_block_number, current_block_number, prev_value,
+              &indexer_probe);
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
@@ -611,6 +663,18 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     parent_block_number = current_block_number;
     current_block_number++;
   }
+
+  // Every block of this run has committed; let the indexer finish draining
+  // before reporting. The trials commit far faster than the indexer ingests,
+  // so the backlog standing here outlives the run by many seconds and the
+  // drain bounds the indexer going quiet rather than the total wait. A stall
+  // is reported as [unobserved] rather than silently shrinking the sample.
+  if (!indexer_probe.drain()) {
+    warn("indexer latency probe: indexer stopped draining committed heights");
+  }
+  indexer_probe.stop();
+  indexer_probe.report(
+      std::format("nexec={},batch={}", exec_cards.size(), batch_size));
 }
 
 } // namespace

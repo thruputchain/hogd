@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "invoke_args.hh"
@@ -54,7 +55,7 @@ get_calldata_entry(GasAmount gas, Calldata const &calldata)
   SyscallGetCalldataOutputs outputs;
   outputs.calldata.append_range(calldata);
   body.get_calldata().outputs = std::move(outputs);
-  return make_entry(gas, gas, std::move(body),
+  return make_entry(gas, gas - kSyscallBaseCost, std::move(body),
                     status_with(SyscallErrorCode::kSyscallErrorCodeNone));
 }
 
@@ -63,7 +64,7 @@ empty_return_entry(GasAmount gas)
 {
   SyscallTraceBody body(SyscallNo::kReturn);
   body.return_trace().inputs.revert_frame = false;
-  return make_entry(gas, gas, std::move(body),
+  return make_entry(gas, gas - kSyscallBaseCost, std::move(body),
                     HostFunctionStatusXdr(HostFnErrorCode::Return));
 }
 
@@ -112,53 +113,62 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'350, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(98'922, tx.tx.invocation.calldata));
   {
     // No child frame ran, and the restored-token span is misaligned (3
     // bytes); the buffer-availability check wins and no outputs are written.
     SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
     expected.push_back(make_entry(
-        99'227, 99'227, std::move(body),
+        98'709, 98'709 - kSyscallBaseCost, std::move(body),
         status_with(
             SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable)));
   }
-  expected.push_back(empty_return_entry(99'195));
+  expected.push_back(empty_return_entry(98'620));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 }
 
-TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
+// The gas figures below track this contract's rv32 entrypoint table: the guest
+// dispatcher scans it linearly, so every record added or moved ahead of the
+// invoked method costs the frame 10 more gas before its first syscall. Renaming
+// this entrypoint for #2973 cost 10; the panic pair added alongside
+// test_invoke_no_return_syscall cost 20 more; the depth-precedence pair added
+// alongside test_invoke_misaligned_tokens_beat_depth cost 20 more again.
+// Measured rather than predicted -- table order does not follow the method
+// name.
+TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
 {
   auto addr = deploy_misc_contract();
   ContractTraitClient<syscall_misc_tests::SyscallMiscTests> client(addr);
   const SignedTransaction tx{
       .tx = Transaction{.invocation = client.make_invocation<
-                            u8"test_invoke_unowned_token_beats_reentrance">(
+                            u8"test_invoke_unowned_token_loses_to_reentrance">(
                             kGasLimit),
                         .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'370, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(98'938, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kGetCurrentAddress);
     body.get_current_address().outputs =
         SyscallGetCurrentAddressOutputs{.address = addr};
     expected.push_back(
-        make_entry(99'336, 99'336, std::move(body),
+        make_entry(98'832, 98'832 - kSyscallBaseCost, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
-    // Self-invoke forwarding a fabricated token id 0xDEAD: the ownership
-    // check wins over the reentrance check, and no child frame runs.
+    // Self-invoke forwarding a fabricated token id 0xDEAD: reentrance wins
+    // over the ownership check, and no child frame runs. The losing input is
+    // still traced (#2973).
     SyscallTraceBody body(SyscallNo::kInvoke);
     body.invoke().inputs.address = addr;
     body.invoke().inputs.owned_auth_token_ids_list.append_range(
@@ -168,11 +178,11 @@ TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
         .gas_limit = UINT64_MAX,
         .flags = 0,
     };
-    expected.push_back(make_entry(
-        99'302, 99'302, std::move(body),
-        status_with(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput)));
+    expected.push_back(
+        make_entry(98'731, 98'731 - kSyscallBaseCost, std::move(body),
+                   status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
-  expected.push_back(empty_return_entry(99'264));
+  expected.push_back(empty_return_entry(98'629));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

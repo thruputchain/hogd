@@ -724,8 +724,9 @@ bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
 // Per-invocation startup cost in isolation: machine construction (memory
 // buffer setup + initial-image copy + register init) plus method-id seeding,
 // no execution. This is the path the thread-local memory slot pool targets.
-// Uses full-size memory (kMaxMemoryBytes, not kBenchMemoryBytes): deployed
-// artifacts default to the maximum, so this is the production-shaped cost.
+// Uses full-size memory (kDefaultMaxMemoryBytes, not kBenchMemoryBytes):
+// deployed artifacts default to the maximum, so this is the production-shaped
+// cost.
 void
 bm_rv32_threaded_instantiate(benchmark::State &state)
 {
@@ -738,7 +739,7 @@ bm_rv32_threaded_instantiate(benchmark::State &state)
   const auto program =
       ThreadedMachinePreInstantiation::create(bytes, initial_memory,
                                               /*memory_start=*/0,
-                                              kMaxMemoryBytes,
+                                              kDefaultMaxMemoryBytes,
                                               /*trace=*/false)
           .value();
   for (auto _ : state) {
@@ -820,7 +821,7 @@ bm_rv32_threaded_compute_loop_independent(benchmark::State &state)
 ArtifactImage
 parse_artifact_or_abort(std::span<const uint8_t> artifact)
 {
-  auto parsed = parse_artifact(artifact);
+  auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   if (!parsed.has_value()) {
     std::abort();
   }

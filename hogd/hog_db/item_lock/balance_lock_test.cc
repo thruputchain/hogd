@@ -311,4 +311,28 @@ TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
   }
 }
 
+// A fresh balance (constructed from std::nullopt) reserves aggregate credit
+// capacity against a logical base of 0, so it can absorb at most INT128_MAX
+// before overflowing. This is the contract ItemLock relies on when it decodes a
+// missing snapshot balance; see ItemLockTest.MissingBalanceSnapshotIsFresh for
+// the boundary regression test for #3809.
+TEST(BalanceLockTest, FreshBalanceCapacityIsInt128Max)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+
+  BalanceLock lock(std::nullopt);
+  EXPECT_EQ(lock.get_add_capacity(), kMax);
+
+  // A first credit can fill the fresh balance to its true capacity...
+  Balance first(kMax);
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &first, make_dummy_context())
+                  .has_value());
+  // ...after which no further credit fits, so the aggregate delta cannot exceed
+  // INT128_MAX and build_result cannot overflow.
+  Balance second(kTestCostModel.get_balance_cost());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
+          .has_value());
+}
+
 } // namespace hogd

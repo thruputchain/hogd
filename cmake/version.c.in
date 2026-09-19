@@ -1,6 +1,6 @@
 /* Auto-genereated - do not edit. */
 
-const char hogd_version[] = "@HOGD_RELEASE_VERSION@";
+const char hogd_version[] = "@HOGD_DISTRIBUTION_VERSION@";
 const char hogd_commit[] = "@GIT_HOGD_COMMIT@";
 /* protocol_commit is part of the network protocol token (see
  * hogd/version.h:kHogdProtocol) that peers compare byte-for-byte at the mempool

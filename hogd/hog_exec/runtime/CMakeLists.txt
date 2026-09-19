@@ -20,6 +20,7 @@ add_library(runtime_objects OBJECT
   native_runtime.cc
   metrics.cc
   multiplexed_context.cc
+  native_syscall_context.cc
   runtime.cc
   syscall_auth.cc
   syscall_block_data.cc
@@ -70,13 +71,17 @@ target_link_libraries(
 )
 
 add_library(runtime_test_objects OBJECT
+  auth_weight_tests.cc
   authclaim_test.cc
   balance_cost_tracking_test.cc
   block_cancel_tests.cc
+  bytestring_limit_test.cc
   contract_result_preset_handling_test.cc
   contract_trait_test.cc
   cross_call_tests.cc
+  execution_limits_test.cc
   cross_contract_revert_test.cc
+  cross_invoke_depth_test.cc
   delete_recreate_tests.cc
   default_wallet_fallback_test.cc
   default_wallet_parity_test.cc
@@ -84,11 +89,14 @@ add_library(runtime_test_objects OBJECT
   empty_test.cc
   erc20_parity_test.cc
   event_test.cc
+  faucet_scenario_test.cc
   fibonacci_test.cc
   sha256_incremental_test.cc
   interleaving_tests.cc
   invocation_frame_test.cc
+  validated_auth_tokens_test.cc
   invoke_error_handling_test.cc
+  invoke_malformed_tokens_rv32_test.cc
   invoke_tx_leak_test.cc
   manual_revert_comprehensive_test.cc
   manual_revert_rv32_test.cc
@@ -126,6 +134,7 @@ add_library(runtime_test_objects OBJECT
   syscall_parse_tests.cc
   tracing_tests.cc
   try_invoke_test.cc
+  tx_context_tests.cc
 )
 
 target_link_libraries(
@@ -223,6 +232,65 @@ target_link_libraries(
 )
 gtest_discover_tests(rv32_syscall_entry_bridge_test
                      TEST_PREFIX rv32.entry.)
+
+if(BUILD_BENCHMARKS)
+  # Syscall cost on the production entry path.
+  #
+  # A separate binary from the rv32 gas calibration on purpose. That harness
+  # links only rv32_isa_core so a calibration can run on a candidate validator
+  # without configuring the node build, which is exactly what it cannot do for
+  # a syscall: syscall_entry needs the protocol XDR, the DB proxy and the
+  # snapshot cache. Splitting them keeps the calibration portable and lets this
+  # one link whatever a real syscall needs.
+  #
+  # The link set is rv32_syscall_entry_bridge_test's, minus GTest and plus
+  # Google Benchmark. Deliberately not a minimized set: this benchmark stands
+  # up a SystemCallHandler behind the same in-process snapshot server and event
+  # aggregator that test does, and that test's dependency list is the one known
+  # to close over them.
+  add_executable(
+    rv32_syscall_entry_bench
+    rv32/rv32_syscall_entry_bench.cc
+  )
+
+  target_link_libraries(
+    rv32_syscall_entry_bench
+    precompiles
+    rv32_syscall_bridge
+    runtime
+    runtime_test_lib
+    runtime_test_util
+    db_interface
+    hog_db
+    storage_cost
+    model_checker
+    contract_loader
+    genesis
+    rv32_gas_calibration
+    benchmark::benchmark
+  )
+
+  target_include_directories(
+    rv32_syscall_entry_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_BINARY_DIR}/hogd/xdr
+  )
+
+
+  # rv32_gas_calibration is linked for provenance.h alone: the engine
+  # fingerprint and the build identity, recorded in the same form the gas
+  # calibration records them. That is what lets rv32_syscall_report.py join a
+  # syscall run to an opcode calibration and refuse the join when the two
+  # describe different engines or different hosts -- a syscall priced in gas
+  # units taken from another machine's baseline is not priced at all.
+  #
+  # Optimized with LTO across the interpreter and the syscall bridge, matching
+  # how the node is built. A syscall measured through a non-LTO build is a
+  # different syscall.
+  set_property(TARGET rv32_syscall_entry_bench
+               PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
 
 add_executable(
   rv32_runtime_context_test

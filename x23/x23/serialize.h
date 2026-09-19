@@ -416,6 +416,29 @@ struct serialize_equiv<std::array<X, N>, span<T, N>> : std::true_type {};
 
 static_assert(serializes_like<span<const int32_t>, Vec<int32_t>>);
 
+template<typename T>
+inline size_t
+xdr_size(const XdrSharedPtr<T> &p)
+{
+  if (p) {
+    return 4UZ + x23::xdr_size(*p);
+  }
+  return 4UZ;
+}
+
+template<typename T>
+inline void
+xdr_serialize(auto &serializer, const XdrSharedPtr<T> &p)
+{
+  if (p) {
+    serializer.put32(1);
+    serializer(*p);
+  }
+  else {
+    serializer.put32(0);
+  }
+}
+
 template<is_xdr_serializable T>
 inline size_t
 xdr_size(BorrowedPtr<T> p)
@@ -632,19 +655,21 @@ template<typename X>
 concept contains_recursive_xdr =
     is_xdr_type<X> && detail::xdr_contains_recursive<X>();
 
-// Default number of stack frames allowed corresponding to recursive
-// structs and unions.
+// Default maximum nesting depth of recursive structs/unions during decoding.
+// Non-recursive wrappers do not count. Override per call when needed; changes
+// to this process-wide default must not race with deserialization.
 extern size_t deserialization_recursion_limit;
 
 namespace detail {
 
 struct DeserializationRecursionChecker {
-  size_t recursion_limit_ = deserialization_recursion_limit;
+  size_t recursion_limit_;
+  size_t initial_recursion_limit_;
   void recurse(this auto &&self)
   {
     if (!self.recursion_limit_) [[unlikely]]
       self.raise("x23::Deserializer: exceeded recursion limit of {}",
-                 deserialization_recursion_limit);
+                 self.initial_recursion_limit_);
     --self.recursion_limit_;
   }
 };
@@ -657,13 +682,18 @@ struct Deserializer
   const uint8_t *const e;  // end of valid input (might read beyond)
   const uint8_t *const ee; // end of buffer (shouldn't read beyond)
 
-  Deserializer(BufViewEnd b) noexcept
-    : Deserializer(b.data(), b.data() + b.size(), b.bufend())
+  Deserializer(BufViewEnd b, size_t recursion_limit) noexcept
+    : Deserializer(b.data(), b.data() + b.size(), b.bufend(), recursion_limit)
   {}
-  Deserializer(const uint8_t *p0, const uint8_t *e0,
-               const uint8_t *ee0) noexcept
+  Deserializer(const uint8_t *p0, const uint8_t *e0, const uint8_t *ee0,
+               size_t recursion_limit) noexcept
     : p(p0), e(e0), ee(ee0)
-  {}
+  {
+    if constexpr (CheckRecursion) {
+      this->recursion_limit_ = recursion_limit;
+      this->initial_recursion_limit_ = recursion_limit;
+    }
+  }
 
   // Check for buffer overrun at end of deserialization--must not use
   // Deserializer without eventually calling this.  (Since it throws,
@@ -857,28 +887,32 @@ struct Deserializer
   template<bool Safe, is_xdr_struct X> void go(X &x)
   {
     constexpr SizeBounds kSB = xdr_size_bounds<X>();
-    if constexpr (CheckRecursion && is_recursive_xdr<X>)
-      this->recurse();
     if constexpr (std::tuple_size_v<X> == 0)
       return;
-    else if (!Safe || unsafe_ok(kSB))
-      visit_fields([this](auto &x) { this->go<false>(x); }, x);
-    else if constexpr (kSB.min_ <
-                       xdr_size_bounds<std::tuple_element_t<0, X>>().max_)
-      visit_fields([this](auto &x) { this->go<true>(x); }, x);
-    // If we are Safe, but the minimum size of the whole structure is
-    // greater than the maximum size of field 0, then we might as well
-    // check once against the minimum size of the structure and then
-    // unmarshal the first few fields unsafely.  That optimizes the
-    // case of a structure that starts with a bunch of integers and
-    // ends with a vector, like call_body.
-    else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_))
-      throw XdrBadInput("x23::Deserializer: input too short");
     else {
-      constexpr auto kUF = first_unsafe_field<X>(xdr_size_bounds<X>().min_);
-      [this, &x]<size_t... I>(std::index_sequence<I...>) {
-        (this->go<(I >= kUF)>(get<I>(x)), ...);
-      }(std::make_index_sequence<std::tuple_size_v<X>>{});
+      if constexpr (CheckRecursion && is_recursive_xdr<X>)
+        this->recurse();
+      if (!Safe || unsafe_ok(kSB))
+        visit_fields([this](auto &x) { this->go<false>(x); }, x);
+      else if constexpr (kSB.min_ <
+                         xdr_size_bounds<std::tuple_element_t<0, X>>().max_)
+        visit_fields([this](auto &x) { this->go<true>(x); }, x);
+      // If we are Safe, but the minimum size of the whole structure is
+      // greater than the maximum size of field 0, then we might as well
+      // check once against the minimum size of the structure and then
+      // unmarshal the first few fields unsafely.  That optimizes the
+      // case of a structure that starts with a bunch of integers and
+      // ends with a vector, like call_body.
+      else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_))
+        throw XdrBadInput("x23::Deserializer: input too short");
+      else {
+        constexpr auto kUF = first_unsafe_field<X>(xdr_size_bounds<X>().min_);
+        [this, &x]<size_t... I>(std::index_sequence<I...>) {
+          (this->go<(I >= kUF)>(get<I>(x)), ...);
+        }(std::make_index_sequence<std::tuple_size_v<X>>{});
+      }
+      if constexpr (CheckRecursion && is_recursive_xdr<X>)
+        this->recursion_limit_++;
     }
   }
   template<bool Safe, is_xdr_union X> void go(X &x)
@@ -892,6 +926,8 @@ struct Deserializer
       raise("Bad discriminant {} deserializing {}", get<0>(x),
             ops::meta::type_name);
     union_visit_arm([this](auto &x) { this->go<Safe>(x); }, x);
+    if constexpr (CheckRecursion && is_recursive_xdr<X>)
+      this->recursion_limit_++;
   }
 
   template<typename... Args>
@@ -909,9 +945,10 @@ struct Deserializer
 
 template<is_xdr_type Xout>
 size_t
-deserialize_from(Xout *out, BufViewEnd buf)
+deserialize_from(Xout *out, BufViewEnd buf,
+                 size_t recursion_limit = deserialization_recursion_limit)
 {
-  detail::Deserializer<contains_recursive_xdr<Xout>> d(buf);
+  detail::Deserializer<contains_recursive_xdr<Xout>> d(buf, recursion_limit);
   d.template go<true>(*out);
   d.check();
   return d.p - buf.data();
@@ -919,12 +956,13 @@ deserialize_from(Xout *out, BufViewEnd buf)
 
 template<is_xdr_type Xout>
 inline void
-deserialize(Xout *out, BufViewEnd buf)
+deserialize(Xout *out, BufViewEnd buf,
+            size_t recursion_limit = deserialization_recursion_limit)
 {
   if (buf.size() % 4)
     throw XdrBadInput("input not multiple of 4 bytes deserializing {}",
                       xdr_type_name<Xout>());
-  if (deserialize_from(out, buf) != buf.size())
+  if (deserialize_from(out, buf, recursion_limit) != buf.size())
     throw XdrBadInput("leftover bytes deserializing {}", xdr_type_name<Xout>());
 }
 

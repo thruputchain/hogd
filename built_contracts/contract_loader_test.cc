@@ -1,10 +1,13 @@
 #include "contract_loader.h"
 
 #include <filesystem>
+#include <memory>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "hogd/base/log.h"
+#include "x23/tests/death_test.h"
 #include "x23/x23/progname.h"
 
 namespace hogd {
@@ -24,13 +27,12 @@ TEST(ContractLoaderTest, SearchOrderIncludesUserDirsAndDefaults)
   set_contract_artifact_directories(user_dirs);
 
   auto dirs = contract_search_directories();
-  ASSERT_EQ(dirs.size(), 5U);
+  ASSERT_EQ(dirs.size(), 4U);
   EXPECT_EQ(dirs[0], user_dirs[0]);
   EXPECT_EQ(dirs[1], user_dirs[1]);
   EXPECT_EQ(dirs[2].filename(), "built_contracts");
   EXPECT_EQ(dirs[3], std::filesystem::path(x23::getprogpath()).parent_path() /
                          "contracts");
-  EXPECT_EQ(dirs[4], std::filesystem::path("/usr/share/groundhog/contracts"));
 }
 
 TEST(ContractLoaderTest, LoadsDevWalletFromBuildTree)
@@ -39,6 +41,20 @@ TEST(ContractLoaderTest, LoadsDevWalletFromBuildTree)
 
   auto rv32_blob = load_contract_blob("dev_wallet.rv32a");
   EXPECT_FALSE(rv32_blob.data.empty());
+}
+
+TEST(ContractLoaderTest, MissingArtifactNamesSearchPathsAndOverride)
+{
+  ContractArtifactDirectoryGuard guard;
+  set_contract_artifact_directories({"/tmp/groundhog-missing-contracts"});
+
+  X23_EXPECT_DEATH(
+      {
+        log_init(std::make_unique<ConsoleLogger>());
+        (void)load_contract_blob("missing-contract.rv32a");
+      },
+      "failed to load contract artifact: missing-contract\\.rv32a; searched "
+      "directories: .*groundhog-missing-contracts.*--contract-artifacts-dir");
 }
 
 } // namespace

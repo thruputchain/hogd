@@ -14,6 +14,10 @@ concurrency:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  # Published crates and pinned submodules retain the legacy registry identity.
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
@@ -126,6 +130,20 @@ jobs:
         run: |
           export LSAN_OPTIONS=suppressions="$(pwd)/.lsan_suppress:print_suppressions=1"
           ./build/hogd/test_ffi/test_ffi_test
+
+      # test_ffi_mock_syscall_test lives in its own binary (it needs a custom
+      # main(); see hogd/test_ffi/CMakeLists.txt), and ENABLE_TEST_FFI is set
+      # only here, so no other workflow compiles it. Without these two steps it
+      # is built by CMake but by nothing in CI, and can break unnoticed.
+      - name: Build test_ffi_mock_syscall_test
+        run: |
+          cmake --build build --parallel "$(nproc)" \
+            --target test_ffi_mock_syscall_test
+
+      - name: Run test_ffi_mock_syscall_test
+        run: |
+          export LSAN_OPTIONS=suppressions="$(pwd)/.lsan_suppress:print_suppressions=1"
+          ./build/hogd/test_ffi/test_ffi_mock_syscall_test
 
       - name: Show ccache stats
         if: always()

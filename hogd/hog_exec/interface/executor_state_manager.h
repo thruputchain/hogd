@@ -14,7 +14,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
-#include "hogd/hog_exec/interface/dispatch_pool.h"
 #include "hogd/hog_exec/interface/executor_context.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -28,14 +27,10 @@ namespace hogd {
 class ExecutorStateManager {
 public:
   ExecutorStateManager(std::unique_ptr<DatabaseProxy> db_proxy,
-                       std::unique_ptr<EventServerProxy> event_server_proxy,
-                       size_t nthreads)
+                       std::unique_ptr<EventServerProxy> event_server_proxy)
     : db_proxy_(std::move(db_proxy)),
-      event_server_proxy_(std::move(event_server_proxy)),
-      worker_pool_(static_cast<int>(nthreads))
-  {
-    CHECK(nthreads <= std::numeric_limits<int>::max());
-  }
+      event_server_proxy_(std::move(event_server_proxy))
+  {}
 
   // This acquires a reference to the executor context, if the returned value is
   // not null. The caller must eventually release the reference and, if
@@ -46,8 +41,10 @@ public:
   // return ExecResultOk if successful, or ExecResultSystemError if
   // the block_id already exists and is of a different mode.
   // These increase the reference count of the executor context
-  x23::Async<ExecResult> open_proposal(BlockID new_proposal_id);
-  x23::Async<ExecResult> open_validation(BlockID new_validation_id);
+  x23::Async<ExecResult> open_proposal(BlockID new_proposal_id,
+                                       BlockExecutionContext block_execution);
+  x23::Async<ExecResult> open_validation(BlockID new_validation_id,
+                                         BlockExecutionContext block_execution);
   // Decreases the reference count of the executor context.
   x23::Async<ExecResult> remove_block(BlockID block_id);
 
@@ -56,10 +53,14 @@ public:
   // draining straggler event callbacks (Abandon is treated as
   // working-as-intended and reported as success), or success if the final
   // drain was clean.
-  x23::Async<SystemStatus<void>> gc_executor_context(BlockID block_id);
+  [[nodiscard]] x23::Async<SystemStatus<void>>
+  gc_executor_context(BlockID block_id);
 
 private:
-  x23::Async<ExecResult> open_block(BlockID block_id, ExecutionMode mode);
+  // Taken by value, not by reference: these are coroutines, and a reference
+  // parameter would dangle across the first suspension.
+  x23::Async<ExecResult> open_block(BlockID block_id, ExecutionMode mode,
+                                    BlockExecutionContext block_execution);
 
   x23::Async<PerThreadARC<ExecutorContext> *>
   get_executor_context_slow(BlockID block_id);
@@ -73,14 +74,16 @@ private:
   stash_snapshot_cache(std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                        x23::CoroGuard const &g);
   std::unique_ptr<StorageSnapshotCache>
-  get_snapshot_cache(BlockID block_id, x23::CoroGuard const &g);
+  get_snapshot_cache(BlockID block_id,
+                     BlockExecutionContext const &block_execution,
+                     x23::CoroGuard const &g);
 
   struct ActiveBlock {
     ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy,
                 std::unique_ptr<StorageSnapshotCache> snapshot_cache,
-                EventServerProxy &event_server_proxy, DispatchPool &worker_pool)
+                EventServerProxy &event_server_proxy)
       : context(mode, block_id, db_proxy, std::move(snapshot_cache),
-                event_server_proxy, worker_pool)
+                event_server_proxy)
     {}
     PerThreadARC<ExecutorContext> context;
     int open_block_count{1};
@@ -106,7 +109,6 @@ private:
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
-  DispatchPool worker_pool_;
 };
 
 inline x23::MaybeAsync<PerThreadARC<ExecutorContext> *>

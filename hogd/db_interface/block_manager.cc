@@ -11,7 +11,6 @@
 #include "address_auth.hh"
 #include "contract.hh"
 #include "genesis.hh"
-#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -100,6 +99,8 @@ BlockManager::commit_block(BlockID id)
       blocks_to_gc.insert(blocks_to_gc.end(), r.begin(), r.end());
     }
     last_committed_id_ = id;
+    // Always a direct child of the previous commit (checked above).
+    last_committed_height_ += 1;
 
     // Now unlink all the children of the new last committed block,
     // telling them to read from the database as the state parent.
@@ -155,6 +156,13 @@ BlockManager::committed_tip_id()
 {
   std::shared_lock lock(mtx_);
   return last_committed_id_;
+}
+
+BlockHeight
+BlockManager::committed_tip_height()
+{
+  std::shared_lock lock(mtx_);
+  return last_committed_height_;
 }
 
 bool
@@ -214,25 +222,18 @@ BlockManager::initialize_genesis_configuration(
   if (initialized_genesis_) {
     return false;
   }
+
   initialized_genesis_ = true;
+  last_committed_height_ = 0;
 
   default_wallet_.emplace(config.default_wallet);
+  network_config_.emplace(config.network_config);
+  network_hash_.emplace(config.network_hash);
 
   cost_model_.emplace(config.storage_cost_model);
 
-  GenesisConfigurationLoader loader(config);
-
-  loader.load_genesis_configuration(
-      [&](StorageKey const &key, int128_t value) -> int128_t {
-        auto item =
-            std::make_shared<StorageItemWrapper>(value, &cost_model_.value());
-        base_database_->write_item(
-            AddressAndKey{
-                .address = GenesisConfigurationLoader::kDeployContractAddress,
-                .key = key},
-            item);
-        return item->storage_cost();
-      },
+  visit_genesis_execution_prerequisites(
+      config,
       [&](std::shared_ptr<const Contract> const &contract) {
         assert(contract);
         auto hash = sha256(*contract);
@@ -247,8 +248,7 @@ BlockManager::initialize_genesis_configuration(
                                                      StorageKeyType::Metadata)},
                                    item);
       },
-      [&](ContractAddress const &addr,
-          AddressAuthData const &auth_data) -> int128_t {
+      [&](ContractAddress const &addr, AddressAuthData const &auth_data) {
         auto item =
             std::make_shared<const StorageItemWrapper>(auth_data,
                                                        &cost_model_.value());
@@ -256,7 +256,6 @@ BlockManager::initialize_genesis_configuration(
                                                  .key = StorageKey(
                                                      StorageKeyType::AuthData)},
                                    item);
-        return item->storage_cost();
       });
 
   return true;

@@ -9,9 +9,14 @@ on:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  # Published crates and pinned submodules retain the legacy registry identity.
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
-  HOGD_RELEASE_VERSION: "0.1.23"
+  # Version embedded in binaries assembled by this component release.
+  HOGD_DISTRIBUTION_VERSION: "0.1.28-rc.2"
 
 permissions:
   contents: write
@@ -112,7 +117,7 @@ jobs:
         run: test "$(uname -m)" = "${{ matrix.machine }}"
 
       - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: groundhog-go/chuckd/go.mod
 
@@ -180,8 +185,8 @@ jobs:
           for build_type in release debug; do
             for binary in "${binaries[@]}"; do
               output=$("build/${build_type}/hogd/${binary}" --version 2>&1)
-              if [[ "$output" != *"$HOGD_RELEASE_VERSION"* ]]; then
-                echo "${binary} does not report distribution version ${HOGD_RELEASE_VERSION}: ${output}" >&2
+              if [[ "$output" != *"$HOGD_DISTRIBUTION_VERSION"* ]]; then
+                echo "${binary} does not report distribution version ${HOGD_DISTRIBUTION_VERSION}: ${output}" >&2
                 exit 1
               fi
             done
@@ -193,6 +198,26 @@ jobs:
             build/release artifacts release "${{ matrix.architecture }}"
           ./scripts/package_hogd_validator_release.sh \
             build/debug artifacts debug "${{ matrix.architecture }}"
+
+          for archive in artifacts/*.tar.gz; do
+            contents=$(tar -tzf "$archive")
+            grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
+            grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
+          done
+
+      # Keep server code generation separate from portable developer artifacts.
+      # These binaries must be runtime-qualified on a Zen 5 host before deployment.
+      - name: Build and package Zen 5 server binaries
+        if: matrix.architecture == 'x86_64'
+        run: |
+          ./scripts/build.sh \
+            -d build/znver5 -t Release -c gcc \
+            -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DBUILD_ARCHITECTURE=znver5" \
+            -x "-DRUST_BUILD_CPU=znver5" \
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
+          ./scripts/package_hogd_validator_release.sh \
+            build/znver5 artifacts release x86_64 znver5
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -250,6 +275,13 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+
+      - name: Configure ccache
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume. Point it at the cached path, as the Linux jobs do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -311,6 +343,7 @@ jobs:
           chmod +x package/hog-devnode-macos-arm64/hog-devnode
           mkdir -p package/hog-devnode-macos-arm64/contracts
           cp build/release/built_contracts/dev_wallet.rv32a package/hog-devnode-macos-arm64/contracts/dev_wallet.rv32a
+          cp build/release/built_contracts/genesis_root.rv32a package/hog-devnode-macos-arm64/contracts/genesis_root.rv32a
 
           pushd package/hog-devnode-macos-arm64 >/dev/null
           mkdir -p lib
@@ -392,8 +425,8 @@ jobs:
           otool -L hog-devnode
 
           version_output=$(./hog-devnode --version 2>&1)
-          if [[ "$version_output" != *"$HOGD_RELEASE_VERSION"* ]]; then
-            echo "hog-devnode does not report distribution version ${HOGD_RELEASE_VERSION}: ${version_output}" >&2
+          if [[ "$version_output" != *"$HOGD_DISTRIBUTION_VERSION"* ]]; then
+            echo "hog-devnode does not report distribution version ${HOGD_DISTRIBUTION_VERSION}: ${version_output}" >&2
             exit 1
           fi
 
@@ -469,7 +502,15 @@ jobs:
           trap - EXIT
           popd >/dev/null
 
-          tar -czf artifacts/hog-devnode-macos-arm64.tar.gz -C package/hog-devnode-macos-arm64 hog-devnode contracts/dev_wallet.rv32a lib
+          tar -czf artifacts/hog-devnode-macos-arm64.tar.gz \
+            -C package/hog-devnode-macos-arm64 \
+            hog-devnode \
+            contracts/dev_wallet.rv32a \
+            contracts/genesis_root.rv32a \
+            lib
+          contents=$(tar -tzf artifacts/hog-devnode-macos-arm64.tar.gz)
+          grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
+          grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -493,20 +534,28 @@ jobs:
       contents: write
       actions: read
     steps:
+      - name: Verify tag matches distribution version
+        run: |
+          expected_tag="v${HOGD_DISTRIBUTION_VERSION}"
+          if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
+            echo "release tag $GITHUB_REF_NAME does not match distribution version $HOGD_DISTRIBUTION_VERSION" >&2
+            exit 1
+          fi
+
       - name: Download Linux x86_64 artifacts
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: hogd-linux-x86_64-release-artifacts
           path: artifacts/
 
       - name: Download Linux ARM64 artifacts
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: hogd-linux-arm64-release-artifacts
           path: artifacts/
 
       - name: Download macOS hog-devnode artifact
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: hog-devnode-macos-arm64
           path: artifacts/
@@ -516,14 +565,14 @@ jobs:
           set -euo pipefail
           cd artifacts
           archives=(*.tar.gz)
-          test "${#archives[@]}" -eq 9
+          test "${#archives[@]}" -eq 10
           for archive in "${archives[@]}"; do
             test -s "$archive"
           done
           sha256sum -- "${archives[@]}" > SHA256SUMS
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: artifacts/*
           generate_release_notes: true

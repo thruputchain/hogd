@@ -33,7 +33,15 @@ namespace x23 {
 #if FASTCLOCK_USE_TSC
 
 struct fastclock {
-  using rep = std::uint64_t;
+  // Signed, and it has to stay that way.  std::condition_variable's
+  // wait_until reads the clock more than once -- it compares the deadline
+  // against one read, then computes `deadline - now()` against a later one
+  // -- so a deadline that expires in between produces a negative interval.
+  // With an unsigned rep that subtraction wraps instead, and a wait of a
+  // few nanoseconds becomes a wait of roughly 585 years.  Signed arithmetic
+  // makes the expired deadline merely negative, which every implementation
+  // treats as "already timed out".
+  using rep = std::int64_t;
   using period = std::nano;
   using duration = std::chrono::duration<rep, period>;
   using time_point = std::chrono::time_point<fastclock>;
@@ -105,7 +113,14 @@ public:
     return ns;
   }
 
-  static time_point now() noexcept { return time_point(duration(get_ns())); }
+  // get_ns stays unsigned: its other callers shift it to seed RNGs, where
+  // running into the sign bit would be undefined.  A TSC-derived nanosecond
+  // count is nowhere near the 292-year range of a signed rep, so narrowing
+  // it here is exact.
+  static time_point now() noexcept
+  {
+    return time_point(duration(static_cast<rep>(get_ns())));
+  }
 };
 
 #else // !FASTCLOCK_USE_TSC

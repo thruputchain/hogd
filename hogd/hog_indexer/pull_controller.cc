@@ -10,7 +10,6 @@
 #include <optional>
 #include <stop_token>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -18,12 +17,12 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
+#include "hogd/hog_indexer/status.h"
 #include "hogd/metrics/health.h"
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
 #include "x23/fastclock.h"
 #include "x23/rpc_common.h"
 #include "x23/serialize.h"
@@ -39,35 +38,6 @@ bool
 xdr_equal(const T &lhs, const T &rhs)
 {
   return x23::serialize(lhs) == x23::serialize(rhs);
-}
-
-template<typename F>
-auto
-call_with_timeout(event_indexer_client_t client,
-                  std::chrono::milliseconds timeout, std::string_view operation,
-                  F &&call)
-{
-  std::mutex mutex;
-  std::condition_variable_any wake;
-  bool completed = false;
-  std::jthread deadline_guard(
-      [client = std::move(client), timeout, operation, &mutex, &wake,
-       &completed](const std::stop_token &stop) mutable {
-        std::unique_lock lock(mutex);
-        if (!wake.wait_for(lock, stop, timeout, [&] { return completed; }) &&
-            !stop.stop_requested()) {
-          warn("{} RPC timed out", operation);
-          client.__send_call.get()->fail();
-        }
-      });
-  x23::Defer complete([&]() noexcept {
-    {
-      std::lock_guard lock(mutex);
-      completed = true;
-    }
-    wake.notify_all();
-  });
-  return std::forward<F>(call)();
 }
 
 } // namespace
@@ -165,11 +135,13 @@ IndexerPullController::pull_tx_failures(event_indexer_client_t &client)
 {
   try {
     IndexerTxFailureNoticeBatch notices =
-        call_with_timeout(client, options_.rpc_timeout,
-                          "indexer tx-failure pull", [&] {
-                            return client.event_indexer_pull_tx_failures()();
-                          });
-    const BlockHeight watermark = db_.latest_block();
+        client.event_indexer_pull_tx_failures()();
+    IndexerStatus<BlockHeight> watermark_status = db_.latest_block();
+    if (!watermark_status) {
+      error("indexer tx-failure pull: {}", watermark_status.error());
+      return false;
+    }
+    const BlockHeight watermark = *watermark_status;
     for (const IndexerTxFailureNotice &notice : notices) {
       failure_cache_.report(notice.tx_hash, notice.diagnostic, watermark);
     }
@@ -233,11 +205,21 @@ IndexerPullController::run(const std::stop_token &stop)
           .protocol = version::kHogdProtocol(),
           .progress = requested_progress,
       };
+      // Only a pull on a connection already answered caught up asks the
+      // server to hold it until the next publication, by sending its cursor
+      // in the CaughtUp state. The first pull of a connection is answered at
+      // once, so a restart or reconnect with persisted progress on an idle
+      // chain still learns it is caught up. The durable cursor itself stays
+      // Initialized; the caught-up reply is checked against it below.
+      if (requested_progress.state() ==
+              IndexerProgressState::IndexerProgressInitialized &&
+          caught_up_now()) {
+        request.progress =
+            IndexerProgress(IndexerProgressState::IndexerProgressCaughtUp);
+        request.progress.initialized() = requested_progress.initialized();
+      }
       EventIndexerPullResult result =
-          call_with_timeout(*client, options_.rpc_timeout, "indexer block pull",
-                            [&] {
-                              return client->event_indexer_pull_next(request)();
-                            });
+          client->event_indexer_pull_next(request)();
       if (stop.stop_requested()) {
         return;
       }
@@ -377,6 +359,13 @@ IndexerPullController::mark_caught_up()
   }
   Health::instance().set_status(Health::Status::kOk)();
   wake_.notify_all();
+}
+
+bool
+IndexerPullController::caught_up_now()
+{
+  std::lock_guard lock(wait_mutex_);
+  return caught_up_;
 }
 
 void

@@ -1,17 +1,17 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <expected>
 #include <limits>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
-#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -23,29 +23,31 @@
 #include "db_conflict.hh"
 #include "event.hh"
 #include "exec_result.hh"
+#include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_event/utilities.h"
-#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/metrics.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -72,12 +74,56 @@ contract_blob_size(Contract const &contract)
   case ContractType::kNative:
   case ContractType::kMockTest:
     return 0;
-  case ContractType::kWasmi:
-    return contract.wasmi_contract().data.size();
   case ContractType::kRv32:
     return contract.rv32_contract().data.size();
   }
   panic("Unrecoverable; Invalid contract type: {}", contract.contract_type());
+}
+
+constexpr NewContractBatch kEmptyVec = {};
+
+ExecutionModeData
+make_execution_mode_data(ExecutionModeCtor execution_mode_ctor)
+{
+  if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
+    return ProposalModeData{};
+  }
+  if (std::holds_alternative<ViewingModeCtor>(execution_mode_ctor)) {
+    return ExecutionModeData{std::in_place_type<ViewingModeData>,
+                             std::get<ViewingModeCtor>(execution_mode_ctor)};
+  }
+  return ExecutionModeData{std::in_place_type<ValidationModeData>,
+                           std::get<ValidationModeCtor>(execution_mode_ctor)};
+}
+
+// Run a logging statement that may itself throw (allocation or sink failure)
+// behind a noexcept boundary. Returns false if the log was dropped, in which
+// case dropped_desc reaches the no-allocation reporter instead.
+template<typename F>
+bool
+guarded_log(char const *dropped_desc, F &&log_fn) noexcept
+{
+  try {
+    std::forward<F>(log_fn)();
+    return true;
+  } catch (...) {
+    report_dropped_log(dropped_desc);
+    return false;
+  }
+}
+
+// Populate an UnmodifiedItem's base item from the snapshot cache if it has
+// not been loaded yet. Not a coroutine: the already-loaded arm answers with a
+// plain value, and the load arm forwards load()'s own MaybeAsync, preserving
+// its no-frame-on-cache-hit property.
+x23::MaybeAsync<SystemStatus<void>>
+ensure_loaded(UnmodifiedItem const &item, StorageSnapshotCache &snapshot_cache,
+              FrameItemKey const &item_key)
+{
+  if (item.is_loaded()) {
+    return SystemStatus<void>{};
+  }
+  return item.load(snapshot_cache, item_key);
 }
 
 } // namespace
@@ -127,49 +173,21 @@ SystemCallHandler::replay_uniquifier_expired(Uniquifier const &uniquifier,
   return uniquifier.block_expiry_height < executing_height;
 }
 
-SystemStatus<bool>
-SystemCallHandler::replay_uniquifier_expired()
+bool
+SystemCallHandler::replay_uniquifier_expired() const
 {
   // Only real transactions carry a uniquifier (the test-harness constructor
   // leaves it empty).
   if (!tx_uniquifier_.has_value()) {
     return false;
   }
-  auto legacy_claim = root_is_legacy_initial_token_claim();
-  if (!legacy_claim.has_value()) {
-    return std::unexpected(legacy_claim.error());
-  }
-  if (*legacy_claim) {
-    return false;
-  }
   // get_block_height() returns the executing block height (parent tip + 1),
-  // which is exactly the height ReplayCacheLock validates expiry against. A
-  // tip-read failure is propagated.
-  auto height = get_block_height();
-  if (!height.has_value()) {
-    return std::unexpected(height.error());
-  }
-  return replay_uniquifier_expired(*tx_uniquifier_, *height);
+  // which is exactly the height ReplayCacheLock validates expiry against.
+  return replay_uniquifier_expired(*tx_uniquifier_, get_block_height());
 }
 
-SystemStatus<bool>
-SystemCallHandler::root_is_legacy_initial_token_claim()
-{
-  if (!root_invoked_address_.has_value() ||
-      *root_invoked_address_ != kGenesisRootContractAddress) {
-    return false;
-  }
-  auto deployed =
-      snapshot_cache_.try_get_deployed_contract(*root_invoked_address_);
-  if (!deployed.has_value()) {
-    return std::unexpected(deployed.error());
-  }
-  return *deployed != nullptr &&
-         (*deployed)->hash.contract_type == ContractType::kNative;
-}
-
-// TODO(geoff): Setup configuration parameters for alternative wasm engines
-// and/or shared contexts.
+// TODO(geoff): Setup configuration parameters for alternative contract
+// runtimes and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
     Transaction const &tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy db_proxy,
@@ -181,34 +199,21 @@ SystemCallHandler::SystemCallHandler(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
         },
-        db_proxy_),
+        db_proxy_, snapshot_cache.get_network_config_params()),
     source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
-    newly_created_contracts_([&] {
-      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                         SipHash24Hasher>
-          contracts;
-      contracts.reserve(tx.contracts_to_deploy.size());
-
-      for (auto const &contract : tx.contracts_to_deploy) {
-        contracts.emplace(sha256(contract),
-                          std::make_unique<const Contract>(contract));
-      }
-      return contracts;
-    }()),
     execution_mode_data_(
-        [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
-          if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
-            return ProposalModeData{};
-          }
-          assert(!std::holds_alternative<ViewingModeCtor>(execution_mode_ctor));
-          return ExecutionModeData{std::in_place_type<ValidationModeData>,
-                                   std::get<ValidationModeCtor>(
-                                       execution_mode_ctor)};
-        }(std::move(execution_mode_ctor))),
+        make_execution_mode_data(std::move(execution_mode_ctor))),
+    contracts_to_deploy_(tx.contracts_to_deploy),
     snapshot_cache_(snapshot_cache)
-{}
+{
+  // Real transactions execute in proposal or validation mode only; viewing
+  // mode goes through the tx-less constructor. CHECK, not assert: the old
+  // per-ctor construction failed loudly (bad_variant_access) on this misuse
+  // in release builds too.
+  CHECK(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
+}
 
 SystemCallHandler::SystemCallHandler(
     StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
@@ -221,50 +226,28 @@ SystemCallHandler::SystemCallHandler(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
         },
-        db_proxy_),
+        db_proxy_, snapshot_cache.get_network_config_params()),
     source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
-    newly_created_contracts_(),
     execution_mode_data_(
-        [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
-          if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
-            return ProposalModeData{};
-          }
-          if (std::holds_alternative<ViewingModeCtor>(execution_mode_ctor)) {
-            return ExecutionModeData{std::in_place_type<ViewingModeData>,
-                                     std::get<ViewingModeCtor>(
-                                         execution_mode_ctor)};
-          }
-          return ExecutionModeData{std::in_place_type<ValidationModeData>,
-                                   std::get<ValidationModeCtor>(
-                                       execution_mode_ctor)};
-        }(std::move(execution_mode_ctor))),
-    snapshot_cache_(snapshot_cache)
+        make_execution_mode_data(std::move(execution_mode_ctor))),
+    contracts_to_deploy_(kEmptyVec), snapshot_cache_(snapshot_cache)
 {}
 
-SystemStatus<void>
+std::pair<InvokeStatus<void>, GasAmount>
 SystemCallHandler::perform_initial_validation()
 {
   // Reject a transaction whose replay uniquifier has already expired before any
   // attached-contract verification or body execution runs (#2568). Without this
   // the body would run to completion and the transaction would only be rejected
-  // by the late replay-cache reservation. A db-tip read failure is a system
-  // error and is propagated to the caller, not dropped.
-  {
-    auto expired = replay_uniquifier_expired();
-    if (!expired.has_value()) {
-      return std::unexpected(expired.error());
-    }
-    if (*expired) {
-      // An expired uniquifier is a deterministic, proposer-attributable
-      // rejection: map it to ValidationFailure uniformly in proposal and
-      // validation mode. In proposal mode this is only reachable when the
-      // scheduler tried to propose a transaction it should have already dropped
-      // -- try_commit_transaction() asserts (debug only) that any proposal-mode
-      // ValidationFailure is in fact a bad expiry height.
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
-      return {};
-    }
+  // by the late replay-cache reservation.
+  if (replay_uniquifier_expired()) {
+    // An expired uniquifier is a deterministic, proposer-attributable
+    // rejection: map it to ValidationFailure uniformly in proposal and
+    // validation mode. In proposal mode this is only reachable when the
+    // scheduler tried to propose a transaction it should have already dropped
+    // -- try_commit_transaction() asserts (debug only) that any proposal-mode
+    // ValidationFailure came from this initial validation.
+    return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
   // Validate the proposal data structure before execution begins.
@@ -273,90 +256,84 @@ SystemCallHandler::perform_initial_validation()
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.validate()) {
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::ValidationFailure};
-      return {};
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }
 
-  // TODO(geoff): Adjust if some assumption on the rest of the system changes
-  //
-  // At this point, we do not know the provenance of signed_tx_.  As such,
-  // an attached wasm may or may not have been validated by this point.
-  //
-  // We should validate wasms as they are sent to us from clients (before
-  // broadcasting to other nodes) and we may wish to validate them as they are
-  // broadcast to us from other nodes. But until we have a concrete design of
-  // the coordinator and know what is is and is not doing, we conservatively
-  // validate wasms here.
-  //
-  // If we make the assumption that all wasms are validated by the time they get
-  // to the executor, this check could be removed.
+  // Without this gate an oversized attachment set fails only at commit, where
+  // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
+  if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
+      contracts_to_deploy_.size() > permitted) {
+    error("Transaction attaches {} contracts; chain permits {}",
+          contracts_to_deploy_.size(), permitted);
+    return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
+  }
 
-  for (auto const &[_, contract] : newly_created_contracts_) {
-    // Enforce the contract size limit before verification: the limit is
-    // runtime-agnostic, and rejecting here -- before any body execution --
-    // guarantees commit_transaction never stages an oversized code row
-    // (#2569). Same deterministic classification as a failed
-    // verify_contract.
-    if (contract_blob_size(*contract) > kMaxContractSizeBytes) {
-      error("Attached contract blob exceeds kMaxContractSizeBytes");
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::Deterministic};
-      return {};
-    }
-    auto res = runtime_context_.verify_contract(*contract);
-    // TODO(geoff): gas costs for verifying contracts
-    if (res != InvokeErrorCode::None) {
-      error("Contract verification failed");
-      cumulative_invoke_result_.result_ = InvokeError{res};
-      return {};
+  // The blob bound is the chain's (#2569): a configuration may raise it past
+  // the default, and hog_db stores whatever a loadable genesis admits.
+  for (auto const &contract : contracts_to_deploy_) {
+    if (const uint32_t permitted = config_params().max_contract_size_bytes;
+        contract_blob_size(contract) > permitted) {
+      error("Transaction attaches a {}-byte contract; chain permits {}",
+            contract_blob_size(contract), permitted);
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }
-  return {};
+
+  // make() allocates proportional to attacker-influenced input (the maps and
+  // each rv32 translation), and this runs inside an x23 coroutine where an
+  // escaping throw is fatal. The old attachment deep copy ran in the ctor
+  // under executor_context's bad_alloc containment; that containment moves
+  // here with the work. Contain bad_alloc only -- allocation-free, so the
+  // handler itself cannot rethrow -- and keep anything else terminating,
+  // since it is a genuine bug.
+  try {
+    auto [res, gas_consumed] =
+        NewContractSet::make(contracts_to_deploy_, runtime_context_,
+                             config_params());
+    if (!res.has_value()) {
+      return {res.error(), gas_consumed};
+    }
+    newly_created_contracts_ = std::move(*res);
+
+    return {InvokeStatus<void>{}, gas_consumed};
+  } catch (std::bad_alloc const &) {
+    return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+  }
 }
 
-void
-SystemCallHandler::check_final_validation_data()
+bool
+SystemCallHandler::check_final_validation_data() const
 {
-  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
-    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
-    if (!validation_data.check_all_consumed()) {
-      // Allowlist: also excludes overwriting an existing ValidationFailure.
-      if (cumulative_invoke_result_.is_root_success() ||
-          cumulative_invoke_result_.result_.error().code() ==
-              InvokeErrorCode::Deterministic ||
-          cumulative_invoke_result_.result_.error().code() ==
-              InvokeErrorCode::OutOfGas) {
-        cumulative_invoke_result_.result_ =
-            InvokeError{InvokeErrorCode::ValidationFailure};
-      }
-    }
+  if (auto const *validation_data =
+          std::get_if<ValidationModeData>(&execution_mode_data_)) {
+    return validation_data->check_all_consumed();
   }
+  return true;
 }
 
-InvokeResult
+x23::Async<InvokeResult>
 SystemCallHandler::root_invoke()
 {
   // A system error here (e.g. an unreadable db tip during the replay-expiry
   // check) is surfaced as the corresponding invoke error rather than dropped.
-  if (auto res = perform_initial_validation(); !res.has_value()) {
-    cumulative_invoke_result_.result_ = res.error().to_invoke_error();
-  }
-  // if validation fails, cumulative_invoke_result_ is set to the appropriate
-  // error and we return it immediately
-  if (!cumulative_invoke_result_.is_root_success()) {
-    check_final_validation_data();
+  //
+  // TODO(geoff): gas cost calibration -- verification gas is hardwired to 0
+  // today. Both paths already record it: the failure branch reports it
+  // directly, and the success path deducts it from the frame's available gas
+  // and adds it back into the final gas_consumed_.
+  auto [initial_validation_res, initial_validation_gas_consumed] =
+      perform_initial_validation();
+  if (!initial_validation_res.has_value()) {
     // The root invocation is terminally rejected before any frame ran (e.g. an
-    // expired uniquifier or a failed contract verification). Mark it
-    // finished/finalized so callers treat it as a completed-but-failed root: no
-    // further frames will start, get_most_recent_frame_output() reports a
-    // Fault, and try_commit_transaction() runs its failure path. The test FFI
-    // wrapper gates commit on last_frame_finished(), so this lets a rejected
-    // transaction surface its ExecResult via try_commit().
-    last_frame_finished_ = true;
-    finalized_ = true;
-    return cumulative_invoke_result_;
+    // expired uniquifier or a failed contract verification).
+    // finalize_after_root_frame() marks it finished/finalized so callers treat
+    // it as a completed-but-failed root, letting the rejected transaction
+    // surface its ExecResult via try_commit_transaction().
+    initial_validation_rejected_ = true;
+    co_return finalize_after_root_frame(
+        InvokeResult{.result_ = initial_validation_res.error(),
+                     .gas_consumed_ = initial_validation_gas_consumed});
   }
 
   // root_invocation_ is nullopt only in the test harness
@@ -365,37 +342,69 @@ SystemCallHandler::root_invoke()
   Invocation root_invocation = std::move(root_invocation_.value());
   root_invocation_.reset();
 
+  // The frame's gas is bounded by available_gas (runtime.cc checks
+  // gas_consumed <= gas_limit), so the reported total below stays within
+  // gas_limit -- except when initial_validation_gas_consumed alone reaches
+  // gas_limit, where the total is the unclamped validation gas.
+  // TODO(geoff): when gas calibration lands, bound the work done in initial
+  // validation so its gas cannot exceed gas_limit (or reject/clamp when it
+  // does), restoring gas_consumed_ <= gas_limit unconditionally.
   GasAmount available_gas =
-      cumulative_invoke_result_.gas_consumed_ < root_invocation.gas_limit
-          ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
+      initial_validation_gas_consumed < root_invocation.gas_limit
+          ? root_invocation.gas_limit - initial_validation_gas_consumed
           : 0;
 
+  // Root frame: only the depth bound can refuse here. Rejected before any
+  // frame ran, so deterministic, as handle_root_host_fn_status() reports it.
+  auto admitted =
+      validate_new_invocation(root_invocation.invoked_address,
+                              std::to_underlying(InvokeFlag::None), {});
+  if (!admitted.has_value()) {
+    co_return finalize_after_root_frame(
+        InvokeResult{.result_ = InvokeError{InvokeErrorCode::Deterministic},
+                     .gas_consumed_ = initial_validation_gas_consumed});
+  }
+
   auto [res, gas_consumed] =
-      invoke(root_invocation.invoked_address,
-             sdk_method_id(root_invocation.entrypoint), available_gas,
-             std::move(root_invocation.calldata),
-             std::to_underlying(InvokeFlag::None), {});
+      co_await invoke(root_invocation.invoked_address,
+                      sdk_method_id(root_invocation.entrypoint), available_gas,
+                      std::move(root_invocation.calldata),
+                      std::to_underlying(InvokeFlag::None), {});
 
-  cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
-  cumulative_invoke_result_.gas_consumed_ += gas_consumed;
-
-  finalize_after_root_frame();
-
-  return cumulative_invoke_result_;
+  co_return finalize_after_root_frame(
+      InvokeResult{.result_ = handle_root_host_fn_status(res),
+                   .gas_consumed_ =
+                       gas_consumed + initial_validation_gas_consumed});
 }
 
-void
-SystemCallHandler::finalize_after_root_frame()
+InvokeResult
+SystemCallHandler::finalize_after_root_frame(InvokeResult result)
 {
   assert(!finalized_);
   assert(invocation_frame_stack_.empty());
   finalized_ = true;
+  // The root invocation is complete, whether a frame ran (finish_frame already
+  // set this when the stack emptied) or the invoke was rejected before one
+  // started. Owning the flag here keeps "finalized" and "last frame finished"
+  // in lockstep: no further frames may start, get_most_recent_frame_output()
+  // reports the finished (or absent) root frame, and the test FFI wrapper's
+  // commit gate on last_frame_finished() admits the finalized result.
+  last_frame_finished_ = true;
 
-  check_final_validation_data();
+  root_invoke_result_ = result;
 
-  if (cumulative_invoke_result_.is_root_success()) {
-    root_invoke_succeeded_ = true;
+  // A failed final validation check rewrites exactly the results a frame can
+  // legitimately produce -- success or a deterministic fault, the partition
+  // to_frame_status() reports as a frame status -- to ValidationFailure.
+  // Block-ending system errors (Abandon, Unrecoverable, an existing
+  // ValidationFailure) are preserved.
+  if (!check_final_validation_data() &&
+      root_invoke_result_.to_frame_status().first.has_value()) {
+    root_invoke_result_.result_ =
+        InvokeError{InvokeErrorCode::ValidationFailure};
   }
+
+  return root_invoke_result_;
 }
 
 InvocationFrameOutput
@@ -487,13 +496,31 @@ SystemCallHandler::handle_root_host_fn_status(
   return InvokeError{InvokeErrorCode::Unrecoverable};
 }
 
-ExecResult
+x23::Async<ExecResult>
+SystemCallHandler::abort_after_commit_failure(ExecResult failure_result,
+                                              bool report_diagnostic)
+{
+  two_phase_commit_failed_ = true;
+  if (report_diagnostic) {
+    report_db_conflict_diagnostic();
+  }
+  // abort_transaction() marks tx_failed and sets
+  // transaction_committed_or_aborted_. A failed abort (e.g. an unreadable db)
+  // outranks the commit failure being reported.
+  auto abort_status = co_await abort_transaction();
+  if (!abort_status.has_value()) {
+    co_return to_exec_result(abort_status.error().code());
+  }
+  co_return failure_result;
+}
+
+x23::Async<ExecResult>
 SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
 
-  if (!cumulative_invoke_result_.is_root_success()) {
-    auto error_code = cumulative_invoke_result_.result_.error().code();
+  if (!root_invoke_result_.is_root_success()) {
+    auto error_code = root_invoke_result_.result_.error().code();
     if (error_code == InvokeErrorCode::Unrecoverable) {
       error("try_commit_transaction: received Unrecoverable");
     }
@@ -507,54 +534,47 @@ SystemCallHandler::try_commit_transaction()
     // clean transaction containing only those side-records.
     if (error_code == InvokeErrorCode::Deterministic ||
         error_code == InvokeErrorCode::OutOfGas) {
-      return commit_body_discarded(to_exec_result(error_code));
+      co_return co_await commit_body_discarded(to_exec_result(error_code));
     }
 
     // Proposal mode should never reject a transaction with a ValidationFailure
-    // except when its replay uniquifier was already expired: the scheduler must
-    // not have tried to propose such a transaction in the first place. Assert
-    // that (debug only) so a future proposal-mode validation failure can't slip
-    // through silently -- generalize this once proposal mode gains other ones.
-    //
-    // The tip re-read here cannot fail: reaching a proposal-mode
-    // ValidationFailure means perform_initial_validation() already read the tip
-    // successfully (a failed read there surfaces as Abandon/Unrecoverable, not
-    // ValidationFailure), which caches it in the snapshot cache. That cache is
-    // only released when it is recycled for a new block, which cannot happen
-    // during the synchronous root_invoke() -> try_commit_transaction() window.
-    // So require has_value().
+    // unless perform_initial_validation() rejected it (an expired replay
+    // uniquifier or a malformed attachment set): the scheduler must not have
+    // tried to propose such a transaction in the first place, and no mid-body
+    // execution path may produce one. Assert that (debug only) so a
+    // proposal-mode validation failure introduced elsewhere can't slip through
+    // silently.
     if constexpr (is_debug_build()) {
       if (error_code == InvokeErrorCode::ValidationFailure &&
           std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
-        auto expired = replay_uniquifier_expired();
-        CHECK(expired.has_value() && *expired);
+        CHECK(initial_validation_rejected_);
       }
     }
 
     // System / unrecoverable / validation errors: the transaction is not
     // included and consumes nothing.
-    auto res = abort_transaction();
+    auto res = co_await abort_transaction();
     if (!res.has_value()) {
-      return to_exec_result(res.error().code());
+      co_return to_exec_result(res.error().code());
     }
 
-    return to_exec_result(error_code);
+    co_return to_exec_result(error_code);
   }
   assert(last_frame_.has_value());
-  assert(root_invoke_succeeded_);
-  assert(cumulative_invoke_result_.result_.has_value());
+  assert(root_invoke_succeeded());
+  assert(root_invoke_result_.result_.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  InvocationFrame &last_frame = last_frame_.value();
 
   // If the last frame was set to manually revert, then we commit the
   // transaction as a no-op: body effects are discarded, but RCQ observations
   // and the replay nonce are still committed (see commit_body_discarded).
-  if (last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-          .value()
-          .should_revert()) {
+  if (last_frame.should_revert()) {
     // Extract the events so that the reverted transaction's events cannot be
     // sent later to the event server.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    last_frame_.value().extract_events();
-    return commit_body_discarded(ExecResult::ExecResultTxRootFrameReverted);
+    last_frame.extract_events();
+    co_return co_await commit_body_discarded(
+        ExecResult::ExecResultTxRootFrameReverted);
   }
 
   // Root commit: push the accumulated delta batch in one HogDb subtransaction.
@@ -565,9 +585,7 @@ SystemCallHandler::try_commit_transaction()
   // future refactor bumps it in validation, mark_frame_as_failed on a later
   // failure path would pop_subtransactions a savepoint that was never pushed.
   assert(!std::holds_alternative<ValidationModeData>(execution_mode_data_) ||
-         last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-                 .value()
-                 .get_try_invoke_frame_count() == 0);
+         last_frame.get_try_invoke_frame_count() == 0);
 
   auto const &observations = std::visit(
       [](auto const &mode)
@@ -581,72 +599,54 @@ SystemCallHandler::try_commit_transaction()
   // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
   add_replay_nonce_delta();
 
-  auto r = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-               .value()
-               .try_acquire_frame_locks(db_proxy_, observations);
+  auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations);
   if (!r.has_value()) {
-    two_phase_commit_failed_ = true;
-    report_db_conflict_diagnostic();
-    auto abort_res = abort_transaction();
-    if (!abort_res.has_value()) {
-      return to_exec_result(abort_res.error().code());
-    }
-    return to_exec_result(r.error().code());
+    co_return co_await abort_after_commit_failure(to_exec_result(
+                                                      r.error().code()),
+                                                  /*report_diagnostic=*/true);
   }
 
-  bool result = r.value();
   // check if any of the 2pc database operations failed
-  if (!result) {
-    two_phase_commit_failed_ = true;
-    report_db_conflict_diagnostic();
-
-    auto abort_status = abort_transaction();
-    if (!abort_status.has_value()) {
-      return to_exec_result(abort_status.error().code());
-    }
-
-    // abort_transaction() sets transaction_committed_or_aborted_ to true
-    return ExecResult::ExecResultTxNonDeterministicError;
+  if (!r.value()) {
+    co_return co_await abort_after_commit_failure(
+        ExecResult::ExecResultTxNonDeterministicError,
+        /*report_diagnostic=*/true);
   }
 
   // Abort on a throw here rather than let it escape with the tx still open: a
   // retry would re-push the replay-cache delta and hard-abort at narrow
   // (#2595).
+  //
+  // The abort cannot run inside the catch handler -- co_await is illegal there
+  // -- so both failure paths record the outcome and the shared abort runs just
+  // below, still before anything else can observe the open transaction.
+  std::optional<ExecResult> commit_failure;
   try {
-    auto new_contract_hashes =
-        last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-            .value()
-            .get_committed_contracts();
-    auto res = db_proxy_.commit_transaction(
-        BorrowedContractBatch(new_contract_hashes, newly_created_contracts_));
+    auto new_contract_hashes = last_frame.get_committed_contracts();
+    auto res = co_await db_proxy_.commit_transaction(
+        newly_created_contracts_.borrow_contracts(new_contract_hashes));
     if (!res.has_value()) {
-      two_phase_commit_failed_ = true;
-      auto abort_res = abort_transaction();
-      if (!abort_res.has_value()) {
-        return to_exec_result(abort_res.error().code());
-      }
-      return to_exec_result(res.error().code());
+      commit_failure = to_exec_result(res.error().code());
     }
   } catch (std::exception const &e) {
     error("try_commit_transaction: commit preparation threw: {}", e.what());
-    two_phase_commit_failed_ = true;
-    auto abort_res = abort_transaction();
-    if (!abort_res.has_value()) {
-      return to_exec_result(abort_res.error().code());
-    }
-    return ExecResult::ExecResultUnrecoverable;
+    commit_failure = ExecResult::ExecResultUnrecoverable;
+  }
+  if (commit_failure.has_value()) {
+    co_return co_await abort_after_commit_failure(*commit_failure,
+                                                  /*report_diagnostic=*/false);
   }
 
   // This is past the point of successful commitment;
   // now we can safely emit the events to the event server
 
-  HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
+  HogexecMetrics::mark_tx_success(root_invoke_result_,
                                   get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
-  return ExecResult::ExecResultOK;
+  co_return ExecResult::ExecResultOK;
 }
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 SystemCallHandler::abort_transaction()
 {
   assert(!transaction_committed_or_aborted_);
@@ -660,9 +660,9 @@ SystemCallHandler::abort_transaction()
   if (last_frame_.has_value()) {
     last_frame_.value().extract_events();
   }
-  HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+  HogexecMetrics::mark_tx_failed(root_invoke_result_,
                                  get_block_execution_mode());
-  return db_proxy_.abort_transaction();
+  co_return co_await db_proxy_.abort_transaction();
 }
 
 void
@@ -677,15 +677,6 @@ SystemCallHandler::add_replay_nonce_delta()
   // Transaction constructor; a uniquifier without a root address would make the
   // access below undefined. Make that invariant explicit.
   assert(root_invoked_address_.has_value());
-  // V1 deployed the native InitialTokenClaim precompile at address 2 and gave
-  // it contract-internal replay protection. V2 deliberately reuses address 2
-  // for an RV32 root contract, so the compatibility exception must be based on
-  // the deployed contract type rather than the address alone.
-  auto legacy_claim = root_is_legacy_initial_token_claim();
-  CHECK(legacy_claim.has_value());
-  if (*legacy_claim) {
-    return;
-  }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   db_proxy_.add_delta(AddressAndKey{.address = root_invoked_address_.value(),
                                     .key = StorageKey(
@@ -694,7 +685,7 @@ SystemCallHandler::add_replay_nonce_delta()
                       std::to_underlying(StorageDeltaFlags::None));
 }
 
-ExecResult
+x23::Async<ExecResult>
 SystemCallHandler::commit_body_discarded(ExecResult success_result)
 {
   // In validation mode, RCQ observation deltas must reach HogDb so block-close
@@ -722,46 +713,34 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
   // the transaction is not included.
   add_replay_nonce_delta();
 
-  auto push_res = db_proxy_.try_push_current_subtransaction();
+  auto push_res = co_await db_proxy_.try_push_current_subtransaction();
   if (!push_res.has_value()) {
     // A system error (e.g. a stale block) leaves the HogDb InvokeTX open; abort
     // it before returning, mirroring the root-success lock-push failure path.
-    two_phase_commit_failed_ = true;
-    auto abort_status = abort_transaction();
-    if (!abort_status.has_value()) {
-      return to_exec_result(abort_status.error().code());
-    }
-    return to_exec_result(push_res.error().code());
+    co_return co_await abort_after_commit_failure(to_exec_result(
+                                                      push_res.error().code()),
+                                                  /*report_diagnostic=*/false);
   }
   if (!push_res.value()) {
-    two_phase_commit_failed_ = true;
-    report_db_conflict_diagnostic();
-    auto abort_status = abort_transaction();
-    if (!abort_status.has_value()) {
-      return to_exec_result(abort_status.error().code());
-    }
-    return ExecResult::ExecResultTxNonDeterministicError;
+    co_return co_await abort_after_commit_failure(
+        ExecResult::ExecResultTxNonDeterministicError,
+        /*report_diagnostic=*/true);
   }
 
-  auto res = db_proxy_.commit_transaction();
+  auto res = co_await db_proxy_.commit_transaction();
   if (!res.has_value()) {
     // A system error (e.g. a stale block) leaves the HogDb InvokeTX open; abort
     // it before returning, mirroring the push-failure paths above and the
     // success-path commit failure in try_commit_transaction().
-    // abort_transaction() marks tx_failed and sets
-    // transaction_committed_or_aborted_.
-    two_phase_commit_failed_ = true;
-    auto abort_status = abort_transaction();
-    if (!abort_status.has_value()) {
-      return to_exec_result(abort_status.error().code());
-    }
-    return to_exec_result(res.error().code());
+    co_return co_await abort_after_commit_failure(to_exec_result(
+                                                      res.error().code()),
+                                                  /*report_diagnostic=*/false);
   }
 
-  HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+  HogexecMetrics::mark_tx_failed(root_invoke_result_,
                                  get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
-  return success_result;
+  co_return success_result;
 }
 
 // can only be called when call_frame_stack_ is nonempty
@@ -792,43 +771,58 @@ SystemCallHandler::get_msg_sender() const
 SyscallStatus<void>
 SystemCallHandler::validate_new_invocation(
     ContractAddress const &address, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids) const
+    ValidatedAuthTokens const &owned_auth_tokens) const
 {
   if (!validate_invoke_flags(flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  if (!invocation_frame_stack_.empty() &&
-      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  // Reentrance and the depth bound are both conditions of the calling frame,
+  // and both sit above the auth-token check so that either is reported even
+  // when the caller also forwarded a token it does not own (#2973 established
+  // that for reentrance).
+  //
+  // Reentrance first: it says the call can never succeed anywhere in this
+  // chain, where the depth bound says only that this frame is too deep and a
+  // shallower one would admit the same call.
   if (invocation_frame_stack_.has_active_frame_for(address)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
+  }
+  // A chain bounds how many invocation frames one transaction may have open at
+  // once. Every open frame holds a live contract runtime, so without this a
+  // recursive call chain grows until the executor cannot hold it.
+  //
+  // The bound is a plain load off the tip the snapshot cache loaded when the
+  // block was opened; get_network_config_params() fails loudly on a cache
+  // whose tip was never loaded.
+  if (invocation_frame_stack_.size() >=
+      config_params().max_cross_invoke_depth) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded};
+  }
+  if (!invocation_frame_stack_.empty() &&
+      !invocation_frame_stack_.check_auth_tokens_owned(
+          owned_auth_tokens.set())) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   return {};
 }
 
-std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>
+x23::Async<std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
+                     GasAmount>>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
-                          std::span<uint32_t const> owned_auth_token_ids)
+                          ValidatedAuthTokens owned_auth_tokens)
 {
-  // syscall_Invoke_inner() rejects undefined flags before we get here, so
-  // reaching this with invalid ones is a bug, not caller input. Asserted here
-  // even though validate_new_invocation() also checks it -- that check is for
-  // the test FFI boundary, which must report rather than abort.
+  using invoke_result_t =
+      std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
+                GasAmount>;
+
+  // Callers run validate_new_invocation() first, so undefined flags here are a
+  // bug, not caller input.
   CHECK(validate_invoke_flags(flags));
 
   if (!invocation_frame_stack_.empty() && is_read_only()) {
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
-  }
-
-  // Rejected before a child frame is created, so this is a complete no-op:
-  // nothing is mutated, and the caller leaves its output state untouched.
-  if (auto admitted =
-          validate_new_invocation(address, flags, owned_auth_token_ids);
-      !admitted.has_value()) {
-    return {admitted.error(), 0};
   }
 
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
@@ -837,48 +831,41 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // noexcept syscall_Invoke_inner() body, so the exception must not unwind
   // across that boundary and terminate the executor -- translate it into an
   // unrecoverable system error instead (issue #3363).
-  auto runtime = [&]() -> SystemStatus<std::unique_ptr<Runtime>> {
-    try {
-      return resolve_runtime(address);
-    } catch (std::exception const &e) {
-      report_dropped_log(e.what());
-      return SystemError{SystemErrorCode::Unrecoverable};
-    } catch (...) {
-      report_dropped_log("unknown exception");
-      return SystemError{SystemErrorCode::Unrecoverable};
-    }
-  }();
+  //
+  // Seeded with the result the handlers used to return: co_await is illegal in
+  // a catch handler, so the arms below only log and leave this value in place.
+  SystemStatus<std::unique_ptr<Runtime>> runtime =
+      SystemError{SystemErrorCode::Unrecoverable};
+  try {
+    runtime = co_await resolve_runtime(address);
+  } catch (std::exception const &e) {
+    report_dropped_log(e.what());
+  } catch (...) {
+    report_dropped_log("unknown exception");
+  }
   if (!runtime) {
     // invoke() is reached from the noexcept syscall_Invoke_inner() body. A
     // logger allocation/sink failure (typically std::bad_alloc out of memory)
     // must not throw across the noexcept boundary and terminate the caller;
     // fail the invocation as unrecoverable instead (issue #2714).
-    try {
-      trace("SystemError: resolving runtime for address: {}, error {}",
-            x23::show(address), runtime.error());
-    } catch (std::exception const &e) {
-      report_dropped_log(e.what());
-      return {SystemError{SystemErrorCode::Unrecoverable}, 0};
-    } catch (...) {
-      report_dropped_log("unknown exception");
-      return {SystemError{SystemErrorCode::Unrecoverable}, 0};
+    if (!guarded_log("runtime-resolution failure diagnostic", [&] {
+          trace("SystemError: resolving runtime for address: {}, error {}",
+                x23::show(address), runtime.error());
+        })) {
+      co_return invoke_result_t{SystemError{SystemErrorCode::Unrecoverable}, 0};
     }
-    return std::pair{runtime.error(), 0};
+    co_return invoke_result_t{runtime.error(), 0};
   }
   if (!runtime.value()) {
-    try {
-      trace("Failed to instantiate runtime for address: {}",
-            x23::show(address));
-    } catch (std::exception const &e) {
-      report_dropped_log(e.what());
-      return {SystemError{SystemErrorCode::Unrecoverable}, 0};
-    } catch (...) {
-      report_dropped_log("unknown exception");
-      return {SystemError{SystemErrorCode::Unrecoverable}, 0};
+    if (!guarded_log("runtime-instantiation failure diagnostic", [&] {
+          trace("Failed to instantiate runtime for address: {}",
+                x23::show(address));
+        })) {
+      co_return invoke_result_t{SystemError{SystemErrorCode::Unrecoverable}, 0};
     }
-    return {SyscallError{
-                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-            0};
+    co_return invoke_result_t{
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+        0};
   }
 
   Invocation invocation = {.invoked_address = address,
@@ -893,25 +880,26 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // noexcept boundary and terminate the executor. The move is allocation-free
   // and invocation is unused afterward (#3058).
   auto start_status =
-      start_frame(std::move(invocation), flags, owned_auth_token_ids);
+      start_frame(std::move(invocation), flags, std::move(owned_auth_tokens));
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and
     // finish_frame() must be skipped; surface the unrecoverable error (issue
     // #3058).
-    return {start_status.error(), 0};
+    co_return invoke_result_t{start_status.error(), 0};
   }
   auto stashed_parent_trace = std::move(start_status.value());
 
-  InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
+  InvokeResult cumulative_result =
+      co_await runtime.value()->invoke(method, gas_limit);
 
-  auto finish_status =
-      finish_frame(cumulative_result.result_, std::move(stashed_parent_trace));
+  auto finish_status = co_await finish_frame(cumulative_result.result_,
+                                             std::move(stashed_parent_trace));
   if (!finish_status.has_value()) {
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
     // the local scheduler, not the canonical chain.
-    return {finish_status.error(), 0};
+    co_return invoke_result_t{finish_status.error(), 0};
   }
   auto [frame_result, manually_reverted] = finish_status.value();
   cumulative_result += frame_result;
@@ -921,7 +909,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // never produces the "rejected before running" channel.
   auto [frame_status, gas_consumed] = cumulative_result.to_frame_status();
   if (!frame_status.has_value()) {
-    return {frame_status.error(), gas_consumed};
+    co_return invoke_result_t{frame_status.error(), gas_consumed};
   }
   // to_frame_status() reports Return for any frame whose deterministic
   // execution succeeded; a manual revert (the contract called Return with
@@ -932,13 +920,12 @@ SystemCallHandler::invoke(ContractAddress const &address,
   if (status_code == InvocationFrameStatusCode::Return && manually_reverted) {
     status_code = InvocationFrameStatusCode::Abort;
   }
-  return {status_code, gas_consumed};
+  co_return invoke_result_t{status_code, gas_consumed};
 }
 
 SystemStatus<std::unique_ptr<InvocationFrameTrace>>
-SystemCallHandler::start_frame(
-    Invocation invocation, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids) noexcept
+SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
+                               ValidatedAuthTokens owned_auth_tokens) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -981,13 +968,12 @@ SystemCallHandler::start_frame(
     try {
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
-                                                 flags, owned_auth_token_ids);
+                                                 flags,
+                                                 std::move(owned_auth_tokens));
     } catch (std::exception const &e) {
-      try {
+      guarded_log("frame-admission failure diagnostic", [&] {
         error("unrecoverable: frame admission threw: {}", e.what());
-      } catch (...) {
-        report_dropped_log("frame-admission failure diagnostic");
-      }
+      });
       return SystemError{SystemErrorCode::Unrecoverable};
     } catch (...) {
       report_dropped_log("non-std exception from frame admission");
@@ -1003,10 +989,37 @@ SystemCallHandler::start_frame(
   return stashed_parent_trace;
 }
 
-SystemStatus<std::pair<InvokeResult, bool>>
+// Stays noexcept and is deliberately NOT a coroutine: creating one allocates
+// its frame in the ramp function, which can throw std::bad_alloc before the
+// body runs, and x23's promises define no
+// get_return_object_on_allocation_failure -- a noexcept coroutine would
+// std::terminate() exactly where this contract promises a structured
+// Unrecoverable. The body lives in finish_frame_impl() and the failure is
+// translated here, into MaybeAsync's value arm.
+x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>>
 SystemCallHandler::finish_frame(
     InvokeStatus<void> result,
     std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept
+{
+  try {
+    return finish_frame_impl(result, std::move(stashed_parent_trace));
+  } catch (std::exception const &e) {
+    guarded_log("frame-completion start failure diagnostic", [&] {
+      error("unrecoverable: could not start frame completion: {}", e.what());
+    });
+    return SystemStatus<std::pair<InvokeResult, bool>>{
+        SystemError{SystemErrorCode::Unrecoverable}};
+  } catch (...) {
+    report_dropped_log("non-std exception starting frame completion");
+    return SystemStatus<std::pair<InvokeResult, bool>>{
+        SystemError{SystemErrorCode::Unrecoverable}};
+  }
+}
+
+x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+SystemCallHandler::finish_frame_impl(
+    InvokeStatus<void> result,
+    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace)
 {
   assert(!invocation_frame_stack_.empty());
   assert(!last_frame_finished_);
@@ -1047,23 +1060,22 @@ SystemCallHandler::finish_frame(
     // the conflict can be recorded on this (still-current) child frame's
     // trace.
     [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
-    res = invocation_frame_stack_.finish_frame(result, execution_mode_data_,
-                                               &try_invoke_conflict);
+    res = co_await invocation_frame_stack_.finish_frame(result,
+                                                        execution_mode_data_,
+                                                        &try_invoke_conflict);
     [[maybe_unused]] size_t stack_size_after = invocation_frame_stack_.size();
     assert(stack_size_after == stack_size - 1);
     if (invocation_frame_stack_.empty()) {
       last_frame_finished_ = true;
     }
   } catch (std::exception const &e) {
-    try {
+    guarded_log("frame-completion failure diagnostic", [&] {
       error("unrecoverable: frame completion threw: {}", e.what());
-    } catch (...) {
-      report_dropped_log("frame-completion failure diagnostic");
-    }
-    return SystemError{SystemErrorCode::Unrecoverable};
+    });
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   } catch (...) {
     report_dropped_log("non-std exception from frame completion");
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   // Record the conflict on this frame's trace. The default-constructed field is
@@ -1104,7 +1116,7 @@ SystemCallHandler::finish_frame(
     }
   }
 
-  return res;
+  co_return res;
 }
 
 void
@@ -1130,7 +1142,7 @@ SystemCallHandler::start_syscall_trace(SyscallNo syscall_number,
     } catch (std::exception &e) {
       // Trace data is best-effort diagnostics. start_syscall_trace() runs from
       // wrap_after_parse() just before the noexcept syscall body, and on the
-      // real WASM path the syscall dispatches through wrap_outer() noexcept, so
+      // real RV32 path the syscall dispatches through wrap_outer() noexcept, so
       // an escaping std::bad_alloc here would terminate an honest test FFI
       // caller (#2644). Drop this frame's trace and continue untraced,
       // mirroring start_frame()'s drop-and-continue (#2473).
@@ -1217,24 +1229,15 @@ SystemCallHandler::report_db_conflict_diagnostic() const
     first = conflict.conflicts().data();
   }
 
-  auto height = get_block_height();
-  if (!height.has_value()) {
-    // Best-effort report, but a tip read failing (e.g. the block is being torn
-    // down) is worth surfacing rather than swallowing.
-    warn("dropping tx-failure diagnostic: could not read executing block "
-         "height (db tip unavailable)");
-    return;
-  }
   // Fire-and-forget: drive the async send in a detached coroutine so execution
   // never waits on it (the same detached-await shape as the event server's own
   // detached sends). report_tx_failure copies the client, so the send is
   // self-contained and safe to outlive us.
-  [](x23::Async<void> send) -> x23::Detached {
-    co_await send;
-  }(event_server_proxy_.report_tx_failure(get_source_tx_hash(),
-                                          TxFailureDiagnostic{
-                                              .attempt_height = height.value(),
-                                              .conflict = *first}));
+  const BlockHeight height = get_block_height();
+  [](x23::Async<void> send)
+      -> x23::Detached { co_await send; }(event_server_proxy_.report_tx_failure(
+          get_source_tx_hash(),
+          TxFailureDiagnostic{.attempt_height = height, .conflict = *first}));
 }
 
 void
@@ -1271,6 +1274,13 @@ SystemCallHandler::get_return_buffer() const
 bool
 SystemCallHandler::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
+{
+  return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
+}
+
+bool
+SystemCallHandler::check_auth_tokens_owned(
+    AuthTokenIdSet const &token_ids) const
 {
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }
@@ -1315,66 +1325,67 @@ SystemCallHandler::~SystemCallHandler()
       }
     }
     if (last_frame_.has_value() && !last_frame_->extract_events().empty() &&
-        root_invoke_succeeded_ && !two_phase_commit_failed_) {
+        root_invoke_succeeded() && !two_phase_commit_failed_) {
       panic("SystemCallHandler destroyed with events to emit");
     }
   }
 }
 
-const Rv32Contract *
-SystemCallHandler::get_or_create_local_rv32_translation(
-    SHA256Hash const &hash, Contract const &contract)
+x23::Async<SystemStatus<const PreparedContract *>>
+SystemCallHandler::resolve_prepared_contract(SHA256Hash hash)
 {
-  auto it = local_rv32_translations_.find(hash);
-  if (it != local_rv32_translations_.end()) {
-    // Cached result -- the pointer is null for a known non-translatable
-    // artifact, so we never retranslate.
-    return it->second.get();
+  // Attachments are prepared once, by perform_initial_validation.
+  auto const *local = newly_created_contracts_.get_prepared_contract(hash);
+  if (local != nullptr) {
+    co_return local;
   }
 
-  std::optional<Rv32Contract> translated =
-      Rv32Contract::create(contract.rv32_contract());
-  auto [inserted, _] = local_rv32_translations_.emplace(
-      hash, translated.has_value()
-                ? std::make_unique<Rv32Contract>(std::move(*translated))
-                : nullptr);
-  return inserted->second.get();
+  // Anything else is already committed, and the snapshot cache prepared it
+  // eagerly when it loaded it. Borrow that image rather than building a second
+  // one from the same bytes (#3536).
+  auto entry = co_await snapshot_cache_.try_get_contract_entry(hash);
+  if (!entry.has_value()) {
+    co_return entry.error();
+  }
+  co_return entry.value() != nullptr ? &entry.value()->prepared : nullptr;
 }
 
-SystemStatus<const Contract *>
+NetworkConfigParams const &
+SystemCallHandler::config_params() const
+{
+  return snapshot_cache_.get_network_config_params();
+}
+
+x23::Async<SystemStatus<const Contract *>>
 SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 {
   // Check cheap in-memory map first before hitting the snapshot cache
   // (which involves a shared_mutex and potentially a database round-trip).
-  auto it = newly_created_contracts_.find(hash);
-  if (it != newly_created_contracts_.end()) {
-    assert(it->second != nullptr);
-    return it->second.get();
+  auto const *local = newly_created_contracts_.get_contract_code(hash);
+  if (local != nullptr) {
+    co_return local;
   }
 
-  auto snapshot_res = snapshot_cache_.try_get_contract_by_hash(hash);
-  if (!snapshot_res.has_value()) {
-    return snapshot_res.error();
+  auto entry = co_await snapshot_cache_.try_get_contract_entry(hash);
+  if (!entry.has_value()) {
+    co_return entry.error();
   }
-  auto &snapshot_contract = *snapshot_res;
-  if (snapshot_contract != nullptr) {
-    return snapshot_contract;
-  }
-  return nullptr;
+  co_return entry.value() != nullptr ? &entry.value()->contract : nullptr;
 }
 
-SystemStatus<std::unique_ptr<Runtime>>
+x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   // Check the snapshot for a deployed contract; on a hit, the returned entry
   // carries the back-pointer to its (eagerly translated) code.
-  auto deployed_expect = snapshot_cache_.try_get_deployed_contract(addr);
+  auto deployed_expect =
+      co_await snapshot_cache_.try_get_deployed_contract(addr);
   if (!deployed_expect) {
-    return deployed_expect.error();
+    co_return deployed_expect.error();
   }
   const DeployedContract *deployed = *deployed_expect;
   if (deployed != nullptr) {
-    return runtime_context_.make_new_runtime(*deployed, this);
+    co_return co_await runtime_context_.make_new_runtime(*deployed, this);
   }
 
   // Not in the snapshot; check the transaction's local context.
@@ -1388,21 +1399,16 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     // auth guard rejects callers that cannot authenticate for the address.
     // If the configured hash has no contract record, resolution fails the
     // same way as any other missing contract.
-    // NOTE: called with no snapshot-cache lock held; try_get_db_tip must
-    // stay outside any SynchronizedMap lock scope (lock-free atomic tip).
-    auto tip = snapshot_cache_.try_get_db_tip();
-    if (!tip.has_value()) {
-      return tip.error();
-    }
-    local_hash = tip.value()->default_wallet;
+    local_hash = snapshot_cache_.get_db_tip().default_wallet;
   }
 
   if (!local_hash) {
-    return nullptr;
+    co_return nullptr;
   }
   // Tx-local deployment or root default-wallet fallback: no cache entry
   // (entry stays null; the engine falls back to resolve_contract).
-  return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
+  co_return co_await runtime_context_.make_new_runtime(
+      DeployedContract{*local_hash}, this);
 }
 
 Calldata const &
@@ -1424,7 +1430,7 @@ SystemCallHandler::get_proposal_data() const
   // Either succeeded on the root tx (with or without a revert)
   // or deterministic error during execution.
   // Not allowed to have i.e. validation failure here, or block abort.
-  assert(cumulative_invoke_result_.has_readable_proposal_data());
+  assert(root_invoke_result_.has_readable_proposal_data());
   assert(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
   if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
     return std::get<ProposalModeData>(execution_mode_data_).proposal_data();
@@ -1436,8 +1442,8 @@ x23::Async<SystemStatus<void>>
 SystemCallHandler::emit_events(ExecResult exec_result,
                                ProposedTransaction proposed_tx)
 {
-  assert(exec_result != ExecResult::ExecResultOK || root_invoke_succeeded_);
-  auto events = (root_invoke_succeeded_ && last_frame_.has_value())
+  assert(exec_result != ExecResult::ExecResultOK || root_invoke_succeeded());
+  auto events = (root_invoke_succeeded() && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
   auto root_output =
@@ -1536,7 +1542,6 @@ is_banned_redeploy_native_contract(
 {
   switch (native_contract_id) {
   case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
-  case HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim:
   case HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet:
     return true;
   }
@@ -1544,7 +1549,7 @@ is_banned_redeploy_native_contract(
 }
 } // namespace
 
-SystemStatus<SyscallStatus<ContractAddress>>
+x23::Async<SystemStatus<SyscallStatus<ContractAddress>>>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
@@ -1555,12 +1560,13 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // This causes a load of the contract to the cache,
   // but this is in most cases no-cost, as a deployed contract will _probably_
   // be immediately invoked with e.g. a constructor
-  auto contract_res = resolve_contract(contract_hash);
+  auto contract_res = co_await resolve_contract(contract_hash);
   if (!contract_res.has_value()) {
-    return contract_res.error();
+    co_return contract_res.error();
   }
   if (contract_res.value() == nullptr) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   assert(contract_res.value() != nullptr);
   auto const &contract = *contract_res.value();
@@ -1569,26 +1575,27 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // genesis and should not be redeployed by user transactions
   if (contract.contract_type() == ContractType::kNative &&
       is_banned_redeploy_native_contract(contract.native_contract_id())) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
   auto deploy_check_status =
-      snapshot_cache_.try_get_deployed_contract(deploy_addr);
+      co_await snapshot_cache_.try_get_deployed_contract(deploy_addr);
   if (!deploy_check_status) {
-    return deploy_check_status.error();
+    co_return deploy_check_status.error();
   }
   if (*deploy_check_status != nullptr) {
-    return SyscallError{
+    co_return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
   if (invocation_frame_stack_.lookup_locally_deployed_contract(deploy_addr)
           .has_value()) {
     // contract has already been deployed in this transaction
-    return SyscallError{
+    co_return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
@@ -1601,48 +1608,63 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                            .contract_size = contract_size,
                            .contract_type = contract.contract_type()});
 
-  return deploy_addr;
+  co_return deploy_addr;
 }
 
-SystemStatus<SyscallStatus<const Bytestring *>>
+x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  using Read = StorageRead<const Bytestring *>;
+
+  const FrameItemKey item_key =
+      invocation_frame_stack_.frame_item_key(storage_key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
+  // Everything up to the load below answers out of the frame stack, so it
+  // reaches no database and costs no load gas.
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
-    return &bytestring_item->bytestring_;
+    co_return Read{&bytestring_item->bytestring_, 0};
   }
 
   if (item_view->get<DeletedItem>()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist},
+                   0};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
-      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
-      if (!load_status.has_value()) {
-        return load_status.error();
-      }
+    // Prices the fetch ensure_loaded() is about to do. Both turn on the same
+    // is_loaded() predicate, and ensure_loaded() stays a non-coroutine so a
+    // hit still allocates no frame.
+    const GasAmount load_gas =
+        unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
     if (!type) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+      co_return Read{SyscallError{
+                         SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist},
+                     load_gas};
     }
     if (*type != ItemViewType::kBytestring) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      co_return Read{
+          SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+          load_gas};
     }
-    return &base_item.bytestring();
+    co_return Read{&base_item.bytestring(), load_gas};
   }
 
-  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return Read{SyscallError{
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                 0};
 }
 
-SystemStatus<SyscallStatus<void>>
+x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring,
                                   StorageDeltaFlagSet input_flags)
@@ -1651,12 +1673,17 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           input_flags)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  if (input_bytestring.size() > config_params().max_bytestring_len) {
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  assert(input_bytestring.size() <= kBytestringMaxLen);
 
   Bytestring new_string;
   new_string.resize_uninitialized(input_bytestring.size());
@@ -1668,31 +1695,50 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                 input_bytestring.size());
   }
 
-  return item_view->set(BytestringItem(std::move(new_string)), input_flags);
+  co_return item_view->set(BytestringItem(std::move(new_string)), input_flags);
 }
 
-SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
+GasAmount
+SystemCallHandler::note_item_load(FrameItemKey const &key)
+{
+  return loaded_keys_.insert(key) ? kDBRPCCost : 0;
+}
+
+x23::Async<
+    SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
                              bool load_from_snapshot)
 {
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  using Value = std::pair<std::optional<int128_t>, int128_t>;
+  using Read = StorageRead<Value>;
+
+  const FrameItemKey item_key =
+      invocation_frame_stack_.frame_item_key(storage_key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
+  // A branch that answers out of the frame stack reaches no database, so it
+  // costs no load gas; only the two that read the snapshot below can.
   if (auto const *nnint_item = item_view->get<NNIntItem>()) {
     if (nnint_item->base_value_.has_value()) {
-      return {std::make_pair(from_xdr(*nnint_item->base_value_),
-                             from_xdr(nnint_item->add_value_))};
+      co_return Read{Value{from_xdr(*nnint_item->base_value_),
+                           from_xdr(nnint_item->add_value_)},
+                     0};
     }
     // If we're not loading from the snapshot, we can return nullopt for the
     // base value.
     if (!load_from_snapshot) {
-      return {std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_))};
+      co_return Read{Value{std::nullopt, from_xdr(nnint_item->add_value_)}, 0};
     }
 
-    auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
-    auto snapshot_value = snapshot_cache_.try_get_snapshot_item(addrkey);
+    // Reaches the database the same way UnmodifiedItem::load() does, so it
+    // is billed the same way: a staged add with no set value followed by a
+    // forced get lands here rather than in the branch below.
+    const GasAmount load_gas = note_item_load(item_key);
+    auto snapshot_value =
+        co_await snapshot_cache_.try_get_snapshot_item(item_key);
     if (!snapshot_value.has_value()) {
-      return snapshot_value.error();
+      co_return snapshot_value.error();
     }
 
     // In this case, we're returning the parameters of the prior NNInt write.
@@ -1702,30 +1748,36 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     // database. Hence we default to 0 if the snapshot value is not an NNInt.
     auto snapshot_type = snapshot_value.value()->type();
     if (!snapshot_type || snapshot_type.value() != ItemViewType::kNNInt) {
-      return std::make_pair(0, from_xdr(nnint_item->add_value_));
+      co_return Read{Value{0, from_xdr(nnint_item->add_value_)}, load_gas};
     }
-    return {std::make_pair(snapshot_value.value()->nnint(),
-                           from_xdr(nnint_item->add_value_))};
+    co_return Read{Value{snapshot_value.value()->nnint(),
+                         from_xdr(nnint_item->add_value_)},
+                   load_gas};
   }
 
   if (item_view->get<DeletedItem>()) {
     if (!load_from_snapshot) {
-      return {std::make_pair(std::nullopt, 0)};
+      co_return Read{Value{std::nullopt, 0}, 0};
     }
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist},
+                   0};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!load_from_snapshot) {
-      return {std::make_pair(std::nullopt, 0)};
+      co_return Read{Value{std::nullopt, 0}, 0};
     }
 
-    if (!unmodified_item->is_loaded()) {
-      auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
-      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
-      if (!load_status.has_value()) {
-        return load_status.error();
-      }
+    // Prices the fetch ensure_loaded() is about to do. Both turn on the same
+    // is_loaded() predicate, and ensure_loaded() stays a non-coroutine so a
+    // hit still allocates no frame.
+    const GasAmount load_gas =
+        unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
@@ -1733,26 +1785,30 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
       assert(load_from_snapshot);
       // We are in load_from_snapshot mode, so we return KeyNotExist instead of
       // std::nullopt, mirroring the behavior above of the DeletedItem case.
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+      co_return Read{SyscallError{
+                         SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist},
+                     load_gas};
     }
     if (*type != ItemViewType::kNNInt) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      co_return Read{
+          SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+          load_gas};
     }
-    return {std::make_pair(base_item.nnint(), 0)};
+    co_return Read{Value{base_item.nnint(), 0}, load_gas};
   }
 
   // the value written at this key is not an NNInt, so we return an
   // InvalidSyscallInput error. This mirrors the case above, where the snapshot
   // *type != kNNInt.
   if (!load_from_snapshot) {
-    return {std::make_pair(std::nullopt, 0)};
+    co_return Read{Value{std::nullopt, 0}, 0};
   }
-  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return Read{SyscallError{
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                 0};
 }
 
-SystemStatus<SyscallStatus<void>>
+x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
                              const int128_t &add_value,
@@ -1762,7 +1818,8 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           input_flags)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
@@ -1772,16 +1829,16 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  return item_view->set(NNIntItem{.base_value_ =
-                                      set_value.has_value()
-                                          ? std::optional<int128_xdr>(
-                                                to_xdr(*set_value))
-                                          : std::nullopt,
-                                  .add_value_ = to_xdr(add_value)},
-                        input_flags);
+  co_return item_view->set(NNIntItem{.base_value_ =
+                                         set_value.has_value()
+                                             ? std::optional<int128_xdr>(
+                                                   to_xdr(*set_value))
+                                             : std::nullopt,
+                                     .add_value_ = to_xdr(add_value)},
+                           input_flags);
 }
 
-SystemStatus<SyscallStatus<void>>
+x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
                                  StorageDeltaFlagSet flags)
 {
@@ -1789,12 +1846,13 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           flags)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  return item_view->set(DeletedItem{}, flags);
+  co_return item_view->set(DeletedItem{}, flags);
 }
 
 namespace {
@@ -1812,261 +1870,297 @@ queue_entry_from_span(std::span<const std::byte> span)
   return new_entry;
 }
 
-x23::Vec<QueueEntry>
+x23::Async<x23::Vec<QueueEntry>>
 get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
                                    SnapshotStorageItem const &base_item,
                                    AddressAndKey const &addrkey, uint32_t count)
 {
   if (auto *vd = std::get_if<ValidationModeData>(&execution_mode_data)) {
-    return vd->get_observed_queue_entries(addrkey, count);
+    co_return vd->get_observed_queue_entries(addrkey, count);
   }
   if (auto *vwd = std::get_if<ViewingModeData>(&execution_mode_data)) {
-    return vwd->get_observed_queue_entries(addrkey, count);
+    co_return vwd->get_observed_queue_entries(addrkey, count);
   }
-  return base_item.get_retrocausally_consumed_entries(count);
+  co_return co_await base_item.get_retrocausally_consumed_entries(count);
 }
 
-SystemStatus<SyscallStatus<RetrocausalQueueItem *>>
+// An RCQ access to a DeletedItem key resolves against a fully-consumed view
+// of the snapshot's queue: the tx-local delete hides every entry, but the
+// retrocausally-consumed count already recorded on the view must be carried
+// forward. Loads the snapshot base item fresh (the DeletedItem holds none)
+// and builds that view.
+x23::Async<SystemStatus<RetrocausalQueueItem>>
+make_deleted_key_queue_item(FrameItemKey const &item_key,
+                            AddressAndKey const &addrkey,
+                            uint32_t retrocausally_consumed_count,
+                            StorageSnapshotCache &snapshot_cache,
+                            ExecutionModeData &execution_mode_data)
+{
+  UnmodifiedItem unmodified_item;
+  auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
+  if (!load_status.has_value()) {
+    co_return load_status.error();
+  }
+
+  auto consumed =
+      co_await get_retrocausally_consumed_entries(execution_mode_data,
+                                                  unmodified_item.base_item(),
+                                                  addrkey,
+                                                  retrocausally_consumed_count);
+  co_return RetrocausalQueueItem::make_fully_consumed_item(
+      unmodified_item.base_item(), std::move(consumed));
+}
+
+x23::Async<SystemStatus<SyscallStatus<RetrocausalQueueItem *>>>
 retrocausal_queue_item_from_view(ItemView *item_view,
+                                 FrameItemKey const &item_key,
                                  AddressAndKey const &addrkey,
                                  StorageSnapshotCache &snapshot_cache,
                                  ExecutionModeData &execution_mode_data)
 {
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
-    return queue_item;
+    co_return queue_item;
   }
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status = unmodified_item->load(snapshot_cache, addrkey);
-      if (!load_status.has_value()) {
-        return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     RetrocausalQueueItem new_item(unmodified_item->base_item());
 
     auto set_status = item_view->set(new_item);
     if (!set_status.has_value()) {
-      return set_status.error();
+      co_return set_status.error();
     }
-    return item_view->get<RetrocausalQueueItem>();
+    co_return item_view->get<RetrocausalQueueItem>();
   }
 
   if (item_view->get<DeletedItem>()) {
-
-    UnmodifiedItem unmodified_item;
-    assert(!unmodified_item.is_loaded());
-    auto load_status = unmodified_item.load(snapshot_cache, addrkey);
-    if (!load_status.has_value()) {
-      return load_status.error();
+    auto new_item = co_await make_deleted_key_queue_item(
+        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+        snapshot_cache, execution_mode_data);
+    if (!new_item.has_value()) {
+      co_return new_item.error();
     }
 
-    auto consumed = get_retrocausally_consumed_entries(
-        execution_mode_data, unmodified_item.base_item(), addrkey,
-        item_view->get_retrocausally_consumed_count());
-    auto new_item = RetrocausalQueueItem::make_fully_consumed_item(
-        unmodified_item.base_item(), std::move(consumed));
-
-    auto set_status = item_view->set(new_item);
+    auto set_status = item_view->set(new_item.value());
     if (!set_status.has_value()) {
-      return set_status.error();
+      co_return set_status.error();
     }
-    return item_view->get<RetrocausalQueueItem>();
+    co_return item_view->get<RetrocausalQueueItem>();
   }
 
-  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
-SystemStatus<SyscallStatus<QueueEntry>>
+x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 load_next_queue_entry(RetrocausalQueueItem &queue_item,
                       ExecutionModeData &execution_mode_data,
                       bool advance_cursor)
 {
-  auto entry = queue_item.get_next_item(execution_mode_data, advance_cursor);
+  auto entry =
+      co_await queue_item.get_next_item(execution_mode_data, advance_cursor);
   if (!entry.has_value()) {
-    return entry.error();
+    co_return entry.error();
   }
 
-  // A read that would exceed the per-tx concurrent-observation cap surfaces as
-  // a deterministic syscall error, so a contract can't drive the bounded
-  // observation vector past kMaxConcurrentRcqReadsPerTx (#2894). This is a
-  // dedicated resource-limit code contracts can handle as a stop condition,
-  // not a malformed-input error.
+  // Return whatever get_next_item resolved. Only a concurrent read consumes an
+  // observation slot; a self or past-block consume records no observation and
+  // so is never subject to the per-tx observation cap. get_next_item already
+  // returns nullptr for a concurrent read the cap blocked, so a non-null entry
+  // here is always a legitimate read -- return it even once the cap is exceeded
+  // rather than dropping it behind a read-limit error (#3611). The pointer
+  // aliases into owned storage and is copied here into the syscall result.
+  if (const QueueEntry *value = entry.value()) {
+    co_return *value;
+  }
+
+  // No entry resolved. If that is because a concurrent read hit the per-tx
+  // observation cap, surface the deterministic read-limit error so a contract
+  // can't drive the bounded observation vector past kMaxConcurrentRcqReadsPerTx
+  // (#2894). This is a dedicated resource-limit code contracts can handle as a
+  // stop condition, not a malformed-input error.
   if (observation_cap_exceeded(execution_mode_data)) {
-    return SyscallError{
+    co_return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached};
   }
 
-  // The pointer aliases into owned storage and is copied here into the syscall
-  // result (the one copy the contract's return value requires).
-  if (const QueueEntry *value = entry.value()) {
-    return *value;
-  }
-
-  return SyscallError{
+  co_return SyscallError{
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
-SystemStatus<SyscallStatus<QueueEntry>>
+x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 retrocausal_queue_peek_from_view(ItemView *item_view,
+                                 FrameItemKey const &item_key,
                                  AddressAndKey const &addrkey,
                                  StorageSnapshotCache &snapshot_cache,
                                  ExecutionModeData &execution_mode_data)
 {
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
-    return load_next_queue_entry(*queue_item, execution_mode_data,
-                                 /*advance_cursor=*/false);
+    co_return co_await load_next_queue_entry(*queue_item, execution_mode_data,
+                                             /*advance_cursor=*/false);
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status = unmodified_item->load(snapshot_cache, addrkey);
-      if (!load_status.has_value()) {
-        return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
 
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
-    return load_next_queue_entry(queue_item, execution_mode_data,
-                                 /*advance_cursor=*/false);
+    co_return co_await load_next_queue_entry(queue_item, execution_mode_data,
+                                             /*advance_cursor=*/false);
   }
 
   if (item_view->get<DeletedItem>()) {
-    UnmodifiedItem unmodified_item;
-    auto load_status = unmodified_item.load(snapshot_cache, addrkey);
-    if (!load_status.has_value()) {
-      return load_status.error();
+    auto queue_item = co_await make_deleted_key_queue_item(
+        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+        snapshot_cache, execution_mode_data);
+    if (!queue_item.has_value()) {
+      co_return queue_item.error();
     }
-
-    auto consumed = get_retrocausally_consumed_entries(
-        execution_mode_data, unmodified_item.base_item(), addrkey,
-        item_view->get_retrocausally_consumed_count());
-    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
-        unmodified_item.base_item(), std::move(consumed));
-    return load_next_queue_entry(queue_item, execution_mode_data,
-                                 /*advance_cursor=*/false);
+    co_return co_await load_next_queue_entry(queue_item.value(),
+                                             execution_mode_data,
+                                             /*advance_cursor=*/false);
   }
 
-  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 } // namespace
 
-SystemStatus<SyscallStatus<void>>
+x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::retrocausal_queue_insert(
     StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
 {
   if (queue_entry.size() > kQueueEntryMaxLen) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
   auto queue_item =
-      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_,
-                                       execution_mode_data_);
+      co_await retrocausal_queue_item_from_view(item_view, item_key, addrkey,
+                                                snapshot_cache_,
+                                                execution_mode_data_);
   if (!queue_item.has_value()) {
-    return queue_item.error();
+    co_return queue_item.error();
   }
   if (!queue_item.value().has_value()) {
-    return queue_item.value().error();
+    co_return queue_item.value().error();
   }
 
   // Now we have either grabbed the preexisting RCQItem, or created a new one.
   // In either case, we can now insert the new entry.
-  return queue_item.value().value()->insert_entry(
+  co_return queue_item.value().value()->insert_entry(
       queue_entry_from_span(queue_entry));
 }
 
-SystemStatus<SyscallStatus<QueueEntry>>
+x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                              bool peek)
 {
+  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
   if (peek) {
-    return retrocausal_queue_peek_from_view(item_view, addrkey, snapshot_cache_,
-                                            execution_mode_data_);
+    co_return co_await retrocausal_queue_peek_from_view(item_view, item_key,
+                                                        addrkey,
+                                                        snapshot_cache_,
+                                                        execution_mode_data_);
   }
 
   // For unmodified keys, probe with a local item first. Only persist
   // into the view if an entry is found, so that a no-op consume on an
   // absent key does not pin the storage type.
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
-      if (!load_status.has_value()) {
-        return load_status.error();
-      }
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
-    auto entry = load_next_queue_entry(queue_item, execution_mode_data_,
+    auto entry =
+        co_await load_next_queue_entry(queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
     if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
-        return set_status.error();
+        co_return set_status.error();
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
-    return entry;
+    co_return entry;
   }
 
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
-    auto entry = load_next_queue_entry(*queue_item, execution_mode_data_,
+    auto entry =
+        co_await load_next_queue_entry(*queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
     item_view->sync_retrocausally_consumed(*queue_item);
-    return entry;
+    co_return entry;
   }
 
   // Same treatment for deleted keys: a no-op consume should leave the
   // key deleted rather than converting it to an empty RCQ.
   if (item_view->get<DeletedItem>()) {
-    UnmodifiedItem unmodified_item;
-    auto load_status = unmodified_item.load(snapshot_cache_, addrkey);
-    if (!load_status.has_value()) {
-      return load_status.error();
+    auto queue_item_res = co_await make_deleted_key_queue_item(
+        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+        snapshot_cache_, execution_mode_data_);
+    if (!queue_item_res.has_value()) {
+      co_return queue_item_res.error();
     }
-    auto consumed = get_retrocausally_consumed_entries(
-        execution_mode_data_, unmodified_item.base_item(), addrkey,
-        item_view->get_retrocausally_consumed_count());
-    auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
-        unmodified_item.base_item(), std::move(consumed));
-    auto entry = load_next_queue_entry(queue_item, execution_mode_data_,
+    auto &queue_item = queue_item_res.value();
+    auto entry =
+        co_await load_next_queue_entry(queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
     if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
-        return set_status.error();
+        co_return set_status.error();
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
-    return entry;
+    co_return entry;
   }
 
-  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
 // == Native token syscalls ==
 
-SystemStatus<SyscallStatus<int128_t>>
+x23::Async<SystemStatus<StorageRead<int128_t>>>
 SystemCallHandler::get_native_token_balance(
     ContractAddress const &contract_address)
 {
+  using Read = StorageRead<int128_t>;
+  // Set by whichever of the two snapshot reads below runs, if either does.
+  GasAmount load_gas = 0;
+
   AddressAndKey addrkey{.address = contract_address,
                         .key =
                             StorageKey(StorageKeyType::FreeNativeTokenBalance)};
+  const FrameItemKey item_key = FrameItemKey::from(addrkey);
 
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
   if (auto *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!unmodified_item->is_loaded()) {
-      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
-      if (!load_status.has_value()) {
-        return load_status.error();
-      }
+    // Prices the fetch ensure_loaded() is about to do; see get_bytestring().
+    load_gas = unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+    if (auto loaded =
+            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+        !loaded.has_value()) {
+      co_return loaded.error();
     }
     auto const &base_item = unmodified_item->base_item();
     assert(base_item.type() == ItemViewType::kNativeTokenBalance);
@@ -2078,49 +2172,59 @@ SystemCallHandler::get_native_token_balance(
     // uint128_t and hand a contract UINT128_MAX. CHECK, not assert: the
     // conversion is unguarded exactly where it matters, in NDEBUG builds.
     CHECK(base_item.native_token_balance() >= 0);
-    return base_item.native_token_balance();
+    co_return Read{base_item.native_token_balance(), load_gas};
   }
 
   auto const *balance_item = item_view->get<NativeTokenBalanceItem>();
   assert(balance_item);
 
-  auto base = [&] -> SystemStatus<int128_t> {
-    if (balance_item->base_value_.has_value()) {
-      return from_xdr(*balance_item->base_value_);
-    }
-    auto snapshot_value = snapshot_cache_.try_get_snapshot_item(addrkey);
+  // Resolve the base balance: the tx-local written value when there is one,
+  // otherwise the snapshot's. An absent or untyped snapshot item is a zero
+  // balance. (This was an immediately-invoked lambda; it is inlined here
+  // because the snapshot read suspends and a lambda cannot be a coroutine
+  // returning a plain SystemStatus.)
+  int128_t base = 0;
+  if (balance_item->base_value_.has_value()) {
+    base = from_xdr(*balance_item->base_value_);
+  }
+  else {
+    // Same database read as the branch above, so it is billed the same way.
+    load_gas = note_item_load(item_key);
+    auto snapshot_value =
+        co_await snapshot_cache_.try_get_snapshot_item(item_key);
     if (!snapshot_value.has_value()) {
-      return snapshot_value.error();
+      co_return snapshot_value.error();
     }
     auto snapshot_type = snapshot_value.value()->type();
-    if (!snapshot_type.has_value()) {
-      return 0;
+    if (snapshot_type.has_value()) {
+      assert(snapshot_type.value() == ItemViewType::kNativeTokenBalance);
+      base = snapshot_value.value()->native_token_balance();
     }
-    assert(snapshot_type.value() == ItemViewType::kNativeTokenBalance);
-    return snapshot_value.value()->native_token_balance();
-  }();
-
-  if (!base.has_value()) {
-    return base.error();
-  }
-  if (integer_add_overflow(*base, from_xdr(balance_item->add_value_))) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  int128_t balance = *base + from_xdr(balance_item->add_value_);
+  if (integer_add_overflow(base, from_xdr(balance_item->add_value_))) {
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                   load_gas};
+  }
+
+  int128_t balance = base + from_xdr(balance_item->add_value_);
   if (balance < 0) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                   load_gas};
   }
-  return balance;
+  co_return Read{balance, load_gas};
 }
 
-SystemStatus<SyscallStatus<void>>
+x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::modify_native_token_balance(
     ContractAddress const &contract_address, int128_t transfer_amount)
 {
   assert(!invocation_frame_stack_.empty());
   if (is_read_only()) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   AddressAndKey addrkey{.address = contract_address,
@@ -2133,17 +2237,17 @@ SystemCallHandler::modify_native_token_balance(
   if (auto const *balance_item = item_view->get<NativeTokenBalanceItem>()) {
     auto current_add = from_xdr(balance_item->add_value_);
     if (integer_add_overflow(current_add, transfer_amount)) {
-      return SyscallError{
+      co_return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     auto new_add = current_add + transfer_amount;
-    return item_view->set(NativeTokenBalanceItem(
+    co_return item_view->set(NativeTokenBalanceItem(
         NNIntItem{.base_value_ = balance_item->base_value_,
                   .add_value_ = to_xdr(new_add)}));
   }
 
   assert(item_view->get<UnmodifiedItem>());
-  return item_view->set(
+  co_return item_view->set(
       NativeTokenBalanceItem(NNIntItem{.base_value_ = std::nullopt,
                                        .add_value_ = to_xdr(transfer_amount)}));
 }
@@ -2156,60 +2260,60 @@ auth_data_addrkey(ContractAddress const &address)
 {
   return {.address = address, .key = StorageKey(StorageKeyType::AuthData)};
 }
+
+// Apply a mutation to the given address's tx-local AddressAuthDataItem,
+// creating the item from scratch on first touch. Synchronous: the item view
+// is tx-local state, so no snapshot read is needed. The mutation runs exactly
+// once per call.
+SystemStatus<SyscallStatus<void>>
+modify_auth_data(InvocationFrameStack &invocation_frame_stack,
+                 ContractAddress const &address, auto mutate)
+{
+  auto *item_view =
+      invocation_frame_stack.get_item_view(auth_data_addrkey(address));
+  assert(item_view);
+
+  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    mutate(*address_auth_data_item);
+    return SystemStatus<SyscallStatus<void>>{};
+  }
+
+  if (item_view->get<DeletedItem>()) [[unlikely]] {
+    error("Unrecoverable: unexpected manual delete of authentication data");
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
+
+  assert(item_view->get<UnmodifiedItem>());
+  AddressAuthDataItem new_item;
+  mutate(new_item);
+  return item_view->set(new_item);
+}
 } // namespace
 
-SystemStatus<SyscallStatus<void>>
+x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::change_public_key_registration(uint32_t key_index,
                                                   PublicKeyConfigOpt new_key)
 {
   if (key_index >= kMaxSigners) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   assert(!invocation_frame_stack_.empty());
-  auto addr = get_current_address();
-  AddressAndKey addrkey = auth_data_addrkey(addr);
-
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
-  assert(item_view);
-
-  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
-    address_auth_data_item->change_public_key(key_index, std::move(new_key));
-    return {};
-  }
-
-  if (item_view->get<DeletedItem>()) [[unlikely]] {
-    error("Unrecoverable: unexpected manual delete of authentication data");
-    return SystemError{SystemErrorCode::Unrecoverable};
-  }
-
-  assert(item_view->get<UnmodifiedItem>());
-  AddressAuthDataItem new_item;
-  new_item.change_public_key(key_index, std::move(new_key));
-  return item_view->set(new_item);
+  co_return modify_auth_data(invocation_frame_stack_, get_current_address(),
+                             [&](AddressAuthDataItem &item) {
+                               item.change_public_key(key_index,
+                                                      std::move(new_key));
+                             });
 }
 
-SystemStatus<SyscallStatus<void>>
+x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_address_required_weight(Weight required_weight)
 {
-  auto addr = get_current_address();
-  auto addrkey = auth_data_addrkey(addr);
-  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
-  assert(item_view);
-
-  if (auto *address_auth_data_item = item_view->get<AddressAuthDataItem>()) {
-    address_auth_data_item->set_required_weight(required_weight);
-    return {};
-  }
-
-  if (item_view->get<DeletedItem>()) [[unlikely]] {
-    error("Unrecoverable: unexpected manual delete of authentication data");
-    return SystemError{SystemErrorCode::Unrecoverable};
-  }
-  assert(item_view->get<UnmodifiedItem>());
-  AddressAuthDataItem new_item;
-  new_item.set_required_weight(required_weight);
-  return item_view->set(new_item);
+  co_return modify_auth_data(invocation_frame_stack_, get_current_address(),
+                             [&](AddressAuthDataItem &item) {
+                               item.set_required_weight(required_weight);
+                             });
 }
 
 const AuthClaim &
@@ -2230,28 +2334,28 @@ SystemCallHandler::sha256_update(uint32_t input_index,
       input_index, input_buffer, input_reset);
 }
 
+SyscallStatus<void>
+SystemCallHandler::sha256_copy(uint32_t input_src_index,
+                               uint32_t input_dst_index)
+{
+  assert(!invocation_frame_stack_.empty());
+  return invocation_frame_stack_.get_active_frame_hash_buffers().copy(
+      input_src_index, input_dst_index);
+}
+
 SyscallStatus<SHA256Hash>
 SystemCallHandler::sha256_finalize(uint32_t input_index)
 {
   assert(!invocation_frame_stack_.empty());
-  size_t output_size = 0;
-  auto r = invocation_frame_stack_.get_active_frame_hash_buffers().finalize(
-      input_index, &output_size);
-  if (auto *stats = get_transaction_stats()) {
-    stats->sha256_total_bytes_processed += output_size;
-  }
-  return r;
+  return invocation_frame_stack_.get_active_frame_hash_buffers().finalize(
+      input_index);
 }
 
 // == Block statistics syscalls ==
 
-SystemStatus<BlockHeight>
+BlockHeight
 SystemCallHandler::get_block_height() const
 {
-  auto tip = snapshot_cache_.try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
-  }
   // The contract-visible current block height is the *executing* block height,
   // which is the parent tip's height + 1: HogDb opens the BlockTX at
   // get_tip().value.proposal_header.block_height + 1 (see
@@ -2259,7 +2363,23 @@ SystemCallHandler::get_block_height() const
   // for an open block. Contract-facing height-gated logic (auth-token expiry,
   // timelocks) must observe the executing height, matching the replay-cache
   // expiry check.
-  return tip.value()->value.proposal_header.block_height + 1;
+  return snapshot_cache_.get_db_tip().value.proposal_header.block_height + 1;
+}
+
+NetworkHash const &
+SystemCallHandler::get_network_hash() const
+{
+  // Identical in every header, so the parent tip's copy is already this
+  // block's value, no adjustment needed.
+  return snapshot_cache_.get_db_tip().value.proposal_header.network_hash;
+}
+
+TimePoint
+SystemCallHandler::get_block_timepoint() const
+{
+  // Not derivable from the tip: for an open block that is the parent, whose
+  // timepoint is the previous block's.
+  return snapshot_cache_.block_execution_context().block_timepoint;
 }
 
 // == Auth token syscalls ==

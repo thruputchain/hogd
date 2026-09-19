@@ -110,7 +110,7 @@ make_artifact_image(std::span<const uint32_t> words,
 {
   const std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact(words, initial_memory);
-  auto parsed = rv32::parse_artifact(artifact);
+  auto parsed = rv32::parse_artifact(artifact, rv32::Rv32Limits::defaults());
   if (!parsed.has_value()) {
     ADD_FAILURE() << "failed to parse upstream-derived RV32 artifact";
     return {};
@@ -234,7 +234,7 @@ TEST_P(Rv32UpstreamArtifactTest, passesThroughRuntimeContext)
                                               rv32_context);
   handler.enable_tracing();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success()) << test_case.name;
   const auto output = handler.get_most_recent_frame_output();
@@ -262,7 +262,7 @@ TEST_F(Rv32UpstreamArtifactTest, failPathMapsToDeterministicRuntimeFailure)
                                               rv32_context);
   handler.enable_tracing();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);

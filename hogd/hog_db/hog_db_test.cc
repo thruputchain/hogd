@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <functional>
@@ -11,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -34,6 +38,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/lthash16.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "hogd/hog_db/background_commit_worker.h"
 #include "hogd/hog_db/block_tx.h"
@@ -45,6 +50,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
@@ -120,7 +126,8 @@ protected:
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -145,7 +152,8 @@ protected:
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     bool acquired_reference = block_tx.try_acquire_reference();
     EXPECT_TRUE(acquired_reference);
     if (!acquired_reference) {
@@ -187,7 +195,8 @@ protected:
     ASSERT_TRUE(db_.write_address_metadata(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("seed"))),
-                             .contract_size = 10}));
+                             .contract_size = 10,
+                             .contract_type = ContractType::kRv32}));
   }
 };
 
@@ -236,12 +245,13 @@ make_code_bytes(size_t size)
   return buf;
 }
 
-// Largest value length that stores inline under the 33-byte wasm-code key.
+// Largest value length that stores inline under the 33-byte contract-code key.
 size_t
-max_inline_wasm_code_size()
+max_inline_contract_code_size()
 {
   size_t size = kBigItemThreshold;
-  while (!Database::item_fits(make_wasm_code_key(SHA256Hash{}).size(), size)) {
+  while (
+      !Database::item_fits(make_contract_code_key(SHA256Hash{}).size(), size)) {
     --size;
   }
   return size;
@@ -249,15 +259,15 @@ max_inline_wasm_code_size()
 
 } // namespace
 
-TEST_F(HogDbTest, WasmCodeChunkedRoundtrip)
+TEST_F(HogDbTest, ContractCodeChunkedRoundtrip)
 {
-  const size_t max_inline = max_inline_wasm_code_size();
+  const size_t max_inline = max_inline_contract_code_size();
   const std::array<size_t, 5> sizes = {
       max_inline,                          // largest inline row
       max_inline + 1,                      // smallest chunked row
-      (2 * kWasmCodeChunkPayloadSize),     // exact multiple of chunk payload
-      (2 * kWasmCodeChunkPayloadSize) + 1, // one byte into a final chunk
-      kMaxSerializedContractBytes,         // largest row hog_db accepts
+      (2 * kContractCodeChunkPayloadSize), // exact multiple of chunk payload
+      (2 * kContractCodeChunkPayloadSize) + 1, // one byte into a final chunk
+      kMaxSerializedContractBytes,             // largest row hog_db accepts
   };
   uint8_t which = 0;
   for (size_t size : sizes) {
@@ -266,14 +276,14 @@ TEST_F(HogDbTest, WasmCodeChunkedRoundtrip)
     hash[1] = which++;
     auto buf = make_code_bytes(size);
     auto buf_span = std::as_bytes(std::span(buf));
-    ASSERT_TRUE(db_.write_wasm_code(hash, buf_span)) << size;
-    auto rcode = db_.read_wasm_code(hash);
+    ASSERT_TRUE(db_.write_contract_code(hash, buf_span)) << size;
+    auto rcode = db_.read_contract_code(hash);
     ASSERT_TRUE(rcode) << size;
     EXPECT_TRUE(std::ranges::equal(buf_span, *rcode)) << size;
     // Re-writing the same row is idempotent (content-addressed rows can be
     // staged again by a later transaction deploying the same contract).
-    ASSERT_TRUE(db_.write_wasm_code(hash, buf_span)) << size;
-    auto rcode2 = db_.read_wasm_code(hash);
+    ASSERT_TRUE(db_.write_contract_code(hash, buf_span)) << size;
+    auto rcode2 = db_.read_contract_code(hash);
     ASSERT_TRUE(rcode2) << size;
     EXPECT_TRUE(std::ranges::equal(buf_span, *rcode2)) << size;
   }
@@ -282,55 +292,55 @@ TEST_F(HogDbTest, WasmCodeChunkedRoundtrip)
 // Guards db_hash compatibility: a row that fits one item must keep the exact
 // pre-chunking layout (type 0 at the 33-byte key, no chunk items), so
 // chunking changes nothing for existing state.
-TEST_F(HogDbTest, WasmCodeSmallRowKeepsLegacyInlineLayout)
+TEST_F(HogDbTest, ContractCodeSmallRowKeepsLegacyInlineLayout)
 {
   SHA256Hash hash{};
   hash[0] = 0xC1;
   auto buf = make_code_bytes(100);
-  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+  ASSERT_TRUE(db_.write_contract_code(hash, std::as_bytes(std::span(buf))));
 
-  auto key = make_wasm_code_key(hash);
+  auto key = make_contract_code_key(hash);
   auto type = db_.get_ramdb().get_type(std::as_bytes(std::span(key)));
   ASSERT_TRUE(type);
-  EXPECT_EQ(*type, kWasmCodeInline);
+  EXPECT_EQ(*type, kContractCodeInline);
 
-  auto chunk_key = make_wasm_code_chunk_key(hash, 0);
+  auto chunk_key = make_contract_code_chunk_key(hash, 0);
   EXPECT_FALSE(db_.get_ramdb().get_type(std::as_bytes(std::span(chunk_key))));
 }
 
-TEST_F(HogDbTest, WasmCodeMissingChunkIsCorruption)
+TEST_F(HogDbTest, ContractCodeMissingChunkIsCorruption)
 {
   SHA256Hash hash{};
   hash[0] = 0xC2;
   auto buf = make_code_bytes(kMaxSerializedContractBytes);
-  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+  ASSERT_TRUE(db_.write_contract_code(hash, std::as_bytes(std::span(buf))));
 
-  auto chunk_key = make_wasm_code_chunk_key(hash, 1);
+  auto chunk_key = make_contract_code_chunk_key(hash, 1);
   ASSERT_TRUE(db_.get_ramdb().remove(std::as_bytes(std::span(chunk_key))));
 
-  auto rcode = db_.read_wasm_code(hash);
+  auto rcode = db_.read_contract_code(hash);
   ASSERT_FALSE(rcode);
   EXPECT_EQ(rcode.error().code(), HogDbCode::kCorruption);
 }
 
 // The chunked-head sanity checks (unknown type byte, fits-inline total,
 // out-of-range chunk count) all reject with kCorruption -- and they run
-// before read_wasm_code allocates `total` bytes, so a hostile head cannot
+// before read_contract_code allocates `total` bytes, so a hostile head cannot
 // drive a huge allocation (the 0xFFFFFFFF case would be a 4 GiB buffer).
-TEST_F(HogDbTest, WasmCodeTamperedHeadIsCorruption)
+TEST_F(HogDbTest, ContractCodeTamperedHeadIsCorruption)
 {
   SHA256Hash hash{};
   hash[0] = 0xC3;
   auto buf = make_code_bytes(kMaxSerializedContractBytes);
-  ASSERT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(buf))));
+  ASSERT_TRUE(db_.write_contract_code(hash, std::as_bytes(std::span(buf))));
 
-  auto key = make_wasm_code_key(hash);
+  auto key = make_contract_code_key(hash);
   auto key_span = std::as_bytes(std::span(key));
 
   auto expect_corrupt_after = [&](uint8_t type,
                                   std::span<const std::byte> value) {
     ASSERT_TRUE(db_.get_ramdb().put(key_span, type, value));
-    auto rcode = db_.read_wasm_code(hash);
+    auto rcode = db_.read_contract_code(hash);
     ASSERT_FALSE(rcode);
     EXPECT_EQ(rcode.error().code(), HogDbCode::kCorruption);
   };
@@ -341,38 +351,38 @@ TEST_F(HogDbTest, WasmCodeTamperedHeadIsCorruption)
 
   // Chunked head describing a row small enough to be stored inline.
   auto small_len = x23::serialize(static_cast<uint32_t>(100));
-  expect_corrupt_after(kWasmCodeChunkedHead,
+  expect_corrupt_after(kContractCodeChunkedHead,
                        std::as_bytes(std::span(small_len)));
 
   // Chunked head describing more chunks than a one-byte index addresses.
   auto huge_len = x23::serialize(static_cast<uint32_t>(0xFFFFFFFF));
-  expect_corrupt_after(kWasmCodeChunkedHead,
+  expect_corrupt_after(kContractCodeChunkedHead,
                        std::as_bytes(std::span(huge_len)));
 }
 
-// for_each_wasm_code_item emits payload chunks before the chunked head, so a
-// reader that observes a head always finds complete chunks. Pin that
+// for_each_contract_code_item emits payload chunks before the chunked head, so
+// a reader that observes a head always finds complete chunks. Pin that
 // ordering: it is documented behavior the read path relies on.
-TEST_F(HogDbTest, WasmCodeChunkedItemsEmitHeadLast)
+TEST_F(HogDbTest, ContractCodeChunkedItemsEmitHeadLast)
 {
   SHA256Hash hash{};
   hash[0] = 0xC4;
-  auto buf = make_code_bytes((2 * kWasmCodeChunkPayloadSize) + 1);
+  auto buf = make_code_bytes((2 * kContractCodeChunkPayloadSize) + 1);
 
   std::vector<std::pair<size_t, uint8_t>> emitted; // (key length, type)
-  for_each_wasm_code_item(hash, std::as_bytes(std::span(buf)),
-                          [&](std::span<const std::byte> key, uint8_t type,
-                              std::span<const std::byte> /*value*/) {
-                            emitted.emplace_back(key.size(), type);
-                          });
+  for_each_contract_code_item(hash, std::as_bytes(std::span(buf)),
+                              [&](std::span<const std::byte> key, uint8_t type,
+                                  std::span<const std::byte> /*value*/) {
+                                emitted.emplace_back(key.size(), type);
+                              });
 
   ASSERT_EQ(emitted.size(), 4U); // 3 chunks + head
   for (size_t i = 0; i + 1 < emitted.size(); ++i) {
     EXPECT_EQ(emitted[i].first, sizeof(SHA256Hash) + 2) << i;
-    EXPECT_EQ(emitted[i].second, kWasmCodeChunk) << i;
+    EXPECT_EQ(emitted[i].second, kContractCodeChunk) << i;
   }
   EXPECT_EQ(emitted.back().first, sizeof(SHA256Hash) + 1);
-  EXPECT_EQ(emitted.back().second, kWasmCodeChunkedHead);
+  EXPECT_EQ(emitted.back().second, kContractCodeChunkedHead);
 }
 
 TEST_F(HogDbTest, DataAccessObject)
@@ -409,22 +419,24 @@ TEST_F(HogDbTest, DataAccessObject)
     EXPECT_EQ(*bal, 10);
   }
 
-  // test wasm hash
-  std::string test_code("wasm contract code is here");
+  // test contract code hash
+  std::string test_code("contract code is here");
   uint32_t contract_size = test_code.size();
   SHA256Hash hash = sha256(std::as_bytes(std::span(test_code)));
   EXPECT_TRUE(db_.write_address_metadata(
-      addr,
-      DeployedContractHash{.hash = hash, .contract_size = contract_size}));
+      addr, DeployedContractHash{.hash = hash,
+                                 .contract_size = contract_size,
+                                 .contract_type = ContractType::kRv32}));
   auto rhash = db_.read_address_metadata(addr);
   EXPECT_TRUE(rhash);
   if (rhash) {
     EXPECT_EQ(hash, rhash->hash);
   }
 
-  // test wasm code
-  EXPECT_TRUE(db_.write_wasm_code(hash, std::as_bytes(std::span(test_code))));
-  HogDbStatus<OwningSpan<const std::byte>> rcode = db_.read_wasm_code(hash);
+  // test contract code
+  EXPECT_TRUE(
+      db_.write_contract_code(hash, std::as_bytes(std::span(test_code))));
+  HogDbStatus<OwningSpan<const std::byte>> rcode = db_.read_contract_code(hash);
   EXPECT_TRUE(rcode);
   if (rcode) {
     EXPECT_EQ(std::as_bytes(std::span(test_code)), *rcode);
@@ -606,23 +618,26 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
   contract.native_contract_id() =
       static_cast<HogexecPrecompiledNativeContracts>(1);
 
-  ASSERT_TRUE(
-      db_.write_address_metadata(addr,
-                                 DeployedContractHash{.hash = sha256(contract),
-                                                      .contract_size = 10}));
+  ASSERT_TRUE(db_.write_address_metadata(
+      addr, DeployedContractHash{.hash = sha256(contract),
+                                 .contract_size = 10,
+                                 .contract_type = ContractType::kRv32}));
   ASSERT_TRUE(db_.write_address_balance(addr, 1000000));
 
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr2,
-      DeployedContractHash{.hash = sha256(contract), .contract_size = 10},
+      DeployedContractHash{.hash = sha256(contract),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32},
       std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(
       invoke_tx.request_nnint128(make_address_balance_item_key(addr), -100000,
@@ -632,7 +647,8 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
                                  std::to_underlying(StorageDeltaFlags::None)));
 
   DeployedContractHash deployed_hash{.hash = sha256(contract),
-                                     .contract_size = 10};
+                                     .contract_size = 10,
+                                     .contract_type = ContractType::kRv32};
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr3, deployed_hash, std::to_underlying(StorageDeltaFlags::None)));
   int128_t cost = cost_model_.get_deployment_cost(deployed_hash) +
@@ -804,7 +820,8 @@ TEST_F(HogDbTest, BalanceTransferReducesByCost)
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -854,7 +871,8 @@ TEST_F(HogDbTest, NewBalanceHogAgeIsAllZeroes)
   constexpr BlockHeight kBlockHeight = 42;
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, kBlockHeight,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
@@ -1001,6 +1019,117 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenBalanceIsNegative)
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
+TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenGroupCountsOverflow)
+{
+  constexpr uint128_t kMax = std::numeric_limits<uint128_t>::max();
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  // kMax + 10 + 1 wraps to exactly 10, the persisted balance. An unchecked
+  // sum therefore reports this row as already reconciled and leaves it in
+  // place, and the corruption only surfaces later in the mempool scheduler.
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/kMax,
+                   /*already_scheduled=*/10,
+                   /*received=*/1,
+                   /*to_schedule_age=*/10,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbCode::kInternal);
+}
+
+TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenAverageAgeIsNegative)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  // Counts sum to the balance, so an average-age-agnostic reconciliation would
+  // report this row as already reconciled and leave the negative average in
+  // place. The scheduler then orders this account ahead of every valid
+  // nonnegative age via its ascending ready-account key.
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/5,
+                   /*already_scheduled=*/3,
+                   /*received=*/2,
+                   /*to_schedule_age=*/-1,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbCode::kInternal);
+}
+
+TEST_F(HogDbTest, HogAgeValueOmitsAddressAndReconstructsFromKey)
+{
+  const Address key_addr = make_address(kAddress);
+  const auto key = make_address_key(key_addr, Prefix::kHogAge);
+  constexpr size_t kValueSize =
+      x23::detail::size_of_fixed<HogAge>() - kAddressSize;
+
+  // A write drops the address: the persisted value is exactly kAddressSize
+  // bytes shorter than the full struct encoding.
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(key_addr, /*to_schedule=*/9, /*already_scheduled=*/0,
+                   /*received=*/0, /*to_schedule_age=*/3,
+                   /*already_scheduled_age=*/0, /*received_age=*/0)));
+  HogDbStatus<size_t> stored_size =
+      db_.get_ramdb().get_size(std::as_bytes(std::span(key)));
+  ASSERT_TRUE(stored_size);
+  EXPECT_EQ(*stored_size, kValueSize);
+
+  // The read reconstructs the address from the key. Craft an address-less value
+  // (a full HogAge encoding minus its leading address bytes) whose stripped-off
+  // address differs from the key, and confirm the read reports key_addr -- the
+  // drift that crashed the scheduler in issue #3812 is now impossible.
+  const auto encoded =
+      x23::serialize(make_hog_age(make_address(kAddress + 1), /*to_schedule=*/5,
+                                  /*already_scheduled=*/0, /*received=*/0,
+                                  /*to_schedule_age=*/7,
+                                  /*already_scheduled_age=*/0,
+                                  /*received_age=*/0));
+  ASSERT_TRUE(db_.get_ramdb().put(
+      std::as_bytes(std::span(key)), 0,
+      std::as_bytes(std::span(encoded)).subspan(kAddressSize)));
+
+  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(Address(age->address), key_addr);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 5U);
+}
+
+TEST_F(HogDbTest, HogAgeReadRejectsUnexpectedValueSize)
+{
+  const Address key_addr = make_address(kAddress);
+  const auto key = make_address_key(key_addr, Prefix::kHogAge);
+
+  // Only the address-less layout is accepted; there is no backward
+  // compatibility with the legacy full-struct encoding. A junk size and the
+  // legacy full-struct size are both corruption.
+  const std::array<std::byte, 7> junk{};
+  ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(key)), 0, junk));
+  {
+    HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+    ASSERT_FALSE(age);
+    EXPECT_EQ(age.error(), HogDbCode::kCorruption);
+  }
+
+  const auto legacy = x23::serialize(
+      make_hog_age(key_addr, /*to_schedule=*/1, /*already_scheduled=*/0,
+                   /*received=*/0, /*to_schedule_age=*/1,
+                   /*already_scheduled_age=*/0, /*received_age=*/0));
+  ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(key)), 0,
+                                  std::as_bytes(std::span(legacy))));
+  {
+    HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+    ASSERT_FALSE(age);
+    EXPECT_EQ(age.error(), HogDbCode::kCorruption);
+  }
+}
+
 TEST_F(HogDbTest, TwoTransfersToSameAddressCostOnce)
 {
   Address sender_addr = make_address(kAddress);
@@ -1016,7 +1145,8 @@ TEST_F(HogDbTest, TwoTransfersToSameAddressCostOnce)
   BlockHeight height = 1;
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     // First InvokeTX: transfer to recipient (new address, cost applies)
@@ -1159,7 +1289,8 @@ TEST_F(HogDbTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -1212,7 +1343,8 @@ TEST_F(HogDbTest, InvariantsAcceptCanonicalBalanceBytes)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -1265,6 +1397,95 @@ TEST_F(HogDbTest, ApplyFeedsDebugInvariants)
   ASSERT_TRUE(db_.apply(changeset));
 
   EXPECT_FALSE(db_.check_invariants());
+}
+
+TEST_F(HogDbTest, InvariantAccumulatorSurvivesMaxSupplyPartialSum)
+{
+  // Regression guard for a signed-integer overflow in the conservation
+  // invariant's running sum, caught by UBSan via
+  // NativeTokenAllowanceTest.StorageRefundCreditsAgainstNearMaxBalance:
+  //
+  //   invariant_hog_conservation.cc:256: signed integer overflow:
+  //   0x80000000000000000000000000000001 + -12007 cannot be represented in
+  //   type '__int128'
+  //
+  // The sum runs over every HOG-denominated item change and only its final
+  // value has to be zero, but a single term can be as large as INT128_MAX:
+  // minting the whole supply debits the total-supply counter by exactly that.
+  // Once the running sum sits at -INT128_MAX, any further negative term -- a
+  // storage refund of a few thousand -- pushes it past INT128_MIN. Summing in
+  // int128 made that intermediate undefined behaviour even though the total
+  // came back to zero.
+  //
+  // Each step below is applied separately so the invariant sees them in this
+  // order (within one apply() the worker pool does not fix an order):
+  //
+  //   1. mint the whole supply     sum = nnint_cost - INT128_MAX
+  //   2. refund a bytestring       sum = nnint_cost - INT128_MAX - victim_cost
+  //                                    < INT128_MIN  <-- used to be UB
+  //   3. credit it to a whale      sum = 0
+  //
+  // A wrapping int128 accumulator still lands on zero, so this only fails
+  // outright under UBSan; the assertions below pin the arithmetic that puts
+  // step 2 out of range so the case cannot silently stop being exercised.
+  if (!is_debug_build()) {
+    GTEST_SKIP() << "debug invariants are only fed in debug builds";
+  }
+
+  auto const &cost_model = cost_model_with_balance_cost_;
+  constexpr int128_t kSupply = std::numeric_limits<int128_t>::max();
+  const int128_t nnint_cost = cost_model.get_nnint_cost();
+  const int128_t balance_cost = cost_model.get_balance_cost();
+
+  // Seeded before the invariants are enabled, so only its later deletion --
+  // the storage refund -- reaches the running sum.
+  ItemKey victim_key = make_key(kAddress + 73, 1);
+  auto victim_db_key = make_contract_data_key(victim_key);
+  const std::array<std::byte, 8> victim_value{};
+  const int128_t victim_cost =
+      cost_model.get_bytestring_cost(victim_value.size());
+  // Step 2 has to land strictly below INT128_MIN, and the whale's balance has
+  // to stay a legal non-negative int128.
+  ASSERT_GT(victim_cost, nnint_cost + 1);
+  ASSERT_LE(victim_cost, nnint_cost + balance_cost);
+  const int128_t whale_balance =
+      kSupply - (nnint_cost + balance_cost - victim_cost);
+
+  auto seed = db_.create_changeset();
+  seed.put(victim_db_key, kBytes, victim_value);
+  ASSERT_TRUE(db_.apply(seed));
+
+  db_.enable_debug_invariants(cost_model);
+
+  auto supply_db_key = make_contract_data_key(
+      ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
+  auto supply_bytes = int128_to_xdr_bytes(kSupply);
+  auto mint = db_.create_changeset();
+  mint.put(supply_db_key, kNNInt128, supply_bytes);
+  ASSERT_TRUE(db_.apply(mint));
+
+  auto refund = db_.create_changeset();
+  refund.remove(victim_db_key);
+  ASSERT_TRUE(db_.apply(refund));
+
+  Address whale = make_address(kAddress + 74);
+  auto whale_balance_key = make_address_key(whale, Prefix::kBalance);
+  auto whale_age_key = make_address_key(whale, Prefix::kHogAge);
+  auto balance_bytes = int128_to_xdr_bytes(whale_balance);
+  auto age_buf = x23::serialize(make_hog_age(whale, /*to_schedule=*/0,
+                                             /*already_scheduled=*/0,
+                                             /*received=*/0,
+                                             /*to_schedule_age=*/0,
+                                             /*already_scheduled_age=*/0,
+                                             /*received_age=*/0));
+  auto credit = db_.create_changeset();
+  credit.put(whale_balance_key, kNNInt128, balance_bytes);
+  // The hog age row accompanies every balance creation; without it the
+  // separate hog age invariant reports the balance as unpaired.
+  credit.put(whale_age_key, 0, age_buf);
+  ASSERT_TRUE(db_.apply(credit));
+
+  EXPECT_TRUE(db_.check_invariants());
 }
 
 TEST_F(HogDbTest, DbHashDeltaBytestringLockMatchesFullStateHash)
@@ -1330,16 +1551,17 @@ TEST_F(HogDbTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_new_contract(contract));
   });
 
-  auto rcode = db_.read_wasm_code(sha256(contract));
+  auto rcode = db_.read_contract_code(sha256(contract));
   ASSERT_TRUE(rcode);
   auto expected = x23::serialize(contract);
   EXPECT_TRUE(std::ranges::equal(std::as_bytes(std::span(expected)), *rcode));
 }
 
 // Regression for #1775/#2569: a serialized contract row larger than
-// kMaxSerializedContractBytes is executor misbehavior -- hog_exec enforces
-// kMaxContractSizeBytes on attached blobs before execution, and hog_db stores
-// any legal row (chunked if necessary). Reject at staging with
+// kMaxSerializedContractBytes is executor misbehavior -- hog_exec enforces the
+// chain's max_contract_size_bytes on attached blobs before execution, genesis
+// load keeps that under kContractSizeCeilingBytes, and hog_db stores any legal
+// row (chunked if necessary). Reject at staging with
 // kInvalidExecutorBehavior, not at block write-back, where apply() would
 // leave earlier writes visible and the commit error would abort the node.
 TEST_F(HogDbTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
@@ -1358,7 +1580,8 @@ TEST_F(HogDbTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -1380,7 +1603,8 @@ TEST_F(HogDbTest, DbHashDeltaNewDeploymentLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_deploy_contract(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("deploy"))),
-                             .contract_size = 15},
+                             .contract_size = 15,
+                             .contract_type = ContractType::kRv32},
         std::to_underlying(StorageDeltaFlags::None)));
   });
 }
@@ -1435,7 +1659,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("x"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Create RCQ with entries across multiple blocks
   // Each block gets kEntriesPerBlock entries
@@ -1443,7 +1668,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
@@ -1532,7 +1758,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("consume"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1542,7 +1769,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1570,7 +1798,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1619,7 +1848,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1629,7 +1859,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1657,7 +1888,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1713,7 +1945,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1723,7 +1956,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1752,7 +1986,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1807,7 +2042,8 @@ TEST_F(HogDbTest,
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1817,7 +2053,8 @@ TEST_F(HogDbTest,
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1846,7 +2083,8 @@ TEST_F(HogDbTest,
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1901,7 +2139,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1911,7 +2150,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1940,7 +2180,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -1991,9 +2232,11 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
   // Setup contract on db_
   ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
   ASSERT_TRUE(db_.write_address_metadata(
-      contract_addr, DeployedContractHash{.hash = sha256(std::as_bytes(
-                                              std::span("rcq_consumed"))),
-                                          .contract_size = 10}));
+      contract_addr,
+      DeployedContractHash{.hash =
+                               sha256(std::as_bytes(std::span("rcq_consumed"))),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Create second database with identical base state
   ErrnoStatus<Directory> dir2 = Directory::open_temporary();
@@ -2006,9 +2249,11 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
 
   ASSERT_TRUE(db2.write_address_balance(contract_addr, 10'000'000));
   ASSERT_TRUE(db2.write_address_metadata(
-      contract_addr, DeployedContractHash{.hash = sha256(std::as_bytes(
-                                              std::span("rcq_consumed"))),
-                                          .contract_size = 10}));
+      contract_addr,
+      DeployedContractHash{.hash =
+                               sha256(std::as_bytes(std::span("rcq_consumed"))),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Insert RCQ entries on db_ over several blocks
   constexpr size_t kNumBlocks = 3;
@@ -2016,7 +2261,8 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     BlockHeight height = block_idx + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2040,7 +2286,8 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     BlockHeight height = kNumBlocks + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2126,7 +2373,8 @@ TEST_F(HogDbTest, ReplayCacheGCOnlyRunsOnCommittedReplayCacheTouch)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 5,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2196,7 +2444,8 @@ TEST_F(HogDbTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 5,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
     invoke_tx.create_savepoint();
@@ -2262,7 +2511,8 @@ TEST_F(HogDbTest, SyncBalanceLocksReportsAllBalanceConflicts)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 5,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
   invoke_tx.create_savepoint();
@@ -2460,7 +2710,8 @@ TEST_F(HogDbTest, AuthDataCreateThenDeleteMatchesEmptyDb)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2479,7 +2730,8 @@ TEST_F(HogDbTest, AuthDataCreateThenDeleteMatchesEmptyDb)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 2,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -2600,7 +2852,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameNNInt128Key)
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
 
     // First InvokeTX: add 100
@@ -2743,7 +2996,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameRCQ)
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
 
     // First InvokeTX: insert entries
@@ -2840,7 +3094,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameReplayCache)
     BlockHeight height = 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
 
     // First InvokeTX: add nonce
@@ -2901,7 +3156,8 @@ TEST_F(HogDbTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
     BlockHeight height = 2;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
 
     // First InvokeTX: insert entries
@@ -2957,7 +3213,8 @@ TEST_F(HogDbTest, AbortedFreshHeightDoesNotPersistEmptyReplayCacheHeight)
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx_a(block_tx);
@@ -3010,7 +3267,8 @@ TEST_F(HogDbTest, AbortedFreshHeightStaysAbsentInNextBlock)
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx_a(block_tx);
@@ -3069,7 +3327,8 @@ TEST_F(HogDbTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
 
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx_a(block_tx);
@@ -3130,7 +3389,8 @@ TEST_F(HogDbTest, AbortedFreshHeightHashEquivalentToCleanBlock)
 
     PerThreadARC<BlockTX> block_tx(
         dao, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     if (include_aborted_attempt) {
       EXPECT_TRUE(block_tx.try_acquire_reference());
@@ -3181,7 +3441,8 @@ TEST_F(HogDbTest, ReleaseBalanceRefundOnFreshAddressCrossTx)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   // T1: fund the fresh address and insert RCQ entries
   ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -3229,7 +3490,8 @@ TEST_F(HogDbTest, ReleaseBalanceRefundOnFreshAddressSameTx)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   // Single tx: fund address, insert RCQ entries, then add a consume in the
   // same invocation via a child frame. The cumulative delta (inserts + consume)
@@ -3312,6 +3574,55 @@ TEST(InvokeTxKeyTest, SynchronizedMapRoundTrip)
   }
 }
 
+// commit_and_snapshot() lets ramdb's disk cleanup reclaim WAL that plain
+// commit() never can: snapshot coverage advances and the covered log files
+// are deleted (#3704).
+TEST(HogDbDaoSnapshotTest, CommitAndSnapshotReclaimsWal)
+{
+  // small WAL files so the snapshot recommendation floor is a few hundred
+  // KiB instead of kDiskLogCleanupRatio full-size files.
+  constexpr size_t kSmallLogFileThreshold = 64 * 1024;
+
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), Database::estimate_heap_size(10_MiB), 0,
+                     kSmallLogFileThreshold);
+  ASSERT_TRUE(db);
+  HogDbDAO dao{RAMDB(std::move(*db))};
+
+  EXPECT_FALSE(dao.snapshot_recommended());
+
+  // ~1 MiB of writes, past the floor.
+  RAMDB &ramdb = dao.get_ramdb();
+  const std::string value(256, 'v');
+  for (int i = 0; i < 4096; ++i) {
+    std::string key = "wal-key-" + std::to_string(i);
+    ASSERT_TRUE(ramdb.put(std::as_bytes(std::span(key)), 0,
+                          std::as_bytes(std::span(value))));
+  }
+  ASSERT_TRUE(dao.commit());
+  ASSERT_TRUE(dao.snapshot_recommended());
+
+  HogDbStatus<uint64_t> lsn = dao.commit_and_snapshot();
+  ASSERT_TRUE(lsn);
+  EXPECT_EQ(*lsn, 2U);
+
+  // the snapshot completes in the background; once durable, coverage
+  // advances and the next cleanup deletes the covered log files.
+  auto wait_until = [](auto &&pred) {
+    for (int i = 0; i < 500; ++i) {
+      if (pred())
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+  };
+  EXPECT_TRUE(wait_until([&dao] { return !dao.snapshot_recommended(); }));
+  EXPECT_TRUE(wait_until(
+      [&dir] { return !dir->openat("0.log", O_RDONLY).has_value(); }));
+}
+
 // Tests that the fresh-balance guard in BalanceLock::try_atomic_change_lock
 // is evaluated per-lock-attempt, not against cumulative committed state.
 // A cumulative guard would be nondeterministic under concurrent InvokeTX
@@ -3325,7 +3636,8 @@ TEST_F(HogDbTest, FreshBalanceGuardRejectsUnderfundedTxRegardlessOfPeerState)
   Address addr = make_address(kAddress + 200);
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_with_balance_cost_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   // T1: fund the fresh address with enough to cover the balance-row cost.
   ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -3362,7 +3674,8 @@ TEST_F(HogDbTest, FreshBalanceGuardAbortDoesNotInvalidatePeerLock)
   Address addr = make_address(kAddress + 201);
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_with_balance_cost_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   // T1: fund the fresh address with exactly the balance-row cost.
   ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -3404,7 +3717,8 @@ TEST_F(HogDbTest, FreshBalanceGuardDeterministicAcrossCommitOrder)
     BlockHeight height = ordering + 1;
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_with_balance_cost_, background_commit_worker_, height,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
 
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx1(block_tx);
@@ -3452,7 +3766,8 @@ TEST_F(HogDbTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
 
   PerThreadARC<BlockTX> block_tx_a(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx_a.try_acquire_reference());
   InvokeTX itx_a(block_tx_a);
 
@@ -3466,7 +3781,8 @@ TEST_F(HogDbTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
   {
     PerThreadARC<BlockTX> block_tx_b(
         db_, cost_model_, background_commit_worker_, 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx_b.try_acquire_reference());
     InvokeTX itx_b(block_tx_b);
 
@@ -3508,7 +3824,8 @@ TEST_F(HogDbTest, BytestringConflictRecordsDbConflictReason)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -3544,7 +3861,8 @@ TEST_F(HogDbTest, ConflictReasonTypeMismatch)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -3578,7 +3896,8 @@ TEST_F(HogDbTest, ConflictReasonReplayProtection)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -3613,7 +3932,8 @@ TEST_F(HogDbTest, ConflictReasonExclusiveLockBalanceFlag)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -3642,7 +3962,8 @@ TEST_F(HogDbTest, ExclusiveLockOnReplayCacheIsInvalidExecutorBehavior)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -3698,7 +4019,8 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 2,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx(block_tx);
 
@@ -3746,7 +4068,8 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnFreshKeyRejectedAtReservation)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx(block_tx);
 
@@ -3796,7 +4119,8 @@ TEST_F(HogDbTest, ExclusiveNNIntOverflowRejectedAtReservation)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 2,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx(block_tx);
 
@@ -3841,7 +4165,8 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnBytestringRejectedAtReservation)
   {
     PerThreadARC<BlockTX> block_tx(
         db_, cost_model_, background_commit_worker_, 2,
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx(block_tx);
 
@@ -3894,7 +4219,8 @@ TEST_F(HogDbTest, ExclusiveDeployBlocksConcurrentDeploy)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -3930,7 +4256,8 @@ TEST_F(HogDbTest, NonExclusiveDeployAdmitsConcurrentIdenticalDeploy)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -3960,7 +4287,8 @@ TEST_F(HogDbTest, ExclusiveDeployStaysLockedAfterCommitAndPersists)
   StorageLongHash base_hash = db_.compute_full_db_hash();
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx_a(block_tx);
@@ -4010,12 +4338,12 @@ TEST_F(HogDbTest, DbHashDeltaExclusiveDeploymentMatchesFullStateHash)
 
 TEST_F(HogDbTest, InvalidateSiblingBlockTX)
 {
-  PerThreadARC<BlockTX> block_a(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
-  PerThreadARC<BlockTX> block_b(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+  PerThreadARC<BlockTX> block_a(db_, cost_model_, background_commit_worker_, 1,
+                                BlockExecutionMode::kBlockExecutionModeProposal,
+                                static_cast<uint32_t>(kMaxSavepointDepth));
+  PerThreadARC<BlockTX> block_b(db_, cost_model_, background_commit_worker_, 1,
+                                BlockExecutionMode::kBlockExecutionModeProposal,
+                                static_cast<uint32_t>(kMaxSavepointDepth));
 
   EXPECT_FALSE(block_a.get().is_invalidated());
   EXPECT_FALSE(block_b.get().is_invalidated());
@@ -4034,7 +4362,8 @@ TEST_F(HogDbTest, InvalidatedBlockTXReadReturnsStaleBlock)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ItemKey key = make_item_key(addr, 0);
   auto result_before = block_tx.get().read_nnint128_base(key);
@@ -4055,7 +4384,8 @@ TEST_F(HogDbTest, InvalidatedBlockTXBalanceReadReturnsStaleBlock)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   auto result_before = block_tx.get().read_balance_base(addr);
   ASSERT_TRUE(result_before.has_value());
@@ -4075,7 +4405,8 @@ TEST_F(HogDbTest, InvalidatedBlockTXLockReturnsStaleBlock)
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   block_tx.get().invalidate();
 
@@ -4092,9 +4423,9 @@ TEST_F(HogDbTest, ViewingBlockTXLockRejectsWrite)
   Address addr = make_address(kViewingAddr);
   setup_contract_address(addr);
 
-  PerThreadARC<BlockTX> block_tx(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeViewing);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1,
+                                 BlockExecutionMode::kBlockExecutionModeViewing,
+                                 static_cast<uint32_t>(kMaxSavepointDepth));
 
   ItemKey key = make_item_key(addr, 0);
   ItemChange change = ItemChange(NNInt128(0, 10));
@@ -4105,9 +4436,9 @@ TEST_F(HogDbTest, ViewingBlockTXLockRejectsWrite)
 
 TEST_F(HogDbTest, ViewingBlockTXCommitRejectsWrite)
 {
-  PerThreadARC<BlockTX> block_tx(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeViewing);
+  PerThreadARC<BlockTX> block_tx(db_, cost_model_, background_commit_worker_, 1,
+                                 BlockExecutionMode::kBlockExecutionModeViewing,
+                                 static_cast<uint32_t>(kMaxSavepointDepth));
 
   auto result = block_tx.get().commit();
   ASSERT_FALSE(result.has_value());
@@ -4128,14 +4459,15 @@ TEST_F(HogDbTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
   ASSERT_TRUE(db_.write_address_metadata(
       addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("stale"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
-  PerThreadARC<BlockTX> block_a(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
-  PerThreadARC<BlockTX> block_b(
-      db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+  PerThreadARC<BlockTX> block_a(db_, cost_model_, background_commit_worker_, 1,
+                                BlockExecutionMode::kBlockExecutionModeProposal,
+                                static_cast<uint32_t>(kMaxSavepointDepth));
+  PerThreadARC<BlockTX> block_b(db_, cost_model_, background_commit_worker_, 1,
+                                BlockExecutionMode::kBlockExecutionModeProposal,
+                                static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(block_a.try_acquire_reference());
   {
@@ -4217,7 +4549,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlock)
 
   PerThreadARC<BlockTX> stale_block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(stale_block_tx.try_acquire_reference());
   InvokeTX insert_only_tx(stale_block_tx);
@@ -4243,7 +4576,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlock)
 
   PerThreadARC<BlockTX> sibling_block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
   {
     InvokeTX sibling_tx(sibling_block_tx);
@@ -4308,7 +4642,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
   // Exclusive RCQ delete + recreate with consume on a non-stale block.
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx(block_tx);
   ASSERT_TRUE(itx.request_deletion(key, kExclusiveFlags));
@@ -4378,7 +4713,8 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   // restore takes the shrink branch.
   PerThreadARC<BlockTX> stale_block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(stale_block_tx.try_acquire_reference());
   InvokeTX stale_tx(stale_block_tx);
 
@@ -4396,7 +4732,8 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   // would during commit publication).
   PerThreadARC<BlockTX> sibling_block_tx(
       db_, cost_model_, background_commit_worker_, 2,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
   {
     InvokeTX sibling_tx(sibling_block_tx);
@@ -4430,7 +4767,8 @@ TEST_F(HogDbTest, InvokeTxDestructorReleasesBlockTxReference)
 {
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   {
     InvokeTX invoke_tx(block_tx);
@@ -4448,7 +4786,8 @@ TEST_F(HogDbTest, InvokeTxMoveTransfersBlockTxReference)
 {
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   {
     InvokeTX source(block_tx);
@@ -4494,7 +4833,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
   StorageLongHash parent_hash = db_.compute_full_db_hash();
   PerThreadARC<BlockTX> stale_block_tx(
       db_, rcq_cost_model, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   ASSERT_TRUE(stale_block_tx.try_acquire_reference());
   InvokeTX stale_tx(stale_block_tx);
@@ -4506,7 +4846,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
 
   PerThreadARC<BlockTX> sibling_block_tx(
       db_, rcq_cost_model, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(sibling_block_tx.try_acquire_reference());
   {
     InvokeTX sibling_tx(sibling_block_tx);

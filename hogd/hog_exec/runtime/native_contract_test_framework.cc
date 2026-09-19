@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -40,12 +41,13 @@ NativeContractTestFramework::try_advance_block(BlockExecutionMode mode)
   }
   {
     ConsensusValue value{};
-    value.proposal_header.block_height = block_number_;
+    value.proposal_header.block_height = committed_height_ + 1;
     auto r =
         coord_wrapper_->client().dbsched_commit_snapshot(block_number_, value);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       return std::unexpected(r.result());
     }
+    committed_height_ += 1;
   }
   close_event_block(block_number_);
   dbtip_block_id_ = block_number_;
@@ -62,7 +64,9 @@ NativeContractTestFramework::try_advance_block(BlockExecutionMode mode)
   open_event_block(block_number_);
 
   storage_snapshot_cache_ =
-      std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_shared<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 
   return closed_hash;
 }
@@ -131,7 +135,9 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
   open_event_block(block_number_);
 
   storage_snapshot_cache_ =
-      std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_shared<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 }
 
 StorageShortHash
@@ -171,7 +177,9 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
   open_event_block(block_number_);
 
   storage_snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 
   return closed_hash;
 }
@@ -249,26 +257,9 @@ NativeContractTestFramework::run_genesis_initialization(
 
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(genesis_configuration);
   auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
-      genesis_configuration, genesis_value);
-  if (r != DbSchedResult::DbSchedResultOK) {
-    panic("run_genesis_initialization: dbsched_load_genesis_block failed: {}",
-          r);
-  }
-  open_block(mode);
-}
-
-void
-NativeContractTestFramework::run_genesis_initialization(
-    GenesisConfigurationV2 const &genesis_configuration,
-    BlockExecutionMode mode)
-{
-  assert(!storage_snapshot_cache_);
-  assert(block_number_ == 0);
-
-  ConsensusValue genesis_value{};
-  genesis_value.proposal_header.block_height = 0;
-  auto r = coord_wrapper_->client().dbsched_load_genesis_configuration_v2(
       genesis_configuration, genesis_value);
   if (r != DbSchedResult::DbSchedResultOK) {
     panic("run_genesis_initialization: dbsched_load_genesis_block failed: {}",

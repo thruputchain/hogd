@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/shared.h"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/x23/async.h"
@@ -40,16 +41,18 @@ public:
     co_return;
   }
 
-  // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
-  // scheduler detects and silently drops the duplicates rather than enqueue
-  // them.
+  // Adds txs to the scheduler and returns one admission outcome per tx, in
+  // input order. Adding the same tx multiple times is okay; a duplicate that
+  // is already pending is reported as admitted rather than enqueued again.
   //
   // This method will cycle the groups for an account if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  x23::Async<void> add_txs(const x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  add_txs(const x23::XdrVec<SignedTransaction> &txs,
+          const x23::XdrVec<TransactionHash> &tx_hashes);
 
   x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
@@ -103,9 +106,30 @@ public:
     size_t num_inserted = 0;
     for (auto it = begin; it != end; it++) {
       const TransactionHash &tx_hash = *it;
-      const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
-      CHECK_PTR(tx_value_ptr);
-      if (insert_tx_into_runqueue(tx_hash, *tx_value_ptr)) {
+      std::shared_ptr<TxValue> tx_value;
+      {
+        const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+        CHECK_PTR(tx_value_ptr);
+        tx_value = *tx_value_ptr;
+      }
+
+      const SignedTransaction &tx = tx_value->tx;
+      const ContractAddress &account = tx.tx.invocation.invoked_address;
+      const TxKey key{
+          .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+          .tx_hash = tx_hash,
+      };
+      auto [account_state, account_lock] = get_account_state(account);
+
+      // [schedule()] or the commit path may have removed the signed tx cache
+      // entry since the lookup above. Revalidate signed tx while holding both
+      // locks in account-then-cache order so a runqueue entry cannot outlive
+      // its cache entry. Use the newly cached signed tx value because a
+      // replacement signed tx may carry different signatures for the same
+      // transaction hash.
+      const auto [cached_value, txs_lock] = txs_.find(tx_hash);
+      if (cached_value &&
+          account_state->txs.insert({key, *cached_value}).second) {
         num_inserted++;
       }
     }
@@ -163,6 +187,11 @@ public:
   {
     current_block_.store(height, std::memory_order_relaxed);
   }
+
+  // Returns whether this transaction body is already pending in the account's
+  // runqueue or stranded set. Callers must authenticate the submitted signed
+  // encoding before treating an existing body as admitted.
+  bool is_pending(const SignedTransaction &tx, const TransactionHash &tx_hash);
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
@@ -238,18 +267,8 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
-  // Inserts the tx with [tx_hash] into the runqueue. Returns true if the
-  // insertion succeeded and false otherwise.
-  //
-  // This method does *not* modify [size_]! The caller must do this. Generally,
-  // the caller will often want to add multiple txs to the runqueue, so it is
-  // more efficient for the caller to do a single [fetch_add()] to [size_]
-  // rather than have [insert_tx_into_runqueue()] increment [size_] for every
-  // single tx.
-  bool insert_tx_into_runqueue(const TransactionHash &tx_hash,
-                               const std::shared_ptr<TxValue> &tx_value);
-  bool add_txs_helper(const SignedTransaction &tx);
-
+  bool add_txs_helper(const SignedTransaction &tx,
+                      const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
@@ -293,10 +312,9 @@ private:
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
-  // Tx cache.
-  // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
-  // free them automatically without too much overhead/garbage collection with
-  // smart pointers (e.g., [std::shared_ptr<>]).
+  // Tx cache. Entries are removed when transactions expire, are discarded, or
+  // appear in a committed/validated block. Shared ownership keeps an entry's
+  // transaction alive for in-flight lookups after it is removed from here.
   SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.

@@ -4,10 +4,13 @@
 #include <optional>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -18,7 +21,10 @@ class Rv32Contract {
 public:
   // TODO(geoff): decide if we want to wire out the several different error
   // categories here.
-  static std::optional<Rv32Contract> create(ContractBlob const &contract_blob);
+  // Translates `contract_blob` under `limits`: the chain's configured bounds
+  // at attachment, the VM's ceilings for an already-deployed contract.
+  static std::optional<Rv32Contract> create(ContractBlob const &contract_blob,
+                                            rv32::Rv32Limits limits);
   Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation);
 
   rv32::ThreadedMachine instantiate(uint64_t gas) const;
@@ -43,8 +49,17 @@ public:
 private:
   Rv32Contract const *contract_;
 
-  std::pair<InvokeStatus<void>, GasAmount>
+  // Stays noexcept and is deliberately not itself a coroutine: creating one
+  // allocates its frame in the ramp function, which can throw before the body
+  // runs, and x23's promises define no
+  // get_return_object_on_allocation_failure -- a noexcept coroutine would
+  // std::terminate() where this returns a structured Unrecoverable. The ecall
+  // loop lives in run_ecall_loop() and its frame allocation is caught here.
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
+
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit);
 };
 
 // RuntimeContext for RV32 contracts. Snapshot deployments arrive with their
@@ -54,11 +69,14 @@ private:
 // cache. The context itself holds no per-contract state.
 class Rv32Context final : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const &contract) const override;
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params,
+                                  PreparedContract &out) const override;
+  using RuntimeContext::verify_contract;
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) override;
+                   SystemCallHandler *syscall_handler) const override;
 };
 
 } // namespace hogd

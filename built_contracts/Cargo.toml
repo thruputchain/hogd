@@ -18,7 +18,6 @@ members = [
     "integration_test_contracts/genesis_root",
     "integration_test_contracts/hash_bug",
     "integration_test_contracts/htlc",
-    "integration_test_contracts/initial_token_claim",
     "integration_test_contracts/itc_erc20",
     "integration_test_contracts/manual_revert_caller",
     "integration_test_contracts/manual_revert_test",
@@ -39,6 +38,12 @@ members = [
     "integration_test_contracts/tuple_return",
     "integration_test_contracts/txs_roundtrip",
     "integration_test_contracts/view_gateway_test",
+    "local_test_contracts/airdrop_faucet",
+    "local_test_contracts/auth_weight_test",
+    "local_test_contracts/drip_faucet",
+    "local_test_contracts/faucet_caller",
+    "local_test_contracts/invoke_malformed_tokens_test",
+    "local_test_contracts/tx_context_test",
 ]
 
 [workspace.package]
@@ -54,27 +59,29 @@ edition = "2024"
 
 [workspace.dependencies]
 # groundhog dependencies
-sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-groundhog-rv32-runtime = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+sdk = { registry = "groundhog", version = "0.34.3" }
+groundhog-rv32-runtime = { registry = "groundhog", version = "0.34.3" }
 # default features include std, which cannot build for the on-chain targets
-groundhog-domain-separator = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", default-features = false }
-groundhog-xdr = { registry = "groundhog", version = "0.20", features = ["xdrs", "syscalls"] }
-groundhog-syscall = { registry = "groundhog", version = "0.20" }
-xdrs = { registry = "groundhog", version = "0.8.1", features = ["int128", "heapless"] }
-sha2 = { version = "0.10.8", default-features = false }
+groundhog-domain-separator = { registry = "groundhog", version = "0.34.3", default-features = false }
+groundhog-xdr = { registry = "groundhog", version = "0.35.2", features = ["xdrs", "syscalls"] }
+groundhog-syscall = { registry = "groundhog", version = "0.35.2" }
+xdrs = { registry = "groundhog", version = "0.10.1", features = ["int128", "heapless"] }
+sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
 hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
-# Standard interface crates
-groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-groundhog-erc1271-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+# Standard interface crates. Their own version line in sdk_rs.
+# ERC20 0.1.24 is the first release where mint and burn are their own events
+# rather than transfers from or to the zero address.
+groundhog-erc20-if = { registry = "groundhog", version = "0.1.30" }
 
-# Standard test crates
-bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-erc20-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-erc20-bottle-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
-erc20-native-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+# Standard test crates. Only reached through optional contract features that
+# nothing here enables, but cargo resolves optional deps regardless.
+bottle-test-if = { registry = "groundhog", version = "0.34.3" }
+erc20-test = { registry = "groundhog", version = "0.34.3" }
+erc20-bottle-test = { registry = "groundhog", version = "0.34.3" }
+erc20-native-test = { registry = "groundhog", version = "0.34.3" }
 
 [profile.release]
 trim-paths = "all" # unstable

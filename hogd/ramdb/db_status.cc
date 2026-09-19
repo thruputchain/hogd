@@ -29,6 +29,8 @@ DBCategory::message(int code) const
     return "Input/Output Error";
   case kCorruption:
     return "Data Corruption";
+  case kBusy:
+    return "Busy";
   default:
     return "Unknown Code";
   }

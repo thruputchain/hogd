@@ -304,6 +304,10 @@ if(HOGD_RV32_ENABLE_LTO)
   )
 endif()
 
+# Gas calibration harness. Added after HOGD_RV32_ENABLE_LTO is set above, which
+# the subdirectory reads to build the harness with production codegen.
+add_subdirectory(gas_calibration)
+
 if(BUILD_BENCHMARKS)
   add_executable(
     rv32_vm_bench

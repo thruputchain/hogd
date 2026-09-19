@@ -110,12 +110,14 @@ ExecutorMempoolRpc::executorsched_propose_batch(
   }
 
   CHECK(signed_txs.size() <= std::numeric_limits<uint32_t>::max());
-  auto first_tx_id = allocate_tx_ids(signed_txs.size());
-  auto r =
-      co_await ctx->get().propose_transaction_batch(signed_txs, first_tx_id);
+  // Preserve the error shape after transferring ownership into execution.
+  const auto batch_size = signed_txs.size();
+  auto first_tx_id = allocate_tx_ids(batch_size);
+  auto r = co_await ctx->get().propose_transaction_batch(std::move(signed_txs),
+                                                         first_tx_id);
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
-    co_return ExecProposeBatchResult(signed_txs.size(),
+    co_return ExecProposeBatchResult(batch_size,
                                      ExecProposeResult(
                                          ExecResult::ExecResultUnrecoverable));
   }
@@ -139,32 +141,37 @@ ExecutorMempoolRpc::executorsched_validate_batch(
   }
 
   CHECK(proposed_txs.size() <= std::numeric_limits<uint32_t>::max());
-  auto r = co_await ctx->get().validate_transaction_batch(
-      proposed_txs, allocate_tx_ids(proposed_txs.size()));
+  const auto batch_size = proposed_txs.size();
+  const auto first_tx_id = allocate_tx_ids(batch_size);
+  auto r =
+      co_await ctx->get().validate_transaction_batch(std::move(proposed_txs),
+                                                     first_tx_id);
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
-    co_return ExecValidateBatchResult(proposed_txs.size(),
+    co_return ExecValidateBatchResult(batch_size,
                                       ExecResult::ExecResultUnrecoverable);
   }
   co_return r;
 }
 
 x23::Async<ExecResult>
-ExecutorMempoolRpc::executorsched_open_proposal_block(BlockID id)
+ExecutorMempoolRpc::executorsched_open_proposal_block(
+    BlockID id, BlockExecutionContext block_execution)
 {
   if (!initialize_check()) [[unlikely]] {
     co_return ExecResult::ExecResultSystemError;
   }
-  co_return co_await executor_states_->open_proposal(id);
+  co_return co_await executor_states_->open_proposal(id, block_execution);
 }
 
 x23::Async<ExecResult>
-ExecutorMempoolRpc::executorsched_open_validation_block(BlockID id)
+ExecutorMempoolRpc::executorsched_open_validation_block(
+    BlockID id, BlockExecutionContext block_execution)
 {
   if (!initialize_check()) [[unlikely]] {
     co_return ExecResult::ExecResultSystemError;
   }
-  co_return co_await executor_states_->open_validation(id);
+  co_return co_await executor_states_->open_validation(id, block_execution);
 }
 
 x23::Async<ExecResult>

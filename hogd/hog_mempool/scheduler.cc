@@ -28,6 +28,7 @@
 #include "hogd/hog_mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/corosync.h"
@@ -423,46 +424,57 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
   return account_state.hog_age;
 }
 
-bool
-Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
-                                   const std::shared_ptr<TxValue> &tx_value)
-{
-  const ContractAddress &account = tx_value->tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height =
-                      tx_value->tx.tx.uniquifier.block_expiry_height,
-                  .tx_hash = tx_hash};
-  auto [account_state, lock] = get_account_state(account);
-  // Check if the tx is already present in [account_state->txs]. If it is, we
-  // are adding a duplicate tx, so we do not want to increment [size_].
-  return account_state->txs.insert({key, tx_value}).second;
-}
-
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
-Scheduler::add_txs_helper(const SignedTransaction &tx)
+Scheduler::add_txs_helper(const SignedTransaction &tx,
+                          const TransactionHash &tx_hash)
 {
-  const TransactionHash &tx_hash = sha256(tx.tx);
-  std::shared_ptr<TxValue> value;
-  {
-    // The tx may already exist in [txs_] because it is okay to add a tx back
-    // into the scheduler again. This can happen if the tx was originally
-    // added to the scheduler, then the tx was removed during nomination by
-    // [schedule()], then a validated block was committed rather than the
-    // nominated block, and then the tx was added back to the scheduler.
-    const auto [tx_ptr, lock] =
-        txs_.find_or_insert(tx_hash,
-                            std::make_shared<TxValue>(TxValue{.tx = tx}));
-    CHECK_PTR(tx_ptr);
-    value = *tx_ptr;
-  }
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+                  .tx_hash = tx_hash};
+  auto [account_state, account_lock] = get_account_state(account);
 
-  return insert_tx_into_runqueue(tx_hash, value);
+  // Publish the cache and runqueue entries while holding both locks in the
+  // account-then-cache order used by removal. Otherwise, [schedule()] could
+  // delete a newly published cache entry while this submission waits for the
+  // account lock, leaving the caller with an admitted outcome for an absent tx.
+  //
+  // The tx may already exist in [txs_] because it is okay to add a tx back
+  // into the scheduler again. This can happen if the tx was originally added
+  // to the scheduler, then removed during nomination by [schedule()], and a
+  // different validated block was committed instead.
+  const auto [tx_ptr, txs_lock] =
+      txs_.find_or_insert(tx_hash,
+                          std::make_shared<TxValue>(TxValue{.tx = tx}));
+  CHECK_PTR(tx_ptr);
+  return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
-x23::Async<void>
-Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
+bool
+Scheduler::is_pending(const SignedTransaction &tx,
+                      const TransactionHash &tx_hash)
 {
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const TxKey key{
+      .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+      .tx_hash = tx_hash,
+  };
+  const auto [account_state, lock] = accounts_.find(account);
+  if (account_state == nullptr) {
+    return false;
+  }
+  return account_state->txs.contains(key);
+}
+
+x23::Async<SchedGatewaySubmitOutcomeBatch>
+Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+                   const x23::XdrVec<TransactionHash> &tx_hashes)
+{
+  CHECK_EQ(txs.size(), tx_hashes.size());
+  SchedGatewaySubmitOutcomeBatch outcomes(
+      txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
   // hide its overhead by removing the [co_await] below, doing other work, and
   // then calling [co_await] on the handle. We instead need to execute
@@ -477,26 +489,34 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
     handles.push_back(
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
+           const x23::XdrVec<TransactionHash> &tx_hashes,
            const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
+           SchedGatewaySubmitOutcomeBatch &outcomes,
            Scheduler &scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
           size_t num_added = 0;
           for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
             if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
-              // The account for this tx does not exist in our copy of hog_db,
-              // so we silently drop the tx.
-              info("scheduler: dropping tx for unknown account {}",
+              // The DB RPC currently cannot distinguish an unknown account
+              // from a transient or internal read failure. Standalone-pubkey
+              // claims can authenticate without an on-chain auth entry and
+              // reach this path, so conservatively report the ambiguous
+              // scheduler-side failure as internal.
+              info("scheduler: dropping tx after hog-age lookup failed for {}",
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
+              outcomes[tx_idx] =
+                  SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
               continue;
             }
-            if (scheduler.add_txs_helper(txs[tx_idx])) {
+            const TransactionHash &tx_hash = tx_hashes[tx_idx];
+            if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
               num_added++;
             }
           }
           scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
           co_return;
-        }(&chunk, txs, missing, *this));
+        }(&chunk, txs, tx_hashes, missing, outcomes, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -516,6 +536,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   }
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
+  co_return outcomes;
 }
 
 void
@@ -1036,6 +1057,12 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // already included in the block, those txs will still be executed.
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
+          // -----
+          // Keep the account locked until the cache entry is gone, so a
+          // concurrent resubmit cannot restore only the runqueue entry. The
+          // runqueue's shared_ptr keeps [tx] alive while the cache entry is
+          // removed.
+          CHECK_EQ(txs_.remove(tx_hash), 1UL);
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
 
@@ -1093,7 +1120,6 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   co_await default_coropoll().pool_.bg();
 
   static SynchronizedMap<ContractAddress, char, SipHash24Hasher> accounts;
-  accounts.clear();
 
   ElapsedTimer timer;
 
@@ -1105,6 +1131,9 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
+  // [accounts] is static and therefore used by multiple threads, so we wait to
+  // call [clear()] on it until after we have acquired the lock.
+  accounts.clear();
 
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -1126,10 +1155,15 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // are on the runqueue and remove them. We cannot skip this step and
             // just remove txs from [txs_], even if the *nominated* block is
             // being committed rather than a *validated* block.
-            auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-            CHECK_PTR(tx_value_ptr);
+            std::shared_ptr<TxValue> tx_value;
+            {
+              const auto [tx_value_ptr, txs_lock] =
+                  scheduler.txs_.find(tx_hash);
+              CHECK_PTR(tx_value_ptr);
+              tx_value = *tx_value_ptr;
+            }
 
-            const SignedTransaction &tx = (*tx_value_ptr)->tx;
+            const SignedTransaction &tx = tx_value->tx;
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const TxKey key = {.expiry_block_height =
                                    tx.tx.uniquifier.block_expiry_height,
@@ -1147,11 +1181,10 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
                 num_removed_from_runqueue++;
                 accounts.insert(account, 0);
               }
+              // Keep the account locked until the cache entry is gone, so a
+              // concurrent resubmit cannot restore only the runqueue entry.
+              CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
             }
-
-            // Careful! We remove the tx from [txs_] at the bottom here because
-            // once we remove it, the references above become invalidated.
-            CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
           }
 
           co_return num_removed_from_runqueue;
@@ -1169,7 +1202,15 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
+      // We do not CHECK that the account is removed from [ready_accounts_]
+      // because the account may not be currently in [ready_accounts_]. For
+      // example, if a tx is submitted that the contract does not have enough
+      // hogs for, the contract is removed from [ready_accounts_]. If other txs
+      // for that contract are committed in this block (maybe the contract had
+      // enough hogs for some of the txs but not all of them), then the line
+      // below will not remove [account] from [ready_accounts_] because the
+      // contract is already not in [ready_accounts_].
+      ready_accounts_.erase(get_account_key(account));
     }
   });
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);

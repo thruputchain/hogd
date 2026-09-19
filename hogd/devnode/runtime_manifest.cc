@@ -29,6 +29,7 @@
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 
 namespace hogd {
@@ -130,8 +131,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
   auto wallet_contract = load_dev_wallet_contract(wallet_profile);
   const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
-      node.genesis_configuration_v2().storage_cost_model);
-  const SHA256Hash genesis_hash = sha256(node.genesis_configuration_v2());
+      node.genesis_configuration().storage_cost_model);
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -140,8 +140,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
     w.field("chainState",
             node.recovered_existing_chain() ? "recovered" : "fresh");
     w.field("networkHash", format_network_hash(network_hash));
-    w.field("protocol", version::kHogdProtocol());
-    w.field("genesisHash", hex_string(genesis_hash));
+    w.field("protocol", protocol_text(version::kHogdProtocol()));
     w.object_field("producer", [&](json::Writer &w) {
       w.field("binary", "hog-devnode");
       w.field("version", version::kHogdVersion);
@@ -153,6 +152,9 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
     w.object_field("endpoints", [&](json::Writer &w) {
       w.field("scheduler", format_advertised_address(node.bind_host(),
                                                      node.scheduler_port()));
+      w.field("schedulerGateway",
+              format_advertised_address(node.bind_host(),
+                                        node.scheduler_gateway_port()));
       w.field("indexer",
               format_advertised_address(node.bind_host(), node.read_port()));
       w.field("dbGateway",

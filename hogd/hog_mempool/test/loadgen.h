@@ -65,7 +65,7 @@ public:
     context_id_ = result.success().context_id;
 
     // Pass the genesis configuration to the db.
-    CHECK_EQ(sched_coord_client.schedcoord_load_genesis_configuration_v2(
+    CHECK_EQ(sched_coord_client.schedcoord_load_genesis_configuration(
                  result.success().genesis_configuration)(),
              DbSchedResult::DbSchedResultOK);
 
@@ -108,7 +108,8 @@ public:
         const SchedulerProposedBlock &proposed = res_propose.proposed_block();
         {
           SignedTransactionBatch proposed_txs;
-          CHECK(parallel_batch_to_t(proposed.txs, proposed_txs)());
+          CHECK(parallel_batch_to_t(proposed.txs, proposed_txs,
+                                    kNoBatchSizeLimit)());
           num_nominated_txs += proposed_txs.size();
         }
 
@@ -218,7 +219,8 @@ public:
       size_t num_txs = 0;
       {
         SignedTransactionBatch proposed_txs;
-        CHECK(co_await parallel_batch_to_t(proposed.txs, proposed_txs));
+        CHECK(co_await parallel_batch_to_t(proposed.txs, proposed_txs,
+                                           kNoBatchSizeLimit));
         num_txs = proposed_txs.size();
       }
 

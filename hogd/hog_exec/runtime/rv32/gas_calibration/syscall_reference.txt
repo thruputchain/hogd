@@ -1,0 +1,107 @@
+# RV32 syscall cost reference.
+#
+# Regenerate with:
+#   scripts/rv32_syscall_bench.sh BUILD_DIR --out /tmp/sys.json
+#   scripts/rv32_syscall_report.py /tmp/sys.json --emit-reference \
+#     > hogd/hog_exec/runtime/rv32/gas_calibration/syscall_reference.txt
+#
+# Or run the RV32 Gas Calibration workflow with mode=reference,
+# which prints this block from the bench host.
+#
+# Checked by scripts/rv32_syscall_report.py --check. Costs are
+# multiples of this run's own crossing cost, not nanoseconds, so
+# the file survives the bench host changing speed. It does not
+# survive changing microarchitecture: a syscall that waits on
+# memory and one that only crosses the boundary do not scale
+# together, which is the same reason the opcode reference carries.
+#
+# What this catches that the gas schedule cannot: the schedule's
+# digest stops a CONSTANT being changed silently, and says nothing
+# about the engine drifting away from the constants. A syscall that
+# doubles in cost without any constant moving is exactly the
+# failure that leaves contracts underpaying, and it is invisible
+# to every other check in this repository.
+#
+# Regenerating this file to make a failure go away hides exactly
+# what it is for.
+
+engine_fingerprint d4697729c27d6dbd
+engine_source_digest 1912005f0d27f8bc
+# generated from a Release build on hog10 (AMD EPYC 9554 64-Core Processor)
+# crossing baseline 62.3 ns
+tolerance 1.0
+
+# guard <key> <cost relative to the crossing baseline>
+guard bytestring/BytestringGet/0 2.406
+guard bytestring/BytestringGet/1024 2.658
+guard bytestring/BytestringGet/16384 7.147
+guard bytestring/BytestringGet/256 2.623
+guard bytestring/BytestringGet/32 2.464
+guard bytestring/BytestringGet/32768 12.139
+guard bytestring/BytestringGet/4096 3.090
+guard bytestring/BytestringGetLen/0 2.180
+guard bytestring/BytestringGetLen/1024 2.192
+guard bytestring/BytestringGetLen/16384 2.188
+guard bytestring/BytestringGetLen/256 2.183
+guard bytestring/BytestringGetLen/32 2.193
+guard bytestring/BytestringGetLen/32768 2.184
+guard bytestring/BytestringGetLen/4096 2.184
+guard bytestring/BytestringSet/0 2.254
+guard bytestring/BytestringSet/1024 2.935
+guard bytestring/BytestringSet/16384 11.951
+guard bytestring/BytestringSet/256 2.670
+guard bytestring/BytestringSet/32 2.677
+guard bytestring/BytestringSet/32768 22.082
+guard bytestring/BytestringSet/4096 4.571
+guard storage/NNIntGetFirstTouch/1/1 4.213
+guard storage/NNIntGetFirstTouch/1/16 3.741
+guard storage/NNIntGetFirstTouch/1/16384 5.817
+guard storage/NNIntGetFirstTouch/1/256 4.060
+guard storage/NNIntGetFirstTouch/1/262144 16.204
+guard storage/NNIntGetFirstTouch/1/4096 5.097
+guard storage/NNIntGetFirstTouch/1/65536 8.447
+guard storage/NNIntGetFirstTouch/16/1 4.251
+guard storage/NNIntGetFirstTouch/16/16 3.944
+guard storage/NNIntGetFirstTouch/16/256 4.346
+guard storage/NNIntGetFirstTouch/16/4096 5.032
+guard storage/NNIntGetFirstTouch/254/16 6.471
+guard storage/NNIntGetFirstTouch/254/256 7.120
+guard storage/NNIntGetFirstTouch/254/4096 7.550
+guard storage/NNIntGetFirstTouch/8/1 4.133
+guard storage/NNIntGetFirstTouch/8/16 3.835
+guard storage/NNIntGetFirstTouch/8/256 4.345
+guard storage/NNIntGetFirstTouch/8/4096 5.108
+guard storage/NNIntGetFirstTouchNoLoad/1/1 4.065
+guard storage/NNIntGetFirstTouchNoLoad/1/16 3.028
+guard storage/NNIntGetFirstTouchNoLoad/1/16384 4.116
+guard storage/NNIntGetFirstTouchNoLoad/1/256 3.296
+guard storage/NNIntGetFirstTouchNoLoad/1/262144 6.128
+guard storage/NNIntGetFirstTouchNoLoad/1/4096 3.697
+guard storage/NNIntGetFirstTouchNoLoad/1/65536 4.542
+guard storage/NNIntSetAddFirstTouch/1/1 3.581
+guard storage/NNIntSetAddFirstTouch/1/16 3.157
+guard storage/NNIntSetAddFirstTouch/1/16384 4.179
+guard storage/NNIntSetAddFirstTouch/1/256 3.349
+guard storage/NNIntSetAddFirstTouch/1/262144 6.207
+guard storage/NNIntSetAddFirstTouch/1/4096 3.772
+guard storage/NNIntSetAddFirstTouch/1/65536 4.610
+guard syscall/GetBlockHeight 0.928
+guard syscall/GetCalldataLen 0.965
+guard syscall/GetCurrentAddress 0.949
+guard syscall/GetMsgSender 1.035
+guard syscall/GetSourceTransactionHash 0.945
+guard syscall/NNIntGet 2.516
+guard syscall/NNIntGetNoLoad 2.407
+guard syscall/NNIntSetAdd 2.565
+guard syscall/SHA256Copy 1.105
+guard syscall/SHA256CopyNewSlot+Finalize 3.152
+guard syscall/SHA256Update/0 1.279
+guard syscall/SHA256Update/1024 10.136
+guard syscall/SHA256Update/256 3.468
+guard syscall/SHA256Update/32 1.317
+guard syscall/SHA256Update/4096 36.693
+guard syscall/SHA256Update0+Finalize 3.099
+guard syscall/VerifySignature/0 459.044
+guard syscall/VerifySignature/1024 490.973
+guard syscall/VerifySignature/64 467.095
+> > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > + METRICS_RESULT=0

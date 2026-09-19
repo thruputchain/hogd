@@ -64,9 +64,6 @@ public:
   dbsched_load_genesis_configuration(GenesisConfiguration genesis_configuration,
                                      ConsensusValue value);
 
-  x23::Async<DbSchedResult> dbsched_load_genesis_configuration_v2(
-      GenesisConfigurationV2 genesis_configuration, ConsensusValue value);
-
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 
   x23::Async<DbTipResult> dbsched_get_tip()
@@ -95,6 +92,11 @@ private:
   HogDbStatus<void> commit_block(BlockID id, ConsensusValue value,
                                  PerThreadARC<BlockTX> *btx,
                                  const StorageLongHash &db_hash);
+
+  // write_hog_ages_locked writes a hog-age batch as one ramdb write pass
+  // under ctx_.ramdb_write_pass_lock(). A plain function, not a coroutine,
+  // so the lock cannot span a suspension point.
+  DbSchedResult write_hog_ages_locked(const HogAgeBatch &ages);
 };
 static_assert(is_DbSched1<HogDbSchedRpc *, x23::Async>);
 

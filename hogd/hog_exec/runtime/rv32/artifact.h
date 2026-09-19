@@ -35,7 +35,7 @@ inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // into the header at kArtifactGasVersionOffset and validated at load.
 // v3 admits canonical UNIMP (0xc0001073) as a deterministic invalid-instruction
 // trap.
-inline constexpr uint32_t kGasTableVersion = 3;
+inline constexpr uint32_t kGasTableVersion = 4;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -95,7 +95,43 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0x918317c21c46bb60ULL);
+static_assert(kGasScheduleDigest == 0x9019deb606f5759bULL);
+
+// The gas schedules an artifact is allowed to declare. The first entry is what
+// this build meters with and what a current lowerer stamps; any further entry
+// is transitional, accepted so a repricing can land here before the lowerer
+// that stamps it has rolled out.
+//
+// Matched as a pair. Checking version and digest independently would accept a
+// combination no tool ever produced, which is worse than rejecting both.
+//
+// What a transitional entry means, stated plainly: the artifact is metered with
+// the CURRENT schedule, not the one it declares. Costs come from
+// kInstructionGasCosts at execution time and nothing in the artifact bytes
+// depends on them, so an older artifact simply gets the new prices. That is the
+// point -- a repricing has to reach contracts that are already deployed -- and
+// it is also the hazard, because the digest exists precisely to stop an
+// artifact being metered under a schedule it did not agree to. Two consequences
+// follow. Every node must carry an identical list, or they will disagree about
+// which transactions are valid. And the list is not a permanent compatibility
+// surface: drop the transitional entries once the lowerer that stamps the
+// current schedule has rolled out, so the check goes back to meaning what it
+// says.
+struct AcceptedGasSchedule {
+  uint32_t version;
+  uint64_t digest;
+};
+
+// What every published groundhog-cli stamps. Remove once the lowerer stamps v4.
+inline constexpr uint32_t kTransitionalGasTableVersion = 3;
+inline constexpr uint64_t kTransitionalGasScheduleDigest =
+    0x918317c21c46bb60ULL;
+
+inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
+    {.version = kGasTableVersion, .digest = kGasScheduleDigest},
+    {.version = kTransitionalGasTableVersion,
+     .digest = kTransitionalGasScheduleDigest},
+}};
 
 constexpr uint64_t
 format_fingerprint_u64(uint64_t digest, const char8_t *name, uint64_t value)
@@ -146,8 +182,14 @@ format_fingerprint_layout_field(uint64_t digest, const char8_t *offset_name,
 // (`...format.vN`) and kArtifactFormatVersion together — passing a different
 // format_version here does not produce a correct fingerprint for another
 // version on its own.
+//
+// `folds_fixed_bounds` reproduces the fingerprint of a lowerer from before
+// the code and memory bounds became chain configuration.
 constexpr uint64_t
-format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
+format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
+                   uint32_t gas_version = kGasTableVersion,
+                   uint64_t gas_digest = kGasScheduleDigest,
+                   bool folds_fixed_bounds = false)
 {
   uint64_t digest = kFnvOffsetBasis;
   digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v5");
@@ -164,10 +206,8 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
                                   kArtifactEntryAbiVersion);
   digest = format_fingerprint_u64(digest, u8"syscall_abi_version",
                                   kArtifactSyscallAbiVersion);
-  digest =
-      format_fingerprint_u64(digest, u8"gas_table_version", kGasTableVersion);
-  digest = format_fingerprint_u64(digest, u8"gas_schedule_digest",
-                                  kGasScheduleDigest);
+  digest = format_fingerprint_u64(digest, u8"gas_table_version", gas_version);
+  digest = format_fingerprint_u64(digest, u8"gas_schedule_digest", gas_digest);
 
   digest = format_fingerprint_layout_field(digest, u8"header.magic.offset",
                                            u8"header.magic.size", 0,
@@ -235,9 +275,14 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
       format_fingerprint_u64(digest, u8"digest_bytes", kArtifactDigestBytes);
   digest =
       format_fingerprint_u64(digest, u8"instruction_bytes", kInstructionBytes);
-  digest = format_fingerprint_u64(digest, u8"max_code_bytes", kMaxCodeBytes);
-  digest =
-      format_fingerprint_u64(digest, u8"max_memory_bytes", kMaxMemoryBytes);
+  // Older lowerers folded the then-fixed bounds; they are chain configuration
+  // now, not part of the format.
+  if (folds_fixed_bounds) {
+    digest = format_fingerprint_u64(digest, u8"max_code_bytes",
+                                    kDefaultMaxCodeBytes);
+    digest = format_fingerprint_u64(digest, u8"max_memory_bytes",
+                                    kDefaultMaxMemoryBytes);
+  }
 
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
@@ -256,9 +301,27 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x8e5caf3e9cd23b22ULL);
+static_assert(kArtifactFormatFingerprint == 0x33c13073a37de665ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
+
+// The fingerprints a lowerer may report: one per lowerer generation in the
+// field, pinned to what that lowerer emits. The transitional entries go with
+// kAcceptedGasSchedules' transitional entry.
+inline constexpr std::array<uint64_t, 3> kAcceptedFormatFingerprints = {
+    // This build's own.
+    kArtifactFormatFingerprint,
+    // groundhog-cli <= 0.15.1: gas table v3 with the bounds folded.
+    format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
+                       kTransitionalGasScheduleDigest,
+                       /*folds_fixed_bounds=*/true),
+    // The next groundhog-cli: gas table v3 with the bounds dropped.
+    format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
+                       kTransitionalGasScheduleDigest,
+                       /*folds_fixed_bounds=*/false),
+};
+static_assert(kAcceptedFormatFingerprints[1] == 0x8e5caf3e9cd23b22ULL);
+static_assert(kAcceptedFormatFingerprints[2] == 0xc5f00a7d4451045eULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
@@ -299,7 +362,7 @@ struct ArtifactImage {
   // zeros below the image's load VA are included so consumers can keep
   // writing it at data address 0.
   std::vector<uint8_t> initial_memory;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
 };
 
 // The ThreadedArtifactImage output from parse_threaded_artifact must not
@@ -309,7 +372,7 @@ struct ThreadedArtifactImage {
   std::span<const uint8_t> initial_memory;
   // Data-space VA where initial_memory is placed; [0, start) zero-fills.
   uint32_t initial_memory_start = 0;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
 };
 
 // Canonical SHA-256 over one artifact section. Infallible by construction:
@@ -318,12 +381,13 @@ struct ThreadedArtifactImage {
 [[nodiscard]]
 ArtifactDigest artifact_digest(std::span<const uint8_t> bytes);
 
+// `limits` bounds the code_size and memory_bytes the header may declare.
 [[nodiscard]]
 std::expected<ArtifactImage, ArtifactError>
-parse_artifact(std::span<const uint8_t> bytes);
+parse_artifact(std::span<const uint8_t> bytes, Rv32Limits limits);
 
 [[nodiscard]]
 std::expected<ThreadedArtifactImage, ArtifactError>
-parse_threaded_artifact(std::span<const uint8_t> bytes);
+parse_threaded_artifact(std::span<const uint8_t> bytes, Rv32Limits limits);
 
 } // namespace hogd::rv32

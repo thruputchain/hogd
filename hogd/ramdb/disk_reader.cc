@@ -4,6 +4,7 @@
 #include <unistd.h> // NOLINT(misc-include-cleaner) for off_t
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
@@ -13,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -123,6 +125,30 @@ crc_valid(uint32_t commit_crc, LogletBuffer &buf, ItemHeader *commit_hdr)
   return true;
 }
 
+inline bool
+all_zero(std::span<const std::byte> bytes)
+{
+  return std::ranges::all_of(bytes,
+                             [](std::byte b) { return b == std::byte{0}; });
+}
+
+// rest_is_zero returns true if every byte from r's position to the end of the
+// file is zero. A read error counts as not zero.
+inline bool
+rest_is_zero(BufferedReader &r)
+{
+  std::array<std::byte, 4096> buf;
+  while (true) {
+    ErrnoStatus<size_t> n = r.read(std::span(buf));
+    if (!n)
+      return false;
+    if (*n == 0)
+      return true;
+    if (!all_zero(std::span(buf).first(*n)))
+      return false;
+  }
+}
+
 // SafeItemHeader is a version of ItemHeader that uses only primitive types.
 // This is necessary because it would be UB to load an out of range value into
 // storage, as it is an enum class in ItemHeader. Since the on-disk log could
@@ -205,6 +231,22 @@ struct FileMetadata {
       }
       file.end_lsn_exclusive_ = *lsn;
 
+      // Require the canonical "{begin}-{end}.snap" spelling. parse_integer
+      // accepts leading zeros and trailing characters, so aliases such as
+      // "00-01.snap" parse to the same LSN range as "0-1.snap" but may hold
+      // different, individually CRC-valid content. operator<() would then
+      // treat the aliases as equivalent, and recovery would pick between them
+      // by directory enumeration order, so two honest validators could restart
+      // from different accepted state commitments (#1049). Reconstructing the
+      // canonical name and rejecting anything else guarantees at most one
+      // snapshot per parsed range, since a directory cannot hold two entries
+      // with the same name.
+      if (file.path_ !=
+          std::format("{}-{}.snap", file.begin_lsn_, file.end_lsn_exclusive_)) {
+        debug("non-canonical snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+
       return file;
     }
 
@@ -219,6 +261,14 @@ struct FileMetadata {
     }
     file.begin_lsn_ = *tmp;
     file.end_lsn_exclusive_ = std::numeric_limits<uint64_t>::max();
+
+    // Require the canonical "{lsn}.log" spelling, for the same reason as
+    // snapshots above: reject leading-zero or trailing-character aliases that
+    // parse to the same LSN.
+    if (file.path_ != std::format("{}.log", file.begin_lsn_)) {
+      debug("non-canonical log filename {}; ignoring", file.path_);
+      return std::nullopt;
+    }
 
     return file;
   }
@@ -272,10 +322,11 @@ DBStatus<void>
 load_log_file(
     LogletAllocator &allocator, Directory &dir, const FileMetadata &file,
     uint64_t &cur_lsn, std::optional<uint64_t> target_lsn, bool is_last_file,
+    bool truncate_tail,
     const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func)
 {
-  DBStatus<File> f =
-      dir.openat(file.path_, O_RDWR).transform_error(to_db_error);
+  DBStatus<File> f = dir.openat(file.path_, truncate_tail ? O_RDWR : O_RDONLY)
+                         .transform_error(to_db_error);
   if (!f) {
     warn("couldn't open logfile `{}`: {}", file.path_, f.error());
     return DBError(DBCode::kCorruption);
@@ -300,6 +351,17 @@ load_log_file(
     }
 
     uncommitted_records = true;
+
+    // A zero header is never valid (key_len == 0). In the last file, treat it
+    // as a torn tail from a crash mid-append and truncate, but only if nothing
+    // but zeros follows; a zeroed header ahead of live records is corruption.
+    if (is_last_file && all_zero(byte_view(tmp))) {
+      if (!rest_is_zero(r)) {
+        error("zeroed record ahead of later records in {}", file.path_);
+        return DBError(DBCode::kCorruption);
+      }
+      goto eof;
+    }
 
     // validate the header.
     ItemHeader hdr;
@@ -431,6 +493,11 @@ eof:
     return {};
 
   if (is_last_file) {
+    if (!truncate_tail) {
+      info("{} has uncommitted records from offset {}; open() truncates them",
+           file.path_, uncommitted_off);
+      return {};
+    }
     info("truncating uncommitted records from {} starting at offset {}",
          file.path_, uncommitted_off);
     ErrnoStatus<void> trunc_ret = f->ftruncate(uncommitted_off),
@@ -514,10 +581,10 @@ DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn,
       [this](std::vector<UniqueLoglet> &&log) {
         return apply_changes(std::move(log));
       },
-      target_lsn, &lsn, max_snapshot_end_lsn);
-  // Only a torn tail (kCorruption) justifies accepting the prefix; any other
-  // error means committed data went unread, so fail closed (#1935).
-  if (!ret && (target_lsn || lsn == 0 || ret.error() != DBCode::kCorruption))
+      target_lsn, /*truncate_tail=*/true, &lsn, max_snapshot_end_lsn);
+  // Recovery is all or nothing (see load_database). Uncommitted records after
+  // the last commit are truncated by load_log_file, not reported here.
+  if (!ret)
     return ret.error();
   assert(!target_lsn || *target_lsn == lsn);
   return lsn;
@@ -530,9 +597,8 @@ DiskReader::verify(Directory &dir)
   DBStatus<void> ret = load_database(
       dir,
       [](std::vector<UniqueLoglet> && /*log*/) -> DBStatus<void> { return {}; },
-      std::nullopt, &lsn);
-  // kCorruption-only, as in load() (#1935).
-  if (!ret && (lsn == 0 || ret.error() != DBCode::kCorruption))
+      std::nullopt, /*truncate_tail=*/false, &lsn);
+  if (!ret)
     return ret.error();
   return lsn;
 }
@@ -614,8 +680,8 @@ DBStatus<void>
 DiskReader::load_database(
     Directory &dir,
     const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
-    std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn,
-    uint64_t *max_snapshot_end_lsn)
+    std::optional<uint64_t> target_lsn, bool truncate_tail,
+    uint64_t *loaded_lsn, uint64_t *max_snapshot_end_lsn)
 {
   uint64_t cur_lsn = 0;
   uint64_t max_snap_end = 0;
@@ -632,8 +698,6 @@ DiskReader::load_database(
     return DBError{DBCode::kNotFound};
   }
 
-  DBStatus<void> prev_ret{};
-
   size_t left_to_process = files->size();
   for (FileMetadata &file : *files) {
     left_to_process--;
@@ -646,8 +710,7 @@ DiskReader::load_database(
 
       if (file.begin_lsn_ > cur_lsn) {
         warn("missing data detected: gap at LSN {}", cur_lsn);
-        ret = DBError(DBCode::kNotFound);
-        break;
+        return DBError(DBCode::kNotFound);
       }
     }
 
@@ -655,24 +718,14 @@ DiskReader::load_database(
 
     uint64_t tmp = cur_lsn;
     ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn,
-                        left_to_process == 0, func);
+                        left_to_process == 0, truncate_tail, func);
     if (!ret) {
-      warn("couldn't completely load logfile {}: {}", file.path_, ret.error());
-      if (ret.error() == DBCode::kCorruption)
-        return ret;
-      break;
+      // Recovery is all or nothing: a record that fails validation anywhere
+      // in the stream aborts it, so the caller never sees a partial prefix.
+      warn("couldn't load logfile {} (recovered through LSN {}): {}",
+           file.path_, cur_lsn, ret.error());
+      return ret;
     }
-
-    if (!prev_ret && tmp != cur_lsn) {
-      info("prior file failed to load successfully and {} contained committed "
-           "records; database corrupted, aborting recovery",
-           file.path_);
-      ret = DBError{DBCode::kCorruption};
-      break;
-    }
-
-    prev_ret = ret;
-    ret = DBStatus<void>{};
 
     // file contained no useful records
     if (tmp == cur_lsn)
@@ -684,24 +737,17 @@ DiskReader::load_database(
   }
 
   // we reached the end; are we still missing data?
-  if (ret && target_lsn && cur_lsn != *target_lsn) {
+  if (target_lsn && cur_lsn != *target_lsn) {
     warn("missing data detected: loaded LSN {} < target LSN {}", cur_lsn,
          *target_lsn);
-    ret = DBError(DBCode::kNotFound);
-  }
-
-  if (!ret) {
-    if (cur_lsn == 0)
-      warn("unable to load any LSNs");
-    else
-      warn("able to load up to LSN {} despite encountering error", cur_lsn);
+    return DBError(DBCode::kNotFound);
   }
 
   if (loaded_lsn)
     *loaded_lsn = cur_lsn;
   if (max_snapshot_end_lsn)
     *max_snapshot_end_lsn = max_snap_end;
-  return ret;
+  return {};
 }
 
 DBStatus<void>

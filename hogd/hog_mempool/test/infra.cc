@@ -1,5 +1,6 @@
 #include "hogd/hog_mempool/test/infra.h"
 
+#include <exception>
 #include <limits>
 #include <memory>
 #include <string>
@@ -11,7 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
+#include "hogd/base/test.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -23,6 +24,7 @@
 #include "hogd/hog_exec/shared.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -33,17 +35,30 @@
 
 namespace hogd {
 
-MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
-                                   size_t mempool_tx_size_limit)
-  : mempool_coord_server_(
-        RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(),
-                                         mempool_auth_server_->impl(),
-                                         kNetworkHash, mempool_tx_size_limit))
+MempoolTestInfra::MempoolTestInfra(const Options &options)
+  : owned_db_dir_(options.db_directory.empty() ? std::make_unique<TmpDir>()
+                                               : nullptr),
+    db_directory_(owned_db_dir_ ? owned_db_dir_->directory()
+                                : options.db_directory),
+    mempool_coord_server_(RpcServer<MempoolCoordinatorRpc>(
+        sched_db_server_->impl(), mempool_auth_server_->impl(),
+        options.network_hash, options.mempool_tx_size_limit))
+{
+  try {
+    start(options);
+  } catch (...) {
+    prepare_for_failed_construction();
+    throw;
+  }
+}
+
+void
+MempoolTestInfra::start(const Options &options)
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration and metrics at the beginning of each test.
   Registration::registration().clear();
-  Registration::registration().set_network_hash(kNetworkHash);
+  Registration::registration().set_network_hash(options.network_hash);
   Metrics::instance().clear();
   init_hog_exec_metrics();
 
@@ -69,7 +84,10 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   Registration::registration().publish_event_canonical_tip(
       EventCanonicalTip{.block_id = std::numeric_limits<BlockID>::max(),
                         .consensus_value = std::move(initial_value)});
-  init_contracts();
+  // A recovered database already holds whatever its chain deployed.
+  if (!ctx_->has_committed_tip()) {
+    init_contracts();
+  }
 
   // Start the database RPC servers.
   // [db_executor_server_] handles RPCs from the executor.
@@ -85,8 +103,8 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   // Start the auth servers.
   std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
   dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)().value();
-  auth_server_ =
-      std::make_unique<AuthServer>(std::move(dbauth_client), kNetworkHash);
+  auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client),
+                                              options.network_hash);
 
   auth_db_server_->max_message_size_ = kBulkRpcMaxMessageSize;
   auth_mempool_server_->max_message_size_ = kBulkRpcMaxMessageSize;
@@ -113,13 +131,14 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   register_auth_with_mempool();
   register_coordinator_with_mempool()();
 
-  if (!skip_genesis_block) {
+  if (!options.skip_genesis_block) {
     const StorageCostModel cost_model = StorageCostModel::default_cost_model();
     GenesisConfigurationBuilder builder;
     auto root_contract = load_stock_genesis_root_contract();
     CHECK_EQ(
-        mempool_coord_server_->impl()->schedcoord_load_genesis_configuration_v2(
-            builder.build_v2(kNetworkHash, cost_model, *root_contract))(),
+        mempool_coord_server_->impl()->schedcoord_load_genesis_configuration(
+            builder.build(options.network_hash, cost_model, *root_contract,
+                          stock_network_config()))(),
         DbSchedResult::DbSchedResultOK);
     register_event_with_mempool();
     register_executor_with_mempool();
@@ -141,6 +160,27 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
                  ->schedulercoord_commit_genesis_ceremony(std::move(request))()
                  .outcome(),
              GenesisCeremonyOutcome::GenesisCeremonyCommitted);
+  }
+}
+
+void
+MempoolTestInfra::prepare_for_failed_construction() noexcept
+{
+  try {
+    // The scheduler only exists once the coordinator intro completed the
+    // mempool's finish_init(); a rejected intro never registers one.
+    std::shared_ptr<Scheduler> scheduler =
+        mempool_coord_server_.impl()->scheduler();
+    if (scheduler != nullptr) {
+      sched_db_server_.impl()->reset_scheduler()();
+      scheduler->shut_down()();
+    }
+    executor_.shut_down();
+  } catch (const std::exception &e) {
+    error("MempoolTestInfra failed-start cleanup received exception: {}",
+          e.what());
+  } catch (...) {
+    error("MempoolTestInfra failed-start cleanup received exception");
   }
 }
 

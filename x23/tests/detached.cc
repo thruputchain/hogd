@@ -1,15 +1,19 @@
 // GTest for Detached coroutine lifetime semantics.
 //
 // Verifies the construct/move/destroy-resumes contract and that
-// parameters survive cross-thread suspend/resume.
+// parameters survive cross-thread suspend/resume.  Also covers
+// Async<R>::operator()(cb).
 
 #include <atomic>
 #include <cstdint>
+#include <semaphore>
+#include <thread>
 #include <utility>
 
 #include <gtest/gtest.h>
 
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/threadpool.h"
 
@@ -163,6 +167,108 @@ TEST(DrainContract, AllJobsCompleteBeforeDrainReturns)
     }
     co_return;
   }()();
+}
+
+// Async<R>::operator()(cb) has the same ramp hazard Detached exists to
+// avoid, so it spawns a Detached rather than being a CallbackPromise
+// coroutine itself.  A CallbackPromise has a suspend_never
+// initial_suspend, so its body would run inside the ramp function; the
+// body suspends awaiting the Async, and the thread that completes the
+// Async then resumes it and -- final_suspend being suspend_never too --
+// destroys the frame while the ramp is still writing to it.  TSAN
+// reported that as a data race on the frame's suspend-point index at the
+// closing brace of Async::operator().
+//
+// The window is narrow -- it closes when the ramp returns -- so a
+// completer thread spins on [armed] and fires the moment the main thread
+// enters operator().  A queued job (pool.bg()) lands too late to catch
+// it.  Under TSAN this fails on the unfixed code within a few hundred
+// iterations.
+TEST(AsyncCallback, CompletionRacesTheRamp)
+{
+  constexpr int kIters = 5000;
+
+  std::atomic_bool armed{false};
+  CoroCB<int> pending;
+  std::binary_semaphore go{0}, done{0};
+
+  std::jthread completer([&](std::stop_token stop) {
+    while (!stop.stop_requested()) {
+      go.acquire();
+      if (stop.stop_requested())
+        return;
+      while (!armed.load(std::memory_order_acquire))
+        ; // spin so the completion lands inside the ramp, not after it
+      pending(7);
+    }
+  });
+
+  // Declared after [completer] so it runs first: the ASSERT below returns
+  // from the test on failure, and ~jthread's request_stop() cannot wake a
+  // semaphore wait, so without this the join would hang and CI would time
+  // out instead of reporting the failure.  [go] is always 0 here -- the
+  // done.acquire() that ends each iteration happens after the completer
+  // consumed its token -- so exactly one release is owed.
+  Defer wake_completer{[&] {
+    completer.request_stop();
+    go.release();
+  }};
+
+  int got = 0;
+  for (int i = 0; i < kIters; i++) {
+    auto [async, cb] = make_async<int>();
+    pending = cb;
+    armed.store(false, std::memory_order_relaxed);
+    go.release();
+    armed.store(true, std::memory_order_release);
+
+    std::move(async)([&got, &done](int n) {
+      got = n;
+      done.release();
+    });
+
+    done.acquire();
+    ASSERT_EQ(got, 7) << "iteration " << i;
+  }
+}
+
+// Same race for an Async<void>, whose callback takes no argument.
+TEST(AsyncCallback, VoidCompletionRacesTheRamp)
+{
+  constexpr int kIters = 5000;
+
+  std::atomic_bool armed{false};
+  CoroCB<void> pending;
+  std::binary_semaphore go{0}, done{0};
+
+  std::jthread completer([&](std::stop_token stop) {
+    while (!stop.stop_requested()) {
+      go.acquire();
+      if (stop.stop_requested())
+        return;
+      while (!armed.load(std::memory_order_acquire))
+        ;
+      pending();
+    }
+  });
+
+  // As above: teardown must run even if the test exits early.
+  Defer wake_completer{[&] {
+    completer.request_stop();
+    go.release();
+  }};
+
+  for (int i = 0; i < kIters; i++) {
+    auto [async, cb] = make_async<void>();
+    pending = cb;
+    armed.store(false, std::memory_order_relaxed);
+    go.release();
+    armed.store(true, std::memory_order_release);
+
+    std::move(async)([&done] { done.release(); });
+
+    done.acquire();
+  }
 }
 
 // Multiple suspend points per coroutine — parameters intact after each.

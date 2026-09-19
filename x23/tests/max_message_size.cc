@@ -30,6 +30,23 @@ struct AsyncServer {
 };
 static_assert(is_blank_rpc_v1<AsyncServer *, Async>);
 
+// Servers whose echo handler always replies with a payload larger than the
+// per-message cap the test configures, regardless of the (small) request, so
+// the oversized data is on the reply path rather than the request path.
+struct SyncBigReplyServer {
+  using rpc_service = blank_rpc_v1;
+  void null() {}
+  Data echo(Data /*arg*/) { return Data(200, 0xbb); }
+};
+static_assert(is_blank_rpc_v1<SyncBigReplyServer *, std::type_identity_t>);
+
+struct AsyncBigReplyServer {
+  using rpc_service = blank_rpc_v1;
+  static Async<void> null() { co_return; }
+  static Async<Data> echo(Data /*arg*/) { co_return Data(200, 0xbb); }
+};
+static_assert(is_blank_rpc_v1<AsyncBigReplyServer *, Async>);
+
 TEST(MaxMessageSize, SrpcClientRejectsOversizedMessage)
 {
   SyncServer server;
@@ -37,7 +54,7 @@ TEST(MaxMessageSize, SrpcClientRejectsOversizedMessage)
   UniqueFd listener = stcplisten(0);
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
-  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client_fd);
   UniqueFd server_fd(::accept(listener.get(), nullptr, nullptr));
   ASSERT_TRUE(server_fd);
@@ -191,6 +208,67 @@ TEST(MaxMessageSize, ClientCreationRejectsCapAboveRecordLimit)
   auto cc = rpc_stream(cp, fds[0]);
   cc->max_message_size = kMaxRecordPayloadSize + 1;
   EXPECT_THROW(cc->client<blank_rpc_v1>(), XdrBadInput);
+}
+
+// A server handler that produces a reply larger than the stream's per-message
+// cap must not frame it: an over-cap record makes the client's reader fail the
+// whole connection, and a payload past the 31-bit record limit wraps its
+// length marker and desynchronizes the stream (#2075).  The server downgrades
+// the oversized reply to a SYSTEM_ERR reply the client surfaces as
+// XdrCallFailed, and the stream stays usable for the next call.
+TEST(MaxMessageSize, SrpcServerCapsOversizedReply)
+{
+  SyncBigReplyServer server;
+
+  UniqueFd listener = stcplisten(0);
+  ASSERT_TRUE(listener);
+  uint16_t port = get_port(local_addr(listener));
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
+  ASSERT_TRUE(client_fd);
+  UniqueFd server_fd(::accept(listener.get(), nullptr, nullptr));
+  ASSERT_TRUE(server_fd);
+
+  RefPtr<SRpcStream<>> server_stream{*new SRpcStream<>(std::move(server_fd))};
+  server_stream->max_message_size_ = 100;
+  server_stream->server(&server);
+  server_stream->go();
+
+  RefPtr<SRpcStream<>> client_stream{*new SRpcStream<>(std::move(client_fd))};
+  client_stream->go();
+  auto client = client_stream->client(blank_rpc_v1{});
+
+  // The 200-byte reply exceeds the server's 100-byte cap: downgraded, not
+  // framed.
+  Data small{1, 2, 3};
+  EXPECT_THROW(client.echo(small), XdrCallFailed);
+
+  // The stream survived: a void reply (well within the cap) still round-trips.
+  client.null();
+}
+
+TEST(MaxMessageSize, AsyncRpcServerCapsOversizedReply)
+{
+  AsyncBigReplyServer server;
+  ThreadPool pool(2);
+  CoroPoll cp(pool);
+
+  int fds[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+
+  {
+    auto sc = rpc_stream(cp, fds[1]);
+    sc->max_message_size = 100;
+    sc->server(&server);
+  }
+
+  auto cc = rpc_stream(cp, fds[0]);
+  auto client = cc->client<blank_rpc_v1>();
+
+  Data small{1, 2, 3};
+  EXPECT_THROW(client.echo(small)(), XdrCallFailed);
+
+  // The stream survived the downgraded reply.
+  client.null()();
 }
 
 } // namespace x23

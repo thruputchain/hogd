@@ -2,7 +2,6 @@ add_library(precompiles_objects OBJECT
   context.cc
   native_contract_builder.cc
   precompile_native_token.cc
-  precompile_initial_token_claim.cc
   precompile_default_wallet.cc
 )
 

@@ -26,6 +26,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -74,9 +75,9 @@ TEST_P(FibonacciTest, FibonacciCalls)
                                 kSufficientGas, 5U),
                             .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -100,7 +101,7 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
                                                                            20U),
                             .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.gas_consumed_, 2000);
   }
@@ -121,17 +122,18 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx, uint32_t input,
-         uint32_t expect) -> InvokeStatus<void> {
+         uint32_t expect) -> x23::Async<InvokeStatus<void>> {
         fib_client_t client(kFibContractAddr);
-        auto decoded = client.template invoke_opt<u8"fibonacci">(ctx, input);
+        auto decoded =
+            co_await client.template invoke_opt<u8"fibonacci">(ctx, input);
         if (!decoded.has_value() || !decoded.value().has_value() ||
             !decoded.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (decoded.value().value().value() != expect) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -158,7 +160,8 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
     auto rv32_context = std::make_unique<Rv32Context>();
 
     return std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kNative, {native_runtime_context.get(), false}},
             {ContractType::kRv32, {rv32_context.release(), true}}});
   };
@@ -186,9 +189,9 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                         .value()},
                     .uniquifier = make_new_uniquifier()}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -211,9 +214,9 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                         .value()},
                     .uniquifier = make_new_uniquifier()}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
   // NOLINTEND(bugprone-unchecked-optional-access)

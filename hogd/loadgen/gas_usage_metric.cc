@@ -53,11 +53,11 @@ run_gas_usage_metric(uint32_t num_accounts)
       // Create a new runtime context for each transaction (it's moved into
       // handler)
       auto handler = framework.make_new_system_call_handler(tx, *context);
-      auto invoke_result = handler.root_invoke();
+      auto invoke_result = handler.root_invoke()();
       if (!invoke_result.is_root_success()) {
         throw std::runtime_error("Initialization transaction execution failed");
       }
-      if (auto r = handler.try_commit_transaction();
+      if (auto r = handler.try_commit_transaction()();
           r != ExecResult::ExecResultOK) {
         throw std::runtime_error("Failed to commit initialization transaction");
       }
@@ -80,7 +80,8 @@ run_gas_usage_metric(uint32_t num_accounts)
   }
 
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(extend_result.value().work_txs, work_txs)();
+  parallel_batch_to_t(extend_result.value().work_txs, work_txs,
+                      kNoBatchSizeLimit)();
   if (work_txs.empty()) {
     throw std::runtime_error("No transactions generated from extend");
   }
@@ -91,14 +92,14 @@ run_gas_usage_metric(uint32_t num_accounts)
 
   // Create a new runtime context for the transaction (it's moved into handler)
   auto handler = framework.make_new_system_call_handler(tx, *context);
-  auto invoke_result = handler.root_invoke();
+  auto invoke_result = handler.root_invoke()();
 
   if (!invoke_result.is_root_success()) {
     throw std::runtime_error("Transaction execution failed");
   }
 
   // Commit the transaction
-  if (auto r = handler.try_commit_transaction();
+  if (auto r = handler.try_commit_transaction()();
       r != ExecResult::ExecResultOK) {
     throw std::runtime_error("Failed to commit transaction");
   }

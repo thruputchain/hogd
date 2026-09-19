@@ -146,8 +146,8 @@ struct GenRs {
 
     if (get_opaque_array_size(d).has_value()) {
       // type is a byte array
-      prtop("{}\n", feature_attr("serde", "serde(with = "
-                                          "\"serde_arrays::hex\")"));
+      prtop("{}", feature_attr("serde", "serde(with = "
+                                        "\"serde_arrays::hex\")"));
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -202,9 +202,14 @@ struct GenRs {
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
   {
+    string str = std::vformat(fmt.get(), std::make_format_args(args...));
+    // Emit nothing (not even indentation) for empty output, e.g. an
+    // attribute suppressed via --rust-no-feature.
+    if (str.empty())
+      return;
     if (top_.empty() || top_.back() == '\n')
       top_ += std::string(kIndentWidth * indent_, ' ');
-    top_ += std::vformat(fmt.get(), std::make_format_args(args...));
+    top_ += str;
   }
 
   auto open_scope(string close = {})
@@ -255,15 +260,19 @@ struct GenRs {
     return ret;
   }
 
+  // Returns the attribute line including its trailing newline, or the empty
+  // string when the feature is suppressed via --rust-no-feature.  Suppression
+  // must yield nothing at all: a bare newline in an attribute stack trips
+  // clippy::empty_line_after_outer_attr in the generated code.
   string feature_attr(const std::string &feature, const std::string &attr)
   {
     if (rust_features.contains(feature)) {
-      return std::format("#[{}]", attr);
+      return std::format("#[{}]\n", attr);
     }
     if (rust_no_features.contains(feature)) {
       return "";
     }
-    return std::format("#[cfg_attr(feature = \"{}\", {})]", feature, attr);
+    return std::format("#[cfg_attr(feature = \"{}\", {})]\n", feature, attr);
   }
 
   // The xdrs-feature derive list.  ConstXDRSize is always safe to derive, but
@@ -277,15 +286,18 @@ struct GenRs {
                     : "derive(ReadXDR, WriteXDR, ConstXDRSize)");
   }
 
+  // Returns value gated behind #[cfg(feature = ...)], with a trailing
+  // newline, or the empty string when the feature is suppressed via
+  // --rust-no-feature, so suppression leaves no blank line behind.
   string cfg(const std::string &feature, const std::string &value)
   {
     if (rust_features.contains(feature)) {
-      return value;
+      return value + "\n";
     }
     if (rust_no_features.contains(feature)) {
       return "";
     }
-    return std::format("#[cfg(feature = \"{}\")]\n{}", feature, value);
+    return std::format("#[cfg(feature = \"{}\")]\n{}\n", feature, value);
   }
 
   static optional<string> substring_removed(std::string_view str,
@@ -419,7 +431,7 @@ pub trait {}_{}: Send + Sync {{)",
       args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
     }
     prtop("    {}\n", proc.comment);
-    prtop("    async fn {}({}) -> Result<{}, ::rpc_driver::ProgramError>;\n",
+    prtop("    async fn {}({}) -> Result<{}, ::rpc_api::ProgramError>;\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
   }
 
@@ -443,11 +455,11 @@ impl {0}_{1}_Dispatcher {{
 }}
 
 #[async_trait::async_trait]
-impl ::rpc_driver::handler::RpcHandler for {0}_{1}_Dispatcher {{
-    fn prog_vers(&self) -> ::rpc_driver::ProgVers {{
-        ::rpc_driver::ProgVers::new({2}, {3})
+impl ::rpc_api::RpcHandler for {0}_{1}_Dispatcher {{
+    fn prog_vers(&self) -> ::rpc_api::ProgVers {{
+        ::rpc_api::ProgVers::new({2}, {3})
     }}
-    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::rpc_driver::RpcError> {{
+    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::rpc_api::RpcError> {{
         match proc {{
 )",
         prog_name, vers.id, prog_id, vers.val);
@@ -471,17 +483,17 @@ impl ::rpc_driver::handler::RpcHandler for {0}_{1}_Dispatcher {{
     prtop("            {} => {{\n", proc.val);
     prtop("                let args: ({}) =\n", type_args);
     prtop("                    xdrs::txs::decode(data).map_err(|_| "
-          "::rpc_driver::RpcError::GarbageArguments)?;\n");
+          "::rpc_api::RpcError::GarbageArguments)?;\n");
     auto detuple = make_arg_detuple(proc.arg_types.size());
     prtop("                let res = self.inner.{}({}).await.map_err(|_| "
-          "::rpc_driver::RpcError::SystemError)?;\n",
+          "::rpc_api::RpcError::SystemError)?;\n",
           proc.id, detuple);
     prtop("                xdrs::txs::encode(&res).map_err(|_| "
-          "::rpc_driver::RpcError::SystemError)\n");
+          "::rpc_api::RpcError::SystemError)\n");
     prtop("            }}\n");
   }
 
-  prtop("            _ => Err(::rpc_driver::RpcError::InvalidProcedure),\n");
+  prtop("            _ => Err(::rpc_api::RpcError::InvalidProcedure),\n");
 
   prtop("        }}\n"); // close match
   prtop("    }}\n");     // close fn
@@ -496,16 +508,16 @@ GenRs::show_vers_client(const VersDef &vers, const std::string &prog_name,
   prtop(R"(
 #[derive(Clone)]
 pub struct {0}_{1}_Client {{
-    handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>,
+    handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>,
 }}
 
 impl {0}_{1}_Client {{
-    pub fn new(handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>) -> Self {{
+    pub fn new(handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>) -> Self {{
         Self {{ handle }}
     }}
 
-    fn prog_vers() -> ::rpc_driver::ProgVers {{
-        ::rpc_driver::ProgVers::new({2}, {3})
+    fn prog_vers() -> ::rpc_api::ProgVers {{
+        ::rpc_api::ProgVers::new({2}, {3})
     }}
 )",
         prog_name, vers.id, prog_id, vers.val);
@@ -529,22 +541,25 @@ impl {0}_{1}_Client {{
       call_args.push_back(
           std::format("{}arg{}", is_ref_type(proc.arg_types[i]), i));
     }
-    prtop("    pub async fn {}({}) -> Result<{}, ::rpc_driver::RpcError> {{\n",
+    prtop("    pub async fn {}({}) -> Result<{}, ::rpc_api::RpcError> {{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
-    prtop("         let data = xdrs::txs::encode(&({})).map_err(|_| "
-          "::rpc_driver::RpcError::GarbageArguments)?;\n",
+    // Encode the arguments straight into a CallBuf so the driver frames the
+    // call in place instead of copying the payload behind its header.
+    prtop("         let mut call = self.handle.call_buf();\n");
+    prtop("         call.encode(&({})).map_err(|_| "
+          "::rpc_api::RpcError::GarbageArguments)?;\n",
           join(call_args, ", "));
     prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
-          "&data).await?;\n",
+          "call).await?;\n",
           proc.val);
     prtop("         xdrs::txs::decode(&buf).map_err(|_| "
-          "::rpc_driver::RpcError::SystemError)\n");
+          "::rpc_api::RpcError::SystemError)\n");
     prtop("    }}\n");
   }
   prtop("}}\n");
   prtop(R"(
-impl From<::std::sync::Arc<dyn ::rpc_driver::RpcSender>> for {0}_{1}_Client {{
-    fn from(handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>) -> Self {{
+impl From<::std::sync::Arc<dyn ::rpc_api::RpcSender>> for {0}_{1}_Client {{
+    fn from(handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>) -> Self {{
         Self::new(handle)
     }}
 }}
@@ -605,18 +620,18 @@ GenRs::show_type(const StructBody &s, string const &tname, bool const_write_xdr)
       }
     }
 
-    prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n", xdrs_derive_attr(const_write_xdr));
-    prtop("{}\n", feature_attr("spec", "derive(XDR)"));
+    prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
+    prtop("{}", xdrs_derive_attr(const_write_xdr));
+    prtop("{}", feature_attr("spec", "derive(XDR)"));
     if (!array_size)
-      prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
+      prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
 
     if (s.transparent) {
       prtop("#[repr(transparent)]\n");
-      prtop("{}\n", feature_attr("serde", "serde(transparent)"));
+      prtop("{}", feature_attr("serde", "serde(transparent)"));
     }
     else
       // We want this, at least optionally on some structs,
@@ -774,7 +789,7 @@ impl {0} {{
 }}
 )",
                                      *array_size, outer_id);
-        prtop("{}\n", cfg("xdrs", xdrs_read));
+        prtop("{}", cfg("xdrs", xdrs_read));
 
         auto schema_impl = std::format(
             R"(impl schemars::JsonSchema for {0} {{
@@ -793,7 +808,7 @@ impl {0} {{
 }}
 )",
             outer_id, std::stoul(*array_size) * 2);
-        prtop("{}\n", cfg("schema", schema_impl));
+        prtop("{}", cfg("schema", schema_impl));
       }
     }
   }
@@ -802,11 +817,11 @@ impl {0} {{
 void
 GenRs::show_type(const EnumBody &e, string const &tname, bool const_write_xdr)
 {
-  prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-  prtop("{}\n", feature_attr("serde", "serde(transparent)"));
-  prtop("{}\n", xdrs_derive_attr(const_write_xdr));
-  prtop("{}\n", feature_attr("spec", "derive(XDR)"));
-  prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
+  prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
+  prtop("{}", feature_attr("serde", "serde(transparent)"));
+  prtop("{}", xdrs_derive_attr(const_write_xdr));
+  prtop("{}", feature_attr("spec", "derive(XDR)"));
+  prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
   prtop("{}\n", kDefaultDerives);
   prtop(R"(#[derive(Copy)]
 #[repr(transparent)]
@@ -864,7 +879,7 @@ pub struct {}(pub i32);
     }}
 }})",
                                           tname, match_block, write_block);
-  prtop("{}\n", cfg("std", display_block));
+  prtop("{}", cfg("std", display_block));
 }
 
 void
@@ -945,10 +960,10 @@ GenRs::show_type(const UnionBody &b, string const &tname, bool const_write_xdr)
   constexpr static auto kEnumBaseType = "i32";
   {
     prtop("{}\n", kDefaultDerives);
-    prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n", xdrs_derive_attr(const_write_xdr));
-    prtop("{}\n", feature_attr("spec", "derive(XDR)"));
-    prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
+    prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
+    prtop("{}", xdrs_derive_attr(const_write_xdr));
+    prtop("{}", feature_attr("spec", "derive(XDR)"));
+    prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
     // This repr(i32) suffices to fully specify the layout of the enum, making
     // it FFI-safe. See Rust RFC 2195:
     // https://github.com/rust-lang/rfcs/blob/master/text/2195-really-tagged-unions.md
@@ -1307,10 +1322,7 @@ use crate::*;
 use core::option::Option;
 use core::ops::{{Deref, DerefMut}};
 
-{0}
-{1}
-{2}
-
+{0}{1}{2}
 )",
                   gs.cfg("std", "use std::io::{Read, Write};"),
                   gs.cfg("xdrs", "use xdrs::*;"),
@@ -1320,9 +1332,7 @@ use core::ops::{{Deref, DerefMut}};
 
   preamble +=
       std::format(R"(
-{0}
-{1}
-)",
+{0}{1})",
                   gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"),
                   gs.cfg("serde", "use ::serde_arrays;"));
 

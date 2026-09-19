@@ -27,7 +27,7 @@
 // derived as (ip - base) * 4 only by the control-flow handlers and when
 // materializing observable state.
 //
-// Gas is metered at *start of run* (block granularity, like the wasm engines):
+// Gas is metered at *start of run* (block granularity):
 // a "run" is a maximal straight-line sequence whose continuation is known at
 // lowering time. enter_run() charges the whole run's gas in one check; the
 // handlers inside do no gas work. Control-flow instructions and host-boundary
@@ -62,8 +62,10 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
 // this, which (a) keeps gas_to_run within its uint16 field and (b) bounds the
 // maximum speculative overdraft a deficit run can incur (enter_run_deficit),
 // since at most one run ever runs in deficit. A single instruction's gas is
-// <= 8 (kDivInstructionGas) << kMaxRunGas, so a valid split always exists.
+// <= kMaxInstructionGas << kMaxRunGas, so a valid split always exists.
 inline constexpr uint32_t kMaxRunGas = 10000;
+static_assert(kMaxInstructionGas <= kMaxRunGas);
+static_assert(kMaxRunGas <= UINT16_MAX);
 
 // The narrow-imm + rs2 arm of Slot's operand union (see Slot below for why the
 // two can share a word). Declared out of line rather than as an unnamed struct
@@ -115,11 +117,20 @@ public:
   // it is placed at data-space VA `memory_start`, with zeros filling [0,
   // memory_start) and [memory_start+memory.size(), total_memory_size).
   // `total_memory_size` is the machine's full memory size and must be <=
-  // kMaxMemoryBytes; memory_start + memory.size() must be <= total_memory_size.
+  // kMemoryCeilingBytes; memory_start + memory.size() must be <=
+  // total_memory_size.
+  // `max_run_gas` is the chunk cap the lowering splits runs at; production
+  // always uses the default kMaxRunGas. Tests and the engine-diff fuzzer pass
+  // smaller caps so break carriers (and their refund/deficit seams) appear in
+  // short programs instead of requiring >kMaxRunGas of straight-line gas. It
+  // is clamped to [kMaxInstructionGas, kMaxRunGas]: the floor keeps a valid
+  // split for every single instruction, the ceiling keeps gas_to_run within
+  // its uint16 field and the deficit overdraft bound.
   [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
                                      ProgramError>
   create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
-         uint32_t memory_start, uint32_t total_memory_size, bool trace);
+         uint32_t memory_start, uint32_t total_memory_size, bool trace,
+         uint32_t max_run_gas = kMaxRunGas, bool fuse = true);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -147,13 +158,15 @@ private:
 };
 
 // Thread-local recycling pool for machine guest-memory buffers. A machine is
-// constructed per method invocation, and nested TryInvoke machines (up to
-// kMaxSavepointDepth deep) are live simultaneously on one thread -- so this
-// is a free list of *released* buffers, not a single slot: every live machine
-// owns its own buffer, and the pool only bounds how many freed buffers are
-// retained for reuse. Acquire reserves kMaxMemoryBytes so any recycled buffer
-// satisfies any artifact's memory size without reallocating; bursts deeper
-// than the cap fall back to plain allocation.
+// constructed per method invocation, and nested TryInvoke machines (up to the
+// chain's max_savepoint_depth deep) are live simultaneously on one thread --
+// so this is a free list of *released* buffers, not a single slot: every live
+// machine owns its own buffer, and the pool only bounds how many freed buffers
+// are retained for reuse. Acquire reserves kDefaultMaxMemoryBytes so a
+// recycled buffer satisfies any artifact within the default memory size
+// without reallocating; a chain admitting larger memories grows the buffer on
+// first use and keeps it, and bursts deeper than the cap fall back to plain
+// allocation.
 inline constexpr size_t kMemorySlotPoolCap = 8;
 
 // Fixed-capacity LIFO: a std::array of vectors so the thread_local's
@@ -180,7 +193,7 @@ acquire_memory_slot()
   if (pool.count != 0) {
     slot = std::move(pool.slots[--pool.count]);
   }
-  slot.reserve(kMaxMemoryBytes);
+  slot.reserve(kDefaultMaxMemoryBytes);
   return slot;
 }
 
@@ -262,7 +275,7 @@ public:
       exec_traced_(pre_instantiation.trace_)
   {
     const auto &image = pre_instantiation.initial_memory_image_;
-    assert(image.size() <= kMaxMemoryBytes);
+    assert(image.size() <= kMemoryCeilingBytes);
     // memory_ acquired its slot from the pool on construction. The recycled
     // slot is dirty, but the image is full-size (zero-padded to
     // total_memory_size), so this assign fully overwrites it -- and the
@@ -460,7 +473,7 @@ capture(const Ctx c)
 // (the continuation isn't known). Its
 // gas is charged individually. Loads/stores are NOT barriers: they're
 // straight-line, so they fold into runs; a mid-run fault is terminal and has
-// already paid the run's gas (block-granular metering, like the wasm engines).
+// already paid the run's gas (block-granular metering).
 // The conditional branches (B-type). Their taken target is PC-relative and
 // static, so PreInstantiation::create resolves it the same way as jal.
 inline bool
@@ -1856,8 +1869,12 @@ inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
 ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
                                         uint32_t memory_start,
-                                        uint32_t total_memory_size, bool trace)
+                                        uint32_t total_memory_size, bool trace,
+                                        uint32_t max_run_gas, bool fuse)
 {
+  max_run_gas = std::clamp<uint32_t>(max_run_gas,
+                                     static_cast<uint32_t>(kMaxInstructionGas),
+                                     kMaxRunGas);
   const auto program = ThreadedProgram::create(code);
   if (!program.has_value()) {
     return std::unexpected(program.error());
@@ -1866,7 +1883,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   // Check the fit with subtraction so the guard is independent of host pointer
   // width: memory_start + memory.size() can wrap when size_t is 32 bits, which
   // would let an out-of-bounds image slip through to the copy below.
-  if (total_memory_size > kMaxMemoryBytes || memory_start > total_memory_size ||
+  if (total_memory_size > kMemoryCeilingBytes ||
+      memory_start > total_memory_size ||
       memory.size() > total_memory_size - memory_start) {
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }
@@ -1919,20 +1937,20 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // kMaxRunGas, so a valid split always exists and no program is rejected for
     // run gas.
     const auto self_gas = static_cast<uint32_t>(d.gas);
-    assert(self_gas <= kMaxRunGas &&
+    assert(self_gas <= max_run_gas &&
            "a single instruction's gas must fit within one run chunk");
     bool is_break_here = false;
     uint32_t run_gas = self_gas;
     if (!is_barrier(d.op) && i + 1 < n) {
       const uint32_t candidate = self_gas + exec[i + 1].gas_to_run;
-      if (candidate <= kMaxRunGas) {
+      if (candidate <= max_run_gas) {
         run_gas = candidate;
       }
       else {
         is_break_here = true; // break carrier; run_gas stays self_gas
       }
     }
-    assert(run_gas <= kMaxRunGas);
+    assert(run_gas <= max_run_gas);
     slot.gas_to_run = static_cast<uint16_t>(run_gas);
 
     slot.handler = pick_handler(d.op, trace, is_break_here);
@@ -1994,12 +2012,16 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // consumed as a fusion tail (`next_fused`) -- a slot belongs to at most one
     // pair. The tail slot keeps its standalone handler and gas_to_run as the
     // branch-in fallback; fusion is behavior-preserving and never changes gas.
+    //
+    // `fuse` is false only for the gas calibration, which prices a single
+    // opcode and needs the unfused dispatch count. Production takes the
+    // default.
     bool fused_here = false;
     // Do not fuse across a chunk boundary: a fused handler skips the
     // intervening enter_run, so a pair may not straddle a break carrier
     // (either as the pair's head or its tail). Break carriers are
     // astronomically rare, so this costs no measurable coverage.
-    if (i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
+    if (fuse && i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
                            .head_pc =

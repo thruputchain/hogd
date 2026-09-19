@@ -10,6 +10,10 @@ on:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  # Published crates and pinned submodules retain the legacy registry identity.
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
 
@@ -123,7 +127,7 @@ jobs:
             hog-auth
 
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.24.4"
 
@@ -165,6 +169,15 @@ jobs:
       # passes if the mempool gates on auth readiness instead.
       - name: "Scenario: starve-auth"
         run: ./scripts/ci/startup_order_test.sh starve-auth
+
+      - name: "Scenario: starve-exec"
+        run: ./scripts/ci/startup_order_test.sh starve-exec
+
+      - name: "Scenario: starve-db"
+        run: ./scripts/ci/startup_order_test.sh starve-db
+
+      - name: "Scenario: starve-event"
+        run: ./scripts/ci/startup_order_test.sh starve-event
 
       - name: Print Log Download Instructions
         if: always()

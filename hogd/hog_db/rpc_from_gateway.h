@@ -32,7 +32,11 @@ public:
 
   static DbGatewayIntroOutcome dbgateway_intro(ProtocolCommit const &protocol);
 
-  DbGatewayResult dbgateway_get_items(AddressAndKeyBatch const &batch);
+  // A coroutine: it may suspend to wait out a commit publication, and the
+  // rpc server runs handlers on ThreadPool workers, which must not park.
+  // Own the decoded batch because RPC dispatch releases its arguments when
+  // a handler suspends.
+  x23::Async<DbGatewayResult> dbgateway_get_items(AddressAndKeyBatch batch);
 
   void shut_down() { shutdown_flag_ = true; }
 
@@ -43,7 +47,10 @@ private:
   RPCContext &ctx_;
 };
 
-static_assert(is_DbGateway1<HogDbGatewayRpc *, std::type_identity_t>);
+// MaybeAsync rather than type_identity_t: dbgateway_get_items is a coroutine
+// (it can suspend on a commit publication), which is also the transform
+// RpcServer itself validates.
+static_assert(is_DbGateway1<HogDbGatewayRpc *, x23::MaybeAsync>);
 
 class HogDbGatewayServer : public RpcServer<HogDbGatewayRpc> {
 public:

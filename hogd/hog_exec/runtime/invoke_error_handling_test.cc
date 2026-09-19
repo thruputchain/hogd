@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <sys/mman.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -15,6 +17,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -26,6 +29,8 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/cleanup.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -47,12 +52,13 @@ protected:
 // caller.
 TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 {
+  // Not a coroutine: a pure enum-to-status mapping with nothing to await.
   auto inner_func = [](InvokeErrorCode enum_code) -> InvokeStatus<void> {
     // Using a switch, so that the compiler will warn when an enum value is
     // missing
     switch (enum_code) {
     case InvokeErrorCode::None:
-      return {};
+      return InvokeStatus<void>{};
     case InvokeErrorCode::Deterministic:
       return InvokeError{InvokeErrorCode::Deterministic};
     case InvokeErrorCode::OutOfGas:
@@ -75,30 +81,36 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
   // Callee: methods that return each InvokeError code. Orchestrator: invokes
   // those methods on the callee contract (no self-reentrance).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
-  fns_callee.emplace(
-      0, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return inner_func(InvokeErrorCode::None);
-      });
-  fns_callee.emplace(
-      1, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return inner_func(InvokeErrorCode::Deterministic);
-      });
-  fns_callee.emplace(
-      2, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return inner_func(InvokeErrorCode::OutOfGas);
-      });
-  fns_callee.emplace(
-      3, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return inner_func(InvokeErrorCode::Abandon);
-      });
-  fns_callee.emplace(
-      4, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return inner_func(InvokeErrorCode::ValidationFailure);
-      });
-  fns_callee.emplace(
-      5, [&](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return inner_func(InvokeErrorCode::Unrecoverable);
-      });
+  fns_callee.emplace(0,
+                     [&](NativeSyscallContext & /*unused*/)
+                         -> x23::Async<InvokeStatus<void>> {
+                       co_return inner_func(InvokeErrorCode::None);
+                     });
+  fns_callee.emplace(1,
+                     [&](NativeSyscallContext & /*unused*/)
+                         -> x23::Async<InvokeStatus<void>> {
+                       co_return inner_func(InvokeErrorCode::Deterministic);
+                     });
+  fns_callee.emplace(2,
+                     [&](NativeSyscallContext & /*unused*/)
+                         -> x23::Async<InvokeStatus<void>> {
+                       co_return inner_func(InvokeErrorCode::OutOfGas);
+                     });
+  fns_callee.emplace(3,
+                     [&](NativeSyscallContext & /*unused*/)
+                         -> x23::Async<InvokeStatus<void>> {
+                       co_return inner_func(InvokeErrorCode::Abandon);
+                     });
+  fns_callee.emplace(4,
+                     [&](NativeSyscallContext & /*unused*/)
+                         -> x23::Async<InvokeStatus<void>> {
+                       co_return inner_func(InvokeErrorCode::ValidationFailure);
+                     });
+  fns_callee.emplace(5,
+                     [&](NativeSyscallContext & /*unused*/)
+                         -> x23::Async<InvokeStatus<void>> {
+                       co_return inner_func(InvokeErrorCode::Unrecoverable);
+                     });
   auto callee_contract =
       std::make_unique<NativeContract>(std::move(fns_callee));
 
@@ -107,35 +119,33 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
   fns_orchestrator.emplace(
       0,
       [kCalleeAddress](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = [&]() {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "Invoke 0 did not return success";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          ADD_FAILURE() << "Invoke 0 did not co_return success";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         CopyableInvokeOutputs r2_outputs{};
-        auto r2 = [&]() {
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r2_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r2_outputs);
         }();
         // A child that traps: the syscall succeeds (a frame ran) and reports
         // the fault via frame_status.
@@ -144,83 +154,79 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
             r2_outputs.frame_status != InvocationFrameStatusCode::Fault) {
           ADD_FAILURE() << "Invoke 1 (child trap) should report frame_status "
                            "Fault with code None";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Out of gas in the child is also a Fault frame_status (the syscall
         // itself still succeeds in the caller).
         CopyableInvokeOutputs r3_outputs{};
-        auto r3 = [&]() {
+        auto r3 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 2,
               .gas_limit = 12345,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r3_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, r3_outputs);
         }();
         if (!r3.has_value() ||
             r3.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r3_outputs.frame_status != InvocationFrameStatusCode::Fault) {
           ADD_FAILURE() << "Invoke 2 (out of gas) should report frame_status "
                            "Fault with code None";
-          return InvokeError{InvokeErrorCode::OutOfGas};
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
 
-        auto r4 = [&]() {
+        auto r4 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 3,
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (r4.has_value() ||
             r4.error() != HostFnError{HostFnErrorCode::Abandon}) {
-          ADD_FAILURE() << "Invoke 3 did not return abort transaction";
-          return InvokeError{InvokeErrorCode::Abandon};
+          ADD_FAILURE() << "Invoke 3 did not co_return abort transaction";
+          co_return InvokeError{InvokeErrorCode::Abandon};
         }
 
-        auto r5 = [&]() {
+        auto r5 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 4,
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (r5.has_value() ||
             r5.error() != HostFnError{HostFnErrorCode::ValidationFailure}) {
-          ADD_FAILURE() << "Invoke 4 did not return validation failure";
-          return InvokeError{InvokeErrorCode::ValidationFailure};
+          ADD_FAILURE() << "Invoke 4 did not co_return validation failure";
+          co_return InvokeError{InvokeErrorCode::ValidationFailure};
         }
 
-        auto r6 = [&]() {
+        auto r6 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 5,
               .gas_limit = UINT64_MAX,
               .flags = 0,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kCalleeAddress, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (r6.has_value() ||
             r6.error() != HostFnError{HostFnErrorCode::Unrecoverable}) {
-          ADD_FAILURE() << "Invoke 5 did not return unrecoverable";
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          ADD_FAILURE() << "Invoke 5 did not co_return unrecoverable";
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto orchestrator_contract =
       std::make_unique<NativeContract>(std::move(fns_orchestrator));
@@ -262,9 +268,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                 }},
         *runtime_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto r = handler.try_commit_transaction();
+    auto r = handler.try_commit_transaction()();
     ASSERT_EQ(r, ExecResult::ExecResultOK);
   }
 }
@@ -279,127 +285,123 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_target;
   fns_target.emplace(0,
-                     [](NativeSyscallContext & /*unused*/) noexcept
-                         -> InvokeStatus<void> { return {}; });
+                     [](NativeSyscallContext & /*unused*/)
+                         -> x23::Async<InvokeStatus<void>> {
+                       co_return InvokeStatus<void>{};
+                     });
   auto target_contract =
       std::make_unique<NativeContract>(std::move(fns_target));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
-      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Valid flags should succeed
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(target_address,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              target_address, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Valid flag TryInvoke should succeed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r2 = [&]() {
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::ReadOnly),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(target_address,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              target_address, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r2.has_value() ||
             r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Valid flag ReadOnly should succeed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Combined valid flags should succeed
-        auto r3 = [&]() {
+        auto r3 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke) |
                        std::to_underlying(InvokeFlag::ReadOnly),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(target_address,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              target_address, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r3.has_value() ||
             r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE()
               << "Combined valid flags TryInvoke|ReadOnly should succeed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Invalid flag bit (0x4 = DelegateCall, not yet implemented)
-        auto r4 = [&]() {
+        auto r4 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = 0x4,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(target_address,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              target_address, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r4.has_value() ||
             r4.value() !=
                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
           ADD_FAILURE() << "Flag 0x4 should be rejected";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Arbitrary garbage bits
-        auto r5 = [&]() {
+        auto r5 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = 0xFF,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(target_address,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              target_address, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r5.has_value() ||
             r5.value() !=
                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
           ADD_FAILURE() << "Garbage flag bits 0xFF should be rejected";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // High bits set
-        auto r6 = [&]() {
+        auto r6 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = 0x7FFF'FFFF,
           };
-          return ctx.syscall<SyscallNo::kInvoke>(target_address,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              target_address, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!r6.has_value() ||
             r6.value() !=
                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
           ADD_FAILURE() << "High flag bits should be rejected";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller));
@@ -434,9 +436,9 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                 }},
         *runtime_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto r = handler.try_commit_transaction();
+    auto r = handler.try_commit_transaction()();
     ASSERT_EQ(r, ExecResult::ExecResultOK);
   }
 }
@@ -448,8 +450,10 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee2;
   fns_callee2.emplace(0,
-                      [](NativeSyscallContext & /*unused*/) noexcept
-                          -> InvokeStatus<void> { return {}; });
+                      [](NativeSyscallContext & /*unused*/)
+                          -> x23::Async<InvokeStatus<void>> {
+                        co_return InvokeStatus<void>{};
+                      });
   auto callee_contract =
       std::make_unique<NativeContract>(std::move(fns_callee2));
 
@@ -457,22 +461,21 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
   fns_caller2.emplace(
       0,
       [kCalleeAddress](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, CopyableInvokeOutputs{});
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Invoke with an empty auth-token span failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller2));
@@ -506,7 +509,7 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
               }},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -528,15 +531,15 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
   fns_callee.emplace(0,
-                     [kRevertPayload](NativeSyscallContext &ctx) noexcept
-                         -> InvokeStatus<void> {
+                     [kRevertPayload](NativeSyscallContext &ctx)
+                         -> x23::Async<InvokeStatus<void>> {
                        ReturnBuffer buffer;
                        buffer.resize_uninitialized(kRevertPayload.size());
                        std::memcpy(buffer.data(), kRevertPayload.data(),
                                    kRevertPayload.size());
                        ctx.handler().set_return_buffer(std::move(buffer), true,
                                                        {});
-                       return {};
+                       co_return InvokeStatus<void>{};
                      });
   auto callee_contract =
       std::make_unique<NativeContract>(std::move(fns_callee));
@@ -545,15 +548,14 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
   fns_orch.emplace(
       0,
       [kCalleeAddress, kRevertPayload](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{.entrypoint_id = 0,
                                     .gas_limit = UINT64_MAX,
                                     .flags = 0};
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, outputs);
         EXPECT_TRUE(r.has_value());
         if (r.has_value()) {
           EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
@@ -574,7 +576,7 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
         else {
           ADD_FAILURE() << "abort buffer should be readable after revert";
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto orchestrator_contract =
       std::make_unique<NativeContract>(std::move(fns_orch));
@@ -606,9 +608,9 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // A child that traps/faults: Invoke returns None, frame_status == Fault, and
@@ -620,8 +622,8 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
   fns_callee.emplace(
-      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return InvokeError{InvokeErrorCode::Deterministic};
+      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
   auto callee_contract =
       std::make_unique<NativeContract>(std::move(fns_callee));
@@ -630,15 +632,14 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
   fns_orch.emplace(
       0,
       [kCalleeAddress](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{.entrypoint_id = 0,
                                     .gas_limit = UINT64_MAX,
                                     .flags = 0};
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, outputs);
         EXPECT_TRUE(r.has_value());
         if (r.has_value()) {
           EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
@@ -657,7 +658,7 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
                 SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable);
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto orchestrator_contract =
       std::make_unique<NativeContract>(std::move(fns_orch));
@@ -689,9 +690,9 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Issue #1909, locked in as working-as-intended: an Invoke rejected before a
@@ -707,12 +708,13 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
   fns_callee.emplace(
-      0, [kPayload](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0,
+      [kPayload](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ReturnBuffer buffer;
         buffer.resize_uninitialized(kPayload.size());
         std::memcpy(buffer.data(), kPayload.data(), kPayload.size());
         ctx.handler().set_return_buffer(std::move(buffer), false, {});
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto callee_contract =
       std::make_unique<NativeContract>(std::move(fns_callee));
@@ -721,16 +723,15 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
   fns_orch.emplace(
       0,
       [kCalleeAddress, kMissingAddress,
-       kPayload](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+       kPayload](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // 1) A child that runs and returns normally seeds the slot.
         CopyableInvokeInputs ok_inputs{.entrypoint_id = 0,
                                        .gas_limit = UINT64_MAX,
                                        .flags = 0};
         CopyableInvokeOutputs ok_outputs{};
-        auto r1 = ctx.syscall<SyscallNo::kInvoke>(kCalleeAddress,
-                                                  std::span<const std::byte>{},
-                                                  std::span<uint32_t>{},
-                                                  ok_inputs, ok_outputs);
+        auto r1 = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
+            ok_inputs, ok_outputs);
         EXPECT_TRUE(r1.has_value());
         if (r1.has_value()) {
           EXPECT_EQ(r1.value(), SyscallErrorCode::kSyscallErrorCodeNone);
@@ -744,17 +745,17 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
                                         .gas_limit = UINT64_MAX,
                                         .flags = 0};
         CopyableInvokeOutputs bad_outputs{};
-        auto r2 = ctx.syscall<SyscallNo::kInvoke>(kMissingAddress,
-                                                  std::span<const std::byte>{},
-                                                  std::span<uint32_t>{},
-                                                  bad_inputs, bad_outputs);
+        auto r2 = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kMissingAddress, std::span<const std::byte>{},
+            std::span<uint32_t>{}, bad_inputs, bad_outputs);
         EXPECT_TRUE(r2.has_value());
         if (r2.has_value()) {
           EXPECT_EQ(r2.value(),
                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
         }
 
-        // 3) The prior child's return buffer is still readable (no-op on slot).
+        // 3) The prior child's co_return buffer is still readable (no-op on
+        // slot).
         auto status = ctx.handler().get_return_buffer();
         EXPECT_TRUE(status.has_value());
         if (status.has_value() && (*status).has_value()) {
@@ -764,10 +765,10 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
                     0);
         }
         else {
-          ADD_FAILURE()
-              << "prior child return buffer should survive a rejected invoke";
+          ADD_FAILURE() << "prior child co_return buffer should survive a "
+                           "rejected invoke";
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto orchestrator_contract =
       std::make_unique<NativeContract>(std::move(fns_orch));
@@ -799,9 +800,104 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// Issue #2973: a self-invoke is rejected as kReentrance *before* the host
+// materializes the caller's calldata. A rejected invoke reports gas 0, so a
+// pre-rejection copy would be host allocation/memcpy work, proportional to a
+// contract-chosen length, that a contract could repeat for free.
+//
+// Statement order is not otherwise observable, so the probe is a calldata span
+// the host cannot possibly copy: one byte longer than Calldata's maximum size.
+// Reaching the copy throws x23::XdrLengthError out of the syscall body, which
+// wrap_after_parse turns into HostFnErrorCode::Unrecoverable -- so the pre-fix
+// ordering fails this test with a structured error rather than a crash, and the
+// span itself is never read either way. Only a native caller can build a span
+// that long (rv32 spans are u32-bounded), which is exactly why it
+// works as an ordering probe rather than as a reachable guest input.
+//
+// The span still has to describe real memory: forming one over a range that
+// does not exist is undefined even if no element is read, and a hardened
+// standard library would abort here rather than at the assertion below. So
+// reserve the range PROT_NONE -- address space only, nothing committed, and
+// nothing ever read from it.
+TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
+{
+  constexpr ContractAddress kSelfAddress = make_contract_address(0);
+
+  size_t const uncopyable_len = Calldata::max_size() + 1;
+  void *reservation = mmap(nullptr, uncopyable_len, PROT_NONE,
+                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (reservation == MAP_FAILED) {
+    GTEST_SKIP() << "could not reserve " << uncopyable_len
+                 << " bytes of address space for the uncopyable-span probe";
+  }
+  x23::Defer unmap([&] { munmap(reservation, uncopyable_len); });
+  std::span<const std::byte> const uncopyable_calldata(
+      static_cast<std::byte const *>(reservation), uncopyable_len);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_self;
+  fns_self.emplace(
+      0,
+      [kSelfAddress, uncopyable_calldata](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        CopyableInvokeInputs inputs{.entrypoint_id = 0,
+                                    .gas_limit = UINT64_MAX,
+                                    .flags = 0};
+        CopyableInvokeOutputs outputs{};
+
+        auto const gas_before = ctx.total_gas_consumed();
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(kSelfAddress,
+                                                          uncopyable_calldata,
+                                                          std::span<uint32_t>{},
+                                                          inputs, outputs);
+        auto const gas_after = ctx.total_gas_consumed();
+
+        if (!r.has_value()) {
+          ADD_FAILURE() << "self-invoke failed while handling its calldata "
+                           "instead of being rejected as reentrant";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeReentrance);
+        // The rejection still does no work -- no child frame, no calldata
+        // copied -- but it is no longer free: the caller crossed into the host
+        // to ask, and pays kSyscallBaseCost for that. Otherwise a contract
+        // could spin on rejected reentrant invokes at no cost.
+        EXPECT_EQ(gas_after, gas_before + kSyscallBaseCost);
+        co_return InvokeStatus<void>{};
+      });
+  auto self_contract = std::make_unique<NativeContract>(std::move(fns_self));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(self_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto self_xdr = make_native_contract(0);
+  write_contract(self_xdr);
+  write_deployment(kSelfAddress, self_xdr);
+
+  // The self-invoking contract is the root invoked address; committing its
+  // transaction consumes one replay-cache entry charged to it (0 on
+  // MockInMemory).
+  setup_grant_storage_token(kSelfAddress, replay_cache_cost_charged(1));
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSelfAddress,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *runtime_context);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,

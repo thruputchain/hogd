@@ -5,7 +5,7 @@
 # Usage: startup_order_test.sh <scenario>
 #   scenarios: mempool-first mempool-middle mempool-last
 #              indexer-before-event event-before-indexer
-#              coordinator-first starve-auth
+#              coordinator-first starve-auth starve-exec starve-db starve-event
 #
 # Env overrides (defaults target the namespace cpp gcc-debug build layout):
 #   BUILD_DIR   build directory holding the C++ binaries (default build/gcc)
@@ -18,7 +18,7 @@ set -Eeuo pipefail
 
 usage() {
   echo "Usage: $0 <scenario>" >&2
-  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer coordinator-first starve-auth" >&2
+  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer coordinator-first starve-auth starve-exec starve-db starve-event" >&2
 }
 
 SCENARIO="${1:-}"
@@ -68,6 +68,15 @@ starve-auth)
   # (If the mempool instead blocks until auth registers, every launched proc
   # stays alive and this passes -- telling us the hub gates on downstreams.)
   ORDER=(mempool loadgen hog-exec hog-db event indexer chuckd)
+  ;;
+starve-exec)
+  ORDER=(mempool loadgen hog-db event indexer auth chuckd)
+  ;;
+starve-db)
+  ORDER=(mempool loadgen hog-exec event indexer auth chuckd)
+  ;;
+starve-event)
+  ORDER=(mempool loadgen hog-exec hog-db indexer auth chuckd)
   ;;
 *)
   echo "unknown scenario: $SCENARIO" >&2
@@ -239,10 +248,11 @@ launch() {
   esac
 }
 
-# Do NOT pre-create the daemons' own data directories. The indexer's
-# IndexDB::open_or_make_new() only creates a fresh DB when its path does NOT
-# exist; a pre-existing empty dir sends it down the open() path, which aborts
-# with "DB Not Found". Each daemon creates its own dir (matches launch-multi.sh).
+# Each daemon creates its own data directory, which is how launch-multi.sh
+# starts them. Pre-creating one is no longer fatal to the indexer -- its
+# IndexDB::open_or_make_new() asks whether a database is there rather than
+# whether the directory is -- but leaving them out keeps this test starting
+# the daemons the way production does.
 mkdir -p "$WORK_DIR/event" "$WORK_DIR/chuckd-storage"
 
 echo "=== scenario $SCENARIO: launching in order: ${ORDER[*]} ==="

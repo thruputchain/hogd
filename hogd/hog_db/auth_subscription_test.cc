@@ -7,6 +7,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -21,6 +22,7 @@
 #include "auth_rpc.hh"
 #include "consensus.hh"
 #include "db_sched.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
@@ -30,6 +32,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "hogd/hog_db/background_commit_worker.h"
 #include "hogd/hog_db/block_tx.h"
@@ -45,6 +48,8 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -133,6 +138,7 @@ protected:
     ctx_opt_.emplace(std::move(db_), nullptr);
     RPCContext &ctx = *ctx_opt_;
     ctx.initialize_cost_model(kTestCostModel);
+    ctx.set_network_config(stock_network_config());
     ASSERT_EQ(ctx.get_height_threadsafe(), kAcceptedHeight);
 
     ASSERT_TRUE(
@@ -204,7 +210,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -310,7 +317,8 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -386,7 +394,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -462,7 +471,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -633,17 +643,24 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
                .address_for_mempool = ""};
 
   AuthCard wrong_protocol_card =
-      AuthCard{.protocol = "wrong/000000000000",
+      AuthCard{.protocol = protocol_from_text("wrong/000000000000"),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
 
-  std::string nul_suffixed(version::kHogdProtocol());
-  nul_suffixed.push_back('\0');
-  nul_suffixed += "suffix";
-  AuthCard nul_protocol_card =
-      AuthCard{.protocol =
-                   ProtocolCommit(nul_suffixed.data(), nul_suffixed.size()),
+  // A fixed-width token has no room past its 20 bytes, so this case used to be
+  // "the real token, a NUL, then junk" and is now simply the real token. What
+  // takes its place is the confusion the fixed width does allow: a short token
+  // padded out to the array, sharing a prefix with the real one. Rejecting it
+  // is what makes the padding part of the token's identity rather than filler.
+  // protocol_text borrows its argument, so the token has to be named here:
+  // taking the view straight off kHogdProtocol() would leave it pointing at a
+  // temporary that dies at the end of that statement (ASan: stack-use-after-
+  // scope, hogd issue #3718).
+  const ProtocolCommit current_token = version::kHogdProtocol();
+  const std::string_view current_protocol = protocol_text(current_token);
+  AuthCard padded_prefix_card =
+      AuthCard{.protocol = protocol_from_text(current_protocol.substr(0, 12)),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
@@ -657,8 +674,8 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   DBAuthIntroResult wrong_result = rpc.dbauth_intro(wrong_protocol_card)();
   EXPECT_EQ(wrong_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
 
-  DBAuthIntroResult nul_result = rpc.dbauth_intro(nul_protocol_card)();
-  EXPECT_EQ(nul_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+  DBAuthIntroResult padded_result = rpc.dbauth_intro(padded_prefix_card)();
+  EXPECT_EQ(padded_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
 
   DBAuthIntroResult valid_result = rpc.dbauth_intro(auth_card_)();
   EXPECT_EQ(valid_result.outcome(), DBAuthIntroOutcome::kIntroSuccess);

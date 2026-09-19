@@ -29,6 +29,7 @@
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 
 namespace hogd {
@@ -61,32 +62,35 @@ class RuntimeResolutionThrowingMockRuntimeContext final
 public:
   using MockRuntimeContext::MockRuntimeContext;
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) override
+                   SystemCallHandler *syscall_handler) const override
   {
     if (throw_after_mock_lookup_ &&
         deployed_contract.hash.contract_type == ContractType::kMockTest) {
-      auto contract =
-          syscall_handler->resolve_contract(deployed_contract.hash.hash);
+      auto contract = co_await syscall_handler->resolve_contract(
+          deployed_contract.hash.hash);
       if (!contract.has_value()) {
-        return contract.error();
+        co_return contract.error();
       }
       if (contract.value() == nullptr ||
           contract.value()->contract_type() != ContractType::kMockTest) {
-        return SystemError{SystemErrorCode::Unrecoverable};
+        co_return SystemError{SystemErrorCode::Unrecoverable};
       }
       throw_after_mock_lookup_ = false;
       throw std::bad_alloc();
     }
-    return MockRuntimeContext::make_new_runtime(deployed_contract,
-                                                syscall_handler);
+    co_return co_await MockRuntimeContext::make_new_runtime(deployed_contract,
+                                                            syscall_handler);
   }
 
   void throw_after_mock_lookup_once() { throw_after_mock_lookup_ = true; }
 
 private:
-  bool throw_after_mock_lookup_ = false;
+  // Fault-injection latch, not logical state: make_new_runtime() is const on
+  // RuntimeContext (a shared sub-context must not mutate through it), and this
+  // test-only context arms itself for exactly one throw.
+  mutable bool throw_after_mock_lookup_ = false;
 };
 
 } // namespace

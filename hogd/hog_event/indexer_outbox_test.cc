@@ -32,6 +32,7 @@
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "parallel.hh"
@@ -200,7 +201,9 @@ make_committed_payload_golden_fixture()
   value.proposal_header.network_hash.fill(0);
   value.proposal_header.network_hash[0] = 0x30;
   value.proposal_header.network_hash[31] = 0x4f;
-  value.proposal_header.genesis_configuration_hash.fill(0);
+  value.proposal_header.config_hash.fill(0);
+  value.proposal_header.config_hash[0] = 0x70;
+  value.proposal_header.config_hash[31] = 0x8f;
   value.proposal_header.proposer.fill(0);
   value.proposal_header.proposer[0] = 0x50;
   value.proposal_header.proposer[31] = 0x6f;
@@ -580,6 +583,40 @@ TEST_F(IndexerOutboxTest, RecognizedNamespaceIncludesCandidatesAndOrigins)
   EXPECT_FALSE(*store.recognized_namespace_empty());
 }
 
+// A committed file's roots are recomputed once per process, and only by a
+// store that did not establish the file itself. The store that published it
+// trusts it for the life of the process: a load is a parse and nothing more.
+// A store opened afterwards recomputes on its first load and refuses a file
+// whose pairs no longer match the header.
+TEST_F(IndexerOutboxTest, RootsAreRecomputedOncePerProcessForUnestablishedFiles)
+{
+  const ProposedTransaction body = make_body(1);
+  const auto committed = make_committed(1, {body}, {make_event(body, 0x01)});
+  const ProposedTransaction other = make_body(2);
+  const TxEventLogBatch other_events{make_event(other, 0x02)};
+  const ProposedTransactionBatch other_bodies{other};
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+
+    // Well-formed pairs that are not this block's, under this block's root.
+    rewrite_events_file(dir_,
+                        committed.consensus_value.proposal_header.events_hash,
+                        other_events, other_bodies);
+    auto loaded = store.load_committed(1)();
+    ASSERT_TRUE(loaded.has_value()) << loaded.error();
+    ASSERT_EQ(loaded->tx_bodies.size(), 1U);
+    EXPECT_EQ(x23::serialize(loaded->tx_bodies[0]), x23::serialize(other));
+  }
+
+  IndexerOutboxStore reopened = open_store(dir_);
+  auto loaded = reopened.load_committed(1)();
+  ASSERT_FALSE(loaded.has_value());
+  EXPECT_NE(loaded.error().find("root differs"), std::string::npos)
+      << loaded.error();
+}
+
 TEST_F(IndexerOutboxTest, FirstCommittedRecordMustMatchPreparedEpochOrigin)
 {
   ConsensusValueHash parent{};
@@ -853,7 +890,7 @@ TEST_F(IndexerOutboxTest, ExactExistingCommittedRetryFsyncsDirectory)
 TEST_F(IndexerOutboxTest, EpochOriginXdrMatchesCrossLanguageGolden)
 {
   IndexerOutboxOrigin origin{
-      .protocol = "hogp/archive_a",
+      .protocol = protocol_from_text("hogp/archive_a"),
       .epoch_sequence = 0x0102030405060708,
       .first_height = 123456789,
   };
@@ -862,11 +899,11 @@ TEST_F(IndexerOutboxTest, EpochOriginXdrMatchesCrossLanguageGolden)
   const x23::Buf encoded = x23::serialize(origin);
 
   constexpr size_t kExpectedByteLength = 68;
-  const SHA256Hash kExpectedDigest{0x33, 0x1f, 0xa7, 0xd2, 0x5a, 0x47, 0x42,
-                                   0x29, 0x8e, 0x93, 0xbe, 0xab, 0x33, 0xc7,
-                                   0x33, 0x45, 0xe2, 0x36, 0xb7, 0x52, 0x98,
-                                   0x78, 0xda, 0x8d, 0x1a, 0x33, 0x27, 0xbf,
-                                   0x8e, 0xaf, 0x52, 0xbd};
+  const SHA256Hash kExpectedDigest{0x8a, 0x4d, 0xa4, 0xf7, 0x0d, 0x97, 0xd8,
+                                   0x62, 0xe0, 0xfe, 0xe4, 0xa1, 0x95, 0x1b,
+                                   0x24, 0xfb, 0xa4, 0x2c, 0x72, 0x97, 0x4c,
+                                   0xeb, 0x3e, 0xe8, 0x07, 0xa7, 0x3f, 0xd8,
+                                   0x97, 0x5b, 0x59, 0x18};
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
 }
@@ -970,8 +1007,7 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   EXPECT_EQ(current_origin->origin.first_height, 7);
   EXPECT_EQ(current_origin->origin.first_prev_hash,
             committed.consensus_value.prev_hash);
-  EXPECT_EQ(std::string_view(current_origin->origin.protocol),
-            version::kHogdProtocol());
+  EXPECT_EQ(current_origin->origin.protocol, version::kHogdProtocol());
   EXPECT_TRUE(store
                   .initialize_current_epoch_origin(
                       7, committed.consensus_value.prev_hash)()
@@ -1075,11 +1111,11 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   ASSERT_TRUE(validate_indexer_committed_payload(payload)().has_value());
   const x23::Buf encoded = x23::serialize(payload);
   constexpr size_t kExpectedByteLength = 576;
-  const SHA256Hash kExpectedDigest{0xac, 0x20, 0x4b, 0x69, 0x7f, 0x4a, 0x80,
-                                   0xfb, 0x7c, 0x64, 0x1d, 0x1f, 0x2b, 0x13,
-                                   0xe8, 0xc8, 0x43, 0xdf, 0x11, 0x77, 0xa9,
-                                   0xbd, 0x06, 0x0b, 0xbf, 0x44, 0x47, 0xd6,
-                                   0x4d, 0xf2, 0x6e, 0xd6};
+  const SHA256Hash kExpectedDigest{0xe9, 0xc4, 0x05, 0xd0, 0x1e, 0x83, 0xc7,
+                                   0x40, 0x7d, 0x5e, 0x61, 0xdb, 0x19, 0xd9,
+                                   0x46, 0x32, 0x86, 0xb4, 0xae, 0x06, 0xd6,
+                                   0xcc, 0x13, 0x02, 0x58, 0x80, 0x1d, 0x42,
+                                   0x43, 0xdf, 0x31, 0x88};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
@@ -1091,7 +1127,7 @@ TEST_F(IndexerOutboxTest, StableEnvelopeReservedSlotPreservesGolden)
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
       .epoch_sequence = 0x0102030405060708,
       .block_height = 123456789,
-      .protocol = "hogp/archive_a",
+      .protocol = protocol_from_text("hogp/archive_a"),
       .payload_byte_length = 0x1112131415161718,
   };
   header.record_identity.kind(IndexerOutboxRecordKind::IndexerOutboxCommitted);
@@ -1102,17 +1138,20 @@ TEST_F(IndexerOutboxTest, StableEnvelopeReservedSlotPreservesGolden)
   header.prev_hash[0] = 0x61;
   header.prev_hash[31] = 0x80;
   // This zero-valued reserved slot occupied the same wire position as the old
-  // ProposalTxsHash field. Keeping the existing golden pins header decoding
-  // compatibility across the semantic rename.
+  // ProposalTxsHash field, and still does. The golden itself moved when
+  // ProtocolCommit became a fixed 20-byte array: the token no longer carries a
+  // length prefix, so every field after it shifts. Envelope width is unchanged
+  // here only because this fixture's token is 14 characters; a production
+  // 17-character token encoded to 24 bytes before and 20 now.
   header.reserved_hash = {};
   const x23::Buf encoded = x23::serialize(header);
 
   constexpr size_t kExpectedByteLength = 212;
-  const SHA256Hash kExpectedDigest{0x34, 0x06, 0x07, 0xe7, 0x3b, 0xd3, 0xa4,
-                                   0xcf, 0xb0, 0x2f, 0x43, 0xc3, 0x80, 0x3c,
-                                   0xa0, 0x44, 0x96, 0x2f, 0xd2, 0xa8, 0xd4,
-                                   0x53, 0x12, 0x07, 0x56, 0xc5, 0x67, 0x82,
-                                   0xf6, 0x24, 0xd8, 0x68};
+  const SHA256Hash kExpectedDigest{0xde, 0x4c, 0x14, 0x76, 0x81, 0x5e, 0x79,
+                                   0x54, 0x27, 0x04, 0xd3, 0xf3, 0x0e, 0xe9,
+                                   0x3b, 0x7f, 0x2f, 0x4f, 0x25, 0x67, 0xa6,
+                                   0x5b, 0xe9, 0x85, 0xac, 0x87, 0x09, 0x19,
+                                   0xcb, 0xf2, 0x78, 0x62};
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
 }
@@ -1314,7 +1353,7 @@ TEST_F(IndexerOutboxTest, ProtocolMismatchPrecedesPayloadDecode)
   ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(47);
   TestOutboxFile envelope = read_envelope(dir_, filename);
-  envelope.protocol = "hogp/different";
+  envelope.protocol = protocol_from_text("hogp/different");
   set_envelope_payload(envelope, x23::Buf{0, 0, 0, 0});
   write_envelope(dir_, filename, envelope);
 
@@ -1332,7 +1371,7 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderProtocolPayloadOpaque)
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(15);
   TestOutboxFile envelope = read_envelope(dir_, filename);
-  envelope.protocol = "hogp/archival";
+  envelope.protocol = protocol_from_text("hogp/archival");
   set_envelope_payload(envelope, x23::Buf{0xff, 0xff, 0xff, 0xff});
   write_envelope(dir_, filename, envelope);
 
@@ -1340,7 +1379,7 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderProtocolPayloadOpaque)
   ASSERT_TRUE(records.has_value()) << records.error();
   ASSERT_EQ(records->size(), 1);
   EXPECT_EQ(records->front().block_height, 15);
-  EXPECT_EQ(records->front().protocol, "hogp/archival");
+  EXPECT_EQ(records->front().protocol, protocol_from_text("hogp/archival"));
   EXPECT_FALSE(store.load_committed(15)().has_value());
 }
 
@@ -1353,17 +1392,24 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderEpochOriginPayloadOpaque)
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
   TestOutboxFile origin =
       read_envelope(dir_, IndexerOutboxStore::current_epoch_origin_filename());
-  origin.protocol = "hogp/archival";
-  set_envelope_payload(origin, x23::Buf{0xff, 0xff, 0xff, 0xff});
+  origin.protocol = protocol_from_text("hogp/archival");
+  // Fixed-shape size, but opaque bytes that are not a decodable epoch origin:
+  // enumeration validates the digest and the size, but never decodes the
+  // payload of an older-protocol origin.
+  set_envelope_payload(origin,
+                       x23::Buf(x23::xdr_size(IndexerOutboxEpochOrigin{}),
+                                static_cast<uint8_t>(0xff)));
   write_envelope(dir_,
-                 IndexerOutboxStore::epoch_origin_filename("hogp/archival"),
+                 IndexerOutboxStore::epoch_origin_filename(
+                     protocol_from_text("hogp/archival")),
                  origin);
 
   auto origins = store.enumerate_epoch_origins_raw();
   ASSERT_TRUE(origins.has_value()) << origins.error();
   ASSERT_EQ(origins->size(), 2);
-  auto archival = std::ranges::find(*origins, "hogp/archival",
-                                    &IndexerOutboxEpochOriginInfo::protocol);
+  auto archival =
+      std::ranges::find(*origins, protocol_from_text("hogp/archival"),
+                        &IndexerOutboxEpochOriginInfo::protocol);
   ASSERT_NE(archival, origins->end());
   EXPECT_EQ(archival->first_height, 15);
   EXPECT_EQ(archival->first_prev_hash, committed.consensus_value.prev_hash);
@@ -1382,7 +1428,7 @@ TEST_F(IndexerOutboxTest, EnumerationReadsOnlyCommittedHeaders)
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(151);
   TestOutboxFile record = read_envelope(dir_, filename);
-  record.protocol = "hogp/archival";
+  record.protocol = protocol_from_text("hogp/archival");
   constexpr uint64_t kSparsePayloadBytes = 512ULL * 1024 * 1024;
   static_assert(kSparsePayloadBytes < kMaxIndexerOutboxPayloadBytes);
   write_sparse_record(dir_, filename, std::move(record), kSparsePayloadBytes);
@@ -1391,40 +1437,88 @@ TEST_F(IndexerOutboxTest, EnumerationReadsOnlyCommittedHeaders)
   ASSERT_TRUE(records.has_value()) << records.error();
   ASSERT_EQ(records->size(), 1UL);
   EXPECT_EQ(records->front().block_height, 151);
-  EXPECT_EQ(records->front().protocol, "hogp/archival");
+  EXPECT_EQ(records->front().protocol, protocol_from_text("hogp/archival"));
+}
+
+TEST_F(IndexerOutboxTest, EpochOriginPayloadSizeMustMatchFixedShape)
+{
+  // Every epoch origin -- current or archival -- is the fixed-size
+  // IndexerOutboxEpochOrigin struct. A tampered file can declare a payload up
+  // to the generic outbox cap with a matching digest; recovery must reject the
+  // size mismatch from the header alone, before enumeration hashes or load
+  // materializes the declared payload.
+  IndexerOutboxStore store = open_store(dir_);
+  auto committed = make_committed(152, {}, {});
+  initialize_test_origin(store, committed);
+  const std::string current_name =
+      IndexerOutboxStore::current_epoch_origin_filename();
+  constexpr uint64_t kSparsePayloadBytes = 512ULL * 1024 * 1024;
+  static_assert(kSparsePayloadBytes < kMaxIndexerOutboxPayloadBytes);
+
+  // An archival (non-current-protocol) origin is bound the same way -- there is
+  // no backwards-compat exemption. Enumeration reaches it and must reject the
+  // oversized declaration before validate_payload_digest() streams the bytes.
+  const std::string archival_name = IndexerOutboxStore::epoch_origin_filename(
+      protocol_from_text("hogp/archival"));
+  TestOutboxFile archival = read_envelope(dir_, current_name);
+  archival.protocol = protocol_from_text("hogp/archival");
+  write_envelope(dir_, archival_name, archival);
+  write_sparse_record(dir_, archival_name, std::move(archival),
+                      kSparsePayloadBytes);
+
+  auto origins = store.enumerate_epoch_origins_raw();
+  ASSERT_FALSE(origins.has_value());
+  EXPECT_NE(origins.error().find("epoch origin payload size mismatch"),
+            std::string::npos)
+      << origins.error();
+
+  // The current origin is bound on the load path too.
+  TestOutboxFile current = read_envelope(dir_, current_name);
+  write_sparse_record(dir_, current_name, std::move(current),
+                      kSparsePayloadBytes);
+  auto loaded = store.load_current_epoch_origin();
+  ASSERT_FALSE(loaded.has_value());
+  EXPECT_NE(loaded.error().find("epoch origin payload size mismatch"),
+            std::string::npos)
+      << loaded.error();
 }
 
 TEST_F(IndexerOutboxTest,
        CandidateCardinalityAndCommittedBodyMismatchAreRejected)
 {
-  IndexerOutboxStore store = open_store(dir_);
   ProposedTransaction body = make_body(5);
-  auto candidate = make_candidate(48, 15, {body}, {make_event(body, 0x55)});
-  ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
-  const std::string candidate_filename =
-      IndexerOutboxStore::candidate_filename(48);
-  mutate_payload<IndexerOutboxCandidatePayload>(dir_, candidate_filename,
-                                                [](auto &payload) {
-                                                  payload.tx_bodies.clear();
-                                                });
-  auto batch_mismatch = store.load_candidate(48)();
-  ASSERT_FALSE(batch_mismatch.has_value());
-  EXPECT_NE(batch_mismatch.error().find("cardinalities differ"),
-            std::string::npos);
-
   auto committed =
       make_committed(16, {body}, {make_event(body, /*marker=*/0x66)});
-  initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed)().has_value());
-  // The pairs live in the events file the record references, so a substituted
-  // body is a mutation of that file.
-  IndexerOutboxCommittedPayload mutated = committed;
-  mutated.tx_bodies[0] = make_body(6);
-  rewrite_events_file(dir_,
-                      committed.consensus_value.proposal_header.events_hash,
-                      mutated.event_logs, mutated.tx_bodies);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    auto candidate = make_candidate(48, 15, {body}, {make_event(body, 0x55)});
+    ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
+    const std::string candidate_filename =
+        IndexerOutboxStore::candidate_filename(48);
+    mutate_payload<IndexerOutboxCandidatePayload>(dir_, candidate_filename,
+                                                  [](auto &payload) {
+                                                    payload.tx_bodies.clear();
+                                                  });
+    auto batch_mismatch = store.load_candidate(48)();
+    ASSERT_FALSE(batch_mismatch.has_value());
+    EXPECT_NE(batch_mismatch.error().find("cardinalities differ"),
+              std::string::npos);
 
-  auto body_mismatch = store.load_committed(16)();
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+    // The pairs live in the events file the record references, so a
+    // substituted body is a mutation of that file.
+    IndexerOutboxCommittedPayload mutated = committed;
+    mutated.tx_bodies[0] = make_body(6);
+    rewrite_events_file(dir_,
+                        committed.consensus_value.proposal_header.events_hash,
+                        mutated.event_logs, mutated.tx_bodies);
+  }
+
+  // The store that published the file trusts it; the mutation is caught by
+  // the first load in a store that did not, which recomputes the roots.
+  IndexerOutboxStore reopened = open_store(dir_);
+  auto body_mismatch = reopened.load_committed(16)();
   ASSERT_FALSE(body_mismatch.has_value());
   EXPECT_NE(body_mismatch.error().find("body hash"), std::string::npos);
 }
@@ -1432,20 +1526,24 @@ TEST_F(IndexerOutboxTest,
 TEST_F(IndexerOutboxTest,
        CommittedNondeterministicDataMutationIsRejectedByEventRoot)
 {
-  IndexerOutboxStore store = open_store(dir_);
   ProposedTransaction body = make_body(7);
   auto committed =
       make_committed(161, {body}, {make_event(body, /*marker=*/0x77)});
-  initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed)().has_value());
-  IndexerOutboxCommittedPayload mutated = committed;
-  mutated.tx_bodies[0]
-      .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
-  rewrite_events_file(dir_,
-                      committed.consensus_value.proposal_header.events_hash,
-                      mutated.event_logs, mutated.tx_bodies);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+    IndexerOutboxCommittedPayload mutated = committed;
+    mutated.tx_bodies[0]
+        .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
+    rewrite_events_file(dir_,
+                        committed.consensus_value.proposal_header.events_hash,
+                        mutated.event_logs, mutated.tx_bodies);
+  }
 
-  auto result = store.load_committed(161)();
+  // Caught on the first load by a store that did not publish the file.
+  IndexerOutboxStore reopened = open_store(dir_);
+  auto result = reopened.load_committed(161)();
 
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("event root"), std::string::npos);

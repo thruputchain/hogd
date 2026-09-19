@@ -50,6 +50,8 @@ void set_nonblock(BorrowedFd fd, bool on = true);
 void enable_abortive_close(BorrowedFd fd);
 
 // Listen on a TCP port on any IP address (allowing IPv4 and IPv6).
+// In IPv4-only environments where AF_INET6 sockets are unavailable,
+// falls back to an IPv4-only listener.
 // stcplisten does not make the socket non-blocking
 UniqueFd stcplisten(std::uint16_t port, int backlog = 5);
 UniqueFd stcplisten(const sockaddr_storage &bind_addr, int backlog = 5);
@@ -157,16 +159,22 @@ namespace x23 {
 
 // Create a TCP connection.  You can bind the socket or make the file
 // descriptor non-blocking in prep_fd.
-UniqueFd tcpconnect(const sockaddr_storage &ss,
-                    std::function<void(int)> prep_fd = nullptr);
-inline UniqueFd
+//
+// The sockaddr_storage overload reports failure through std::expected and
+// does not throw.  The host/port overload resolves the address first and
+// throws on failure: the GaiError from address resolution, or the connect
+// error re-raised as a std::system_error.
+std::expected<UniqueFd, Errno>
+tcpconnect(const sockaddr_storage &ss,
+           std::function<void(int)> prep_fd = nullptr);
+inline std::expected<UniqueFd, MultiError<Errno, GaiError>>
 tcpconnect(auto host, auto port, std::function<void(int)> prep_fd = nullptr)
     requires requires { HostPort{std::move(host), std::move(port)}; }
 {
-  if (auto addr = HostPort{host, port}.to_addr())
-    return tcpconnect(*addr, std::move(prep_fd));
-  else
-    throw addr.error();
+  auto addr = HostPort{host, port}.to_addr();
+  if (!addr)
+    return addr.error();
+  return tcpconnect(*addr, std::move(prep_fd));
 }
 
 } // namespace x23

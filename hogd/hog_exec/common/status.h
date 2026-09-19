@@ -170,7 +170,7 @@ struct InvokeResult {
   }
 
   // Map the frame's deterministic result to a frame outcome: Return on a
-  // successful frame, Fault on a wasm trap / out-of-gas. A SystemError
+  // successful frame, Fault on a guest trap / out-of-gas. A SystemError
   // (Unrecoverable / Abandon / ValidationFailure) is returned on the error
   // channel. Callers that distinguish a manual revert override Return -> Abort
   // separately (that information is not carried in result_).

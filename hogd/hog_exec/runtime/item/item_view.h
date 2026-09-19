@@ -15,11 +15,13 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -41,7 +43,7 @@ class StorageSnapshotCache;
 class BytestringItem {
 public:
   StorageDelta get_delta() const;
-  SyscallStatus<void> validate() const;
+  [[nodiscard]] SyscallStatus<void> validate() const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
 
@@ -52,7 +54,7 @@ public:
 class NNIntItem {
 public:
   StorageDelta get_delta() const;
-  SyscallStatus<void> validate() const;
+  [[nodiscard]] SyscallStatus<void> validate() const;
   constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
   std::optional<int128_xdr> base_value_;
@@ -73,7 +75,7 @@ public:
     return StorageDelta(StorageDeltaType::kDeltaTypeDelete);
   }
 
-  constexpr static SyscallStatus<void> validate() { return {}; }
+  [[nodiscard]] constexpr static SyscallStatus<void> validate() { return {}; }
 };
 
 // Represent state of an item that is a retrocausal queue.
@@ -104,10 +106,10 @@ public:
   // snapshot block, this item's self-insert delta, or the proposal/validation
   // observation buffer) and is valid until the next RCQ mutation -- callers
   // copy it into the syscall result before returning to the contract.
-  SystemStatus<const QueueEntry *>
+  [[nodiscard]] x23::Async<SystemStatus<const QueueEntry *>>
   get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
 
-  SyscallStatus<void> insert_entry(QueueEntry const &entry);
+  [[nodiscard]] SyscallStatus<void> insert_entry(QueueEntry const &entry);
 
   uint32_t get_retrocausally_consumed_count() const
   {
@@ -115,12 +117,19 @@ public:
   }
 
 private:
-  SystemStatus<const RetrocausalQueueBlock *>
+  x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_block(uint64_t search_start_index) const;
 
-  SystemStatus<const QueueEntry *>
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const QueueEntry *>>
   get_next_concurrent_entry(uint32_t index,
                             ExecutionModeData &execution_mode_data) const;
+
+  // Proposal-mode miss path for the above: the only arm that reads the
+  // database.  [proposal_data] aliases the caller's ExecutionModeData and must
+  // outlive the call.
+  [[nodiscard]] x23::Async<SystemStatus<const QueueEntry *>>
+  get_next_concurrent_entry_proposing(uint32_t index,
+                                      ProposalModeData &proposal_data) const;
 
   const QueueEntry *get_next_self_entry(uint32_t index) const;
 
@@ -155,7 +164,7 @@ public:
   ReplayCacheItem &operator=(ReplayCacheItem const &other) = default;
 
   StorageDelta get_delta() const;
-  constexpr static SyscallStatus<void> validate() { return {}; }
+  [[nodiscard]] constexpr static SyscallStatus<void> validate() { return {}; }
 
   constexpr static ItemViewType kItemType = ItemViewType::kReplayCache;
 
@@ -230,8 +239,22 @@ public:
 
   std::optional<ItemViewType> get_item_type() const;
 
-  SystemStatus<void> load(StorageSnapshotCache &snapshot_cache,
-                          AddressAndKey const &addrkey) const;
+  // Populates base_item_ from the snapshot cache.  Answers with no coroutine
+  // frame on a cache hit; only a miss allocates and suspends on the database.
+  // Takes the frame key the caller already built and hashed for its frame
+  // probe, so the cache probe reuses that hash rather than computing another.
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<void>>
+  load(StorageSnapshotCache &snapshot_cache, FrameItemKey const &key) const;
+
+private:
+  // Miss path for load(): awaits the pending cache fill, then stores it.
+  x23::Async<SystemStatus<void>> load_slow(
+      x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>> pending) const;
+  // Shared tail of both load() paths.
+  [[nodiscard]] SystemStatus<void>
+  store_loaded(SystemStatus<const SnapshotStorageItem *> const &r) const;
+
+public:
   bool is_loaded() const { return base_item_.has_value(); }
 
   const SnapshotStorageItem &base_item() const
@@ -292,7 +315,7 @@ public:
   }
 
   template<typename ItemType>
-  SyscallStatus<void>
+  [[nodiscard]] SyscallStatus<void>
   set(ItemType const &type,
       StorageDeltaFlagSet flags = std::to_underlying(StorageDeltaFlags::None))
   {

@@ -24,7 +24,7 @@ Machine::Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,
   else if (!program_->contains_pc(initial_pc_)) {
     construction_trap_ = Trap::kBadPc;
   }
-  else if (memory_bytes > kMaxMemoryBytes) {
+  else if (memory_bytes > kMemoryCeilingBytes) {
     construction_trap_ = Trap::kBadMemory;
   }
   else {

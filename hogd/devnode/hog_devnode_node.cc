@@ -26,11 +26,11 @@
 #include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
-#include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/cleanup.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
@@ -45,11 +45,11 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
-#include "hogd/devnode/manifest_hex.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_parse.h"
-#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
@@ -63,6 +63,7 @@
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/hog_mempool/registration.h"
+#include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/ramdb/db.h"
@@ -84,10 +85,6 @@ namespace hogd {
 
 namespace {
 constexpr char kIndexerDbSubdir[] = "indexer-db";
-constexpr char kRuntimeSubdir[] = "runtime";
-constexpr char kRamDbSubdir[] = "ramdb";
-constexpr char kEventSubdir[] = "events";
-constexpr char kIndexerSubdir[] = "indexer";
 constexpr char kDataDirMetadataFile[] = "hog-devnode-data.json";
 constexpr std::size_t kMaxDataDirMetadataBytes = 64 * 1024;
 constexpr int kMetadataTempOpenFlags =
@@ -169,26 +166,13 @@ metadata_path(std::filesystem::path const &data_dir)
   return data_dir / kDataDirMetadataFile;
 }
 
-GenesisConfigurationV2
-build_genesis_configuration(LocalBootstrapConfig const &config,
-                            NetworkHash const &network_hash,
-                            StorageCostModel const &cost_model)
-{
-  BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config, network_hash, cost_model);
-  return std::move(artifact.genesis_configuration_v2);
-}
-
 std::string
-build_data_dir_metadata_json(
-    LocalBootstrapConfig const &config,
-    GenesisConfigurationV2 const &genesis_configuration)
+build_data_dir_metadata_json(LocalBootstrapConfig const &config)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{2});
     w.field("kind", "hog-devnode-data");
-    w.field("genesisHash", hex_string(sha256(genesis_configuration)));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.dev_wallet_profile);
       w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
@@ -196,6 +180,13 @@ build_data_dir_metadata_json(
               static_cast<std::int64_t>(config.user_account_count));
       w.field("devAccountSeed", config.seed);
       w.field("devAccountTokens", std::to_string(config.user_storage_tokens));
+      if (!config.network_config_overrides.empty()) {
+        w.object_field("networkConfigOverrides", [&](json::Writer &fields) {
+          for (auto const &[name, value] : config.network_config_overrides) {
+            fields.field(name, static_cast<std::int64_t>(value));
+          }
+        });
+      }
     });
   });
   return buffer;
@@ -311,7 +302,7 @@ require_string_value(std::string_view actual, std::string_view expected,
 }
 
 LocalBootstrapConfig
-parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
+parse_data_dir_metadata(std::string_view bytes)
 {
   std::expected<json::Value, json::ParseError> parsed = json::parse(bytes);
   if (!parsed.has_value()) {
@@ -381,6 +372,21 @@ parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
           std::string(require_string_field(config_json, "devWalletProfile",
                                            "bootstrapConfig")),
   };
+  if (const auto *overrides = config_json.find("networkConfigOverrides")) {
+    if (overrides->type() != json::Value::Type::kObject) {
+      throw std::runtime_error(
+          "data metadata networkConfigOverrides must be an object");
+    }
+    for (auto const &[name, value] : overrides->as_object()) {
+      const auto number = value.as_integer();
+      if (!number || *number < 0 || std::cmp_greater(*number, UINT32_MAX)) {
+        throw std::runtime_error(
+            "data metadata network override must be a uint32 integer");
+      }
+      add_local_network_config_override(config.network_config_overrides,
+                                        std::format("{}={}", name, *number));
+    }
+  }
   if (config.seed.empty()) {
     throw std::runtime_error(
         "hog-devnode data metadata devAccountSeed must not be empty");
@@ -390,13 +396,6 @@ parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
         "hog-devnode data metadata devWalletProfile must not be empty");
   }
   resolve_dev_wallet_profile(config.dev_wallet_profile);
-
-  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
-  const GenesisConfigurationV2 genesis =
-      build_genesis_configuration(config, network_hash, cost_model);
-  const std::string expected_genesis_hash = hex_string(sha256(genesis));
-  require_string_value(require_string_field(*parsed, "genesisHash", "root"),
-                       expected_genesis_hash, "genesisHash");
   return config;
 }
 
@@ -422,6 +421,13 @@ require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
     fail("--dev-account-tokens", std::to_string(persisted.user_storage_tokens),
          std::to_string(requested.user_storage_tokens));
   }
+  if (persisted.network_config_overrides !=
+      requested.network_config_overrides) {
+    throw std::runtime_error(
+        "hog-devnode data dir was initialized with different --network-config "
+        "overrides; reuse the original overrides or choose a fresh data "
+        "directory");
+  }
   if (persisted.dev_wallet_profile != requested.dev_wallet_profile) {
     fail("--dev-wallet-profile", persisted.dev_wallet_profile,
          requested.dev_wallet_profile);
@@ -431,8 +437,7 @@ require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
 void
 preflight_data_dir_metadata(
     std::optional<std::filesystem::path> const &data_dir,
-    LocalBootstrapConfig const &requested_config,
-    NetworkHash const &network_hash)
+    LocalBootstrapConfig const &requested_config)
 {
   if (!data_dir.has_value()) {
     return;
@@ -448,7 +453,7 @@ preflight_data_dir_metadata(
     return;
   }
   LocalBootstrapConfig persisted_config =
-      parse_data_dir_metadata(read_metadata_file(path), network_hash);
+      parse_data_dir_metadata(read_metadata_file(path));
   require_matching_bootstrap_config(persisted_config, requested_config);
 }
 
@@ -519,20 +524,20 @@ run_ramdb_open(std::size_t ramdb_bytes, Fn &&fn)
 
 HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
+    HogDevnodeDirectories directories,
     LocalBootstrapConfig const &bootstrap_config,
     std::optional<std::filesystem::path> const &data_dir,
     NetworkHash network_hash, std::size_t ramdb_bytes)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
-    ramdb_bytes_(ramdb_bytes), runtime_dir_(data_dir, kRuntimeSubdir),
-    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
-    indexer_dir_(data_dir, kIndexerSubdir), opened_db_([this] {
+    ramdb_bytes_(ramdb_bytes), dirs_(std::move(directories)),
+    opened_db_([this] {
       // Reject incompatible bootstrap intent before opening or migrating any
       // persisted chain state.
-      preflight_data_dir_metadata(data_dir_, bootstrap_config_, network_hash_);
+      preflight_data_dir_metadata(data_dir_, bootstrap_config_);
       return open_db_backend();
     }()),
-    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
+    event_ctx_(dirs_.event.directory()), event_sched_server_(event_ctx_),
     event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   try {
@@ -544,6 +549,7 @@ HogDevnodeNode::HogDevnodeNode(
 
     // Genesis bootstrap payloads can be larger than the transport default.
     mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    mempool_gateway_server_->max_message_size_ = kDevRpcMaxMessageSize;
     mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
 
     // Start the mempool RPC servers. All of the subsystems register with the
@@ -555,6 +561,8 @@ HogDevnodeNode::HogDevnodeNode(
         make_bind_host_port(bind_host_, /*port=*/0));
     mempool_coord_server_.start_server(
         make_bind_host_port(bind_host_, requested_scheduler_port));
+    mempool_gateway_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
     mempool_auth_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
 
@@ -724,22 +732,16 @@ HogDevnodeNode::prepare_for_failed_construction() noexcept
 {
   try {
     indexer_pull_controller_.reset();
-    // [mempool_auth_server_] invokes [MempoolCoordinatorRpc::auth_data_changed]
-    // (which broadcasts on the coordinator's [auth_data_height_]) via the
-    // registered callback, and is destroyed after [mempool_coord_server_].
-    // Unlike ~HogDevnodeNode, this cleanup does not reset [ctx_], so the DB's
-    // auth-change subscription manager does not drain in-flight forwards for
-    // us. Drain the auth server directly -- [~RpcServer] waits for in-flight
-    // handlers -- before the member destructors that run after we rethrow tear
-    // down the coordinator, so no new [auth_data_changed] is delivered past
-    // this point. Note this is necessary but not sufficient: the tail of an
-    // in-flight [auth_data_changed] (the [auth_data_height_] broadcast) runs on
-    // a thread-pool worker after the handler has already been resumed/failed,
-    // so ~RpcServer's drain does not cover it. The coordinator itself closes
-    // that gap by counting [auth_data_changed] in its [pending_detached_-
-    // coroutines_], which ~MempoolCoordinatorRpc waits on. Safe even when
-    // construction failed early: [mempool_auth_server_] is created by its
-    // member initializer.
+    // This cleanup closes the auth server before member destruction reaches
+    // the coordinator. First stop callback admission and drain callbacks that
+    // already captured coordinator state; this also clears the coordinator's
+    // borrowed auth pointer before the server is destroyed. This is also safe
+    // when construction failed before a callback was registered.
+    [](RpcServer<MempoolCoordinatorRpc> &mempool_coord_server)
+        -> x23::Async<void> {
+      co_await default_threadpool().bg();
+      co_await mempool_coord_server.impl()->disconnect_auth_callback();
+    }(mempool_coord_server_)();
     mempool_auth_server_.reset();
     // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
     // the coordinator registered the scheduler (e.g. the post-genesis failure
@@ -771,7 +773,7 @@ void
 HogDevnodeNode::init_indexer_backend()
 {
   std::filesystem::path db_path =
-      std::filesystem::path(indexer_dir_.directory()) / kIndexerDbSubdir;
+      std::filesystem::path(dirs_.indexer.directory()) / kIndexerDbSubdir;
   IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(db_path);
   if (!db_status) {
     panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
@@ -855,7 +857,12 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
 
   const DbTip tip = ctx_->get_tip();
   const BlockHeight tip_height = tip.value.proposal_header.block_height;
-  const BlockHeight indexed_height = indexer_db_->latest_block();
+  IndexerStatus<BlockHeight> indexed_height_status =
+      indexer_db_->latest_block();
+  if (!indexed_height_status) {
+    throw std::runtime_error("failed to read indexer watermark");
+  }
+  const BlockHeight indexed_height = *indexed_height_status;
   auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
   if (!latest) {
     throw std::runtime_error(
@@ -893,8 +900,7 @@ HogDevnodeNode::validate_fresh_data_dir(
   std::error_code ec;
   if (std::filesystem::exists(metadata_path(*data_dir_), ec)) {
     LocalBootstrapConfig persisted_config =
-        parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)),
-                                network_hash_);
+        parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)));
     require_matching_bootstrap_config(persisted_config, requested_config);
     return persisted_config;
   }
@@ -927,8 +933,7 @@ HogDevnodeNode::validate_recovered_data_dir(
   }
 
   LocalBootstrapConfig persisted_config =
-      parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)),
-                              network_hash_);
+      parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)));
   require_matching_bootstrap_config(persisted_config, requested_config);
   return persisted_config;
 }
@@ -940,12 +945,8 @@ HogDevnodeNode::write_data_dir_metadata() const
     return;
   }
 
-  write_metadata_atomically(
-      metadata_path(*data_dir_),
-      build_data_dir_metadata_json(
-          bootstrap_config_,
-          build_genesis_configuration(bootstrap_config_, network_hash_,
-                                      ctx_->get_cost_model())));
+  write_metadata_atomically(metadata_path(*data_dir_),
+                            build_data_dir_metadata_json(bootstrap_config_));
 }
 
 void
@@ -957,9 +958,6 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
                                              ctx_->get_cost_model());
   genesis_configuration_ = std::move(artifact.genesis_configuration);
   genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
-  genesis_configuration_v2_ = std::move(artifact.genesis_configuration_v2);
-  genesis_configuration_v2_.storage_cost_model =
-      ctx_->get_cost_model().to_xdr();
   bootstrap_accounts_ = std::move(artifact.accounts);
   if (ctx_->get_tip().value.proposal_header.block_height == 0) {
     throw std::runtime_error(
@@ -984,10 +982,16 @@ HogDevnodeNode::materialize_bootstrap_accounts(
       build_local_bootstrap_account_artifact(config, network_hash_,
                                              ctx_->get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
-  genesis_configuration_v2_ = artifact.genesis_configuration_v2;
-  CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(
-               std::move(artifact.genesis_configuration_v2))(),
-           DbSchedResult::DbSchedResultOK);
+  const auto genesis_result = client.schedcoord_load_genesis_configuration(
+      std::move(artifact.genesis_configuration))();
+  if (genesis_result != DbSchedResult::DbSchedResultOK) {
+    panic("devnode could not load the genesis configuration: {}. A "
+          "--network-config override is likely outside the bounds this build "
+          "accepts. If this node has a persistent --data-dir, it already "
+          "recorded the requested overrides; correct them and start from a "
+          "fresh data directory.",
+          genesis_result);
+  }
   co_await initialize_fresh_event_outbox_origin();
   register_event_with_mempool();
   register_executor_with_mempool();
@@ -1081,20 +1085,20 @@ HogDbDAO
 HogDevnodeNode::open_db_backend() const
 {
   DBStatus<std::uint64_t> lsn = run_ramdb_open(ramdb_bytes_, [&] {
-    return Database::check(db_dir_.directory(), ramdb_bytes_);
+    return Database::check(dirs_.db.directory(), ramdb_bytes_);
   });
   if (!lsn.has_value()) {
     lsn.error().raise("ramdb integrity check failed for '{}'",
-                      db_dir_.directory());
+                      dirs_.db.directory());
   }
   info("database '{}' passed integrity check; current LSN is {}",
-       db_dir_.directory(), *lsn);
+       dirs_.db.directory(), *lsn);
 
   DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(ramdb_bytes_, [&] {
-    return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
+    return Database::open_lsn(dirs_.db.directory(), *lsn, ramdb_bytes_);
   });
   if (!ramdb.has_value()) {
-    ramdb.error().raise("ramdb open failed for '{}'", db_dir_.directory());
+    ramdb.error().raise("ramdb open failed for '{}'", dirs_.db.directory());
   }
 
   HogDbDAO db(RAMDB(std::move(*ramdb)));
@@ -1117,30 +1121,11 @@ HogDevnodeNode::open_db_backend() const
   }
   if (RPCContext::has_committed_tip(*recovered_tip) &&
       recovered_tip->value.proposal_header.network_hash != network_hash_) {
-    ProposalHeader &header = recovered_tip->value.proposal_header;
-    HogDbStatus<DeployedContractHash> root =
-        db.read_address_metadata(kGenesisRootContractAddress);
-    const bool is_legacy_genesis =
-        root && root->contract_type == ContractType::kNative;
-    if (header.block_height <= 1 && header.network_hash == NetworkHash{} &&
-        is_legacy_genesis) {
-      header.network_hash = network_hash_;
-      if (HogDbStatus<void> status = db.write_dbtip(*recovered_tip); !status) {
-        status.error().raise("failed to migrate genesis network hash");
-      }
-      if (HogDbStatus<std::uint64_t> status = db.commit(); !status) {
-        status.error().raise("failed to persist genesis network hash");
-      }
-      info("migrated legacy genesis network hash to {}",
-           format_network_hash(network_hash_));
-    }
-    else {
-      throw std::runtime_error(std::format(
-          "recovered chain network hash {} does not match requested network "
-          "hash {}",
-          format_network_hash(header.network_hash),
-          format_network_hash(network_hash_)));
-    }
+    throw std::runtime_error(std::format(
+        "unsupported hog-devnode data directory: recovered chain network "
+        "hash {} does not match requested network hash {}",
+        format_network_hash(recovered_tip->value.proposal_header.network_hash),
+        format_network_hash(network_hash_)));
   }
   return db;
 }
@@ -1158,6 +1143,17 @@ HogDevnodeNode::init_db_backend(
     }
     ctx_->initialize_cost_model(*cost_model);
     recovered_existing_chain_ = true;
+    // Hog ages are scheduler-visible state derived from committed balances,
+    // and nothing republishes them for blocks that committed before this
+    // process started. hog-db's own main does this at startup; a composed
+    // devnode has to as well, or every account reads zero hogs available and
+    // the scheduler discards every transaction it is handed.
+    HogDbStatus<void> reconciled = reconcile_startup_hog_ages(ctx_->get_db());
+    if (!reconciled.has_value()) {
+      throw std::runtime_error(
+          std::format("failed to reconcile startup hog ages: {}",
+                      reconciled.error()));
+    }
     info("recovered hog-devnode database at committed height {}",
          ctx_->get_tip().value.proposal_header.block_height);
   }

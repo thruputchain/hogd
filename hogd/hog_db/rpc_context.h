@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/container/synchronized_map.h"
@@ -30,9 +31,12 @@
 #include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/mvar.h"
 #include "x23/rpc.h"
 
@@ -68,9 +72,11 @@ public:
     if (ret.has_value()) {
       // There is an existing dbtip, meaning that blocks have already been
       // committed to the db.
-      *tip_.take() = *ret;
-      current_committed_id_ = ret->id;
-      current_committed_height_ = ret->value.proposal_header.block_height;
+      auto state = tip_.take();
+      state->params = NetworkConfigParams(ret->network_config.v0());
+      state->tip = std::move(*ret);
+      current_committed_id_ = state->tip.id;
+      current_committed_height_ = state->tip.value.proposal_header.block_height;
     }
     else if (ret.error().code() != HogDbCode::kNotFound) {
       ret.error().raise("failed to read DbTip");
@@ -81,7 +87,7 @@ public:
 
   // getters.
   HogDbDAO &get_db() { return db_; }
-  DbTip get_tip() { return *tip_.take(); }
+  DbTip get_tip() { return tip_.take()->tip; }
   static bool has_committed_tip(DbTip const &tip)
   {
     return tip.value.proposal_header.block_height >= 0;
@@ -91,8 +97,9 @@ public:
   {
     const BlockTXID id = new_tip.id;
     const BlockHeight height = new_tip.value.proposal_header.block_height;
-    auto tip = tip_.take();
-    *tip = std::move(new_tip);
+    auto state = tip_.take();
+    state->params = NetworkConfigParams(new_tip.network_config.v0());
+    state->tip = std::move(new_tip);
     current_committed_height_.store(height, std::memory_order_relaxed);
     current_committed_id_.store(id, std::memory_order_release);
   }
@@ -100,6 +107,20 @@ public:
   {
     return auth_change_subscription_manager_;
   }
+
+  // Serializes ramdb write passes against each other and against the
+  // sync()/snapshot at block commit. hog_db writes in coarse passes — the
+  // per-block changeset apply plus dbtip update ending in commit(), and
+  // the per-block hog-age batch — so each pass takes this once and
+  // Database::sync()'s no-concurrent-writes precondition (which ramdb's
+  // write_record() CHECKs) holds by construction instead of by the
+  // RPC-transport serialization described in #3397. The genesis-load
+  // writes run before any concurrent writer exists and are exempt.
+  // A contending pass parks its worker, which is safe here where it is not
+  // for co_wait_for_no_commit_publishing(): at most one hog-age pass contends
+  // per block, and commit_block() never waits on the x23 ThreadPool while
+  // holding the lock.
+  std::mutex &ramdb_write_pass_lock() { return ramdb_write_pass_lock_; }
 
   // Get the committed block height, when exact synchronization with DbTip is
   // not required. current_committed_height_ is updated when a block is
@@ -120,12 +141,24 @@ public:
     cost_model_.emplace(cost_model);
   }
 
+  // Install the chain's execution parameters into the tip. Called at genesis
+  // load, before the genesis commit; update_dbtip preserves the field, so the
+  // commit's write_dbtip persists it.
+  void set_network_config(NetworkConfig const &network_config)
+  {
+    tip_.with([&](TipState &state) {
+      state.tip.network_config = network_config;
+      state.params = NetworkConfigParams(network_config.v0());
+    });
+  }
+
   // Install the chain-configured default wallet into the tip. Called at
   // genesis load, before the genesis commit; update_dbtip preserves the
   // field, so the commit's write_dbtip persists it.
   void set_default_wallet(DeployedContractHash const &default_wallet)
   {
-    tip_.with([&](DbTip &tip) { tip.default_wallet = default_wallet; });
+    tip_.with(
+        [&](TipState &state) { state.tip.default_wallet = default_wallet; });
   }
 
   // opens a new block transaction.
@@ -134,16 +167,19 @@ public:
                                                      BlockExecutionMode mode);
 
   // Opens a new block transaction only if parent_id is still the committed
-  // tip. If a commit is currently being published, waits until the tip and
-  // committed data are consistent before checking parent_id.
-  HogDbStatus<PerThreadARC<BlockTX> *>
+  // tip. If a commit is currently being published, suspends until the tip
+  // and committed data are consistent before checking parent_id (a
+  // coroutine, never a parked worker -- see
+  // co_wait_for_no_commit_publishing()).
+  x23::Async<HogDbStatus<PerThreadARC<BlockTX> *>>
   open_block_tx_at_parent(BlockTXID parent_id, BlockTXID bid,
                           BlockExecutionMode mode);
 
-  // Opens a viewing block transaction and returns the tip it views. If a commit
-  // is currently being published, waits until the tip and committed data are
-  // consistent before opening.
-  HogDbStatus<ViewingSnapshot> open_viewing_snapshot(BlockTXID bid);
+  // Opens a viewing block transaction and returns the tip it views. If a
+  // commit is currently being published, suspends until the tip and
+  // committed data are consistent before opening (a coroutine, never a
+  // parked worker -- see co_wait_for_no_commit_publishing()).
+  x23::Async<HogDbStatus<ViewingSnapshot>> open_viewing_snapshot(BlockTXID bid);
 
   // retrieves an open block transaction.
   // If the returned value is not null, then
@@ -159,6 +195,9 @@ public:
   // the blocktx is garbage collected.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
+  // Advance the committed tip. Carries the chain-configuration fields
+  // (default_wallet, network_config) forward by mutating the tip in place, so
+  // a commit that does not change them leaves them in force.
   HogDbStatus<void> update_dbtip(BlockTXID bid, ConsensusValue value,
                                  const StorageLongHash &db_hash);
 
@@ -220,14 +259,15 @@ public:
            committed_height != snapshot.value.proposal_header.block_height;
   }
 
-  // Block until no commit is mid-publication, so a committed-tip reader can
-  // start from a point where the tip and ramdb data are consistent. Returns
-  // immediately if nothing is publishing. Used to keep committed-tip read
-  // retries from spinning through a publication window.
-  void wait_for_no_commit_publishing()
-  {
-    commit_publishing_.wait(true, std::memory_order_acquire);
-  }
+  // Suspend until no commit is mid-publication, so a committed-tip reader
+  // can start from a point where the tip and ramdb data are consistent.
+  // Returns immediately if nothing is publishing. Used to keep committed-tip
+  // read retries from spinning through a publication window.
+  //
+  // A coroutine, never a parked thread: the rpc handlers that wait here run
+  // on x23 ThreadPool workers, which a mid-publication committer may itself
+  // need to resume on.
+  x23::Async<void> co_wait_for_no_commit_publishing();
 
   class CommitPublicationGuard {
   public:
@@ -253,12 +293,18 @@ private:
 
   // the database used to persist state.
   HogDbDAO db_;
-  x23::MVar<DbTip> tip_{[] {
+  // The tip and the parameters its network config puts in force.
+  struct TipState {
+    DbTip tip;
+    NetworkConfigParams params;
+  };
+  x23::MVar<TipState> tip_{[] {
     ConsensusValue value{};
     value.proposal_header.block_height = -1;
-    return DbTip{.id = std::numeric_limits<BlockTXID>::max(),
-                 .storage_long_hash = {},
-                 .value = std::move(value)};
+    return TipState{.tip = DbTip{.id = std::numeric_limits<BlockTXID>::max(),
+                                 .storage_long_hash = {},
+                                 .value = std::move(value)},
+                    .params = NetworkConfigParams{}};
   }()};
   // Scalar mirror of tip_.id for the per-RPC snapshot staleness check. DbTip
   // contains the 2 KiB storage hash and a non-trivial ConsensusValue, so
@@ -272,7 +318,15 @@ private:
   std::optional<StorageCostModel> cost_model_;
   // protects block_txes_.
   std::mutex lock_;
+  // see ramdb_write_pass_lock().
+  std::mutex ramdb_write_pass_lock_;
   std::atomic<bool> commit_publishing_{false};
+
+  // Bumped and broadcast by finish_commit_publication() so
+  // co_wait_for_no_commit_publishing() waiters wake without a parked thread.
+  // Waiters re-check commit_publishing_ in a loop, so a spurious wake is
+  // harmless and the only invariant is bump-after-clear.
+  x23::CoroFutex<uint64_t> publication_generation_{0};
   // pending block transactions.
   // The block txs are refcounted.
   // Each InvokeTX acquires a reference;  when the InvokeTX is closed, it

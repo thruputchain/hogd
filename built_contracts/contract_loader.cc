@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -17,9 +18,6 @@
 namespace hogd {
 
 namespace {
-
-constexpr std::string_view kSystemContractsDir =
-    "/usr/share/groundhog/contracts";
 
 std::mutex contract_artifact_directories_mutex;
 std::vector<std::filesystem::path> contract_artifact_directories;
@@ -43,7 +41,6 @@ contract_search_directories()
   directories.push_back(std::filesystem::path(kBuildRoot) / "built_contracts");
   directories.push_back(
       std::filesystem::path(x23::getprogpath()).parent_path() / "contracts");
-  directories.emplace_back(kSystemContractsDir);
   return directories;
 }
 
@@ -63,7 +60,17 @@ load_raw_file(std::string_view filename)
     }
   }
   if (!f) {
-    panic("failed to load contract artifact: {}", filename);
+    std::string searched_directories;
+    for (const std::filesystem::path &search_dir : search_directories) {
+      if (!searched_directories.empty()) {
+        searched_directories.append(", ");
+      }
+      searched_directories.append(search_dir.string());
+    }
+    panic("failed to load contract artifact: {}; searched directories: {}; "
+          "pass --contract-artifacts-dir <DIR> to add a contract artifact "
+          "directory",
+          filename, searched_directories);
   }
 
   ContractBlob contents;

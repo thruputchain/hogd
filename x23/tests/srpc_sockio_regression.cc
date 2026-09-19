@@ -2,9 +2,13 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
+#include <expected>
+#include <semaphore>
 #include <string_view>
 #include <sys/socket.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 
@@ -29,7 +33,7 @@ TEST(SrpcRegression, ProgramUnavailableReplyIsFramed)
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
 
-  UniqueFd client = tcpconnect("127.0.0.1", port);
+  UniqueFd client = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client);
 
   UniqueFd accepted(::accept(listener.get(), nullptr, nullptr));
@@ -96,6 +100,43 @@ TEST(SockioRegression, BoundedStrCStr)
   bs.c_str();
 }
 
+TEST(SockioRegression, TcpConnectSockaddrReturnsFdOnSuccess)
+{
+  UniqueFd listener = stcplisten(0);
+  ASSERT_TRUE(listener);
+  uint16_t port = get_port(local_addr(listener));
+
+  auto target = HostPort{"127.0.0.1", port}.to_addr();
+  ASSERT_TRUE(target.has_value());
+
+  std::expected<UniqueFd, Errno> res = tcpconnect(*target);
+  ASSERT_TRUE(res.has_value());
+  EXPECT_TRUE(*res);
+}
+
+TEST(SockioRegression, TcpConnectSockaddrReturnsErrnoOnRefusal)
+{
+  // Bind a listener to claim a free port, then close it so nothing is
+  // listening.  Connecting to the now-vacant port must fail with an
+  // unexpected Errno rather than throwing.
+  auto bind_addr = HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(bind_addr.has_value());
+
+  uint16_t port = 0;
+  {
+    UniqueFd listener = stcplisten(*bind_addr);
+    ASSERT_TRUE(listener);
+    port = get_port(local_addr(listener));
+  }
+
+  auto target = HostPort{"127.0.0.1", port}.to_addr();
+  ASSERT_TRUE(target.has_value());
+
+  std::expected<UniqueFd, Errno> res = tcpconnect(*target);
+  ASSERT_FALSE(res.has_value());
+  EXPECT_EQ(res.error().error_code(), std::errc::connection_refused);
+}
+
 namespace {
 
 // Metadata for a synthetic non-void RPC whose result is a bounded vector
@@ -158,7 +199,7 @@ TEST(SrpcRegression, OversizedBoundedVecReplyIsDecodeError)
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
 
-  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client_fd);
   UniqueFd peer_fd{::accept(listener.get(), nullptr, nullptr)};
   ASSERT_TRUE(peer_fd);
@@ -246,64 +287,134 @@ TEST(RpcRegression, InFlightDisconnectIsTransportException)
 
 namespace {
 
-// Reports an enormous serialized size while writing only four bytes, so the
-// oversized-record path can be exercised without materializing gigabytes.
-struct HugeReportedPayloadForRecordRegression {
-  size_t serialized_size;
+// Metadata for a synthetic void call, used only to build a well-formed
+// client call record.  The record is never written to the socket.  Only
+// the fields call_msg() reads are declared: the version_name/proc_name
+// strings the logging and error paths use are unreferenced here, and
+// -Wunused-const-variable rejects them at internal linkage.
+struct queued_callback_proc {
+  struct version_meta {
+    static constexpr std::uint32_t program = 0x5a23'2284;
+    static constexpr std::uint32_t version = 1;
+  };
+
+  static constexpr std::uint32_t proc = 1;
+  using return_type = void;
 };
 
-inline size_t
-xdr_size(const HugeReportedPayloadForRecordRegression &payload)
-{
-  return payload.serialized_size;
-}
-
-inline void
-xdr_serialize(auto &serializer,
-              const HugeReportedPayloadForRecordRegression & /*payload*/)
-{
-  serializer.put32(0xfeedfaceU);
-}
+// Exposes the protected write_call() so a client callback can be parked in
+// write_queue_ without a write worker running to drain it.  This is the same
+// state a real send_call() is in for the window between write_call() queueing
+// the callback and write_worker() registering it in PendingCalls::cbmap_.
+struct QueueOnlyStream : SRpcStream<> {
+  using SRpcStream<>::SRpcStream;
+  using SRpcFd::write_call;
+};
 
 } // namespace
 
-// An ONC RPC record marker carries the payload length in its low 31 bits.
-// make_record() used to guard the limit with a debug-only assertion, so a
-// release sender could emit a wrapped marker for an oversized payload (a
-// 0x80000004-byte record produced marker 0x80000000: a zero-length final
-// record) and desynchronize the stream (#2075).  The guard is a runtime
-// throw now; verify it holds in every build mode.
-TEST(RpcRecordRegression, OversizedRecordIsRejectedBeforeMarkerWrite)
+// Regression test for issue #1987: SRpcFd::stop() must complete every
+// outstanding client callback, including one still sitting in write_queue_
+// waiting for the write worker to move it into PendingCalls::cbmap_.  stop()
+// used to drain cbmap_ only, so a callback queued in that window was never
+// invoked -- destroying the sole failure-completion path for the call.  The
+// SRpcStream::send_call() that queued it then waited forever on its stack
+// semaphore, stranding the calling thread (an executor worker, for
+// contract-originated database RPCs reaching SRPC via DatabaseProxy).
+// Expected behaviour: the callback is invoked exactly once, with a null
+// rpc_msg, so send_call() wakes and reports an RPC failure.
+TEST(SrpcRegression, StopCompletesQueuedClientCallback)
 {
-  using enum auth_flavor;
+  auto bind_addr = HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(bind_addr.has_value());
+  UniqueFd listener = stcplisten(*bind_addr);
+  ASSERT_TRUE(listener);
+  uint16_t port = get_port(local_addr(listener));
+
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
+  ASSERT_TRUE(client_fd);
+  // Accepted but intentionally idle: nothing ever replies on this stream.
+  UniqueFd peer_fd{::accept(listener.get(), nullptr, nullptr)};
+  ASSERT_TRUE(peer_fd);
+
+  // Deliberately no go(): with no write worker running, the queued callback
+  // stays in write_queue_ and never reaches cbmap_, making the handoff window
+  // deterministic.
+  QueueOnlyStream stream(std::move(client_fd));
+
+  std::atomic<int> callback_count{0};
+  std::atomic<bool> reported_failure{false};
+  std::binary_semaphore callback_done{0};
+
+  stream.write_call(make_record(call_msg<queued_callback_proc>()),
+                    [&](rpc_msg *msg, BufView) {
+                      reported_failure = msg == nullptr;
+                      ++callback_count;
+                      callback_done.release();
+                    });
+
+  stream.stop();
+
+  EXPECT_TRUE(callback_done.try_acquire_for(std::chrono::milliseconds(50)))
+      << "stop() left a queued client callback stranded; the send_call() that "
+         "queued it would block forever";
+  // stop() is one-shot, and the stream's destructor calls it again, so the
+  // callback must run exactly once with a failure indication.
+  EXPECT_EQ(callback_count.load(), 1);
+  EXPECT_TRUE(reported_failure.load());
+}
+
+// A framed record smaller than the single-fragment limit carries an intact,
+// non-wrapped marker: the final-fragment bit is set and the low 31 bits equal
+// the true payload length.
+TEST(RpcRecordRegression, SmallRecordFramesWithIntactMarker)
+{
+  rpc_msg reply{.xid = 0x12345678};
+  msg_set_reply_stat(&reply, accept_stat::SUCCESS);
+  Buf record = make_record(reply, std::uint32_t{0xfeedface});
+
+  const uint32_t marker = getbe<std::uint32_t>(record.data());
+  EXPECT_EQ(marker & 0x80000000U, 0x80000000U); // final-fragment bit
+  EXPECT_EQ(static_cast<size_t>(marker & 0x7fffffffU), record.size() - 4UZ);
+}
+
+// A server must never frame a reply larger than the negotiated per-message
+// cap: the peer's reader fails the whole connection on an over-cap record, and
+// a payload past the 31-bit limit wraps its marker and desynchronizes the
+// stream (#2075).  cap_server_reply() downgrades an over-cap reply to a
+// SYSTEM_ERR reply carrying the same xid, so an oversized handler result
+// becomes a clean per-call error; a reply within the cap is returned intact.
+TEST(RpcRecordRegression, OverCapServerReplyDowngradesToSystemErr)
+{
+  using enum accept_stat;
+  using enum reply_stat;
   using enum msg_type;
 
-  rpc_msg msg{};
-  msg.xid = 0x12345678;
-  msg.body.mtype(CALL);
-  msg.body.cbody().rpcvers = 2;
-  msg.body.cbody().prog = 0x20000001;
-  msg.body.cbody().vers = 1;
-  msg.body.cbody().proc = 0;
-  msg.body.cbody().cred.flavor = AUTH_NONE;
-  msg.body.cbody().verf.flavor = AUTH_NONE;
-
-  // The first record size whose marker wraps: 0x80000004 bytes on the wire
-  // is payload 0x80000000, one past the 0x7fffffff single-fragment limit.
-  // The reported size drives the rejection before any buffer is allocated,
-  // so the huge value never materializes 2 GiB.
-  const size_t msg_size = xdr_size(msg);
-  ASSERT_LT(msg_size, kMaxRecordPayloadSize);
-  const HugeReportedPayloadForRecordRegression oversized{
-      .serialized_size = kMaxRecordPayloadSize + 1UZ - msg_size,
+  constexpr std::uint32_t kXid = 0xabcdef01;
+  auto make_reply = [] {
+    rpc_msg reply{.xid = kXid};
+    msg_set_reply_stat(&reply, SUCCESS);
+    return make_record(reply, std::uint32_t{1}, std::uint32_t{2},
+                       std::uint32_t{3}, std::uint32_t{4});
   };
-  EXPECT_THROW(make_record(msg, oversized), XdrBadInput);
+  const size_t payload = make_reply().size() - 4UZ;
 
-  // A normal (small) record still frames, with an intact non-wrapped marker.
-  Buf record = make_record(msg, std::uint32_t{0xfeedface});
-  const uint32_t marker = getbe<uint32_t>(record.data());
-  EXPECT_EQ(marker & 0x80000000U, 0x80000000U); // final-fragment bit set
-  EXPECT_EQ(static_cast<size_t>(marker & 0x7fffffffU), record.size() - 4UZ);
+  // Within the cap: returned untouched.
+  Buf under = cap_server_reply(make_reply(), payload);
+  EXPECT_EQ(under.size() - 4UZ, payload);
+
+  // One byte over the cap: downgraded to a SYSTEM_ERR reply that fits, with the
+  // original xid preserved so the caller matches it to its pending request.
+  Buf over = cap_server_reply(make_reply(), payload - 1UZ);
+  ASSERT_GE(over.size(), 8UZ);
+  EXPECT_LE(over.size() - 4UZ, payload - 1UZ);
+  EXPECT_EQ(getbe<std::uint32_t>(over.data() + 4), kXid);
+
+  rpc_msg decoded{};
+  deserialize(&decoded, BufView{over.data() + 4, over.size() - 4});
+  EXPECT_EQ(decoded.body.mtype(), REPLY);
+  EXPECT_EQ(decoded.body.rbody().stat(), MSG_ACCEPTED);
+  EXPECT_EQ(decoded.body.rbody().areply().reply_data.stat(), SYSTEM_ERR);
 }
 
 } // namespace x23

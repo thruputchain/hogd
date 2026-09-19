@@ -5,6 +5,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -19,14 +20,15 @@ namespace hogd {
 TEST(MultiplexedContextTest, UnregisteredTypeAtInvokeIsUnrecoverable)
 {
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{});
+      std::unordered_map<ContractType,
+                         std::pair<RuntimeContext const *, bool>>{});
 
   DeployedContract deployed(DeployedContractHash{
       .hash = SHA256Hash{},
       .contract_size = 0,
       .contract_type = ContractType::kMockTest,
   });
-  auto runtime = context.make_new_runtime(deployed, nullptr);
+  auto runtime = context.make_new_runtime(deployed, nullptr)();
   ASSERT_FALSE(runtime.has_value());
   EXPECT_EQ(runtime.error().code(), SystemErrorCode::Unrecoverable);
 }
@@ -34,9 +36,11 @@ TEST(MultiplexedContextTest, UnregisteredTypeAtInvokeIsUnrecoverable)
 TEST(MultiplexedContextTest, UnregisteredTypeVerifyIsDeterministic)
 {
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{});
+      std::unordered_map<ContractType,
+                         std::pair<RuntimeContext const *, bool>>{});
 
-  EXPECT_EQ(context.verify_contract(Contract(ContractType::kMockTest)),
+  EXPECT_EQ(context.verify_contract(Contract(ContractType::kMockTest),
+                                    NetworkConfigParams{}),
             InvokeErrorCode::Deterministic);
 }
 

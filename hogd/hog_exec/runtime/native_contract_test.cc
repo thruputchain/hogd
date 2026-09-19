@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -14,18 +15,16 @@
 #include <utility>
 #include <vector>
 
-#include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
-#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -45,10 +44,17 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/sockio.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
+
+// The mock serves a genesis tip at height 0, so the executing block is 1.
+constexpr BlockExecutionContext kTestBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1'700'000'000,
+};
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class NativeContractTest : public ::testing::Test {
@@ -74,16 +80,29 @@ protected:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
 
-  SystemCallHandler make_handler(Transaction const &tx,
-                                 StorageSnapshotCache &snapshot,
+  // The handler borrows tx.contracts_to_deploy for its whole lifetime, so the
+  // fixture keeps every transaction alive here (call sites pass temporaries
+  // freely). A deque so growth never moves earlier entries a live handler
+  // still references.
+  std::deque<Transaction> handler_txs_;
+
+  SystemCallHandler make_handler(Transaction tx, StorageSnapshotCache &snapshot,
                                  BlockID block_id, TransactionID tx_id,
                                  RuntimeContext &runtime_context)
   {
     assert(db_proxy_ != nullptr);
     assert(event_server_proxy_ != nullptr);
 
+    // None of these tests is about replay expiry, and a default-constructed
+    // uniquifier expires at height 0. Leave an explicit choice alone.
+    if (tx.uniquifier.block_expiry_height == 0) {
+      tx.uniquifier.block_expiry_height = 1'000'000;
+    }
+
+    handler_txs_.push_back(std::move(tx));
     return SystemCallHandler(
-        tx, snapshot, PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
+        handler_txs_.back(), snapshot,
+        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
         PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
         ProposalModeCtor{}, runtime_context);
   }
@@ -91,7 +110,8 @@ protected:
 
 TEST_F(NativeContractTest, BasicInstantiate)
 {
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -100,24 +120,26 @@ TEST_F(NativeContractTest, BasicInstantiate)
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
     fns_0.emplace(0,
-                  [](NativeSyscallContext & /*unused*/) noexcept
-                      -> InvokeStatus<void> { return {}; });
+                  [](NativeSyscallContext & /*unused*/)
+                      -> x23::Async<InvokeStatus<void>> {
+                    co_return InvokeStatus<void>{};
+                  });
     fns_0.emplace(1,
-                  [](NativeSyscallContext & /*unused*/) noexcept
-                      -> InvokeStatus<void> {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                  [](NativeSyscallContext & /*unused*/)
+                      -> x23::Async<InvokeStatus<void>> {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   });
     auto contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
     // Invokes another contract, returns the error code of the other contract
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
     fns_1.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
 
           if (calldata.size() !=
               sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           Runtime::MethodID invoked_id =
               *reinterpret_cast<const Runtime::MethodID *>(calldata.data());
@@ -131,19 +153,17 @@ TEST_F(NativeContractTest, BasicInstantiate)
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto invoke_res =
-              ctx.syscall<SyscallNo::kInvoke>(invoked_addr,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+          auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+              invoked_addr, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
 
           if (invoke_res) {
-            return (invoke_res.value() ==
-                    SyscallErrorCode::kSyscallErrorCodeNone)
-                       ? InvokeStatus<void>{}
-                       : InvokeError{InvokeErrorCode::Deterministic};
+            co_return (invoke_res.value() ==
+                       SyscallErrorCode::kSyscallErrorCodeNone)
+                ? InvokeStatus<void>{}
+                : InvokeError{InvokeErrorCode::Deterministic};
           }
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
     auto contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
 
@@ -154,10 +174,13 @@ TEST_F(NativeContractTest, BasicInstantiate)
   };
   auto context = make_context();
 
-  Transaction tx{};
-  tx.contracts_to_deploy.push_back(contract);
+  // Register the contract in the snapshot so make_new_runtime can resolve
+  // it: initial validation now refuses any non-rv32 attachment, so a native
+  // contract can no longer ride in via contracts_to_deploy.
+  snapshot_server_->impl()->setup_create_contract(contract);
 
-  SystemCallHandler handler = make_handler(tx, snapshot, 0, 0, *context);
+  SystemCallHandler handler =
+      make_handler(Transaction{}, snapshot, 0, 0, *context);
 
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
@@ -166,16 +189,16 @@ TEST_F(NativeContractTest, BasicInstantiate)
   };
 
   auto runtime_res =
-      context->make_new_runtime(deployed_contract_hash, &handler);
+      context->make_new_runtime(deployed_contract_hash, &handler)();
   ASSERT_TRUE(runtime_res.has_value());
   auto runtime = std::move(runtime_res.value());
   ASSERT_TRUE(runtime != nullptr);
 
-  auto res = runtime->invoke(0, UINT64_MAX);
+  auto res = runtime->invoke(0, UINT64_MAX)();
 
   ASSERT_TRUE(res.result_);
 
-  res = runtime->invoke(1, UINT64_MAX);
+  res = runtime->invoke(1, UINT64_MAX)();
 
   ASSERT_FALSE(res.result_);
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
@@ -212,115 +235,121 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   builder_consumer.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &runtime,
-         uint32_t test_amount) -> InvokeStatus<int32_t> {
+         uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
         if (!runtime.consume_gas(test_amount)) {
-          return InvokeError{InvokeErrorCode::OutOfGas};
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
-        return 0;
+        co_return 0;
       });
 
   NativeContractBuilder builder_middle;
   builder_middle.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
         // Invoke consumer method 0 three times, with various gas costs
-        auto r1 = [&]() {
+        auto r1 = co_await
+            [&]() -> x23::Async<
+                      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> {
           auto gas_before = ctx.gas_remaining();
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
               kAddressConsumer,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(100)
                       .value(),
               std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
-          return std::pair{r, gas_before - ctx.gas_remaining()};
+          co_return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r1_status, g1] = r1;
         if (!r1_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g1 != 100) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (g1 != 100 + kSyscallBaseCost) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r2 = [&]() {
+        auto r2 = co_await
+            [&]() -> x23::Async<
+                      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> {
           auto gas_before = ctx.gas_remaining();
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
               kAddressConsumer,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(200)
                       .value(),
               std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
-          return std::pair{r, gas_before - ctx.gas_remaining()};
+          co_return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r2_status, g2] = r2;
         if (!r2_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g2 != 200) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (g2 != 200 + kSyscallBaseCost) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r3 = [&]() {
+        auto r3 = co_await
+            [&]() -> x23::Async<
+                      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> {
           auto gas_before = ctx.gas_remaining();
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
               kAddressConsumer,
               Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                   serialize<uint32_t>(150)
                       .value(),
               std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
-          return std::pair{r, gas_before - ctx.gas_remaining()};
+          co_return std::pair{r, gas_before - ctx.gas_remaining()};
         }();
         auto const &[r3_status, g3] = r3;
         if (!r3_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g3 != 150) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (g3 != 150 + kSyscallBaseCost) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return 0;
+        co_return 0;
       });
 
   NativeContractBuilder builder_entry;
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
-        auto r = [&]() {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
+        auto r = co_await
+            [&]() -> x23::Async<
+                      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> {
           auto gas_before = ctx.gas_remaining();
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto invoke_status =
-              ctx.syscall<SyscallNo::kInvoke>(kAddressMiddle,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
-          return std::pair{invoke_status, gas_before - ctx.gas_remaining()};
+          auto invoke_status = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressMiddle, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          co_return std::pair{invoke_status, gas_before - ctx.gas_remaining()};
         }();
         auto const &[invoke_status, g] = r;
         if (!invoke_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g != 100 + 200 + 150) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (g != 100 + 200 + 150 + (4 * kSyscallBaseCost)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return 0;
+        co_return 0;
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -331,7 +360,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressMiddle,
                                               kAddressEntry};
@@ -359,16 +389,16 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
+  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150 + (4 * kSyscallBaseCost));
 }
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
 {
   // Verifies boundary gas accounting for native invokes: gas_limit 256 permits
   // a child that consumes 255 gas, while gas_limit 255 is converted to
-  // OutOfGas/DeterministicWasm and still charges the full child limit.
+  // OutOfGas/Deterministic and still charges the full child limit.
 
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);
@@ -377,28 +407,26 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
   builder_consumer.add<SerializationFormat::kTxs>(
       0,
       [](NativeSyscallContext &runtime,
-         uint32_t test_amount) -> InvokeStatus<int32_t> {
+         uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
         if (!runtime.consume_gas(test_amount)) {
-          return InvokeError{InvokeErrorCode::OutOfGas};
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
-        return 0;
+        co_return 0;
       });
 
   NativeContractBuilder builder_entry;
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = 256,
             .flags = std::to_underlying(InvokeFlag::None),
         };
-        auto invoke_status =
-            ctx.syscall<SyscallNo::kInvoke>(kAddressConsumer,
-                                            Calldata{0x00, 0x00, 0x00, 0xFF},
-                                            std::span<uint32_t>{}, inputs,
-                                            CopyableInvokeOutputs{});
+        auto invoke_status = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kAddressConsumer, Calldata{0x00, 0x00, 0x00, 0xFF},
+            std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         if (!invoke_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         CopyableInvokeInputs inputs2{
@@ -407,20 +435,18 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
             .flags = std::to_underlying(InvokeFlag::None),
         };
         CopyableInvokeOutputs outputs2{};
-        invoke_status =
-            ctx.syscall<SyscallNo::kInvoke>(kAddressConsumer,
-                                            Calldata{0x00, 0x00, 0x00, 0xFF},
-                                            std::span<uint32_t>{}, inputs2,
-                                            outputs2);
+        invoke_status = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kAddressConsumer, Calldata{0x00, 0x00, 0x00, 0xFF},
+            std::span<uint32_t>{}, inputs2, outputs2);
         // A child frame that traps / runs out of gas now returns
         // kSyscallErrorCodeNone with frame_status == Fault.
         if (!invoke_status.has_value() ||
             invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             outputs2.frame_status != InvocationFrameStatusCode::Fault) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<int32_t>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -430,7 +456,8 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -457,9 +484,13 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 510);
+  // 255 for each child -- the one that fits and the one that is converted to
+  // OutOfGas and still charged its full limit -- plus the crossing each of the
+  // two invoke syscalls pays. The children's own limits are unaffected: the
+  // crossing is billed to the caller, outside the budget it hands down.
+  ASSERT_EQ(res.gas_consumed_, 255 + 255 + (2 * kSyscallBaseCost));
 }
 
 // NativeContract::invoke error-precedence lattice at exact gas exhaustion
@@ -479,85 +510,86 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
   builder_consumer.add<SerializationFormat::kTxs>(
       0,
       [](NativeSyscallContext &runtime,
-         uint32_t test_amount) -> InvokeStatus<int32_t> {
+         uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
         // Exhaust the limit exactly, then report success.
         runtime.consume_gas(test_amount);
-        return 0;
+        co_return 0;
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       1,
       [](NativeSyscallContext &runtime,
-         uint32_t test_amount) -> InvokeStatus<int32_t> {
+         uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
         runtime.consume_gas(test_amount);
-        return InvokeError{InvokeErrorCode::Abandon};
+        co_return InvokeError{InvokeErrorCode::Abandon};
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       2,
       [](NativeSyscallContext &runtime,
-         uint32_t test_amount) -> InvokeStatus<int32_t> {
+         uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
         runtime.consume_gas(test_amount);
-        return InvokeError{InvokeErrorCode::ValidationFailure};
+        co_return InvokeError{InvokeErrorCode::ValidationFailure};
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       3,
       [](NativeSyscallContext &runtime,
-         uint32_t test_amount) -> InvokeStatus<int32_t> {
+         uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
         runtime.consume_gas(test_amount);
-        return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeError{InvokeErrorCode::Unrecoverable};
       });
 
   NativeContractBuilder builder_entry;
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
         auto invoke_consumer = [&](Runtime::MethodID method,
-                                   CopyableInvokeOutputs &outputs) {
+                                   CopyableInvokeOutputs &outputs)
+            -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = method,
               .gas_limit = kChildGas,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressConsumer, kAmount,
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressConsumer, kAmount, std::span<uint32_t>{}, inputs,
+              outputs);
         };
 
         // Success at exact exhaustion: upgraded to OutOfGas -> frame Fault.
         CopyableInvokeOutputs success_outputs{};
-        auto success = invoke_consumer(0, success_outputs);
+        auto success = co_await invoke_consumer(0, success_outputs);
         if (!success.has_value() ||
             success.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             success_outputs.frame_status != InvocationFrameStatusCode::Fault) {
           ADD_FAILURE() << "success at exact gas exhaustion must become an "
                            "OutOfGas frame Fault";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Fatal codes at exact exhaustion stay themselves: the syscall
         // errors, no frame Fault is reported.
         CopyableInvokeOutputs fatal_outputs{};
-        auto abandon = invoke_consumer(1, fatal_outputs);
+        auto abandon = co_await invoke_consumer(1, fatal_outputs);
         if (abandon.has_value() ||
             abandon.error() != HostFnError{HostFnErrorCode::Abandon}) {
           ADD_FAILURE() << "Abandon at exact gas exhaustion must stay Abandon";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto validation = invoke_consumer(2, fatal_outputs);
+        auto validation = co_await invoke_consumer(2, fatal_outputs);
         if (validation.has_value() ||
             validation.error() !=
                 HostFnError{HostFnErrorCode::ValidationFailure}) {
           ADD_FAILURE() << "ValidationFailure at exact gas exhaustion must "
                            "stay ValidationFailure";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto unrecoverable = invoke_consumer(3, fatal_outputs);
+        auto unrecoverable = co_await invoke_consumer(3, fatal_outputs);
         if (unrecoverable.has_value() ||
             unrecoverable.error() !=
                 HostFnError{HostFnErrorCode::Unrecoverable}) {
           ADD_FAILURE() << "Unrecoverable at exact gas exhaustion must stay "
                            "Unrecoverable";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<int32_t>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -567,7 +599,8 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -594,7 +627,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
 }
 
@@ -619,43 +652,43 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   bad_full_key.contract_data_key() = kBadKey;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto bstring = make_bytestring("bad");
         // comment this set_bytestring to verify that the test framework
         // does, in fact, throw errors if you get_bytestring from the snapshot
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kBadKey, std::as_bytes(std::span(bstring)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // This would have failed if the bytestring was not loaded lazily:
         // we're getting the bytestring from the prior write, not the snapshot
-        auto r2 = ctx.handler().get_bytestring(kBadKey);
-        if (!r2.has_value() || !r2.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        auto r2 = co_await ctx.handler().get_bytestring(kBadKey);
+        if (!r2.has_value() || !r2.value().result.has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        assert(r2.value().value());
-        if (*r2.value().value() != bstring) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        assert(r2.value().result.value());
+        if (*r2.value().result.value() != bstring) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         std::vector<uint8_t> bstring(100);
         RuntimeMemoryLength written_len = 0;
-        auto res = ctx.syscall<SyscallNo::kBytestringGet>(
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringGet>(
             kBadKey, std::as_writable_bytes(std::span(bstring)), written_len);
         // This test should fail because it accesses the bytestring the server
-        // is configured to return an unrecoverable error on
+        // is configured to co_return an unrecoverable error on
         if (res.has_value() ||
             res.error().code() != HostFnErrorCode::Unrecoverable) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -666,7 +699,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -693,7 +727,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   SystemCallHandler handler2 = make_handler(
@@ -707,7 +741,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
               },
       },
       snapshot, 0, 0, *runtime_context);
-  res = handler2.root_invoke();
+  res = handler2.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -724,75 +758,75 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     NativeContractBuilder builder;
 
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // get_nnint() with force_load_from_snapshot=false from clean state
           // should not query db
-          auto r0 = ctx.handler().get_nnint(kBadKey, false);
-          if (!r0.has_value() || !r0.value().has_value() ||
-              r0.value().value().first.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          auto r0 = co_await ctx.handler().get_nnint(kBadKey, false);
+          if (!r0.has_value() || !r0.value().result.has_value() ||
+              r0.value().result.value().first.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // add ops shouldn't query db
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, nullptr, 100,
               std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
+          auto [r2, _gas2] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, nullptr, -200,
               std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // assert that get_nnint() without a load doesn't query db
-          auto r3 = ctx.handler().get_nnint(kBadKey, false);
-          if (!r3.has_value() || !r3.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
+          if (!r3.has_value() || !r3.value().result.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r3.value().value().first.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (r3.value().result.value().first.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           int128_t set_value = 100;
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, &set_value, 200,
               std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // assert that get_nnint() after a set doesn't query db, even with
           // force_load_from_snapshot=true
-          auto r2 = ctx.handler().get_nnint(kBadKey, true);
-          if (!r2.has_value() || !r2.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          auto r2 = co_await ctx.handler().get_nnint(kBadKey, true);
+          if (!r2.has_value() || !r2.value().result.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!r2.value().value().first.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!r2.value().result.value().first.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // get_nnint() after a set with force_load_from_snapshot=false should
-          // return the set value if it exists
-          auto r3 = ctx.handler().get_nnint(kBadKey, false);
-          if (!r3.has_value() || !r3.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          // co_return the set value if it exists
+          auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
+          if (!r3.has_value() || !r3.value().result.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!r3.value().value().first.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!r3.value().result.value().first.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     auto native_contract = builder.build();
@@ -804,7 +838,8 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
   auto context = make_context();
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -831,7 +866,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         },
         snapshot, 0, 0, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.result_);
   }
   {
@@ -847,17 +882,23 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         },
         snapshot, 0, 1, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.result_);
   }
 }
 
 // Regression test for issue #1512. An attached native contract with an
-// unknown native_contract_id must be rejected by verify_contract rather
-// than reaching the panic in the deploy path.
-TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
+// unknown native_contract_id must be rejected during initial validation
+// rather than reaching the panic in the deploy path. Attachments are now
+// refused by contract type before verify_contract runs -- as a
+// ValidationFailure: a non-rv32 attachment makes the transaction malformed,
+// and malformed transactions are dropped -- so this no longer exercises that
+// unknown-id branch, but it still pins what #1512 is about: the panic stays
+// unreachable.
+TEST_F(NativeContractTest, InvalidNativeContractIdRejectedBeforeDeploy)
 {
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract malicious_contract(ContractType::kNative);
   malicious_contract.native_contract_id() =
@@ -866,8 +907,10 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
-                [](NativeSyscallContext & /*unused*/) noexcept
-                    -> InvokeStatus<void> { return {}; });
+                [](NativeSyscallContext & /*unused*/)
+                    -> x23::Async<InvokeStatus<void>> {
+                  co_return InvokeStatus<void>{};
+                });
     auto deployer_contract = std::make_unique<NativeContract>(std::move(fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -901,9 +944,9 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
       },
       snapshot, 0, 0, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.result_);
-  ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
+  ASSERT_EQ(res.result_.error(), InvokeErrorCode::ValidationFailure);
 }
 
 TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
@@ -922,55 +965,55 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
 
   // Parent: TryInvoke the child, assert the frame aborted (manual revert).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
-  fns_parent.emplace(
-      0,
-      [kAddrChild](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        CopyableInvokeInputs inputs{
-            .entrypoint_id = 0,
-            .gas_limit = ctx.gas_remaining(),
-            .flags = std::to_underlying(InvokeFlag::TryInvoke),
-        };
-        CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
-        if (!r.has_value()) {
-          ADD_FAILURE()
-              << "TryInvoke returned system error (lock probe reached "
-                 "banned key?)";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "Expected kSyscallErrorCodeNone, got "
-                        << static_cast<int32_t>(r.value());
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (outputs.frame_status != InvocationFrameStatusCode::Abort) {
-          ADD_FAILURE() << "Expected frame_status Abort, got "
-                        << static_cast<int32_t>(outputs.frame_status);
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
+  fns_parent
+      .emplace(0,
+               [kAddrChild](NativeSyscallContext &ctx)
+                   -> x23::Async<InvokeStatus<void>> {
+                 CopyableInvokeInputs inputs{
+                     .entrypoint_id = 0,
+                     .gas_limit = ctx.gas_remaining(),
+                     .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                 };
+                 CopyableInvokeOutputs outputs{};
+                 auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+                     kAddrChild, std::span<const std::byte>{},
+                     std::span<uint32_t>{}, inputs, outputs);
+                 if (!r.has_value()) {
+                   ADD_FAILURE()
+                       << "TryInvoke returned system error (lock probe reached "
+                          "banned key?)";
+                   co_return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+                 if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                   ADD_FAILURE() << "Expected kSyscallErrorCodeNone, got "
+                                 << static_cast<int32_t>(r.value());
+                   co_return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+                 if (outputs.frame_status != InvocationFrameStatusCode::Abort) {
+                   ADD_FAILURE() << "Expected frame_status Abort, got "
+                                 << static_cast<int32_t>(outputs.frame_status);
+                   co_return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+                 co_return InvokeStatus<void>{};
+               });
   auto contract_parent =
       std::make_unique<NativeContract>(std::move(fns_parent));
 
   // Child: write to the banned key, then manually revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto data = make_bytestring("child_write");
         constexpr StorageKeyContractData kKey{};
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kKey, std::as_bytes(std::span(data)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_child = std::make_unique<NativeContract>(std::move(fns_child));
 
@@ -980,7 +1023,8 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
 
   Contract parent_contract(ContractType::kNative);
   parent_contract.native_contract_id() =
@@ -1003,90 +1047,16 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
                            .contract_size = 0,
                            .contract_type = child_contract.contract_type()});
 
+  Transaction tx{.invocation =
+                     Invocation{.invoked_address = kAddrParent,
+                                .entrypoint = entrypoint_from_method_id(0),
+                                .gas_limit = UINT64_MAX,
+                                .calldata = {}}};
   SystemCallHandler handler =
-      make_handler(Transaction{.invocation =
-                                   Invocation{.invoked_address = kAddrParent,
-                                              .entrypoint =
-                                                  entrypoint_from_method_id(0),
-                                              .gas_limit = UINT64_MAX,
-                                              .calldata = {}}},
-                   snapshot, 0, 0, *runtime_context);
+      make_handler(tx, snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-}
-
-TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
-{
-  StorageSnapshotCache snapshot(0, *db_proxy_);
-  auto runtime_context = make_hog_exec_precompiles_context();
-
-  Contract contract(ContractType::kNative);
-  contract.native_contract_id() =
-      HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim;
-  snapshot_server_->impl()->setup_create_contract(contract);
-  snapshot_server_->impl()->setup_create_deployment(
-      GenesisConfigurationLoader::kDeployContractAddress,
-      DeployedContractHash{.hash = sha256(contract),
-                           .contract_size = 0,
-                           .contract_type = contract.contract_type()});
-
-  // Forge calldata: valid SHA256Hash + SHA256Hash + ContractEntrypointID,
-  // then a Calldata field whose CXS length header claims 32 MiB but
-  // the buffer is only a few bytes longer than the header.
-  using itc_meta = ContractTraitMeta<initial_token_claim::InitialTokenClaim>;
-
-  SHA256Hash hash{};
-  SHA256Hash nonce{};
-  ContractEntrypointID entrypoint{};
-
-  // Serialize the fixed-size args as valid CXS prefix.
-  // For fixed-size opaque arrays, CXS serialization is raw bytes.
-  auto prefix =
-      Serializer<itc_meta::kSerializationFormat>::serialize(hash, nonce,
-                                                            entrypoint);
-  ASSERT_TRUE(prefix.has_value());
-
-  // Append a CXS-encoded length claiming 32 MiB.
-  // CXS compact-uint encoding for a uint32 value:
-  //   header byte 0xBF (kCxsHeader4Byte) + 4 bytes little-endian value.
-  constexpr uint32_t kFakeSize = 32 * 1024 * 1024;
-  uint8_t cxs_len_bytes[5];
-  cxs_len_bytes[0] = 0xBF; // CXS header for 4-byte unsigned integer
-  std::memcpy(cxs_len_bytes + 1, &kFakeSize, sizeof(kFakeSize));
-
-  Calldata forged;
-  forged.append_range(
-      prefix.value()); // NOLINT(bugprone-unchecked-optional-access)
-  forged.append(std::begin(cxs_len_bytes), std::end(cxs_len_bytes));
-  // Don't append the claimed 32 MiB — the buffer is truncated
-
-  SystemCallHandler handler = make_handler(
-      Transaction{
-          .invocation =
-              {
-                  .invoked_address =
-                      GenesisConfigurationLoader::kDeployContractAddress,
-                  .entrypoint =
-                      itc_meta::entrypoint<u8"claim_initial_tokens">(),
-                  .gas_limit = UINT64_MAX,
-                  .calldata = std::move(forged),
-              },
-      },
-      snapshot, 0, 0, *runtime_context);
-
-  // This must NOT throw std::bad_alloc. The zero-copy BufView
-  // deserialization path validates the declared size against the
-  // actual input buffer via check_size(), which returns a parse error
-  // (caught by serialize_calldata.h). The builder surfaces that as an
-  // sdk-parallel LibraryExn::Handling(DecodingArgs) abort — a frame that
-  // ran and reverted, not a fault or a crash.
-  EXPECT_NO_THROW({
-    auto res = handler.root_invoke();
-    EXPECT_TRUE(res.result_.has_value());
-  });
-  EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
-            InvocationFrameStatusCode::Abort);
 }
 
 // A contract that supplies a buffer shorter than the stored value must be told
@@ -1098,15 +1068,15 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
 
   NativeContractBuilder builder;
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto value = make_bytestring("12345678"); // 8 bytes
-        auto [set_res, _gas] = syscall_BytestringSet_inner(
+        auto [set_res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kKey, std::as_bytes(std::span(value)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!set_res.has_value() ||
             set_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "BytestringSet failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Read the 8-byte value into a 4-byte buffer (with a sentinel byte
@@ -1116,26 +1086,27 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
         std::span<std::byte> short_buf =
             std::as_writable_bytes(std::span(backing).first(4));
         RuntimeMemoryLength written_len = 0;
-        auto get_res = ctx.syscall<SyscallNo::kBytestringGet>(kKey, short_buf,
-                                                              written_len);
+        auto get_res =
+            co_await ctx.syscall<SyscallNo::kBytestringGet>(kKey, short_buf,
+                                                            written_len);
         if (!get_res.has_value() ||
             get_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "BytestringGet failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (written_len != 8) {
           ADD_FAILURE() << "expected full length 8, got " << written_len;
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (backing[0] != '1' || backing[3] != '4') {
           ADD_FAILURE() << "buffer prefix not copied";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (backing[4] != 0xEE) {
           ADD_FAILURE() << "byte past buffer was overwritten";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -1144,7 +1115,8 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
   ContractAddress address{};
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -1167,7 +1139,7 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
