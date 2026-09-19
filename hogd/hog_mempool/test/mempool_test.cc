@@ -2682,6 +2682,7 @@ TEST(Mempool, GenerateBlockIdUniqueUnderContention)
 
   std::vector<std::vector<uint64_t>> per_thread(kThreads);
   std::vector<std::thread> threads;
+  threads.reserve(kThreads);
   std::latch start(kThreads);
 
   for (size_t i = 0; i < kThreads; i++) {
