@@ -900,12 +900,9 @@ template<typename T, typename Xdr,
          template<typename> typename RetTrans = std::type_identity_t>
 concept satisfies_rpc_return =
     std::convertible_to<T, RetTrans<Xdr>> ||
-    // Where the transform accepts an untransformed value at all, a handler
-    // may answer with anything that serializes like the declared type, e.g. a
-    // reply borrowing bytes it already holds.  untransform_t below only
-    // reaches this for RetTrans = type_identity_t, since it has no mapping
-    // for a T that is not RetTrans<something>.  The guard keeps a transform
-    // that demands one (RetTrans = Async) rejecting a plain return.
+    // A wire-equivalent plain return, e.g. a reply borrowing bytes it already
+    // holds, but only where the transform admits an untransformed value:
+    // RetTrans = Async must still reject one.
     (std::convertible_to<Xdr, RetTrans<Xdr>> && serializes_like<T, Xdr>) ||
     serializes_like<untransform_t<RetTrans, T>, Xdr> ||
     (std::convertible_to<T, RetTrans<untransform_auto_t<T>>> &&

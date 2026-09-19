@@ -88,10 +88,8 @@ public:
   std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
 
   // A view of the concurrently-inserted entry at [index], or nullopt if this
-  // lock has no such entry.  Only a finalized RCQ lock can have one, and a
-  // finalized lock's contents are never reset, so the view outlives this call
-  // for as long as the lock does.  See
-  // RetrocausalQueueLock::get_concurrent_entry_view for the full contract.
+  // lock has no such entry.  Only a finalized lock can, and its contents are
+  // never reset.  See RetrocausalQueueLock::get_concurrent_entry_view.
   std::optional<x23::BufView> get_concurrent_entry_view(uint32_t index) const;
 
   bool is_finalized() const
