@@ -141,8 +141,31 @@ public:
   x23::Async<void>
   remove_from_scheduler(x23::span<const TransactionHash> hashes);
 
+  // Stamps the surviving cache entries for [tx_hashes] as verified against
+  // [height], and in debug builds audits that no cached tx belonging to
+  // [accounts] kept an older stamp.
+  //
+  // [MempoolCoordinatorRpc::auth_data_changed()] re-verifies an account's
+  // transactions through [get_txs_for_account()], which reports the runqueue
+  // only. A cache entry that is absent from the runqueue is therefore never
+  // re-verified, and a stale stamp is how that shows up: the entry survived an
+  // auth change that should have re-checked it. The audit is a diagnostic, not
+  // an admission gate -- it never removes or rejects a transaction.
+  void record_auth_reverification(
+      x23::span<const TransactionHash> tx_hashes,
+      const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
+      BlockHeight height);
+
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
+
+  // The auth height stamped on the cache entry for [tx_hash], or
+  // [kNeverVerified] when no entry is cached.
+  BlockHeight tx_verified_height(const TransactionHash &tx_hash)
+  {
+    const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+    return tx_value_ptr ? (*tx_value_ptr)->verified_height : kNeverVerified;
+  }
 
   std::pair<HogAge *, std::unique_lock<std::mutex>>
   get_cached_hog_age(const ContractAddress &address);
@@ -198,6 +221,10 @@ public:
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
   size_t tx_cache_size() { return txs_.size(); }
 
+  // [TxValue::verified_height] for a cache entry no auth verification has
+  // stamped yet.
+  static constexpr BlockHeight kNeverVerified = -1;
+
   // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age
   // updates.
   x23::CoroLock pending_hog_age_update_lock_;
@@ -223,6 +250,12 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
+    // The block height whose auth state [tx]'s signatures were verified
+    // against -- the height handed to [authmempool_verify_transactions()],
+    // which [AuthServer::lookup_auth_data()] resolves exactly. This describes
+    // the cached signature bytes, not the transaction body, so an entry reused
+    // by a later submission of the same body keeps the original height.
+    BlockHeight verified_height = kNeverVerified;
   };
 
   struct AccountState {
@@ -268,7 +301,8 @@ private:
                         bool remove_expired_txs);
 
   bool add_txs_helper(const SignedTransaction &tx,
-                      const TransactionHash &tx_hash);
+                      const TransactionHash &tx_hash,
+                      BlockHeight verified_height);
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
