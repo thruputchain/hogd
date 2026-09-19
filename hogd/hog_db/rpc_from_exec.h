@@ -89,7 +89,7 @@ public:
 
 private:
   RPCError error_ = RPCError::kRPCNotFound;
-  x23::BufView entry_{};
+  x23::BufView entry_;
   // Set together: ctx_ is read only to release btx_.
   RPCContext *ctx_ = nullptr;
   PerThreadARC<BlockTX> *btx_ = nullptr;
