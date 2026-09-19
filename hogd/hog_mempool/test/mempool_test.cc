@@ -41,7 +41,6 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
-#include "hogd/hog_exec/common/block_id_util.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -2636,72 +2635,6 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(committed_event_tip.block_id, db_tip.id);
   EXPECT_EQ(x23::serialize(committed_event_tip.consensus_value),
             x23::serialize(db_tip.value));
-}
-
-TEST(Mempool, GenerateBlockId)
-{
-  uint64_t first = generate_block_id();
-  EXPECT_NE(first, 0UL);
-
-  uint64_t second = generate_block_id();
-  EXPECT_NE(second, 0UL);
-  EXPECT_NE(first, second);
-}
-
-TEST(Mempool, GenerateBlockIdSurvivesClockRollback)
-{
-  // A rolled-back or repeated clock reading must still yield a fresh ID.
-  constexpr uint64_t kFirst = 1'700'000'000'000'000'000UL;
-  constexpr uint64_t kLater = kFirst + 25UL;
-
-  std::atomic<uint64_t> last = 0;
-
-  const uint64_t first = detail::next_block_id(last, kFirst);
-  const uint64_t later = detail::next_block_id(last, kLater);
-  const uint64_t rolled_back = detail::next_block_id(last, kFirst);
-  const uint64_t stuck = detail::next_block_id(last, kFirst);
-
-  // A clock that advances is reported verbatim.
-  EXPECT_EQ(first, kFirst);
-  EXPECT_EQ(later, kLater);
-
-  // A clock that steps back to an already-issued reading, and one that stays
-  // there, both keep handing out fresh IDs.
-  EXPECT_GT(rolled_back, later);
-  EXPECT_GT(stuck, rolled_back);
-}
-
-TEST(Mempool, GenerateBlockIdUniqueUnderContention)
-{
-  // [generate_block_id] promises process-lifetime uniqueness across threads.
-  constexpr size_t kThreads = 4;
-  constexpr size_t kIdsPerThread = 2000;
-
-  std::vector<std::vector<uint64_t>> per_thread(kThreads);
-  std::vector<std::thread> threads;
-  threads.reserve(kThreads);
-  std::latch start(kThreads);
-
-  for (size_t i = 0; i < kThreads; i++) {
-    threads.emplace_back([&, i]() {
-      per_thread[i].reserve(kIdsPerThread);
-      start.arrive_and_wait();
-      for (size_t j = 0; j < kIdsPerThread; j++) {
-        per_thread[i].push_back(generate_block_id());
-      }
-    });
-  }
-  for (std::thread &thread : threads) {
-    thread.join();
-  }
-
-  std::unordered_set<uint64_t> seen;
-  for (const std::vector<uint64_t> &ids : per_thread) {
-    for (uint64_t id : ids) {
-      EXPECT_TRUE(seen.insert(id).second) << "duplicate block ID " << id;
-    }
-  }
-  EXPECT_EQ(seen.size(), kThreads * kIdsPerThread);
 }
 
 TEST(Mempool, AuthChangedEvictsInvalidTxs)

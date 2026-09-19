@@ -29,6 +29,7 @@
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "header.hh"
+#include "hogd/base/block_id.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
@@ -42,7 +43,6 @@
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
-#include "hogd/hog_exec/common/block_id_util.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
@@ -1592,7 +1592,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
 
   auto prepare_cache_node = nomination_dag.async<void>(
       "prepare nomination cache", [&]() -> x23::Async<void> {
-        nominated_block_cache_.block_id = generate_block_id();
+        nominated_block_cache_.block_id = BlockIdGenerator::generate();
         // Fixed before execution; every executor gets this same value.
         nominated_block_cache_.block_execution = BlockExecutionContext{
             .block_height =
@@ -1815,7 +1815,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
     }
 
-    block_id = generate_block_id();
+    block_id = BlockIdGenerator::generate();
     {
       x23::CoroGuard scheduler_guard;
       co_await scheduler_guard(scheduler_->global_lock_);
@@ -2403,7 +2403,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
           co_return;
         }
 
-        cache.block_id = generate_block_id();
+        cache.block_id = BlockIdGenerator::generate();
         validation_block_id = cache.block_id;
         validation_tx_count = cache.tx_hashes.size();
         co_return;

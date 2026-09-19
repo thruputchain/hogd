@@ -9,13 +9,12 @@
 #include <utility>
 #include <vector>
 
-#include "hogd/hog_exec/common/block_id_util.h"
-
 // generated x23 headers
 #include "address_auth.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/block_id.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/debug/delta_validity_checks.h"
@@ -628,7 +627,7 @@ HogDbExecutorRpc::get_db_tip(BlockID block_id, BlockHeight block_height)
 x23::Async<ExpectedViewingSnapshot>
 HogDbExecutorRpc::open_viewing_snapshot()
 {
-  BlockID block_id = generate_block_id();
+  BlockID block_id = BlockIdGenerator::generate();
   auto res = co_await ctx_.open_viewing_snapshot(block_id);
   if (!res) {
     co_return ExpectedViewingSnapshot(to_rpc_error(res.error()));
