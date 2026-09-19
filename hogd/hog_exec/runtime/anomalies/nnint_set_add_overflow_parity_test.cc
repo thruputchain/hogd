@@ -1,40 +1,6 @@
-// Tolerated anomaly: an NNInt add that would overflow INT128_MAX is not
-// rejected at the syscall; it fails at commit, and it fails the same way
-// whether the base was set explicitly or taken from the snapshot.
-//
-// NonnegativeIntSetAdd has two modes.  With an explicit set_value the
-// executor stages set_add(set_value, add_value); without one it stages
-// add(add_value) and the base is whatever the database snapshot holds at
-// commit.  In the implicit mode the executor cannot see the base, so an
-// overflowing add can only be caught by hog_db at reservation.  In the
-// explicit mode the executor could check base + add locally, but it does
-// not: NNIntItem::validate() accepts every nonnegative add_value (the
-// protocol invariant is value >= min(set_value, 0), see #2155), so an
-// explicit set_add(INT128_MAX, +1) is staged and also caught by hog_db.
-//
-// Either way the transaction is excluded from the block as
-// ExecResultTxNonDeterministicError, with a kDbConflictOverflow diagnostic,
-// instead of being included as a deterministic InvalidSyscallInput fault.
-// Issue #1634 reported the explicit case as a misclassification.
-//
-// Why this is tolerated:
-//   - The two modes agree.  A contract that adds to a high NNInt observes the
-//     same syscall result (kSyscallErrorCodeNone), the same commit outcome and
-//     the same diagnostic whether or not it passed the base explicitly.  A
-//     syscall-time check in the explicit mode alone would split them: the
-//     explicit overflow would be included in the block as a deterministic
-//     fault while the implicit one stayed excluded.
-//   - The transaction only harms itself.  It is dropped from the proposal,
-//     the key keeps its committed value, and the contract can resubmit with
-//     a representable add.
-//   - No consensus divergence.  An excluded transaction is never replayed by
-//     validators, and hog_db rejects the overflow at reservation, so nothing
-//     impossible is ever staged.
-//   - The failure is attributable: since #2878 the commit diagnostic names
-//     the key and kDbConflictOverflow.
-//
-// Contracts must not rely on NonnegativeIntSetAdd returning
-// InvalidSyscallInput for an overflowing explicit set-add.
+// Tolerated anomaly: an NNInt add that would overflow INT128_MAX passes the
+// syscall and fails at commit as ExecResultTxNonDeterministicError, the same
+// way whether the base was set explicitly or taken from the snapshot.
 //
 // See:
 //   - https://github.com/groundhogchain/hogd/issues/1634
@@ -108,10 +74,7 @@ public:
 
   enum class Mode : uint8_t { kExplicit = 0, kImplicit = 1 };
 
-  // Calldata: [key, mode, add].  Explicit mode passes explicit_set_ as the
-  // set value; implicit mode passes no set value and lets the snapshot supply
-  // the base.  The contract records the syscall's result and faults
-  // deterministically on anything but kSyscallErrorCodeNone.
+  // The set value explicit-mode adds pass; the result the contract last saw.
   int128_t explicit_set_ = 0;
   std::optional<SyscallErrorCode> last_syscall_code_;
 
@@ -230,13 +193,8 @@ public:
   }
 };
 
-// Issue #1634: add 1 to a committed INT128_MAX.
-//
-// Explicit mode stages set_add(INT128_MAX, +1); implicit mode stages add(+1)
-// against the same committed base.  Both syscalls return
-// kSyscallErrorCodeNone, both root invocations succeed, and both commits are
-// rejected by hog_db as an overflow and surface as
-// ExecResultTxNonDeterministicError.  Neither key changes.
+// Issue #1634: adding 1 to a committed INT128_MAX fails identically in both
+// modes.
 TEST_F(NNIntSetAddOverflowParityTest,
        ExplicitAndImplicitOverflowFailIdenticallyAtCommit)
 {
@@ -266,9 +224,7 @@ TEST_F(NNIntSetAddOverflowParityTest,
   EXPECT_EQ(read_nnint(Key::kImplicit), kMax);
 }
 
-// The boundary: adding up to exactly INT128_MAX is accepted in both modes.
-// The modes diverge from each other nowhere; they only diverge from a
-// deterministic fault once the sum is unrepresentable.
+// Boundary control: adding up to exactly INT128_MAX commits in both modes.
 TEST_F(NNIntSetAddOverflowParityTest,
        ExplicitAndImplicitAddToBoundarySucceedIdentically)
 {
