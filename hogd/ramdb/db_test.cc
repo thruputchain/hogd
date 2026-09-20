@@ -445,6 +445,38 @@ TEST_F(DatabaseTest, RecoveryRejectsGarbageTail)
   EXPECT_EQ(ret.error(), DBCode::kCorruption);
 }
 
+// A data-directory attacker can flip a persisted record's storage
+// discriminator from kNormal to the in-range but unsupported kBig value.
+// Recovery must reject the tampered header as corruption rather than reaching
+// the unimplemented kBig branch and terminating the process (#4098).
+TEST_F(DatabaseTest, CheckRejectsPersistedBigRecord)
+{
+  insert_n(1);
+  DBStatus<uint64_t> sync_ret = db_->sync();
+  ASSERT_TRUE(sync_ret);
+  ASSERT_EQ(*sync_ret, 1);
+  db_.reset();
+
+  // Flip only the first record's storage byte from kNormal to kBig, leaving
+  // the rest of the valid record intact.
+  ErrnoStatus<File> log = dir_.openat("0.log", O_RDWR);
+  ASSERT_TRUE(static_cast<bool>(log));
+  std::byte storage{};
+  ASSERT_TRUE(static_cast<bool>(read_full(*log, std::span(&storage, 1))));
+  ASSERT_EQ(storage, std::byte{std::to_underlying(ItemStorage::kNormal)});
+  ASSERT_TRUE(static_cast<bool>(log->lseek(0, SEEK_SET)));
+  const std::byte big_storage{std::to_underlying(ItemStorage::kBig)};
+  ASSERT_TRUE(static_cast<bool>(write_full(*log, std::span(&big_storage, 1))));
+  ASSERT_TRUE(static_cast<bool>(log->sync()));
+  log = {};
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> result = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(result));
+  EXPECT_EQ(result.error(), DBCode::kCorruption);
+}
+
 // Database::check must not modify the files it checks: it reports the last
 // committed LSN and leaves an uncommitted tail for open() to truncate.
 TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
