@@ -860,13 +860,9 @@ TEST_F(HogDbTest, BalanceTransferReducesByCost)
             *recipient_balance);
 }
 
-// Two same-block transactions writing the same previously-absent bytestring
-// key with the same value each reserve the full storage cost, but only the
-// first commit materializes the row; the second refunds its redundant
-// reservation as a balance credit. When the snapshot balance sits near
-// INT128_MAX -- so the positive add-capacity is smaller than one refund -- that
-// credit must still succeed, because it only returns storage that was already
-// subtracted. Regression test for #4095 (previously aborted the process).
+// A duplicate same-value write refunds its redundant storage reservation; that
+// credit must not abort when the balance is near INT128_MAX and the positive
+// add-capacity is smaller than one refund. Regression test for #4095.
 TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
@@ -876,7 +872,7 @@ TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
   ItemKey key = make_item_key(addr, 1);
   const int128_t item_cost = cost_model_.get_bytestring_cost(kValue.size());
   // Snapshot balance leaves less positive headroom (item_cost - 1) than a
-  // single redundant refund (item_cost) -- the condition that used to abort.
+  // single redundant refund (item_cost), the condition that used to abort.
   const int128_t initial_balance =
       std::numeric_limits<int128_t>::max() - (item_cost - 1);
 
