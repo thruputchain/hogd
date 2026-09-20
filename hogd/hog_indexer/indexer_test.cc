@@ -86,7 +86,7 @@ create_event_logs()
   std::ranges::fill(contract_addr0, 0xAA);
   std::ranges::fill(contract_addr1, 0xBB);
 
-  TxEventLog event_log0;
+  TxEventLog event_log0{};
   event_log0.tx_hash = tx_hash0;
   TxEmittedEvent event0;
   event0.contract_address = contract_addr0;
@@ -95,7 +95,7 @@ create_event_logs()
   std::ranges::fill(event0.serialized_event, 0x11);
   event_log0.events.push_back(event0);
 
-  TxEventLog event_log1;
+  TxEventLog event_log1{};
   event_log1.tx_hash = tx_hash1;
   TxEmittedEvent event1;
   event1.contract_address = contract_addr1;
@@ -259,7 +259,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   SHA256Hash tx_hash;
   std::ranges::fill(tx_hash, 0x33);
 
-  TxEventLog event_log; // no events emitted
+  TxEventLog event_log{}; // no events emitted
   event_log.tx_hash = tx_hash;
   ASSERT_TRUE(event_log.events.empty());
 
@@ -298,7 +298,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   SHA256Hash tx_hash;
   std::ranges::fill(tx_hash, 0x44);
 
-  TxEventLog event_log;
+  TxEventLog event_log{};
   event_log.tx_hash = tx_hash;
   TxEmittedEvent ev;
   ev.contract_address = emitter_b; // event emitted by B, not the root A
@@ -352,7 +352,7 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
     SHA256Hash h;
     std::ranges::fill(h, static_cast<char>(0x50 + i));
     hashes.push_back(h);
-    TxEventLog log;
+    TxEventLog log{};
     log.tx_hash = h;
     ingest_legacy_events(static_cast<BlockHeight>(300 + i),
                          TxEventLogBatch{log},
@@ -393,7 +393,7 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
     ProposedTransaction body;
     body.signed_tx.tx.uniquifier.nonce = fill;
     body.signed_tx.tx.invocation.invoked_address = addr;
-    TxEventLog log;
+    TxEventLog log{};
     std::ranges::fill(log.tx_hash, fill);
     TxEmittedEvent event;
     event.contract_address = addr;
@@ -480,7 +480,7 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     SHA256Hash h;
     std::ranges::fill(h, static_cast<char>(0x90 + i));
 
-    TxEventLog log;
+    TxEventLog log{};
     log.tx_hash = h;
     logs.push_back(log); // present, but emits no events
 
@@ -541,7 +541,7 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
   // Ingest committed blocks 100..105; each ingest prunes against the new
   // watermark. Give each block one distinct committed tx.
   for (BlockHeight h = 100; h <= 105; h++) {
-    TxEventLog log;
+    TxEventLog log{};
     std::ranges::fill(log.tx_hash, static_cast<uint8_t>(h));
     ProposedTransaction body;
     body.signed_tx.tx.uniquifier.nonce = h;
@@ -582,7 +582,7 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   std::ranges::fill(tx12, 0x12);
 
   auto ingest_at = [&](BlockHeight height, SHA256Hash const &tx) {
-    TxEventLog log;
+    TxEventLog log{};
     log.tx_hash = tx;
     TxEmittedEvent ev;
     ev.contract_address = addr;
