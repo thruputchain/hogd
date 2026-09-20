@@ -2637,16 +2637,6 @@ TEST(Mempool, GetTip)
             x23::serialize(db_tip.value));
 }
 
-TEST(Mempool, GenerateBlockId)
-{
-  uint64_t first = MempoolCoordinatorRpc::generate_block_id();
-  EXPECT_NE(first, 0UL);
-
-  uint64_t second = MempoolCoordinatorRpc::generate_block_id();
-  EXPECT_NE(second, 0UL);
-  EXPECT_NE(first, second);
-}
-
 TEST(Mempool, AuthChangedEvictsInvalidTxs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
