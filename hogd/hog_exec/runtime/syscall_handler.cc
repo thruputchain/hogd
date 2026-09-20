@@ -1450,9 +1450,7 @@ SystemCallHandler::emit_events(ExecResult exec_result,
       last_frame_.has_value()
           ? last_frame_.value().get_frame_output()
           : InvocationFrameOutput(InvocationFrameStatusCode::Fault);
-  // The root result already totals every frame plus initial validation, and
-  // reports the full limit on an out-of-gas fault. It is part of the event
-  // trie leaf, so the events root commits to it.
+  // gas_consumed is in the event trie leaf, so the events root commits to it.
   co_return co_await event_server_proxy_.emit_events(
       TxEventLog{
           .tx_hash = get_source_tx_hash(),
