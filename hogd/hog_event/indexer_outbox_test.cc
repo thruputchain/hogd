@@ -68,7 +68,7 @@ TxEventLog
 make_event(const ProposedTransaction &body, uint8_t marker,
            bool with_emitted_event = true)
 {
-  TxEventLog event;
+  TxEventLog event{};
   event.tx_hash = sha256(body.signed_tx.tx);
   if (with_emitted_event) {
     TxEmittedEvent emitted;
@@ -214,7 +214,7 @@ make_committed_payload_golden_fixture()
   value.proposal_header.storage_hash[31] = 0xaf;
   value.upgrades = {{0xde, 0xad, 0xbe, 0xef}, {1, 2, 3}};
 
-  TxEventLog event;
+  TxEventLog event{};
   event.tx_hash.fill(0);
   event.tx_hash[0] = 0x21;
   event.tx_hash[31] = 0x40;

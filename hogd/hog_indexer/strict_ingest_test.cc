@@ -78,7 +78,7 @@ make_body(uint64_t nonce, uint8_t address_fill)
 TxEventLog
 make_log(const ProposedTransaction &body, std::optional<uint8_t> emitter_fill)
 {
-  TxEventLog log;
+  TxEventLog log{};
   log.tx_hash = sha256(body.signed_tx.tx);
   if (emitter_fill) {
     TxEmittedEvent event;

@@ -44,7 +44,7 @@ public:
     }
 
     size_t offset = 0;
-    TxEventLog log;
+    TxEventLog log{};
     auto data = std::span(*buf);
 
     // The events file is a flat run of [TxEventLog][ProposedTransaction]
