@@ -79,8 +79,16 @@ void
 BalanceLock::add_committed_credit(int128_t delta)
 {
   CHECK_GT(delta, 0);
-  auto ok = delta_bounds_.try_reserve_delta(0, delta, 0, delta, 0, 0);
-  CHECK(ok);
+  // Refund of a redundant storage reservation (a duplicate same-value write
+  // whose row an earlier commit already materialized). Bump the committed delta
+  // directly rather than reserving add-capacity, which a refund is not and
+  // which can be exhausted near INT128_MAX. This cannot overflow the committed
+  // balance because total HOG supply is bounded at INT128_MAX in the native
+  // token precompile, and that bound includes storage-locked funds, so any
+  // single balance plus the storage it reclaims stays <= total supply <=
+  // INT128_MAX. The safety comes from that global bound, not from the refund
+  // reversing a specific reserved debit (it need not). (#4095)
+  delta_bounds_.apply_committed_refund(delta);
 }
 
 int128_t
