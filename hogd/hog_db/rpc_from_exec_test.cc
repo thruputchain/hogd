@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <set>
 #include <utility>
@@ -12,6 +13,7 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -31,6 +33,10 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/async.h"
+#include "x23/serialize.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -420,6 +426,57 @@ TEST_F(RpcFromExecDiagnosticsTest, MalformedContractRowReportsCorruption)
 
   ExpectedContract result = rpc_->get_contract(BlockID{1}, hash);
   EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
+}
+
+// BorrowedQueueEntryReply must put the same bytes on the wire as the
+// ExpectedQueueEntry it stands in for, on every arm and length (#2035).
+TEST(BorrowedQueueEntryReplyTest, MatchesExpectedQueueEntryOnTheWire)
+{
+  static_assert(
+      x23::serializes_like<BorrowedQueueEntryReply, ExpectedQueueEntry>);
+  static_assert(x23::satisfies_rpc_return<BorrowedQueueEntryReply,
+                                          ExpectedQueueEntry, x23::MaybeAsync>);
+
+  // 0 and kQueueEntryMaxLen are the bounds; 1 and 3 are the sub-word cases
+  // and 13 is the interior case that needs padding.
+  for (size_t len : {size_t{0}, size_t{1}, size_t{3}, size_t{13},
+                     size_t{kQueueEntryMaxLen}}) {
+    QueueEntry entry;
+    for (size_t i = 0; i < len; i++) {
+      entry.push_back(static_cast<uint8_t>((i * 7) + 1));
+    }
+
+    ExpectedQueueEntry owning;
+    owning.error(RPCError::kRPCNone);
+    owning.queue_entry() = entry;
+
+    BorrowedQueueEntryReply borrowed(RPCError::kRPCNotFound);
+    borrowed.set_entry(x23::BufView(entry.data(), entry.size()));
+
+    EXPECT_EQ(borrowed.error(), RPCError::kRPCNone);
+    EXPECT_EQ(x23::xdr_size(owning), xdr_size(borrowed)) << "length " << len;
+    auto owning_bytes = x23::serialize(owning);
+    auto borrowed_bytes = x23::serialize(borrowed);
+    ASSERT_EQ(owning_bytes.size(), borrowed_bytes.size()) << "length " << len;
+    EXPECT_EQ(0, memcmp(owning_bytes.data(), borrowed_bytes.data(),
+                        owning_bytes.size()))
+        << "length " << len;
+  }
+
+  // Every other discriminant selects the void arm, which carries no entry.
+  for (RPCError error : {RPCError::kRPCNotFound, RPCError::kRPCBadBlockID,
+                         RPCError::kRPCUnrecoverable}) {
+    ExpectedQueueEntry owning;
+    owning.error(error);
+    BorrowedQueueEntryReply borrowed(error);
+
+    EXPECT_EQ(x23::xdr_size(owning), xdr_size(borrowed));
+    auto owning_bytes = x23::serialize(owning);
+    auto borrowed_bytes = x23::serialize(borrowed);
+    ASSERT_EQ(owning_bytes.size(), borrowed_bytes.size());
+    EXPECT_EQ(0, memcmp(owning_bytes.data(), borrowed_bytes.data(),
+                        owning_bytes.size()));
+  }
 }
 
 } // namespace

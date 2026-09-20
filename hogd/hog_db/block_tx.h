@@ -21,6 +21,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 // BlockTX manages a set of pending changes made in a block relative to the
@@ -85,9 +86,9 @@ public:
   HogDbStatus<int128_t> read_nnint128_base(const ItemKey &key);
   HogDbStatus<int128_t> read_balance_base(const Address &addr);
 
-  // return entry from an RCQ that was created by a transaction in the current
-  // block if it exists.
-  HogDbStatus<std::optional<QueueEntry>>
+  // Borrowed view of a current-block RCQ entry; valid while the caller holds
+  // this BlockTX.
+  HogDbStatus<std::optional<x23::BufView>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
   // Stage all finalized lock changes into a ChangeSet and compute the hash

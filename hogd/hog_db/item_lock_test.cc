@@ -33,6 +33,7 @@
 #include "retrocausal_queue.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -713,6 +714,15 @@ TEST(ItemLockTest, MissingBalanceSnapshotIsFresh)
                    .has_value());
 }
 
+namespace {
+// get_concurrent_entry hands back a view; own the bytes to compare.
+QueueEntry
+as_entry(x23::BufView view)
+{
+  return QueueEntry(view.begin(), view.end());
+}
+} // namespace
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(ItemLockTest, ConcurrentRCQReadReturnsNulloptUntilCommit)
 {
@@ -733,18 +743,18 @@ TEST(ItemLockTest, ConcurrentRCQReadReturnsNulloptUntilCommit)
 
   auto entry0 = lock.get_concurrent_entry(0);
   ASSERT_TRUE(entry0.has_value());
-  EXPECT_EQ(*entry0, QueueEntry{0x01});
+  EXPECT_EQ(as_entry(*entry0), QueueEntry{0x01});
   EXPECT_EQ(lock.get_concurrent_entry(1), std::nullopt);
 
   EXPECT_EQ(lock.commit_change(second, make_rcq_context()), 1);
 
   auto entry0_after = lock.get_concurrent_entry(0);
   ASSERT_TRUE(entry0_after.has_value());
-  EXPECT_EQ(*entry0_after, QueueEntry{0x01});
+  EXPECT_EQ(as_entry(*entry0_after), QueueEntry{0x01});
 
   auto entry1 = lock.get_concurrent_entry(1);
   ASSERT_TRUE(entry1.has_value());
-  EXPECT_EQ(*entry1, QueueEntry{0x02});
+  EXPECT_EQ(as_entry(*entry1), QueueEntry{0x02});
 }
 
 TEST(ItemLockTest, ConcurrentRCQReadDoesNotTouchUncommittedVariant)

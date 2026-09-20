@@ -199,7 +199,9 @@ private:
           return make_record(rmsg);
         }
         else {
-          return_type res = dispatch(argbytes);
+          // res outlives make_record, so a reply may borrow bytes it guards.
+          static_assert(serializes_like<dispatch_t, return_type>);
+          decltype(auto) res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
           return make_record(rmsg, res);
         }

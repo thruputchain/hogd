@@ -777,7 +777,7 @@ RCQBenchmark::run_concurrent()
               if (!r)
                 fail(r.error());
               if (*r) {
-                collected.push_back(std::move(**r));
+                collected.emplace_back((*r)->begin(), (*r)->end());
                 next_index++;
               }
             }

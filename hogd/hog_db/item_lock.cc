@@ -26,8 +26,8 @@
 #include "hogd/hog_db/item_lock/pointer_lock.h"
 #include "hogd/hog_db/item_lock/replay_cache_lock.h"
 #include "hogd/hog_db/status.h"
-#include "retrocausal_queue.hh"
 #include "x23/testlock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -555,7 +555,7 @@ ItemLock::reset_lock_contents(std::unique_lock<x23::TestLock> const &ul)
   lock_contents_ = std::monostate{};
 }
 
-std::optional<QueueEntry>
+std::optional<x23::BufView>
 ItemLock::get_concurrent_entry(uint32_t index) const
 {
   auto lock_state = lock_state_.load(std::memory_order_acquire);
@@ -564,7 +564,7 @@ ItemLock::get_concurrent_entry(uint32_t index) const
   }
 
   return std::visit(
-      [index](auto const &lock) -> std::optional<QueueEntry> {
+      [index](auto const &lock) -> std::optional<x23::BufView> {
         using lock_t = std::decay_t<decltype(lock)>;
         if constexpr (std::is_same_v<lock_t,
                                      PointerLock<RetrocausalQueueLock>>) {
