@@ -31,14 +31,11 @@ public:
 
   int128_t get_delta() const { return delta_.load(std::memory_order_relaxed); }
 
-  // Refunds a storage cost an earlier reservation already subtracted from the
-  // committed value. Bump the delta directly rather than reserving
-  // add-capacity: a refund returns capacity a debit consumed and must not draw
-  // on the add-capacity that can be exhausted near INT128_MAX. Leaving
-  // add_/sub_ untouched stays correct because they track reserved contributions
-  // (which a refund is not): they keep bounding any later reservation that
-  // re-enters this lock, and base + delta cannot exceed INT128_MAX since the
-  // refund only returns value already subtracted (#4095).
+  // Add to the committed delta without adjusting the add_/sub_ reservation
+  // counters. Those counters bound concurrent reservations; a refund is not a
+  // reservation and must not consume add-capacity, which can be exhausted near
+  // INT128_MAX. The caller guarantees the resulting committed value stays in
+  // range (see BalanceLock::add_committed_credit) (#4095).
   void apply_committed_refund(int128_t amount)
   {
     assert(amount > 0);
