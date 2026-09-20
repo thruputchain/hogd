@@ -860,6 +860,61 @@ TEST_F(HogDbTest, BalanceTransferReducesByCost)
             *recipient_balance);
 }
 
+// Two same-block transactions writing the same previously-absent bytestring
+// key with the same value each reserve the full storage cost, but only the
+// first commit materializes the row; the second refunds its redundant
+// reservation as a balance credit. When the snapshot balance sits near
+// INT128_MAX -- so the positive add-capacity is smaller than one refund -- that
+// credit must still succeed, because it only returns storage that was already
+// subtracted. Regression test for #4095 (previously aborted the process).
+TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr std::array<std::byte, 1> kValue{std::byte{0x42}};
+
+  Address addr = make_address(kAddress + 77382);
+  ItemKey key = make_item_key(addr, 1);
+  const int128_t item_cost = cost_model_.get_bytestring_cost(kValue.size());
+  // Snapshot balance leaves less positive headroom (item_cost - 1) than a
+  // single redundant refund (item_cost) -- the condition that used to abort.
+  const int128_t initial_balance =
+      std::numeric_limits<int128_t>::max() - (item_cost - 1);
+
+  ASSERT_TRUE(db_.write_address_balance(addr, initial_balance));
+
+  BlockHeight height = 1;
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, height,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX first(block_tx);
+  ASSERT_TRUE(first.request_bytes(key, std::span(kValue), kNoFlags));
+  ASSERT_TRUE(first.sync_balance_locks());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX duplicate(block_tx);
+  ASSERT_TRUE(duplicate.request_bytes(key, std::span(kValue), kNoFlags));
+  ASSERT_TRUE(duplicate.sync_balance_locks());
+
+  ASSERT_TRUE(first.commit());
+  // The redundant refund on the second commit must not abort; the net charge is
+  // exactly one materialized bytestring cost.
+  ASSERT_TRUE(duplicate.commit());
+
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
+  ASSERT_TRUE(block_tx.get().commit());
+
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance);
+  EXPECT_EQ(initial_balance - item_cost, *balance);
+
+  auto stored = db_.read_bytes(key);
+  ASSERT_TRUE(stored);
+  EXPECT_TRUE(std::ranges::equal(*stored, kValue));
+}
+
 TEST_F(HogDbTest, NewBalanceHogAgeIsAllZeroes)
 {
   Address sender_addr = make_address(kAddress);

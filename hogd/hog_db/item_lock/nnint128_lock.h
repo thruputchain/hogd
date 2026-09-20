@@ -31,6 +31,20 @@ public:
 
   int128_t get_delta() const { return delta_.load(std::memory_order_relaxed); }
 
+  // Refund, after finalization, part of a storage cost that an earlier
+  // reservation already subtracted from the committed value. The refund only
+  // returns value that was previously debited, so the committed result
+  // (base + delta) provably stays within [0, INT128_MAX]; advance the delta
+  // directly rather than reserving fresh add-capacity, which is scarce near
+  // INT128_MAX and would abort an otherwise-valid commit (#4095). The
+  // add_/sub_ reservation counters guard concurrent locking only and are no
+  // longer consulted once the lock is finalized, so they are left untouched.
+  void apply_committed_refund(int128_t amount)
+  {
+    assert(amount > 0);
+    delta_.fetch_add(amount, std::memory_order_relaxed);
+  }
+
   // For testing only
   uint128_t get_add_capacity() const { return add_.load(); }
   int128_t get_sub_capacity() const { return sub_.load(); }
