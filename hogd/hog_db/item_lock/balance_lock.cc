@@ -79,9 +79,8 @@ void
 BalanceLock::add_committed_credit(int128_t delta)
 {
   CHECK_GT(delta, 0);
-  // Refund of a redundant storage reservation (e.g. a duplicate same-value
-  // write whose row an earlier commit already materialized). See
-  // apply_committed_refund for why this cannot exceed INT128_MAX (#4095).
+  // Refund of a redundant storage reservation (duplicate same-value write).
+  // See apply_committed_refund for the INT128_MAX bound (#4095).
   delta_bounds_.apply_committed_refund(delta);
 }
 

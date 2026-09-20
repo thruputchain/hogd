@@ -31,11 +31,9 @@ public:
 
   int128_t get_delta() const { return delta_.load(std::memory_order_relaxed); }
 
-  // Refund, after finalization, a storage cost an earlier reservation already
-  // subtracted from the committed value, so base + delta stays within
-  // [0, INT128_MAX]. Advance the delta directly instead of reserving
-  // add-capacity (scarce near INT128_MAX); the add_/sub_ counters guard only
-  // concurrent locking and are unused once finalized (#4095).
+  // Refunds a storage cost already subtracted from the committed value, so it
+  // cannot exceed INT128_MAX. Bumps the delta directly since add_/sub_ only
+  // guard concurrent locking and are unused once finalized (#4095).
   void apply_committed_refund(int128_t amount)
   {
     assert(amount > 0);

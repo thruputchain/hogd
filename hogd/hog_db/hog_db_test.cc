@@ -860,9 +860,8 @@ TEST_F(HogDbTest, BalanceTransferReducesByCost)
             *recipient_balance);
 }
 
-// A duplicate same-value write refunds its redundant storage reservation; that
-// credit must not abort when the balance is near INT128_MAX and the positive
-// add-capacity is smaller than one refund. Regression test for #4095.
+// Regression test for #4095: a redundant refund must not abort when the
+// balance is near INT128_MAX and add-capacity is smaller than one refund.
 TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
