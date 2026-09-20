@@ -79,6 +79,20 @@ if(NOT serde_pos EQUAL -1)
   message(FATAL_ERROR "--rust-no-feature serde did not disable serde")
 endif()
 
+# #[rust(no_debug)] drops Debug from the derive list of the type carrying it,
+# leaving the impl to hand-written code, and is stripped from the comment
+# rather than passed through to the generated source.  Types without the
+# marker still derive Debug.
+require_text("${rust}" "#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Default, Copy)]
+#[repr(transparent)]
+pub struct Fingerprint {")
+require_text("${rust}" "#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]")
+string(FIND "${rust}" "no_debug" no_debug_pos)
+if(NOT no_debug_pos EQUAL -1)
+  message(FATAL_ERROR "#[rust(no_debug)] marker leaked into the generated Rust")
+endif()
+
 run_compiler(0 --ts "${INPUT}")
 file(READ "${TEST_DIR}/compiler.ts" ts)
 require_text("${ts}" "export interface Record")
