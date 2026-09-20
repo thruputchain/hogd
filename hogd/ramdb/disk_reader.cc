@@ -166,11 +166,9 @@ struct SafeItemHeader {
   {
     if (storage > std::to_underlying(ItemStorage::kCommit))
       return std::nullopt;
-    // kBig is an in-range discriminator, but the on-disk big-item format is not
-    // implemented and the writer never persists a kBig record, so any kBig
-    // header on disk is corruption or tampering. Reject it here, before the
-    // recovery skip/dispatch paths, so it can't reach the unimplemented kBig
-    // branch and terminate the process.
+    // kBig is in range but the writer never persists it, so a kBig header on
+    // disk is corruption. Reject it here, before the skip/dispatch paths, so it
+    // can't reach the unimplemented kBig branch and terminate the process.
     if (storage == std::to_underlying(ItemStorage::kBig))
       return std::nullopt;
     if (key_len == 0)
@@ -441,10 +439,8 @@ load_log_file(
 
     case kBig:
     {
-      // Unreachable: SafeItemHeader::operator() rejects kBig headers above, so
-      // a validated hdr never carries kBig. Kept as a defensive guard so an
-      // unsupported on-disk storage class returns corruption rather than
-      // terminating the process.
+      // Unreachable: kBig headers are rejected during validation. Guard anyway
+      // so an unsupported storage class returns corruption, not a panic.
       error("unsupported kBig record in recovery");
       return DBError(DBCode::kCorruption);
     }

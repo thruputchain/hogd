@@ -445,10 +445,9 @@ TEST_F(DatabaseTest, RecoveryRejectsGarbageTail)
   EXPECT_EQ(ret.error(), DBCode::kCorruption);
 }
 
-// A data-directory attacker can flip a persisted record's storage
-// discriminator from kNormal to the in-range but unsupported kBig value.
-// Recovery must reject the tampered header as corruption rather than reaching
-// the unimplemented kBig branch and terminating the process (#4098).
+// Recovery must reject a persisted record whose storage byte was flipped to the
+// in-range but unsupported kBig value as corruption, rather than panicking in
+// the unimplemented kBig branch (#4098).
 TEST_F(DatabaseTest, CheckRejectsPersistedBigRecord)
 {
   insert_n(1);
