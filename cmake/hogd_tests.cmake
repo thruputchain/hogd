@@ -1,7 +1,6 @@
-# gtest_discover_tests enumerates each test binary at build time under a timeout
-# CMake defaults to 5 seconds, which a loaded runner can exceed once hogd's own
-# startup is counted, failing the build in an unrelated target (see #4102).
-# Route discovery through this wrapper so the budget lives in one place.
+# gtest_discover_tests runs each test binary at build time to enumerate its
+# cases, under a 5s default that a loaded runner can exceed, failing the build
+# in an unrelated target (#4102). This wrapper keeps the budget in one place.
 set(HOGD_TEST_DISCOVERY_TIMEOUT 60 CACHE STRING
   "Seconds gtest_discover_tests may spend enumerating a test binary")
 
