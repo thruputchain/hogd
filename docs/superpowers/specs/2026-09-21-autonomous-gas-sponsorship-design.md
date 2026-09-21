@@ -56,11 +56,18 @@ decides autonomously, in its own code, during execution.
 
 ### Transaction surface
 
-`Transaction` gains an `ExtensionPoint` (it has none today, unlike
-`ProposalHeader` / `StorageCostModelXdr` / `ContractEvent`), and the
-sponsorship request lives in the v1 arm. Adding the extension point is a
-flag-day change to the signature preimage and to every `TransactionHash`, and
-is cheap only while the chain is pre-mainnet.
+`Transaction` gains a nullable `sponsorship` field. It also gains an
+`ExtensionPoint`, which it lacks today unlike `ProposalHeader` /
+`StorageCostModelXdr` / `ContractEvent`.
+
+The extension point does not hold the sponsorship field. Per its contract in
+`types.x`, an embedded `ExtensionPoint` costs four zero bytes now and lets the
+*next* change replace the struct with a union carrying this one as variant 0.
+Adding `sponsorship` is itself a flag day — it changes the signature preimage
+and every `TransactionHash` — so the reserved field rides along on a break
+that is already being taken, and buys the change after this one a union arm
+instead of another flag day. Both are cheap only while the chain is
+pre-mainnet.
 
 ```xdr
 /// A specific commitment asked of a specific address.
@@ -69,8 +76,9 @@ struct SponsorTerm {
   ContractAddress sponsor;
 
   /// Exactly how much gas this sponsor covers. Fixed at signing time, so
-  /// the scheduler's admission-time solvency check is exact and validators
-  /// can bound replay without any proposer-supplied hint.
+  /// the scheduler checks solvency against a known number rather than a
+  /// ceiling, and validators can bound replay without any proposer-supplied
+  /// hint.
   GasAmount amount;
 };
 
@@ -109,16 +117,22 @@ The contract cannot name its own number.
 
 ```yaml
 - name: "SponsorGas"
-  read_only: false        # tx-level accounting; must fault in a ReadOnly frame
+  # read_only omitted, per this file's convention for state-modifying
+  # syscalls: it changes tx-level accounting, so it fails in a ReadOnly frame.
   needs_gas: true
   inputs:
     - name: "expected_amount"
       typename: "GasAmount"
-  description: |
-    Assents to this transaction's SponsorTerm for GetCurrentAddress().
-    Faults unless a term names this address and its amount equals
-    expected_amount.
+  # errors: kSyscallErrorCodeSponsorshipNotOffered
+  #         kSyscallErrorCodeSponsorshipAlreadyAssented
+  #         kSyscallErrorCodeSponsorInsufficientHogs
 ```
+
+Failures are syscall **error codes**, not frame faults, matching how
+`kSyscallErrorCodeInvokeDepthExceeded` treats a resource limit as reportable
+rather than malformed. Whether the not-offered case should instead be a hard
+fault — a contract assenting to sponsorship it was not offered is arguably a
+programming error rather than a condition to handle — is open.
 
 Three properties follow:
 
@@ -127,11 +141,11 @@ Three properties follow:
    contract can be made to sponsor a transaction by another contract in the
    call path.
 2. **A contract cannot assent to an amount it did not check.** Passing
-   `expected_amount` and faulting on mismatch means a blind assent is not
+   `expected_amount` and erroring on mismatch means a blind assent is not
    expressible.
 3. **A sponsor's exposure per transaction is fixed at signing time**, not at
-   runtime, which is what makes the admission-time solvency check exact rather
-   than a lower bound.
+   runtime, so the scheduler checks solvency against a known number rather
+   than against a ceiling the runtime might later raise.
 
 ### Execution accounting
 
@@ -140,7 +154,7 @@ allowed_gas = <proposer-local initial allowance>
 sponsor     = none
 
 on SponsorGas(expected) from address A:
-    require sponsor == none                           # else fault
+    require sponsor == none                           # else error
     require some term T in tx.sponsorship.terms has T.sponsor == A
     require expected == T.amount
     require A is solvent for T.amount                 # at grant time
@@ -158,6 +172,13 @@ on completion:
 `allowed_gas` must only ever rise. If an assent could lower the ceiling, a
 transaction that had legitimately spent gas under the initial allowance would
 fault on gas it was entitled to spend.
+
+Solvency is inherently point-in-time. `cycle_if_needed` moves hogs between
+groups and other transactions drain `ToSchedule` between admission and
+scheduling, so the admission check is a filter against obvious waste rather
+than a guarantee. The binding checks are the existing
+`gas_limit <= hogs_available` in `Scheduler::schedule()` and the grant-time
+check below.
 
 Solvency is checked **at grant time**, not only at commit. That is what lets
 admission accept a transaction when at least one declared sponsor is solvent:
@@ -254,15 +275,21 @@ a quota. Keying the lane by sponsor means `schedule()` holds exactly one
 account lock per entry, mirroring the existing loop and avoiding cross-account
 lock ordering inside the per-account critical section.
 
-Two quotas bound it:
+Two quotas bound it. Both are **node-local policy, not `ConfigParam`s**: like
+the initial allowance, they only ever bind on transactions a proposer drops,
+which never reach a block, so no validator checks them and nothing needs
+coordinating.
 
-- `kConfigParamSponsoredLaneFraction` — share of block transaction slots the
-  sponsored lane may take, so sponsored traffic cannot crowd out self-funded
-  traffic.
-- `kConfigParamSponsoredLaneGasBudget` — per-block ceiling on proposer
-  execution spent on sponsored-lane attempts. This is the real bound on unpaid
-  work, and it is a gas budget rather than a transaction count because gas is
-  what the attack actually consumes.
+- Sponsored-lane block-slot share, so sponsored traffic cannot crowd out
+  self-funded traffic.
+- Sponsored-lane per-block gas budget: the ceiling on proposer execution spent
+  on sponsored-lane attempts. This is the real bound on unpaid work, and it is
+  a gas budget rather than a transaction count because gas is what the attack
+  actually consumes.
+
+The one genuinely consensus-critical parameter is `kConfigParamMaxSponsoredGas`,
+which caps `sum(terms[*].amount)` — validators do check that, because it is
+what bounds their replay.
 
 Per-address rate limiting is deliberately **not** part of this. Addresses
 reached through the `kPubkeySignature` claim are
@@ -306,10 +333,12 @@ allowance must not require a coordinated gas-schedule update.
 - `transaction.x` — `ExtensionPoint` on `Transaction`; `SponsorTerm`,
   `SponsorshipRequest`, `OptSponsorshipRequest`; `kMaxSponsorTerms`.
 - `syscalls.yaml` — the `SponsorGas` entry.
-- `exec_result.x` — exclusion-class result for pre-grant allowance exhaustion.
-- `network_config.x` — `kConfigParamMaxSponsoredGas`,
-  `kConfigParamSponsoredLaneFraction`, `kConfigParamSponsoredLaneGasBudget`,
-  and the (non-consensus) default initial allowance.
+- `exec_result.x` — `ExecResultSponsorshipUnmet = 202`, in the exclusion class.
+- `syscall_error.x` — `kSyscallErrorCodeSponsorshipNotOffered`,
+  `kSyscallErrorCodeSponsorshipAlreadyAssented`,
+  `kSyscallErrorCodeSponsorInsufficientHogs`.
+- `network_config.x` — `kConfigParamMaxSponsoredGas` only. The lane quotas and
+  the initial allowance are node-local and belong in hogd's configuration.
 - `sched_gateway.x` — a `SchedGatewaySubmitOutcome` variant for "no declared
   sponsor is solvent".
 
@@ -348,3 +377,22 @@ transactions: `add_txs_helper`, `is_pending`, `reenqueue_txs`, and
 - Sponsored transactions cannot exceed `kConfigParamSponsoredLaneFraction` of
   a block.
 - Pre-grant `contracts_to_deploy`, RCQ reads, and `TryInvoke` all fault.
+
+## Wire-compatibility cost
+
+`scripts/xdrcompat` reports **66 violations** against `protocol` main for the
+sketch (26 R1 procedure-signature changes, 40 R3 layout changes). The check is
+advisory in CI. Two independent causes:
+
+- **`Transaction` layout** (27 reports). Every RPC carrying a
+  `SignedTransaction` or `ProposedTransaction` — auth, mempool, scheduler,
+  indexer, event, loadgen, wallet, repair — changes signature. This is the
+  flag day, and it is the cost of the change whether or not the
+  `ExtensionPoint` rides along.
+- **`ConfigParam` gaining an arm** (20 reports). Every RPC carrying a
+  `NetworkConfig`, `ConfigHashPreimage` or `DbTip` changes signature. This is
+  not specific to sponsorship: `network_config.x` documents the union as
+  designed to grow ("a new parameter is then an id and a `ConfigParam` arm"),
+  so **any** new parameter costs this. Worth confirming with the team that
+  these reports are understood as routine rather than blocking, since the
+  checker cannot tell the intended growth from an accident.
