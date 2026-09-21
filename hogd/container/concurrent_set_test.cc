@@ -192,22 +192,12 @@ TEST(ConcurrentSet, Erase)
   ASSERT_EQ(s.size(), 1);
 }
 
-// Tolerated behavior (#4107): erase leaves a tombstone that try_insert never
-// reclaims, and try_resize grows from the monotonic lifetime insert count.
-// Inserting and erasing the same value in a loop -- e.g. a replay-cache
-// reservation reserved and aborted repeatedly within one block -- therefore
-// accumulates tombstones and grows retained capacity even though the live size
-// never exceeds one.
-//
-// This is working as intended, not a leak to fix. The set is insert-mostly and
-// per-block (a fresh one each block, discarded at close), so the growth is
-// bounded to a single block's proposal work. Reclaiming tombstones lock-free
-// would either break the duplicate-detection invariant -- a concurrent probe
-// can miss a value republished into a reclaimed slot, since tombstones are not
-// monotonic -- or add a lock to the high-performance common path, neither of
-// which is worth it for this niche case. This test pins the behavior so a
-// future change does not mistake it for a regression.
-TEST(ConcurrentSet, InsertEraseChurnAccumulatesTombstonesWAI)
+// Pins tolerated behavior (#4107): insert/erase churn on one value accumulates
+// tombstones and grows capacity while the live size stays at one, because erase
+// leaves a tombstone that try_insert never reclaims and try_resize grows from
+// the lifetime insert count. The conflict set backing the replay cache is
+// per-block and discarded at close, so the growth is bounded and intended.
+TEST(ConcurrentSet, InsertEraseChurnAccumulatesTombstones)
 {
   ConcurrentSet<uint128_t> s;
   const uint128_t value = (uint128_t{7} << 64) | uint128_t{42};
