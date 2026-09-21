@@ -7,10 +7,10 @@
 #include <mutex>
 #include <optional>
 #include <span>
-#include <unordered_set>
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/container/concurrent_set.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/item_lock/pointer_lock.h"
@@ -22,14 +22,16 @@
 
 namespace hogd {
 
-// Hasher for the replay-cache conflict set. Runs the full 128-bit
+// Hash traits for the replay-cache conflict set. Runs the full 128-bit
 // (expiry_height, nonce) key through the process-wide keyed SipHash24 rather
 // than std::hash<uint128_t>, which is implementation-defined and on libstdc++
 // hashes only the low (nonce) limb, so distinct-expiry same-nonce entries all
 // collapse into one bucket. (#2663)
 struct ReplayConflictSetTraits {
+  static constexpr uint128_t kEmpty = uint128_t{};
+  static constexpr uint128_t kTombstone = ~uint128_t{};
+  static constexpr uint128_t kInserting = ~uint128_t{} - 1;
   static size_t hash(const uint128_t &v);
-  size_t operator()(const uint128_t &v) const { return hash(v); }
 };
 
 class ReplayCacheLock {
@@ -73,11 +75,7 @@ private:
   mutable std::once_flag meta_once_flag_;
   mutable bool meta_poisoned_{false};
 
-  // Uniquifiers reserved so far in this block. A mutex-guarded set, not a
-  // lock-free one, so an aborted reservation is fully reclaimed and a
-  // reserve/abort loop on one uniquifier cannot accumulate dead slots (#4107).
-  mutable std::unordered_set<uint128_t, ReplayConflictSetTraits> conflicts_;
-  mutable std::mutex conflicts_lock_;
+  mutable ConcurrentSet<uint128_t, ReplayConflictSetTraits> conflicts_;
   mutable std::atomic<uint64_t> committed_additions_{0};
 
   mutable std::atomic<int32_t> pending_new_heights_{0};

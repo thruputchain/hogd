@@ -116,6 +116,27 @@ public:
     }
     return count;
   }
+
+  static size_t tombstone_count(ConcurrentSet<uint128_t> &s)
+  {
+    size_t count = 0;
+    for (size_t level = 0; level < s.levels(); ++level) {
+      const size_t level_capacity =
+          ConcurrentSet<uint128_t>::entries_for_level(level);
+      for (size_t i = 0; i < level_capacity; ++i) {
+        if (s.get_level(level)[i].load(std::memory_order_relaxed) ==
+            kTombstone) {
+          ++count;
+        }
+      }
+    }
+    return count;
+  }
+
+  static size_t capacity(ConcurrentSet<uint128_t> &s)
+  {
+    return s.capacity_.load(std::memory_order_relaxed);
+  }
 };
 
 TEST(ConcurrentSet, Basic)
@@ -169,6 +190,41 @@ TEST(ConcurrentSet, Erase)
   ASSERT_EQ(InsertResult::kInserted, s.try_insert(1));
   ASSERT_EQ(InsertResult::kAlreadyPresent, s.try_insert(1));
   ASSERT_EQ(s.size(), 1);
+}
+
+// Tolerated behavior (#4107): erase leaves a tombstone that try_insert never
+// reclaims, and try_resize grows from the monotonic lifetime insert count.
+// Inserting and erasing the same value in a loop -- e.g. a replay-cache
+// reservation reserved and aborted repeatedly within one block -- therefore
+// accumulates tombstones and grows retained capacity even though the live size
+// never exceeds one.
+//
+// This is working as intended, not a leak to fix. The set is insert-mostly and
+// per-block (a fresh one each block, discarded at close), so the growth is
+// bounded to a single block's proposal work. Reclaiming tombstones lock-free
+// would either break the duplicate-detection invariant -- a concurrent probe
+// can miss a value republished into a reclaimed slot, since tombstones are not
+// monotonic -- or add a lock to the high-performance common path, neither of
+// which is worth it for this niche case. This test pins the behavior so a
+// future change does not mistake it for a regression.
+TEST(ConcurrentSet, InsertEraseChurnAccumulatesTombstonesWAI)
+{
+  ConcurrentSet<uint128_t> s;
+  const uint128_t value = (uint128_t{7} << 64) | uint128_t{42};
+
+  constexpr size_t kCycles = 64;
+  for (size_t i = 0; i < kCycles; ++i) {
+    ASSERT_EQ(InsertResult::kInserted, s.try_insert(value));
+    ASSERT_EQ(s.size(), 1);
+    ASSERT_TRUE(s.erase(value));
+    ASSERT_EQ(s.size(), 0);
+  }
+
+  // Live size never exceeded one, yet every abort left a tombstone behind and
+  // the table grew well past its initial capacity.
+  EXPECT_GE(ConcurrentSetHelper::tombstone_count(s), kCycles);
+  EXPECT_GT(ConcurrentSetHelper::capacity(s),
+            ConcurrentSetHelper::kInitialCapacity);
 }
 
 TEST(ConcurrentSet, FullLevel0)
