@@ -73,14 +73,9 @@ private:
   mutable std::once_flag meta_once_flag_;
   mutable bool meta_poisoned_{false};
 
-  // The uniquifiers reserved so far in this block. A hash set guarded by a
-  // small mutex rather than a lock-free set: an aborted reservation must be
-  // fully reclaimed so re-reserving the same uniquifier costs the same as the
-  // first reservation. A lock-free tombstoned set instead retains a dead slot
-  // (and grows capacity) on every abort, letting a reserve/abort loop on one
-  // uniquifier spend super-linear, ungated admission work (#4107). Contention
-  // is confined to a single address's replay lock, where reservations for that
-  // address in this block already serialize on the tiny set operation.
+  // Uniquifiers reserved so far in this block. A mutex-guarded set, not a
+  // lock-free one, so an aborted reservation is fully reclaimed and a
+  // reserve/abort loop on one uniquifier cannot accumulate dead slots (#4107).
   mutable std::unordered_set<uint128_t, ReplayConflictSetTraits> conflicts_;
   mutable std::mutex conflicts_lock_;
   mutable std::atomic<uint64_t> committed_additions_{0};

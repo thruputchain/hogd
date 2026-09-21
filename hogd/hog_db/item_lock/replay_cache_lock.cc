@@ -273,10 +273,8 @@ ReplayCacheLock::try_atomic_change_lock(
     return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
   }
 
-  // A failed reservation is invalid replay input: another transaction in this
-  // block already claimed this uniquifier. The all-zero {expiry=0, nonce=0} is
-  // reachable at executing height 0; keep rejecting it here to preserve the
-  // pre-existing admission decision (#3188).
+  // Reject a duplicate in-block reservation, and the all-zero
+  // {expiry=0, nonce=0} uniquifier reachable at executing height 0 (#3188).
   {
     std::lock_guard<std::mutex> lock(conflicts_lock_);
     if (addition_key == 0 || !conflicts_.insert(addition_key).second) {

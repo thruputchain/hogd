@@ -116,9 +116,7 @@ public:
     return lock.conflicts_.size();
   }
 
-  // Number of buckets retained by the conflict set. Grows only when the live
-  // element count forces a rehash, so it must stay flat under a reserve/abort
-  // loop that never leaves more than one live element (#4107).
+  // Buckets retained by the conflict set; must stay flat under abort churn.
   static size_t conflict_bucket_count(const ReplayCacheLock &lock)
   {
     return lock.conflicts_.bucket_count();
@@ -710,10 +708,8 @@ TEST_F(ReplayCacheLockTest, RemovedReservationDoesNotAdvanceCommittedCounter)
   EXPECT_EQ(kTestCostModel.get_replay_cache_cost(2) - snapshot_cost, d1 + d2);
 }
 
-// Regression for #4107: reserving and aborting the same uniquifier must leave
-// the conflict set in a state equivalent to before the reservation. The old
-// lock-free tombstoned set retained a dead slot and grew capacity on every
-// abort, so a reserve/abort loop spent super-linear, ungated admission work.
+// Regression for #4107: reserve/abort of the same uniquifier must leave no
+// residual state in the conflict set (the old set leaked a slot per abort).
 TEST_F(ReplayCacheLockTest, AbortedReservationsDoNotAccumulateState)
 {
   ReplayCacheLock lock;
