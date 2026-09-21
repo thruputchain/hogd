@@ -1,5 +1,7 @@
 #include "hogd/hog_mempool/scheduler.h"
 
+#include "hogd/hog_mempool/block_transfers.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>

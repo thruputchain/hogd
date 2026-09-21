@@ -15,6 +15,7 @@
 #include "auth_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "sched_db.hh"
 #include "types.hh"

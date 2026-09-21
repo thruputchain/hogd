@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -36,6 +36,18 @@ make_chunk(BlockHeight block, uint32_t index, uint32_t count,
   return chunk;
 }
 
+// The block a push completed. Fails the test and returns an empty block when
+// the push did not complete one.
+BlockTransfers
+completed(std::optional<BlockTransfers> pushed)
+{
+  if (!pushed.has_value()) {
+    ADD_FAILURE() << "the run did not complete on this chunk";
+    return BlockTransfers{.block = 0, .delta_chunks = {}};
+  }
+  return std::move(*pushed);
+}
+
 // The tags of [block]'s deltas, slot by slot, checking each delta is intact.
 std::vector<uint8_t>
 tags_by_slot(const BlockTransfers &block)
@@ -56,12 +68,11 @@ tags_by_slot(const BlockTransfers &block)
 TEST(TransferRunAssembler, SingleChunkRunCompletesAtOnce)
 {
   TransferRunAssembler assembler;
-  const std::optional<BlockTransfers> block =
-      assembler.push(make_chunk(7, 0, 1, {1, 2}));
-  ASSERT_TRUE(block.has_value());
-  EXPECT_EQ(block->block, 7);
-  ASSERT_EQ(block->delta_chunks.size(), 1U);
-  EXPECT_EQ(tags_by_slot(*block), (std::vector<uint8_t>{1, 2}));
+  const BlockTransfers block =
+      completed(assembler.push(make_chunk(7, 0, 1, {1, 2})));
+  EXPECT_EQ(block.block, 7);
+  ASSERT_EQ(block.delta_chunks.size(), 1U);
+  EXPECT_EQ(tags_by_slot(block), (std::vector<uint8_t>{1, 2}));
 }
 
 TEST(TransferRunAssembler, RunCompletesOnceEveryChunkIsIn)
@@ -69,20 +80,18 @@ TEST(TransferRunAssembler, RunCompletesOnceEveryChunkIsIn)
   TransferRunAssembler assembler;
   EXPECT_FALSE(assembler.push(make_chunk(7, 0, 3, {1, 2})).has_value());
   EXPECT_FALSE(assembler.push(make_chunk(7, 1, 3, {3, 4})).has_value());
-  const std::optional<BlockTransfers> block =
-      assembler.push(make_chunk(7, 2, 3, {5}));
-  ASSERT_TRUE(block.has_value());
-  EXPECT_EQ(block->block, 7);
-  ASSERT_EQ(block->delta_chunks.size(), 3U);
-  EXPECT_EQ(tags_by_slot(*block), (std::vector<uint8_t>{1, 2, 3, 4, 5}));
+  const BlockTransfers block =
+      completed(assembler.push(make_chunk(7, 2, 3, {5})));
+  EXPECT_EQ(block.block, 7);
+  ASSERT_EQ(block.delta_chunks.size(), 3U);
+  EXPECT_EQ(tags_by_slot(block), (std::vector<uint8_t>{1, 2, 3, 4, 5}));
 
   // The assembler is ready for the next block, including an empty one.
-  const std::optional<BlockTransfers> next_block =
-      assembler.push(make_chunk(8, 0, 1, {}));
-  ASSERT_TRUE(next_block.has_value());
-  EXPECT_EQ(next_block->block, 8);
-  ASSERT_EQ(next_block->delta_chunks.size(), 1U);
-  EXPECT_TRUE(next_block->delta_chunks[0].empty());
+  const BlockTransfers next_block =
+      completed(assembler.push(make_chunk(8, 0, 1, {})));
+  EXPECT_EQ(next_block.block, 8);
+  ASSERT_EQ(next_block.delta_chunks.size(), 1U);
+  EXPECT_TRUE(next_block.delta_chunks[0].empty());
 }
 
 TEST(TransferRunAssembler, ChunksLandInTheirSlotsWhateverTheirArrivalOrder)
@@ -91,24 +100,22 @@ TEST(TransferRunAssembler, ChunksLandInTheirSlotsWhateverTheirArrivalOrder)
   // The run's length and block come from whichever chunk arrives first.
   EXPECT_FALSE(assembler.push(make_chunk(7, 2, 3, {5})).has_value());
   EXPECT_FALSE(assembler.push(make_chunk(7, 0, 3, {1, 2})).has_value());
-  const std::optional<BlockTransfers> block =
-      assembler.push(make_chunk(7, 1, 3, {3, 4}));
-  ASSERT_TRUE(block.has_value());
-  EXPECT_EQ(block->block, 7);
-  ASSERT_EQ(block->delta_chunks.size(), 3U);
-  EXPECT_EQ(tags_by_slot(*block), (std::vector<uint8_t>{1, 2, 3, 4, 5}));
+  const BlockTransfers block =
+      completed(assembler.push(make_chunk(7, 1, 3, {3, 4})));
+  EXPECT_EQ(block.block, 7);
+  ASSERT_EQ(block.delta_chunks.size(), 3U);
+  EXPECT_EQ(tags_by_slot(block), (std::vector<uint8_t>{1, 2, 3, 4, 5}));
 }
 
 TEST(TransferRunAssembler, AnEmptyChunkStillCountsTowardTheRun)
 {
   TransferRunAssembler assembler;
   EXPECT_FALSE(assembler.push(make_chunk(7, 1, 2, {})).has_value());
-  const std::optional<BlockTransfers> block =
-      assembler.push(make_chunk(7, 0, 2, {1}));
-  ASSERT_TRUE(block.has_value());
-  ASSERT_EQ(block->delta_chunks.size(), 2U);
-  EXPECT_EQ(tags_by_slot(*block), (std::vector<uint8_t>{1}));
-  EXPECT_TRUE(block->delta_chunks[1].empty());
+  const BlockTransfers block =
+      completed(assembler.push(make_chunk(7, 0, 2, {1})));
+  ASSERT_EQ(block.delta_chunks.size(), 2U);
+  EXPECT_EQ(tags_by_slot(block), (std::vector<uint8_t>{1}));
+  EXPECT_TRUE(block.delta_chunks[1].empty());
 }
 
 } // namespace hogd

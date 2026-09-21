@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -10,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_rpc.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
@@ -52,7 +52,7 @@ static_assert(is_SchedDb1<ChunkRecordingSchedDbRpc *, std::type_identity_t>);
 Delta
 make_delta(uint64_t i)
 {
-  Delta delta{.address = {}, .hog_delta = to_xdr(static_cast<int128_t>(i + 1))};
+  Delta delta{.address = {}, .hog_delta = to_xdr(static_cast<int128_t>(i) + 1)};
   for (size_t byte = 0; byte < sizeof(i); ++byte) {
     delta.address[byte] = static_cast<uint8_t>(i >> (8 * byte));
   }
