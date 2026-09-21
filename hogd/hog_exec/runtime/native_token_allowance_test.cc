@@ -1823,25 +1823,11 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
   EXPECT_FALSE(handler.root_invoke()().is_root_success());
 }
 
-// Edge case: a native-token balance at (nearly) INT128_MAX must still be able
-// to receive a storage refund at commit. hogdb's release_balance() is
-// infallible -- it CHECK-fails rather than returning an error if the credited
-// refund exceeds the balance's remaining add-capacity (INT128_MAX - base). The
-// mint precompile no longer bounds total supply below INT128_MAX at invoke
-// (that check moved to commit for rv32 parity), so this pins the property that
-// keeps release_balance() safe even at the maximum: an address holding the
-// entire supply as balance has no storage to release, and more generally
-// (balance + its locked storage) <= total_supply <= INT128_MAX, so any storage
-// refund it receives is always <= its add-capacity. HOG conservation is what
-// makes the unreachable state (base == INT128_MAX AND a pending refund)
-// unreachable; if that ever regressed, the block-3 delete below would abort
-// the process on the CHECK inside release_balance() rather than committing.
-//
-// Sequence: block 1 mints INT128_MAX to the whale (the genesis root is the
-// only authorized minter); block 2 has the whale write a bytestring, locking
-// storage cost out of its near-max balance; block 3 has the whale delete it,
-// so the released storage cost is credited back via release_balance() against
-// a base a hair below INT128_MAX.
+// Pins HOG conservation (balance + locked storage <= supply <= INT128_MAX) so a
+// storage refund against a near-max balance never trips the CHECK in
+// release_balance(). Needed because the mint precompile stopped bounding supply
+// below INT128_MAX at invoke (that moved to commit for rv32 parity). Mint max,
+// write a bytestring, then delete it; a regression aborts on the delete.
 TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
 {
   constexpr static ContractAddress kWhaleAddr = make_contract_address(180);
