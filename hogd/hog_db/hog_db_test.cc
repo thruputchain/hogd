@@ -910,6 +910,87 @@ TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
   EXPECT_TRUE(std::ranges::equal(*stored, kValue));
 }
 
+// The other half of the #4096 contract: a redundant refund must not strand the
+// add-capacity it would have consumed. A refund is applied straight to the
+// committed delta, so the capacity stays available to the rest of the block --
+// including a later tx that re-enters the already-finalized balance lock
+// through try_atomic_change_lock, which does consult add-capacity.
+//
+// Before the fix the refund reserved add-capacity for itself, so the transfer
+// in the third tx below found one bytestring cost less headroom than the
+// address actually had and was rejected with kDbConflictBoundsExceeded.
+TEST_F(HogDbTest, DuplicateBytestringRefundLeavesAddCapacityForLaterTransfer)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr std::array<std::byte, 1> kValue{std::byte{0x42}};
+
+  Address addr = make_address(kAddress + 77383);
+  Address funder_addr = make_address(kAddress + 77384);
+  ItemKey key = make_item_key(addr, 1);
+  const int128_t item_cost = cost_model_.get_bytestring_cost(kValue.size());
+
+  // addr's positive headroom is exactly the transfer the third tx makes, so the
+  // transfer fits only if the refund left that headroom untouched -- one
+  // bytestring cost of capacity taken by the refund is enough to break it. The
+  // two balances together come to exactly INT128_MAX.
+  const int128_t transfer = 8 * item_cost;
+  const int128_t initial_balance =
+      std::numeric_limits<int128_t>::max() - transfer;
+
+  ASSERT_TRUE(db_.write_address_balance(addr, initial_balance));
+  ASSERT_TRUE(db_.write_address_balance(funder_addr, transfer));
+
+  BlockHeight height = 1;
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, height,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
+
+  // Two same-value writers of a previously absent row: each reserves the full
+  // bytestring cost, the first materializes it, the second is refunded.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX first(block_tx);
+  ASSERT_TRUE(first.request_bytes(key, std::span(kValue), kNoFlags));
+  ASSERT_TRUE(first.sync_balance_locks());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX duplicate(block_tx);
+  ASSERT_TRUE(duplicate.request_bytes(key, std::span(kValue), kNoFlags));
+  ASSERT_TRUE(duplicate.sync_balance_locks());
+
+  ASSERT_TRUE(first.commit());
+  ASSERT_TRUE(duplicate.commit());
+
+  // A later tx in the same block credits addr with its whole remaining
+  // headroom, against the balance lock the refund above already finalized.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX transfer_tx(block_tx);
+  ASSERT_TRUE(
+      transfer_tx.request_nnint128(make_address_balance_item_key(funder_addr),
+                                   -transfer, kNoFlags));
+  ASSERT_TRUE(transfer_tx.request_nnint128(make_address_balance_item_key(addr),
+                                           transfer, kNoFlags));
+  ASSERT_TRUE(transfer_tx.sync_balance_locks())
+      << "the refund stranded add-capacity on the recipient's balance lock";
+  ASSERT_TRUE(transfer_tx.commit());
+
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
+  ASSERT_TRUE(block_tx.get().commit());
+
+  // Charged for exactly one materialized row, and credited the full transfer.
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance);
+  EXPECT_EQ(initial_balance - item_cost + transfer, *balance);
+
+  auto funder_balance = db_.read_address_balance(funder_addr);
+  ASSERT_TRUE(funder_balance);
+  EXPECT_EQ(0, *funder_balance);
+
+  auto stored = db_.read_bytes(key);
+  ASSERT_TRUE(stored);
+  EXPECT_TRUE(std::ranges::equal(*stored, kValue));
+}
+
 TEST_F(HogDbTest, NewBalanceHogAgeIsAllZeroes)
 {
   Address sender_addr = make_address(kAddress);
