@@ -336,10 +336,8 @@ TEST(BalanceLockTest, FreshBalanceCapacityIsInt128Max)
 }
 
 // add_committed_credit refunds a redundant storage reservation on an
-// already-finalized lock (#4096): it must land in the committed delta and cost
-// no capacity.
-
-// A refund is not a reservation, so neither capacity counter may move.
+// already-finalized lock (#4096). The refund must land in the committed delta,
+// and it is not a reservation, so neither capacity counter may move.
 TEST(BalanceLockTest, RefundDoesNotConsumeCapacity)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();

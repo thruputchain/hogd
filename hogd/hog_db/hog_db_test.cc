@@ -910,11 +910,8 @@ TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
   EXPECT_TRUE(std::ranges::equal(*stored, kValue));
 }
 
-// The other half of the #4096 contract: a redundant refund must leave
-// add-capacity available to later txs in the block, including one that
-// re-enters the already-finalized balance lock. Before the fix the refund
-// reserved that capacity for itself and the transfer below was rejected with
-// kDbConflictBoundsExceeded.
+// A redundant refund must leave add-capacity for later txs (#4096). Before the
+// fix the transfer below was rejected with kDbConflictBoundsExceeded.
 TEST_F(HogDbTest, DuplicateBytestringRefundLeavesAddCapacityForLaterTransfer)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);

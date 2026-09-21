@@ -1824,17 +1824,18 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
 }
 
 // Edge case: a native-token balance at (nearly) INT128_MAX must still be able
-// to receive a storage refund at commit. release_balance() is infallible and
-// CHECK-fails rather than returning an error if it cannot apply the credit.
-// Since #4096 a refund onto an already-finalized lock (this test's path) goes
-// through BalanceLock::add_committed_credit and reserves no add-capacity, so
-// what remains CHECK-able is release_balance's not-yet-finalized branch and
-// build_result's overflow check on snapshot + delta. The mint precompile no
-// longer bounds total supply below INT128_MAX at invoke (that check moved to
-// commit for rv32 parity), so this pins what keeps those safe at the maximum:
-// (balance + its locked storage) <= total_supply <= INT128_MAX, so a refunded
-// balance never exceeds INT128_MAX. If HOG conservation ever regressed, the
-// block-3 delete below would abort the process rather than committing.
+// to receive a storage refund at commit. hogdb's release_balance() is
+// infallible -- it CHECK-fails rather than returning an error if the credited
+// refund exceeds the balance's remaining add-capacity (INT128_MAX - base). The
+// mint precompile no longer bounds total supply below INT128_MAX at invoke
+// (that check moved to commit for rv32 parity), so this pins the property that
+// keeps release_balance() safe even at the maximum: an address holding the
+// entire supply as balance has no storage to release, and more generally
+// (balance + its locked storage) <= total_supply <= INT128_MAX, so any storage
+// refund it receives is always <= its add-capacity. HOG conservation is what
+// makes the unreachable state (base == INT128_MAX AND a pending refund)
+// unreachable; if that ever regressed, the block-3 delete below would abort
+// the process on the CHECK inside release_balance() rather than committing.
 //
 // Sequence: block 1 mints INT128_MAX to the whale (the genesis root is the
 // only authorized minter); block 2 has the whale write a bytestring, locking
