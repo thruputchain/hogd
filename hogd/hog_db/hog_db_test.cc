@@ -910,15 +910,11 @@ TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
   EXPECT_TRUE(std::ranges::equal(*stored, kValue));
 }
 
-// The other half of the #4096 contract: a redundant refund must not strand the
-// add-capacity it would have consumed. A refund is applied straight to the
-// committed delta, so the capacity stays available to the rest of the block --
-// including a later tx that re-enters the already-finalized balance lock
-// through try_atomic_change_lock, which does consult add-capacity.
-//
-// Before the fix the refund reserved add-capacity for itself, so the transfer
-// in the third tx below found one bytestring cost less headroom than the
-// address actually had and was rejected with kDbConflictBoundsExceeded.
+// The other half of the #4096 contract: a redundant refund must leave
+// add-capacity available to later txs in the block, including one that
+// re-enters the already-finalized balance lock. Before the fix the refund
+// reserved that capacity for itself and the transfer below was rejected with
+// kDbConflictBoundsExceeded.
 TEST_F(HogDbTest, DuplicateBytestringRefundLeavesAddCapacityForLaterTransfer)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
@@ -929,10 +925,8 @@ TEST_F(HogDbTest, DuplicateBytestringRefundLeavesAddCapacityForLaterTransfer)
   ItemKey key = make_item_key(addr, 1);
   const int128_t item_cost = cost_model_.get_bytestring_cost(kValue.size());
 
-  // addr's positive headroom is exactly the transfer the third tx makes, so the
-  // transfer fits only if the refund left that headroom untouched -- one
-  // bytestring cost of capacity taken by the refund is enough to break it. The
-  // two balances together come to exactly INT128_MAX.
+  // addr's headroom equals the transfer exactly, so one bytestring cost of
+  // capacity taken by the refund is enough to break it.
   const int128_t transfer = 8 * item_cost;
   const int128_t initial_balance =
       std::numeric_limits<int128_t>::max() - transfer;

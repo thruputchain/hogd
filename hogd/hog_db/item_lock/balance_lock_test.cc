@@ -335,24 +335,11 @@ TEST(BalanceLockTest, FreshBalanceCapacityIsInt128Max)
           .has_value());
 }
 
-// --- Storage-refund path (BalanceLock::add_committed_credit) -----------------
-//
-// A tx reserves the full storage cost of every row it writes, but only the
-// commit that actually materializes a row keeps that cost; a duplicate
-// same-value write gets its reservation back through
-// BlockTX::release_balance -> ItemLock::add_committed_balance_credit ->
-// BalanceLock::add_committed_credit, on a lock that is already finalized.
-//
-// #4096 changed how that refund is applied: it used to reserve *fresh positive
-// add-capacity* and CHECK the reservation succeeded, which aborted the process
-// whenever the remaining add-capacity was smaller than the refund (#4095). It
-// now bumps the committed delta directly and leaves the add_/sub_ reservation
-// counters alone, so the tests below pin both halves of that contract -- the
-// refund lands in the committed value, and it costs no capacity.
+// add_committed_credit refunds a redundant storage reservation on an
+// already-finalized lock (#4096): it must land in the committed delta and cost
+// no capacity.
 
-// The refund moves the committed delta and nothing else. Reservation counters
-// bound *concurrent* locking; a refund is not a reservation, so neither the
-// add nor the sub counter may move.
+// A refund is not a reservation, so neither capacity counter may move.
 TEST(BalanceLockTest, RefundDoesNotConsumeCapacity)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
@@ -381,18 +368,15 @@ TEST(BalanceLockTest, RefundDoesNotConsumeCapacity)
       << "a refund must not hand back sub-capacity either";
 }
 
-// Regression test for #4095, at the lock level: when remaining add-capacity is
-// smaller than a single refund, the refund must still be applied. The old
-// implementation reserved add-capacity for the refund and CHECK-failed here,
-// aborting the validator. See
-// HogDbTest.DuplicateBytestringRefundNearMaxBalanceCommits for the same case
-// driven end to end through two duplicate writers.
+// Regression for #4095: the refund must apply even when add-capacity is
+// smaller than it. Driven end to end by
+// HogDbTest.DuplicateBytestringRefundNearMaxBalanceCommits.
 TEST(BalanceLockTest, RefundCommitsWhenAddCapacityIsSmallerThanRefund)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
   constexpr int128_t kRowCost = kTestCostModel.get_nnint_cost();
 
-  // One unit short of a single refund -- the exact condition that used to trip
+  // One unit short of a single refund, the condition that used to trip
   // CHECK(ok) inside add_committed_credit.
   constexpr int128_t kBase = kMax - (kRowCost - 1);
   BalanceLock lock(kBase);
@@ -410,14 +394,9 @@ TEST(BalanceLockTest, RefundCommitsWhenAddCapacityIsSmallerThanRefund)
       << "the refund must not have drawn on the capacity it cannot afford";
 }
 
-// A balance sitting at exactly INT128_MAX has *zero* add-capacity, so the old
-// implementation aborted on any refund at all. The refund path no longer
-// consults add-capacity, and returning the reservation puts the committed value
-// back at exactly INT128_MAX -- one unit from tripping build_result's overflow
-// CHECK. (HOG conservation makes a max-balance address holding locked storage
-// unreachable in production -- see
-// NativeTokenAllowanceTest.StorageRefundCreditsAgainstNearMaxBalance -- but
-// add_committed_credit is infallible and must be total at the boundary.)
+// A balance at exactly INT128_MAX has zero add-capacity, and the refund must
+// still return the committed value to exactly INT128_MAX without tripping
+// build_result's overflow CHECK.
 TEST(BalanceLockTest, RefundAgainstZeroAddCapacityCommits)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
@@ -438,12 +417,9 @@ TEST(BalanceLockTest, RefundAgainstZeroAddCapacityCommits)
   EXPECT_EQ(lock.get_add_capacity(), 0);
 }
 
-// The point of applying the refund outside the reservation counters: the
-// capacity it would have consumed stays available to the rest of the block. A
-// later tx re-enters the finalized lock through try_atomic_change_lock, which
-// *does* consult add_, and must still find the full original headroom. Before
-// #4096 the refund had eaten kRowCost of it and the credit below would have
-// been rejected with kDbConflictBoundsExceeded.
+// A later tx re-enters the finalized lock through try_atomic_change_lock, which
+// does consult add_, and must still find the full original headroom. Before
+// #4096 the refund had eaten kRowCost of it.
 TEST(BalanceLockTest, RefundedCapacityStaysAvailableToALaterReservation)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
@@ -472,10 +448,8 @@ TEST(BalanceLockTest, RefundedCapacityStaysAvailableToALaterReservation)
   EXPECT_EQ(lock.build_result(make_dummy_context()), kMax);
 }
 
-// Several duplicate writers of the same row each reserve its cost, and every
-// commit after the first refunds one. The refunds accumulate in the committed
-// delta, the net charge is exactly the one materialized row, and none of them
-// touches the capacity counters.
+// Refunds accumulate in the committed delta and never touch the capacity
+// counters, leaving the one materialized row as the net charge.
 TEST(BalanceLockTest, MultipleRefundsAccumulate)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
@@ -505,12 +479,9 @@ TEST(BalanceLockTest, MultipleRefundsAccumulate)
   EXPECT_EQ(lock.get_add_capacity(), kRowCost - 1);
 }
 
-// A refund on a balance that this block created (no snapshot value) still has
-// the one-time balance-row cost deducted from build_result, exactly once. A
-// fresh balance has zero sub-capacity, so its storage charge can only ride
-// along inside the funding credit -- the shape
-// HogDbTest.ReleaseBalanceRefundOnFreshAddress{CrossTx,SameTx} exercise end to
-// end, here with the refund landing on the finalized lock.
+// On a balance this block created (no snapshot value), build_result still
+// deducts the one-time balance-row cost exactly once. A fresh balance has zero
+// sub-capacity, so its storage charge rides inside the funding credit.
 TEST(BalanceLockTest, RefundOnFreshBalanceChargesRowCostOnce)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
