@@ -49,7 +49,7 @@ public:
 
     if (scheduler_) {
       // See the comment above if you change this.
-      handle_transfer(transfers, std::move(cg));
+      handle_transfer(std::move(transfers), std::move(cg));
     }
     else {
       info("[MempoolDbRpc::scheddb_hogs_transferred] failed. This is ok and "
