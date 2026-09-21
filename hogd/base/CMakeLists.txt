@@ -58,4 +58,4 @@ target_link_libraries(
   hogd
   GTest::gtest
 )
-gtest_discover_tests(base_test)
+hogd_discover_tests(base_test)

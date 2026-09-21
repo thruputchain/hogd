@@ -44,4 +44,4 @@ target_link_libraries(
   db_interface
   GTest::gtest
 )
-gtest_discover_tests(db_interface_test)
+hogd_discover_tests(db_interface_test)

@@ -48,7 +48,7 @@ target_link_libraries(mempool_test
   GTest::gtest
 )
 
-gtest_discover_tests(mempool_test)
+hogd_discover_tests(mempool_test)
 
 add_executable(
   coordinator

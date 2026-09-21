@@ -90,7 +90,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_isa_core_test TEST_PREFIX rv32.isa_core.)
+hogd_discover_tests(rv32_isa_core_test TEST_PREFIX rv32.isa_core.)
 
 # Differential-testing substrate (arch_trace.h). Also core-only: it must stay
 # linkable against an external oracle harness with no hogd dependencies.
@@ -105,7 +105,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_arch_trace_test TEST_PREFIX rv32.arch_trace.)
+hogd_discover_tests(rv32_arch_trace_test TEST_PREFIX rv32.arch_trace.)
 
 # External-oracle differential harness (oracle.h + spec_model.h). Core-only for
 # the same reason: the Oracle interface must stay linkable against an external
@@ -121,7 +121,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_oracle_test TEST_PREFIX rv32.oracle.)
+hogd_discover_tests(rv32_oracle_test TEST_PREFIX rv32.oracle.)
 
 # External-oracle differential test (spike_oracle.h). Core-only; drives the real
 # Spike (riscv-isa-sim) as a subprocess located via RV32_ORACLE_BIN and SKIPS
@@ -137,7 +137,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_spike_oracle_test TEST_PREFIX rv32.spike_oracle.)
+hogd_discover_tests(rv32_spike_oracle_test TEST_PREFIX rv32.spike_oracle.)
 
 add_executable(
   rv32_vm_test
@@ -150,7 +150,7 @@ target_link_libraries(
   rv32_vm
   GTest::gtest
 )
-gtest_discover_tests(rv32_vm_test TEST_PREFIX rv32.)
+hogd_discover_tests(rv32_vm_test TEST_PREFIX rv32.)
 
 add_executable(
   rv32_conformance_test
@@ -163,7 +163,7 @@ target_link_libraries(
   rv32_vm
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_conformance_test
   TEST_PREFIX rv32.conformance.
   NO_PRETTY_VALUES
@@ -180,7 +180,7 @@ target_link_libraries(
   rv32_vm
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_borrowed_conformance_test
   TEST_PREFIX rv32.borrowed.
   NO_PRETTY_VALUES
@@ -197,7 +197,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_spec_model_crosscheck_test
   TEST_PREFIX rv32.crosscheck.
   NO_PRETTY_VALUES
@@ -220,7 +220,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_threaded_test TEST_PREFIX rv32.threaded.)
+hogd_discover_tests(rv32_threaded_test TEST_PREFIX rv32.threaded.)
 
 add_executable(
   rv32_unsupported_profile_test
@@ -233,7 +233,7 @@ target_link_libraries(
   rv32_vm
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_unsupported_profile_test
   TEST_PREFIX rv32.unsupported.
   NO_PRETTY_VALUES
@@ -262,7 +262,7 @@ add_dependencies(
   rv32_syscall_bridge_test
   rv32_syscall_xdr_hh
 )
-gtest_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)
+hogd_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)
 
 add_library(rv32_runtime_objects OBJECT
   rv32_contract.cc

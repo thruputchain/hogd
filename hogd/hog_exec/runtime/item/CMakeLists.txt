@@ -31,4 +31,4 @@ target_link_libraries(item_test
   storage_cost
   GTest::gtest
 )
-gtest_discover_tests(item_test)
+hogd_discover_tests(item_test)

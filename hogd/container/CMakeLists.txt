@@ -14,7 +14,7 @@ target_link_libraries(
   hogd
   GTest::gtest
 )
-gtest_discover_tests(container_test)
+hogd_discover_tests(container_test)
 
 if(BUILD_BENCHMARKS)
   add_executable(

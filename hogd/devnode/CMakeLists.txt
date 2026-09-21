@@ -84,7 +84,7 @@ add_dependencies(
   all_riscv_contracts
   hog-devnode
 )
-gtest_discover_tests(
+hogd_discover_tests(
   hog_devnode_test
   PROPERTIES
     RESOURCE_LOCK hog_devnode
@@ -111,7 +111,7 @@ add_dependencies(
   all_riscv_contracts
   all_contract_headers
 )
-gtest_discover_tests(bootstrap_manifest_test)
+hogd_discover_tests(bootstrap_manifest_test)
 
 add_executable(
   hog_devnode_tmp_dir_test
@@ -132,7 +132,7 @@ add_dependencies(
   all_riscv_contracts
   all_contract_headers
 )
-gtest_discover_tests(hog_devnode_tmp_dir_test)
+hogd_discover_tests(hog_devnode_tmp_dir_test)
 
 add_executable(
   hosted_bootstrap_generator_test
@@ -161,7 +161,7 @@ add_dependencies(
   all_contract_headers
   hog-hosted-bootstrap
 )
-gtest_discover_tests(hosted_bootstrap_generator_test)
+hogd_discover_tests(hosted_bootstrap_generator_test)
 
 add_executable(
   hog_devnode_fresh_launch_test
