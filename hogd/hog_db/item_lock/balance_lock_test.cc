@@ -335,9 +335,8 @@ TEST(BalanceLockTest, FreshBalanceCapacityIsInt128Max)
           .has_value());
 }
 
-// add_committed_credit refunds a redundant storage reservation on an
-// already-finalized lock (#4096). The refund must land in the committed delta,
-// and it is not a reservation, so neither capacity counter may move.
+// add_committed_credit refunds a redundant reservation (#4096): it lands in the
+// committed delta and must not move either capacity counter.
 TEST(BalanceLockTest, RefundDoesNotConsumeCapacity)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
@@ -392,9 +391,8 @@ TEST(BalanceLockTest, RefundCommitsWhenAddCapacityIsSmallerThanRefund)
       << "the refund must not have drawn on the capacity it cannot afford";
 }
 
-// A balance at exactly INT128_MAX has zero add-capacity, and the refund must
-// still return the committed value to exactly INT128_MAX without tripping
-// build_result's overflow CHECK.
+// At INT128_MAX add-capacity is zero, so the refund must restore the committed
+// value exactly without tripping build_result's overflow CHECK.
 TEST(BalanceLockTest, RefundAgainstZeroAddCapacityCommits)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
@@ -477,9 +475,8 @@ TEST(BalanceLockTest, MultipleRefundsAccumulate)
   EXPECT_EQ(lock.get_add_capacity(), kRowCost - 1);
 }
 
-// On a balance this block created (no snapshot value), build_result still
-// deducts the one-time balance-row cost exactly once. A fresh balance has zero
-// sub-capacity, so its storage charge rides inside the funding credit.
+// A fresh balance has zero sub-capacity, so its storage charge rides in the
+// funding credit; build_result still deducts the balance-row cost once.
 TEST(BalanceLockTest, RefundOnFreshBalanceChargesRowCostOnce)
 {
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
