@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <type_traits>
@@ -20,19 +21,19 @@ public:
   using rpc_service = SchedDb1;
 
   void scheddb_intro_shard(ShardCard const & /*unused*/) {};
-  // Accumulates a block's run and publishes it on the run's last chunk, so a
-  // waiter never sees a partially delivered block.
+  // Accumulates a block's run and publishes it once every chunk is in, so a
+  // waiter never sees a partially delivered block. Chunks may arrive in any
+  // order.
   void scheddb_hogs_transferred_chunk(HogsTransferredChunk const &chunk)
   {
     std::unique_lock<std::mutex> lock(mtx_);
-    std::map<ContractAddress, int128_t> &pending =
-        pending_hogs_transferred_[chunk.block];
+    PendingRun &pending = pending_hogs_transferred_[chunk.block];
     for (const auto &delta : chunk.deltas) {
-      pending[delta.address] = from_xdr(delta.hog_delta);
+      pending.deltas[delta.address] = from_xdr(delta.hog_delta);
     }
-    if (chunk.chunk_index + 1 == chunk.chunk_count) {
+    if (++pending.received_chunks == chunk.chunk_count) {
       assert(!hogs_transferred_.contains(chunk.block));
-      hogs_transferred_[chunk.block] = std::move(pending);
+      hogs_transferred_[chunk.block] = std::move(pending.deltas);
       pending_hogs_transferred_.erase(chunk.block);
       cv_.notify_all();
     }
@@ -50,8 +51,11 @@ private:
   std::mutex mtx_;
   std::condition_variable cv_;
   std::map<BlockHeight, std::map<ContractAddress, int128_t>> hogs_transferred_;
-  std::map<BlockHeight, std::map<ContractAddress, int128_t>>
-      pending_hogs_transferred_;
+  struct PendingRun {
+    std::map<ContractAddress, int128_t> deltas;
+    uint32_t received_chunks = 0;
+  };
+  std::map<BlockHeight, PendingRun> pending_hogs_transferred_;
   std::map<BlockHeight, ContractAddressBatch> changed_accounts_;
 };
 

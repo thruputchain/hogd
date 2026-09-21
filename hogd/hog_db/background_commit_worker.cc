@@ -37,10 +37,12 @@ BackgroundCommitWorker::BackgroundCommitWorker(
 
 namespace {
 // Sends a committed block's balance deltas to the scheduler as a run of
-// chunks, each awaited before the next so the run arrives in order and the
-// mempool never holds a whole block. Every chunk carries its index and the
-// run's length, and the mempool completes the block on the last one, so a
-// block with no nonzero delta still sends one empty chunk.
+// chunks. Every chunk carries its index and the run's length, so the mempool
+// accepts the run in any order and completes the block once all of it is in;
+// a block with no nonzero delta still sends one empty chunk. This sends the
+// chunks one at a time and awaits each, which also keeps the contract that
+// the next block's run starts only after every chunk of this one is
+// acknowledged; a sender may fan a run out over several connections instead.
 void
 dispatch_balance_deltas(
     BlockHeight block_height, PerThread<std::vector<Delta>> balance_deltas,

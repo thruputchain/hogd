@@ -47,9 +47,10 @@ public:
 
   // Collects the run of chunks hog_db sends for a committed block and hands
   // the scheduler the whole block once, so it keeps seeing one update per
-  // height. scheduler_lock_, held through [cg] until handle_transfer is done,
-  // serializes the chunks and the assembler; a chunk's deltas move from the
-  // decoded record into the block without a copy.
+  // height. The chunks may arrive in any order and on any connection;
+  // scheduler_lock_, held through [cg] until handle_transfer is done,
+  // serializes the assembler. A chunk's deltas move from the decoded record
+  // into the block without a copy.
   x23::Async<void> scheddb_hogs_transferred_chunk(HogsTransferredChunk chunk)
   {
     auto cg = std::make_unique<x23::CoroGuard>();

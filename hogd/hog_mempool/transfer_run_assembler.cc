@@ -1,6 +1,5 @@
 #include "hogd/hog_mempool/transfer_run_assembler.h"
 
-#include <cstdint>
 #include <optional>
 #include <utility>
 
@@ -15,24 +14,25 @@ TransferRunAssembler::push(HogsTransferredChunk chunk)
 {
   CHECK_GT(chunk.chunk_count, 0U);
   CHECK_LT(chunk.chunk_index, chunk.chunk_count);
-  if (chunk.chunk_index == 0) {
-    CHECK(!pending_.has_value());
-    pending_.emplace(Pending{.block = BlockTransfers{.block = chunk.block,
-                                                     .delta_chunks = {}},
-                             .chunk_count = chunk.chunk_count});
-    pending_->block.delta_chunks.reserve(chunk.chunk_count);
+  if (!pending_.has_value()) {
+    Pending &started = pending_.emplace();
+    started.block.block = chunk.block;
+    started.block.delta_chunks.resize(chunk.chunk_count);
+    started.received.assign(chunk.chunk_count, false);
+    started.remaining = chunk.chunk_count;
   }
   else {
-    CHECK(pending_.has_value());
     CHECK_EQ(pending_->block.block, chunk.block);
-    CHECK_EQ(pending_->chunk_count, chunk.chunk_count);
-    CHECK_EQ(pending_->block.delta_chunks.size(), chunk.chunk_index);
+    CHECK_EQ(pending_->block.delta_chunks.size(), chunk.chunk_count);
   }
-  pending_->block.delta_chunks.push_back(std::move(chunk.deltas));
-  if (chunk.chunk_index + 1 != chunk.chunk_count) {
+  Pending &pending = *pending_;
+  CHECK(!pending.received[chunk.chunk_index]);
+  pending.received[chunk.chunk_index] = true;
+  pending.block.delta_chunks[chunk.chunk_index] = std::move(chunk.deltas);
+  if (--pending.remaining != 0) {
     return std::nullopt;
   }
-  BlockTransfers block = std::move(pending_->block);
+  BlockTransfers block = std::move(pending.block);
   pending_.reset();
   return block;
 }
