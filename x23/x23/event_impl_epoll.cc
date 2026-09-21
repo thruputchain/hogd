@@ -26,11 +26,8 @@ CoroPollImpl::CoroPollImpl(ThreadPool &pool)
 
 CoroPollImpl::~CoroPollImpl()
 {
-  // Cancel the SIGUSR1 dump before freeing the fd table.  debug_dump()
-  // runs on the signal service thread, and cancel() waits out a pass
-  // that is already making callbacks.  Leaving this to sigcb_'s own
-  // destructor would be too late: member destructors run after this
-  // body, so the dump could still be walking state_ as we delete it.
+  // Stop the SIGUSR1 dump before freeing state_: it runs on the signal
+  // service thread, and sigcb_'s own destructor runs too late.
   sigcb_ = AutoSignalCbHandle{};
   delete[] state_.load();
 }
