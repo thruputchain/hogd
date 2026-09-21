@@ -655,10 +655,8 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-// Working-as-intended per #2155: a negative explicit set_value is deliberately
-// allowed. The NNInt invariant is value >= min(set_value, 0), not value >= 0
-// (see NNIntItem::validate()). Probes the INT128_MIN boundary that #4104
-// re-reported as a bug; it commits with no overflow, on both DB backends.
+// Working-as-intended per #2155: the NNInt invariant is value >= min(set_value,
+// 0), not value >= 0. Probes the INT128_MIN boundary re-reported in #4104.
 TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
 {
   auto contract_addr = make_contract_address(0);
