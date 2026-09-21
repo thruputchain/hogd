@@ -7,10 +7,10 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <unordered_set>
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/container/concurrent_set.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/item_lock/pointer_lock.h"
@@ -22,16 +22,14 @@
 
 namespace hogd {
 
-// Hash traits for the replay-cache conflict set. Runs the full 128-bit
+// Hasher for the replay-cache conflict set. Runs the full 128-bit
 // (expiry_height, nonce) key through the process-wide keyed SipHash24 rather
 // than std::hash<uint128_t>, which is implementation-defined and on libstdc++
 // hashes only the low (nonce) limb, so distinct-expiry same-nonce entries all
 // collapse into one bucket. (#2663)
 struct ReplayConflictSetTraits {
-  static constexpr uint128_t kEmpty = uint128_t{};
-  static constexpr uint128_t kTombstone = ~uint128_t{};
-  static constexpr uint128_t kInserting = ~uint128_t{} - 1;
   static size_t hash(const uint128_t &v);
+  size_t operator()(const uint128_t &v) const { return hash(v); }
 };
 
 class ReplayCacheLock {
@@ -75,7 +73,16 @@ private:
   mutable std::once_flag meta_once_flag_;
   mutable bool meta_poisoned_{false};
 
-  mutable ConcurrentSet<uint128_t, ReplayConflictSetTraits> conflicts_;
+  // The uniquifiers reserved so far in this block. A hash set guarded by a
+  // small mutex rather than a lock-free set: an aborted reservation must be
+  // fully reclaimed so re-reserving the same uniquifier costs the same as the
+  // first reservation. A lock-free tombstoned set instead retains a dead slot
+  // (and grows capacity) on every abort, letting a reserve/abort loop on one
+  // uniquifier spend super-linear, ungated admission work (#4107). Contention
+  // is confined to a single address's replay lock, where reservations for that
+  // address in this block already serialize on the tiny set operation.
+  mutable std::unordered_set<uint128_t, ReplayConflictSetTraits> conflicts_;
+  mutable std::mutex conflicts_lock_;
   mutable std::atomic<uint64_t> committed_additions_{0};
 
   mutable std::atomic<int32_t> pending_new_heights_{0};

@@ -109,6 +109,26 @@ public:
     std::ranges::sort(all_additions);
     return lock.build_result(ctx, height, all_additions);
   }
+
+  static size_t conflict_size(const ReplayCacheLock &lock)
+  {
+    return lock.conflicts_.size();
+  }
+
+  // Number of buckets retained by the conflict set. Grows only when the live
+  // element count forces a rehash, so it must stay flat under a reserve/abort
+  // loop that never leaves more than one live element (#4107).
+  static size_t conflict_bucket_count(const ReplayCacheLock &lock)
+  {
+    return lock.conflicts_.bucket_count();
+  }
+
+  static int32_t pending_additions(const ReplayCacheLock &lock,
+                                   BlockHeight height)
+  {
+    return lock.bases_.at(height).pending_additions.load(
+        std::memory_order_relaxed);
+  }
 };
 
 class ReplayCacheLockTest : public testing::Test {
@@ -687,6 +707,43 @@ TEST_F(ReplayCacheLockTest, RemovedReservationDoesNotAdvanceCommittedCounter)
             d2);
 
   EXPECT_EQ(kTestCostModel.get_replay_cache_cost(2) - snapshot_cost, d1 + d2);
+}
+
+// Regression for #4107: reserving and aborting the same uniquifier must leave
+// the conflict set in a state equivalent to before the reservation. The old
+// lock-free tombstoned set retained a dead slot and grew capacity on every
+// abort, so a reserve/abort loop spent super-linear, ungated admission work.
+TEST_F(ReplayCacheLockTest, AbortedReservationsDoNotAccumulateState)
+{
+  ReplayCacheLock lock;
+  const BlockHeight expiry = height_ + 1;
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_, expiry);
+  auto ctx = make_dummy_context(height_);
+
+  PointerItem<ReplayCacheIt> item(u(expiry, 4242));
+
+  size_t buckets_after_first_reserve = 0;
+  constexpr size_t kCycles = 1000;
+  for (size_t i = 0; i < kCycles; ++i) {
+    // Re-reserving the same uniquifier after an abort must keep succeeding.
+    ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item, ctx).has_value());
+    EXPECT_EQ(1U, ReplayCacheLockTestHelper::conflict_size(lock));
+    EXPECT_EQ(1, ReplayCacheLockTestHelper::pending_additions(lock, expiry));
+
+    if (i == 0) {
+      buckets_after_first_reserve =
+          ReplayCacheLockTestHelper::conflict_bucket_count(lock);
+    }
+
+    ASSERT_TRUE(lock.try_atomic_change_lock(&item, nullptr, ctx).has_value());
+    EXPECT_EQ(0U, ReplayCacheLockTestHelper::conflict_size(lock));
+    EXPECT_EQ(0, ReplayCacheLockTestHelper::pending_additions(lock, expiry));
+  }
+
+  // Retained capacity never grew past what one live element needs: the abort
+  // fully reclaimed the slot instead of leaving a tombstone behind.
+  EXPECT_EQ(buckets_after_first_reserve,
+            ReplayCacheLockTestHelper::conflict_bucket_count(lock));
 }
 
 TEST(ReplayCacheLockHeightCap, RejectsNewHeightWhenMetadataAlreadyAtCap)

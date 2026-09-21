@@ -14,7 +14,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/concurrent_set.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_db/change_set.h"
 #include "hogd/hog_db/hog_db_dao.h"
@@ -231,7 +230,10 @@ ReplayCacheLock::try_atomic_change_lock(
       return HogDbError{HogDbCode::kInternal};
     }
     auto &base = *r.value();
-    conflicts_.erase(UniquifierHelper::to_uint128(u));
+    {
+      std::lock_guard<std::mutex> lock(conflicts_lock_);
+      conflicts_.erase(UniquifierHelper::to_uint128(u));
+    }
     base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
     return {};
   }
@@ -271,13 +273,16 @@ ReplayCacheLock::try_atomic_change_lock(
     return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
   }
 
-  // Either rejection is invalid replay input. kAlreadyPresent means another
-  // transaction in this block already claimed the uniquifier; kValueReserved
-  // means it packs to a value conflicts_ cannot store -- e.g. the all-zero
-  // {expiry=0, nonce=0}, reachable at executing height 0 (#3188).
-  if (conflicts_.try_insert(addition_key) != InsertResult::kInserted) {
-    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
-    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
+  // A failed reservation is invalid replay input: another transaction in this
+  // block already claimed this uniquifier. The all-zero {expiry=0, nonce=0} is
+  // reachable at executing height 0; keep rejecting it here to preserve the
+  // pre-existing admission decision (#3188).
+  {
+    std::lock_guard<std::mutex> lock(conflicts_lock_);
+    if (addition_key == 0 || !conflicts_.insert(addition_key).second) {
+      base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
+      return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
+    }
   }
 
   auto meta = get_meta(&ctx);
@@ -362,9 +367,12 @@ ReplayCacheLock::stage_committed_changes(const LockContext &ctx,
   auto end = meta.heights.end();
 
   std::vector<Uniquifier> all_additions;
-  all_additions.reserve(conflicts_.size());
-  for (const uint128_t &value : conflicts_) {
-    all_additions.push_back(UniquifierHelper::from_uint128(value));
+  {
+    std::lock_guard<std::mutex> lock(conflicts_lock_);
+    all_additions.reserve(conflicts_.size());
+    for (const uint128_t &value : conflicts_) {
+      all_additions.push_back(UniquifierHelper::from_uint128(value));
+    }
   }
   std::ranges::sort(all_additions);
 
