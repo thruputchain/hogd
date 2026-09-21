@@ -44,4 +44,4 @@ add_dependencies(
   all_riscvs_built # for sha256_wrapper.rv32a
 )
 
-gtest_discover_tests(tracing_tests TEST_PREFIX tracing.)
+hogd_discover_tests(tracing_tests TEST_PREFIX tracing.)

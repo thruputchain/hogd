@@ -124,6 +124,7 @@ set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
   CACHE PATH "Path to googletest" FORCE)
 enable_testing()
 include(GoogleTest)
+include(cmake/hogd_tests.cmake)
 
 # When enabled, test commands are prefixed with a wrapper that captures gdb
 # backtraces on timeout (instead of ctest's silent SIGKILL).

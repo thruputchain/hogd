@@ -105,6 +105,6 @@ target_link_libraries(
   GTest::gtest_main
 )
 add_dependencies(hog_db_test all_riscv_contracts)
-gtest_discover_tests(
+hogd_discover_tests(
   hog_db_test
 )

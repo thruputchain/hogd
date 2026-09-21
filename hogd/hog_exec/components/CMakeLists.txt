@@ -50,4 +50,4 @@ target_link_libraries(
   metrics
   GTest::gtest
 )
-gtest_discover_tests(components_test)
+hogd_discover_tests(components_test)

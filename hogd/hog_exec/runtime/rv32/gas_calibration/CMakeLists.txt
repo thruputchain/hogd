@@ -122,4 +122,4 @@ target_link_libraries(
   GTest::gtest
 )
 
-gtest_discover_tests(rv32_gas_calibration_test TEST_PREFIX rv32.gas_calibration.)
+hogd_discover_tests(rv32_gas_calibration_test TEST_PREFIX rv32.gas_calibration.)

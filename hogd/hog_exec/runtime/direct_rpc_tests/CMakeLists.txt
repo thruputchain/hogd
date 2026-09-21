@@ -37,4 +37,4 @@ target_link_libraries(
   model_checker
   GTest::gtest
 )
-gtest_discover_tests(direct_rpc_test)
+hogd_discover_tests(direct_rpc_test)

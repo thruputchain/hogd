@@ -188,7 +188,7 @@ target_link_libraries(contract_loader_test
   GTest::gtest_main
 )
 add_dependencies(contract_loader_test all_riscv_contracts all_riscvs_built)
-gtest_discover_tests(contract_loader_test)
+hogd_discover_tests(contract_loader_test)
 
 # Build the contracts for RV32 (each gets a [[bin]] wrapper + .rv32a). The
 # SPEC_CONTRACTS also produce <name>_spec.json, consumed by the header/XDR
