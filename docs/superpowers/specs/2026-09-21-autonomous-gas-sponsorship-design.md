@@ -70,21 +70,15 @@ instead of another flag day. Both are cheap only while the chain is
 pre-mainnet.
 
 ```xdr
-/// A specific commitment asked of a specific address.
-struct SponsorTerm {
-  /// SponsorGas faults unless GetCurrentAddress() matches.
-  ContractAddress sponsor;
-
-  /// Exactly how much gas this sponsor covers. Fixed at signing time, so
-  /// the scheduler checks solvency against a known number rather than a
-  /// ceiling, and validators can bound replay without any proposer-supplied
-  /// hint.
-  GasAmount amount;
-};
-
 struct SponsorshipRequest {
   ExtensionPoint ext;
-  SponsorTerm terms<kMaxSponsorTerms>;   // one, in the common case
+
+  /// SponsorGas fails unless the assenting frame's own address matches.
+  ContractAddress sponsor;
+
+  /// Must equal Invocation::gas_limit. Fixed at signing time, so the
+  /// scheduler checks solvency against a known number.
+  GasAmount amount;
 };
 
 /// Null = self-funded: full gas_limit from the start, scheduled against
@@ -96,17 +90,14 @@ Well-formedness, checked structurally before execution (so a violation is
 `ExecResultMalformedTransaction` at proposal, `ExecResultTxValidationFailure`
 at validation):
 
-- `terms` is non-empty and contains no duplicate `sponsor` addresses.
-- `invocation.gas_limit <= sum(terms[*].amount)`. Without this a sponsored
-  transaction could consume more gas than any sponsor committed to.
-- `sum(terms[*].amount) <= kConfigParamMaxSponsoredGas` (network config). This
-  is the hard cap on per-transaction validator replay work; see
-  "Why validators need a bound".
+- `amount == invocation.gas_limit`. Anything less lets a sponsored
+  transaction consume more gas than its sponsor committed to; anything more
+  over-reserves the sponsor's hogs for gas the transaction cannot spend.
 
 Because `SponsorshipRequest` sits inside `Transaction`, it is covered by the
 signature preimage
 (`cxs(DomainSeparator{u8"Transaction"}) || network_hash || xdr(tx)`). The
-submitter has therefore **consented** to each named sponsor. Without that, any
+submitter has therefore **consented** to the named sponsor. Without that, any
 contract in the call path could sponsor a transaction the user never offered
 it, creating an unwanted on-chain association or debt relationship.
 
@@ -181,13 +172,13 @@ than a guarantee. The binding checks are the existing
 check below.
 
 Solvency is checked **at grant time**, not only at commit. That is what lets
-admission accept a transaction when at least one declared sponsor is solvent:
-if an insolvent sponsor assents first, the transaction faults immediately
-rather than running to completion and discovering the shortfall at two-phase
-commit. Commit-time insolvency remains possible — a sponsor solvent at grant
-can be drained by other transactions in the same block — and is already handled
-by `kDbConflictBoundsExceeded` in `db_conflict.x` ("a nonnegative int or
-balance would go below zero given the deltas in this block").
+admission stay a cheap filter rather than a guarantee: a sponsor solvent at
+admission but drained by the time it assents fails immediately, rather than
+running to completion and discovering the shortfall at two-phase commit.
+Commit-time insolvency remains possible — a sponsor solvent at grant can still
+be drained by other transactions in the same block — and is already handled by
+`kDbConflictBoundsExceeded` in `db_conflict.x` ("a nonnegative int or balance
+would go below zero given the deltas in this block").
 
 ### The initial allowance is proposer-local
 
@@ -197,7 +188,7 @@ The initial allowance — the gas a transaction may burn *before* reaching a
 It only ever binds on transactions that are dropped, and dropped transactions
 are not in the block. Any transaction that *is* included demonstrably reached
 `SponsorGas` before its allowance ran out, and from that point `allowed_gas` is
-the declared term amount. So the initial allowance is never the binding
+the declared amount. So the initial allowance is never the binding
 constraint on anything a validator replays.
 
 A stingier proposer includes fewer sponsored transactions; a more generous one
@@ -213,10 +204,19 @@ could include one carrying a large `invocation.gas_limit` that never calls
 gas with nobody to charge.
 
 Pre-declaring the amount closes this without reintroducing a consensus-visible
-allowance. **Validators replay a sponsored transaction bounded by
-`sum(terms[*].amount)`** — a value the submitter signed, the scheduler verified
-against sponsor balances, and `kConfigParamMaxSponsoredGas` caps. No
+allowance. **Validators replay a sponsored transaction bounded by `amount`**,
+which equals `invocation.gas_limit` — the same bound that already applies to
+every self-funded transaction, on a value the submitter signed. No
 proposer-supplied hint in `NondeterministicProposalData` is required.
+
+No new parameter caps it, and none is needed. `gas_limit` has no protocol
+bound today and does not want one: it is gated economically, because
+`Scheduler::schedule()` will not schedule a transaction unless the paying
+account holds `gas_limit` hogs in `kHogAgeGroupToSchedule`. A sponsored
+transaction is that same bound with a different payer, so the sponsor's
+solvency check is what bounds validator replay. A rich sponsor naming a large
+amount is paying for it, exactly as a rich account self-funding a large
+transaction does.
 
 ### Included-but-ungranted transactions
 
@@ -263,10 +263,10 @@ tx.sponsorship == null
      ToSchedule hogs cover invocation.gas_limit
 
 tx.sponsorship != null
-  -> batch-read HogAge for every terms[*].sponsor
-  -> admit to the sponsored lane iff AT LEAST ONE declared sponsor's
-     ToSchedule hogs cover its own term amount
-  -> schedule against the sponsor's HogAge, debiting term.amount
+  -> read the named sponsor's HogAge alongside the invoked address's
+  -> admit to the sponsored lane iff the sponsor's ToSchedule hogs cover
+     `amount`
+  -> schedule against the sponsor's HogAge, debiting `amount`
 ```
 
 The sponsored lane is a **parallel structure**, not a modification of the
@@ -287,9 +287,9 @@ coordinating.
   a gas budget rather than a transaction count because gas is what the attack
   actually consumes.
 
-The one genuinely consensus-critical parameter is `kConfigParamMaxSponsoredGas`,
-which caps `sum(terms[*].amount)` — validators do check that, because it is
-what bounds their replay.
+This design adds **no `ConfigParam` at all**. The bound validators need comes
+from `amount == gas_limit` plus the sponsor's solvency, both of which already
+exist.
 
 Per-address rate limiting is deliberately **not** part of this. Addresses
 reached through the `kPubkeySignature` claim are
@@ -330,15 +330,17 @@ allowance must not require a coordinated gas-schedule update.
 
 ### Protocol (`protocol/`)
 
-- `transaction.x` — `ExtensionPoint` on `Transaction`; `SponsorTerm`,
-  `SponsorshipRequest`, `OptSponsorshipRequest`; `kMaxSponsorTerms`.
+- `transaction.x` — `ExtensionPoint` on `Transaction`; `SponsorshipRequest`,
+  `OptSponsorshipRequest`.
 - `syscalls.yaml` — the `SponsorGas` entry.
-- `exec_result.x` — `ExecResultSponsorshipUnmet = 202`, in the exclusion class.
 - `syscall_error.x` — `kSyscallErrorCodeSponsorshipNotOffered`,
   `kSyscallErrorCodeSponsorshipAlreadyAssented`,
   `kSyscallErrorCodeSponsorInsufficientHogs`.
-- `network_config.x` — `kConfigParamMaxSponsoredGas` only. The lane quotas and
-  the initial allowance are node-local and belong in hogd's configuration.
+- `exec_result.x` — nothing. The validator side is already
+  `ExecResultTxValidationFailure`, and the proposal side is a scheduler
+  decision about what to include rather than an enum value.
+- `network_config.x` — nothing. The lane quotas and the initial allowance are
+  node-local and belong in hogd's configuration.
 - `sched_gateway.x` — a `SchedGatewaySubmitOutcome` variant for "no declared
   sponsor is solvent".
 
@@ -354,14 +356,14 @@ transactions: `add_txs_helper`, `is_pending`, `reenqueue_txs`, and
 - `SponsorGas` syscall handler; `allowed_gas` tracking alongside the existing
   `gas_consumed_` accounting in `syscall_handler.cc`.
 - Pre-grant restriction enforcement (deploys, RCQ, `TryInvoke`).
-- Validator-side replay bound of `sum(terms[*].amount)`.
+- Validator-side replay bound of `amount`.
 
 ## Testing
 
 - A brand-new address with zero hogs transacts successfully via a native
-  sponsor; the sponsor's `ToSchedule` hogs decrease by exactly `term.amount`.
+  sponsor; the sponsor's `ToSchedule` hogs decrease by exactly `amount`.
 - `SponsorGas` from an address not named in `terms` faults.
-- `SponsorGas` with `expected_amount != term.amount` faults.
+- `SponsorGas` with `expected_amount != sponsorship.amount` errors.
 - A second `SponsorGas` in one transaction faults.
 - `SponsorGas` inside a `ReadOnly` frame faults.
 - A transaction that never assents is dropped, not included, and its
@@ -373,7 +375,7 @@ transactions: `add_txs_helper`, `is_pending`, `reenqueue_txs`, and
   local allowance is smaller.
 - A sponsor drained by earlier transactions in the same block causes later
   ones to fail with `kDbConflictBoundsExceeded`.
-- `invocation.gas_limit > sum(terms[*].amount)` is rejected as malformed.
+- `amount != invocation.gas_limit` is rejected as malformed.
 - Sponsored transactions cannot exceed `kConfigParamSponsoredLaneFraction` of
   a block.
 - Pre-grant `contracts_to_deploy`, RCQ reads, and `TryInvoke` all fault.
