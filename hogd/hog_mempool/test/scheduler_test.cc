@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/scheduler.h"
@@ -463,9 +464,10 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
+  BlockTransfers transfer;
   transfer.block = kBlock;
-  transfer.deltas.push_back(
+  transfer.delta_chunks.emplace_back();
+  transfer.delta_chunks.back().push_back(
       Delta{.address = account,
             .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
 
@@ -485,9 +487,10 @@ TEST(Scheduler, ProcessTransfersCreatesHogAgeForFirstTimeRecipient)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
+  BlockTransfers transfer;
   transfer.block = kBlock;
-  transfer.deltas.push_back(
+  transfer.delta_chunks.emplace_back();
+  transfer.delta_chunks.back().push_back(
       Delta{.address = account,
             .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
 
@@ -639,11 +642,12 @@ TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
+  BlockTransfers transfer;
   transfer.block = 10;
+  transfer.delta_chunks.emplace_back();
   const auto signed_gas = static_cast<int128_t>(kGas);
   const int128_t delta_value = -8 * signed_gas;
-  transfer.deltas.push_back(
+  transfer.delta_chunks.back().push_back(
       Delta{.address = account, .hog_delta = to_xdr(delta_value)});
 
   scheduler->process_transfers(transfer)();

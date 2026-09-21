@@ -18,6 +18,7 @@ add_library(mempool_test_objects OBJECT
   mempool_test.cc
   scheduler_test.cc
   config_hash_test.cc
+  transfer_run_assembler_test.cc
 )
 target_include_directories(mempool_test_objects
   PRIVATE

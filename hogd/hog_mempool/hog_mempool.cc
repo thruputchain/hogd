@@ -56,10 +56,10 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
-  // HogDb sends one block-wide HogsTransferred RPC with the bulk cap (see
-  // hog_db.cc create_sched_db_client); a committed block's aggregated balance
-  // deltas can exceed x23's 16 MiB default, so the receiver must match it or
-  // the record is rejected at the framing layer before dispatch.
+  // HogDb's scheduler client sends with the bulk cap (see hog_db.cc
+  // create_sched_db_client), so the receiver matches it: a record over the
+  // receiver's cap is rejected at the framing layer before dispatch. The
+  // HogsTransferredChunk records themselves stay far below it.
   db->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_db_port =
       db.start_server(make_bind_host_port(bind_ip, db_port));

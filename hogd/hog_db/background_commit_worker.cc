@@ -1,13 +1,19 @@
 #include "background_commit_worker.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <stop_token>
 #include <thread>
 #include <utility>
 #include <vector>
 
 #include "auth_rpc.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "sched_db.hh"
@@ -18,30 +24,53 @@ namespace hogd {
 
 BackgroundCommitWorker::BackgroundCommitWorker(
     AuthChangeSubscriptionManager &auth_change_subscription_manager,
-    std::shared_ptr<sched_db_client_t> sched_db_client)
+    std::shared_ptr<sched_db_client_t> sched_db_client,
+    size_t max_deltas_per_chunk)
   : auth_change_subscription_manager_(auth_change_subscription_manager),
-    sched_db_client_(std::move(sched_db_client))
-
+    sched_db_client_(std::move(sched_db_client)),
+    max_deltas_per_chunk_(max_deltas_per_chunk)
 {
+  CHECK_GT(max_deltas_per_chunk_, 0UL);
   background_worker_ =
       std::jthread([this](std::stop_token stoken) { commit_worker(stoken); });
 }
 
 namespace {
-x23::Async<void>
+// Sends a committed block's balance deltas to the scheduler as a run of
+// chunks, each awaited before the next so the run arrives in order and the
+// mempool never holds a whole block. Every chunk carries its index and the
+// run's length, and the mempool completes the block on the last one, so a
+// block with no nonzero delta still sends one empty chunk.
+void
 dispatch_balance_deltas(
     BlockHeight block_height, PerThread<std::vector<Delta>> balance_deltas,
+    size_t max_deltas_per_chunk,
     BackgroundCommitWorker::sched_db_client_t &sched_db_client)
 {
-  HogsTransferred transferred{.block = block_height, .deltas = {}};
+  std::vector<Delta> deltas;
   // Release ul before calling the rpc client
   {
     auto ul = balance_deltas.lock_threads();
-    balance_deltas.for_each(ul, [&](const std::vector<Delta> &deltas) {
-      transferred.deltas.append_range(deltas);
+    balance_deltas.for_each(ul, [&](const std::vector<Delta> &thread_deltas) {
+      deltas.insert(deltas.end(), thread_deltas.begin(), thread_deltas.end());
     });
   }
-  return sched_db_client.scheddb_hogs_transferred(std::move(transferred));
+
+  const std::span<const Delta> all(deltas);
+  const size_t chunk_count =
+      std::max<size_t>(1, (all.size() + max_deltas_per_chunk - 1) /
+                              max_deltas_per_chunk);
+  for (size_t index = 0; index < chunk_count; ++index) {
+    const size_t begin = index * max_deltas_per_chunk;
+    const size_t count = std::min(max_deltas_per_chunk, all.size() - begin);
+    HogsTransferredChunk chunk{.block = block_height,
+                               .chunk_index = static_cast<std::uint32_t>(index),
+                               .chunk_count =
+                                   static_cast<std::uint32_t>(chunk_count),
+                               .deltas = {}};
+    chunk.deltas.append_range(all.subspan(begin, count));
+    sched_db_client.scheddb_hogs_transferred_chunk(std::move(chunk))();
+  }
 }
 } // namespace
 
@@ -60,11 +89,31 @@ BackgroundCommitWorker::submit_job(BlockHeight block_height,
 void
 BackgroundCommitWorker::commit_job(Job &job)
 {
-  auth_change_subscription_manager_.detached_publish_auth_changes(
-      job.block_height_, std::move(job.key_change_batch_));
-  if (sched_db_client_) {
-    dispatch_balance_deltas(job.block_height_, std::move(job.balance_deltas_),
-                            *sched_db_client_)();
+  // This runs on a std::jthread, where an escaping throw is std::terminate
+  // with no message. The scheduler callback is a post-commit side effect the
+  // mempool gates the next block on, so once it fails the chain stalls either
+  // way; fail stop with the height and the cause instead (issue #2332). The
+  // noexcept wrappers keep a throw from panic()'s own formatting inside the
+  // fail stop.
+  try {
+    auth_change_subscription_manager_.detached_publish_auth_changes(
+        job.block_height_, std::move(job.key_change_batch_));
+    if (sched_db_client_) {
+      dispatch_balance_deltas(job.block_height_, std::move(job.balance_deltas_),
+                              max_deltas_per_chunk_, *sched_db_client_);
+    }
+  } catch (const std::exception &e) {
+    [&]() noexcept {
+      panic("background commit of block {} failed; its scheduler callback is "
+            "lost: {}",
+            job.block_height_, e.what());
+    }();
+  } catch (...) {
+    [&]() noexcept {
+      panic("background commit of block {} failed; its scheduler callback is "
+            "lost",
+            job.block_height_);
+    }();
   }
 }
 

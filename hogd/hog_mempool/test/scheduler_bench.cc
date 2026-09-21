@@ -12,6 +12,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
@@ -77,11 +78,12 @@ bm_scheduler_process_transfers(benchmark::State &state)
       make_benchmark_accounts(static_cast<size_t>(state.range(0)));
   seed_benchmark_hog_ages(server, accounts);
 
-  HogsTransferred transfer;
+  BlockTransfers transfer;
   transfer.block = 5;
-  transfer.deltas.reserve(state.range(0));
+  transfer.delta_chunks.emplace_back();
+  transfer.delta_chunks.back().reserve(state.range(0));
   for (int i = 0; i < state.range(0); ++i) {
-    transfer.deltas.push_back(Delta{
+    transfer.delta_chunks.back().push_back(Delta{
         .address = accounts[static_cast<size_t>(i)],
         .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000)),
     });

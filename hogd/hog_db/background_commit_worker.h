@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -18,13 +19,24 @@
 
 namespace hogd {
 
+// Publishes a committed block's side effects off the commit path: its auth
+// changes to the auth subscribers and its native-token balance deltas to the
+// scheduler.
 class BackgroundCommitWorker {
 public:
   using sched_db_client_t =
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  // Deltas per HogsTransferredChunk. A Delta encodes to 48 bytes, so a full
+  // chunk is 12 MiB of deltas: far below the link's record cap, and all the
+  // mempool holds for this shard while it applies the previous chunk.
+  static constexpr size_t kMaxDeltasPerChunk = size_t{1} << 18;
+
+  // [max_deltas_per_chunk] is a test seam; production uses the default.
   BackgroundCommitWorker(
       AuthChangeSubscriptionManager &auth_change_subscription_manager,
-      std::shared_ptr<sched_db_client_t> sched_db_client);
+      std::shared_ptr<sched_db_client_t> sched_db_client,
+      size_t max_deltas_per_chunk = kMaxDeltasPerChunk);
 
   void submit_job(BlockHeight block_height,
                   PerThread<KeyChangeBatch> key_changes,
@@ -50,6 +62,7 @@ private:
 
   AuthChangeSubscriptionManager &auth_change_subscription_manager_;
   std::shared_ptr<sched_db_client_t> sched_db_client_;
+  size_t max_deltas_per_chunk_;
 
   std::mutex mutex_;
   std::condition_variable_any cv_;
