@@ -1823,16 +1823,11 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
   EXPECT_FALSE(handler.root_invoke()().is_root_success());
 }
 
-// Edge case: a native-token balance at (nearly) INT128_MAX must still receive a
-// storage refund at commit. release_balance() CHECK-fails rather than returning
-// an error, and since #4096 the finalized-lock refund path reserves no
-// add-capacity, so what keeps it safe at the maximum is HOG conservation:
-// balance + its locked storage <= total_supply <= INT128_MAX. The mint
-// precompile no longer bounds supply below INT128_MAX at invoke (that moved to
-// commit for rv32 parity), so this test pins that property: block 1 mints
-// INT128_MAX to the whale (the genesis root is the only authorized minter),
-// block 2 has it write a bytestring, block 3 deletes it so the released cost is
-// credited against a near-max base. A regression aborts on the block-3 delete.
+// Pins HOG conservation (balance + locked storage <= supply <= INT128_MAX) so a
+// storage refund against a near-max balance never trips the CHECK in
+// release_balance(). Needed because the mint precompile stopped bounding supply
+// below INT128_MAX at invoke (that moved to commit for rv32 parity). Mint max,
+// write a bytestring, then delete it; a regression aborts on the delete.
 TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
 {
   constexpr static ContractAddress kWhaleAddr = make_contract_address(180);
