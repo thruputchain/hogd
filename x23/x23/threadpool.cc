@@ -46,6 +46,13 @@ ThreadPool::ThreadPool(size_t nthreads)
 
 ThreadPool::~ThreadPool()
 {
+  // Cancel the SIGUSR1 dump first, for the same reason as
+  // CoroPollImpl's destructor: debug_dump() runs on the signal service
+  // thread and reads state this destructor tears down.  sigcb_'s own
+  // destructor is too late, both because it runs after this body and
+  // because workers_, threads_ and tstate_ are declared after sigcb_
+  // and so are destroyed before it.
+  sigcb_ = AutoSignalCbHandle{};
   // Helpers, including their capture destructors, may still need workers.
   external_users_.destroy_wait();
   ss_.request_stop();
