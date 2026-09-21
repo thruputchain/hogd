@@ -775,6 +775,56 @@ TEST_P(DirectNNIntTest, BugHuntNNIntSetNegOneAddZero)
   EXPECT_EQ(stored, -1);
 }
 
+// Reported as a bug in #4104, but this is working-as-intended (#2155): a
+// negative explicit set_value is deliberately allowed, and the protocol
+// invariant is value >= min(set_value, 0), not value >= 0 (see
+// NNIntItem::validate() and NNInt128Lock::is_committed_value_in_bounds).
+// This pins the INT128_MIN boundary the report calls novel: set_add(INT128_MIN,
+// 0) persists INT128_MIN under kItemTypeNonnegativeInt, and a later add-only
+// +1 commits against that base to reach INT128_MIN + 1 -- identical semantics
+// to the documented set_add(-1, 0) case above, with no overflow at the
+// boundary. Runs on both DB backends, so it also pins cross-engine agreement.
+TEST_P(DirectNNIntTest, BugHuntNNIntSetIntMinAddZeroIsWAI)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "set_int_min");
+  constexpr int128_t kIntMin = std::numeric_limits<int128_t>::min();
+
+  auto tx_init = make_new_per_tx_db_proxy();
+  tx_init.add_delta(key, make_nnint_set_add_delta(kIntMin, 0),
+                    std::to_underlying(StorageDeltaFlags::None));
+  auto r_init = tx_init.try_push_current_subtransaction()();
+  ASSERT_TRUE(r_init.has_value() && r_init.value());
+  ASSERT_TRUE(tx_init.commit_transaction()().has_value());
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(item->nnint()), kIntMin);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  // A later add-only +1 commits against the negative base, reaching
+  // INT128_MIN + 1 (still >= the lock lower bound min(base, 0) = INT128_MIN).
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_add_delta(1),
+               std::to_underlying(StorageDeltaFlags::None));
+  auto r = tx.try_push_current_subtransaction()();
+  ASSERT_TRUE(r.has_value() && r.value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
+  advance_block();
+
+  auto item2 = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item2.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_EQ(item2->type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(item2->nnint()), kIntMin + 1);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
 TEST_P(DirectNNIntTest, BugHuntNNIntAddOnlyExclNewKey)
 {
   auto contract_addr = make_contract_address(0);
