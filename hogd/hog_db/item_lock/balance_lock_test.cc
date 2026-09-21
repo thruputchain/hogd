@@ -335,4 +335,172 @@ TEST(BalanceLockTest, FreshBalanceCapacityIsInt128Max)
           .has_value());
 }
 
+// add_committed_credit refunds a redundant reservation (#4096): it lands in the
+// committed delta and must not move either capacity counter.
+TEST(BalanceLockTest, RefundDoesNotConsumeCapacity)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+
+  BalanceLock lock(100);
+  ASSERT_EQ(lock.get_add_capacity(), kMax - 100);
+  ASSERT_EQ(lock.get_sub_capacity(), 100);
+
+  // A tx locks storage out of the balance: a debit draws on sub-capacity only.
+  const Balance debit(-50);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &debit, make_dummy_context())
+                  .has_value());
+  ASSERT_EQ(lock.get_delta(), -50);
+  ASSERT_EQ(lock.get_add_capacity(), kMax - 100);
+  ASSERT_EQ(lock.get_sub_capacity(), 50);
+
+  // Its row turns out to be already materialized, so the reservation comes
+  // back after the lock is finalized.
+  lock.add_committed_credit(50);
+
+  EXPECT_EQ(lock.get_delta(), 0);
+  EXPECT_EQ(lock.build_result(make_dummy_context()), 100);
+  EXPECT_EQ(lock.get_add_capacity(), kMax - 100)
+      << "a refund must not consume add-capacity";
+  EXPECT_EQ(lock.get_sub_capacity(), 50)
+      << "a refund must not hand back sub-capacity either";
+}
+
+// Regression for #4095: the refund must apply even when add-capacity is
+// smaller than it. Driven end to end by
+// HogDbTest.DuplicateBytestringRefundNearMaxBalanceCommits.
+TEST(BalanceLockTest, RefundCommitsWhenAddCapacityIsSmallerThanRefund)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  constexpr int128_t kRowCost = kTestCostModel.get_nnint_cost();
+
+  // One unit short of a single refund, the condition that used to trip
+  // CHECK(ok) inside add_committed_credit.
+  constexpr int128_t kBase = kMax - (kRowCost - 1);
+  BalanceLock lock(kBase);
+  ASSERT_LT(lock.get_add_capacity(), kRowCost);
+
+  const Balance debit(-kRowCost);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &debit, make_dummy_context())
+                  .has_value());
+
+  lock.add_committed_credit(kRowCost);
+
+  EXPECT_EQ(lock.get_delta(), 0);
+  EXPECT_EQ(lock.build_result(make_dummy_context()), kBase);
+  EXPECT_EQ(lock.get_add_capacity(), kRowCost - 1)
+      << "the refund must not have drawn on the capacity it cannot afford";
+}
+
+// At INT128_MAX add-capacity is zero, so the refund must restore the committed
+// value exactly without tripping build_result's overflow CHECK.
+TEST(BalanceLockTest, RefundAgainstZeroAddCapacityCommits)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  constexpr int128_t kRowCost = kTestCostModel.get_nnint_cost();
+
+  BalanceLock lock(kMax);
+  ASSERT_EQ(lock.get_add_capacity(), 0);
+
+  const Balance debit(-kRowCost);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &debit, make_dummy_context())
+                  .has_value());
+  ASSERT_EQ(lock.build_result(make_dummy_context()), kMax - kRowCost);
+
+  lock.add_committed_credit(kRowCost);
+
+  EXPECT_EQ(lock.get_delta(), 0);
+  EXPECT_EQ(lock.build_result(make_dummy_context()), kMax);
+  EXPECT_EQ(lock.get_add_capacity(), 0);
+}
+
+// A later tx re-enters the finalized lock through try_atomic_change_lock, which
+// does consult add_, and must still find the full original headroom. Before
+// #4096 the refund had eaten kRowCost of it.
+TEST(BalanceLockTest, RefundedCapacityStaysAvailableToALaterReservation)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  constexpr int128_t kRowCost = kTestCostModel.get_nnint_cost();
+
+  constexpr int128_t kBase = kMax - (3 * kRowCost);
+  BalanceLock lock(kBase);
+  ASSERT_EQ(lock.get_add_capacity(), 3 * kRowCost);
+
+  const Balance debit(-kRowCost);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &debit, make_dummy_context())
+                  .has_value());
+  lock.add_committed_credit(kRowCost);
+  ASSERT_EQ(lock.get_delta(), 0);
+
+  // A later tx in the same block credits the whole remaining headroom.
+  const Balance credit(3 * kRowCost);
+  std::optional<DbConflictCode> reason;
+  LockContext ctx = make_dummy_context();
+  ctx.conflict_reason = &reason;
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &credit, ctx).has_value())
+      << "the refund stranded add-capacity the rest of the block needs";
+  EXPECT_FALSE(reason.has_value());
+
+  EXPECT_EQ(lock.get_add_capacity(), 0);
+  EXPECT_EQ(lock.build_result(make_dummy_context()), kMax);
+}
+
+// Refunds accumulate in the committed delta and never touch the capacity
+// counters, leaving the one materialized row as the net charge.
+TEST(BalanceLockTest, MultipleRefundsAccumulate)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  constexpr int128_t kRowCost = kTestCostModel.get_nnint_cost();
+
+  constexpr int128_t kBase = kMax - (kRowCost - 1);
+  BalanceLock lock(kBase);
+
+  // Three concurrent txs each reserve the row's full cost.
+  const Balance debit(-kRowCost);
+  for (int i = 0; i < 3; ++i) {
+    ASSERT_TRUE(
+        lock.try_atomic_change_lock(nullptr, &debit, make_dummy_context())
+            .has_value())
+        << "reservation " << i << " failed";
+  }
+  ASSERT_EQ(lock.get_delta(), -3 * kRowCost);
+
+  // Only the first commit materializes the row; the other two refund.
+  lock.add_committed_credit(kRowCost);
+  lock.add_committed_credit(kRowCost);
+
+  EXPECT_EQ(lock.get_delta(), -kRowCost);
+  EXPECT_EQ(lock.build_result(make_dummy_context()), kBase - kRowCost);
+  // What the mempool scheduler observes for this address.
+  EXPECT_EQ(lock.get_committed_delta(make_dummy_context()), -kRowCost);
+  EXPECT_EQ(lock.get_add_capacity(), kRowCost - 1);
+}
+
+// A fresh balance has zero sub-capacity, so its storage charge rides in the
+// funding credit; build_result still deducts the balance-row cost once.
+TEST(BalanceLockTest, RefundOnFreshBalanceChargesRowCostOnce)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  constexpr int128_t kRowCost = kTestCostModel.get_nnint_cost();
+  constexpr int128_t kBalanceCost = kTestCostModel.get_balance_cost();
+
+  BalanceLock lock(std::nullopt);
+  ASSERT_EQ(lock.get_sub_capacity(), 0);
+
+  // Funded, minus the cost of the two rows the same tx locks.
+  constexpr int128_t kNetCredit =
+      kBalanceCost + (4 * kRowCost) - (2 * kRowCost);
+  const Balance funding(kNetCredit);
+  ASSERT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &funding, make_dummy_context())
+          .has_value());
+
+  // One of the two rows was already materialized by a sibling tx.
+  lock.add_committed_credit(kRowCost);
+
+  constexpr int128_t kExpected = kNetCredit + kRowCost - kBalanceCost;
+  EXPECT_EQ(lock.build_result(make_dummy_context()), kExpected);
+  EXPECT_EQ(lock.get_committed_delta(make_dummy_context()), kExpected);
+  EXPECT_EQ(lock.get_add_capacity(), kMax - kNetCredit);
+}
+
 } // namespace hogd
