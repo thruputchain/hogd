@@ -655,6 +655,8 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
+// Working-as-intended per #2155: the NNInt invariant is value >= min(set_value,
+// 0), not value >= 0. Probes the INT128_MIN boundary re-reported in #4104.
 TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
 {
   auto contract_addr = make_contract_address(0);
@@ -663,7 +665,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   auto key = make_addrkey(contract_addr, "neg_nnint");
   constexpr int128_t kIntMin = std::numeric_limits<int128_t>::min();
 
-  // Store INT128_MIN as NNInt
+  // Store INT128_MIN as an NNInt.
   auto tx_init = make_new_per_tx_db_proxy();
   tx_init.add_delta(key, make_nnint_set_add_delta(kIntMin, 0),
                     std::to_underlying(StorageDeltaFlags::None));
@@ -672,16 +674,15 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   ASSERT_TRUE(tx_init.commit_transaction()().has_value());
   advance_block();
 
-  // Read back - should be INT128_MIN
+  // Persists as INT128_MIN under the nonnegative-int type.
   auto item = lookup_storage_item_from_db(key);
   ASSERT_TRUE(item.has_value());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  int128_t stored_value = from_xdr(item->nnint());
+  ASSERT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(item->nnint()), kIntMin);
   // NOLINTEND(bugprone-unchecked-optional-access)
-  // This is the bug: a "non-negative" integer storing INT128_MIN
-  EXPECT_EQ(stored_value, kIntMin);
 
-  // Now try to add 1 to the negative base
+  // An add-only +1 commits against the negative base.
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_nnint_add_delta(1),
                std::to_underlying(StorageDeltaFlags::None));
@@ -690,14 +691,12 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 
-  // Check the value - INT128_MIN + 1 is still negative
   auto item2 = lookup_storage_item_from_db(key);
   ASSERT_TRUE(item2.has_value());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  int128_t final_value = from_xdr(item2->nnint());
+  ASSERT_EQ(item2->type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(item2->nnint()), kIntMin + 1);
   // NOLINTEND(bugprone-unchecked-optional-access)
-  // negative nnint is allowed if the base is negative
-  EXPECT_EQ(final_value, kIntMin + 1);
 }
 
 TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
