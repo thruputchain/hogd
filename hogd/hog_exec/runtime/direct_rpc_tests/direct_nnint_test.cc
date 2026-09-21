@@ -674,8 +674,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   ASSERT_TRUE(tx_init.commit_transaction()().has_value());
   advance_block();
 
-  // Persists as INT128_MIN under the nonnegative-int type; intended, since the
-  // lower bound is min(set_value, 0).
+  // Persists as INT128_MIN under the nonnegative-int type.
   auto item = lookup_storage_item_from_db(key);
   ASSERT_TRUE(item.has_value());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -683,8 +682,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   EXPECT_EQ(from_xdr(item->nnint()), kIntMin);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
-  // An add-only +1 commits against the negative base, reaching INT128_MIN + 1
-  // (still >= the lower bound min(base, 0) = INT128_MIN), with no overflow.
+  // An add-only +1 commits against the negative base.
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_nnint_add_delta(1),
                std::to_underlying(StorageDeltaFlags::None));
