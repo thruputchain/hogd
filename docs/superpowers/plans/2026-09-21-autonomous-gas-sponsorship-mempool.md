@@ -34,6 +34,9 @@ by `x23c` at build time), GoogleTest.
   invoked address's.
 - **Lane quotas are node-local, not `ConfigParam`s.** They only bind on
   transactions the proposer drops, which never reach a block.
+  `kConfigParamMaxSponsorTerms` is the one exception and is consensus-critical:
+  it bounds how many sponsors a transaction may name, which is per-transaction
+  work every node does.
 
 ---
 
@@ -86,8 +89,8 @@ transactions cannot exist until the protocol lands, so this is inert.
 - Test: `hogd/hog_mempool/test/`
 
 **Steps:**
-- [ ] At `scheduler.cc:299`, collect `sponsorship.sponsor` in addition to
-      `invocation.invoked_address`.
+- [ ] At `scheduler.cc:299`, collect every `sponsorship.terms[*].sponsor` in
+      addition to `invocation.invoked_address`.
 - [ ] Confirm `dbsched_get_hog_ages(ContractAddressBatch)` needs no interface
       change — it already takes a batch, so the extra addresses ride along.
 - [ ] Distinguish "sponsor unknown" from "invoked address unknown" in the
@@ -109,6 +112,9 @@ nothing entering it yet. Purely structural and testable on its own.
 - [ ] Add `ready_sponsors_`, ordered like `ready_accounts_` — the `AccountKey`
       comparator sorts by `average_hog_age` then address, and the sponsor lane
       wants the same ordering over sponsor addresses.
+- [ ] A transaction with N terms enters the lane under N sponsors, so lane
+      membership is many-to-one in both directions. Draining it must not
+      schedule the same transaction twice.
 - [ ] `add_txs_helper`: keep the `invoked_address` insert; additionally insert
       into the sponsor lane when `tx.tx.sponsorship` is non-null.
 - [ ] `remove_from_scheduler` and the `schedule()` erase paths: clear **both**
@@ -133,8 +139,8 @@ Filter on sponsor solvency and report the new outcome.
   `hogd/hog_mempool/rpc_from_coord.cc` (capacity node)
 
 **Steps:**
-- [ ] In `add_txs`, admit a sponsored transaction iff the named sponsor's
-      `kHogAgeGroupToSchedule` covers `sponsorship.amount`.
+- [ ] In `add_txs`, admit a sponsored transaction iff **every** named
+      sponsor's `kHogAgeGroupToSchedule` covers its own term amount.
 - [ ] Reject with `SchedGatewaySubmitSponsorshipUnfunded` otherwise.
 - [ ] Add a sponsored-lane capacity sub-limit in the `enforce capacity` node,
       separate from `mempool_tx_size_limit_`, so sponsored traffic cannot fill
@@ -143,8 +149,8 @@ Filter on sponsor solvency and report the new outcome.
 - [ ] Note in comments that this check is point-in-time: `cycle_if_needed` and
       concurrent draws can invalidate it before scheduling. It is a filter, not
       a guarantee.
-- [ ] Test: unfunded sponsor rejected; funded sponsor admitted; sponsored
-      transactions cannot exceed the sub-limit.
+- [ ] Test: any unfunded sponsor rejects the transaction; all-funded
+      admitted; sponsored transactions cannot exceed the sub-limit.
 
 ---
 
@@ -159,17 +165,17 @@ Drain the sponsor lane under quota, debiting the sponsor.
 **Steps:**
 - [ ] Add a second loop in `schedule()` over `ready_sponsors_`, holding only
       the sponsor's lock, resolving transaction bodies through `txs_` by hash.
-- [ ] Debit `sponsorship.amount` from the sponsor's `kHogAgeGroupToSchedule`,
-      mirroring `scheduler.cc:1015-1020` but charging the sponsor's hogs rather
-      than the invoked address's. The amount equals `invocation.gas_limit`, so
-      the quantity is the same; only the payer changes.
+- [ ] Debit each term's amount from that sponsor's `kHogAgeGroupToSchedule`,
+      mirroring `scheduler.cc:1015-1020` but charging the sponsors' hogs rather
+      than the invoked address's. The amounts sum to `invocation.gas_limit`, so
+      the total is the same; only the payers change.
 - [ ] Apply the block-slot share and the per-block sponsored-lane gas budget.
 - [ ] `apply_committed_block_hog_ages` (`scheduler.cc:218`): debit the sponsor,
       not the invoked address, for committed sponsored transactions.
 - [ ] Pending nomination: `get_hog_age_from_pending_nomination_create_if_needed`
       and `accounts_excluded_from_block` must carry sponsor entries through
       `start` / `commit` / `abandon`.
-- [ ] Test: sponsor's `ToSchedule` decreases by exactly `sponsorship.amount`; the
+- [ ] Test: each sponsor's `ToSchedule` decreases by exactly its term amount; the
       invoked address's hogs are untouched; abandoning a nomination restores
       the sponsor's hogs; the lane cannot exceed its block-slot share.
 
@@ -188,10 +194,10 @@ Drain the sponsor lane under quota, debiting the sponsor.
 - **Lane ordering.** `ready_sponsors_` ordered by the sponsor's average hog age
   means a well-funded sponsor's traffic always wins. Round-robin across
   sponsors may be fairer. Unresolved.
-- **Partial sponsorship.** `amount` must currently equal `gas_limit`, which
-  makes it redundant with it. It is a separate field only because a sponsor
-  covering part of a transaction's gas, with the submitter funding the rest,
-  is an open question. If that is ruled out, the field should go.
+- **Submitter co-funding.** Shares must sum to exactly `gas_limit`, so a
+  transaction is either fully covered by its sponsors or short. Letting the
+  invoked address fund a remainder is a natural extension and would make the
+  admission check span both the sponsors' hogs and the invoked address's.
 - **`kPubkeySignature` addresses are Sybil-cheap** — they are
   `SHA256(cxs(DomainSeparator{u8"PubkeyAccount"}) || cxs(preimage))` — so
   per-address rate limiting in the lane buys nothing. The design leans entirely
