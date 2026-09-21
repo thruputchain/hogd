@@ -775,15 +775,9 @@ TEST_P(DirectNNIntTest, BugHuntNNIntSetNegOneAddZero)
   EXPECT_EQ(stored, -1);
 }
 
-// Reported as a bug in #4104, but this is working-as-intended (#2155): a
-// negative explicit set_value is deliberately allowed, and the protocol
-// invariant is value >= min(set_value, 0), not value >= 0 (see
-// NNIntItem::validate() and NNInt128Lock::is_committed_value_in_bounds).
-// This pins the INT128_MIN boundary the report calls novel: set_add(INT128_MIN,
-// 0) persists INT128_MIN under kItemTypeNonnegativeInt, and a later add-only
-// +1 commits against that base to reach INT128_MIN + 1 -- identical semantics
-// to the documented set_add(-1, 0) case above, with no overflow at the
-// boundary. Runs on both DB backends, so it also pins cross-engine agreement.
+// Working-as-intended per #2155: the NNInt invariant is
+// value >= min(set_value, 0), not value >= 0. Pins the INT128_MIN boundary
+// reported as a bug in #4104, on both DB backends.
 TEST_P(DirectNNIntTest, BugHuntNNIntSetIntMinAddZeroIsWAI)
 {
   auto contract_addr = make_contract_address(0);
