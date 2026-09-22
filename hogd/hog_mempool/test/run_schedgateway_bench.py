@@ -21,7 +21,8 @@ def main():
     signal.signal(signal.SIGTERM, interrupt)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build", type=Path)
-    parser.add_argument("output", type=Path, help="new directory for results and logs")
+    parser.add_argument("output", type=Path,
+                        help="new directory for results and logs")
     parser.add_argument("--connections", type=int, default=4)
     parser.add_argument("--seconds", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
@@ -30,12 +31,13 @@ def main():
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
     for key, limit in (("connections", 64), ("seconds", 60), ("warmup", 10),
-                       ("transactions", 1000000), ("block_ms", 10000), ("workers", 256)):
+                       ("transactions", 1000000), ("block_ms", 10000),
+                       ("workers", 256)):
         if not 1 <= getattr(args, key) <= limit:
             parser.error(f"{key} must be between 1 and {limit}")
     build = args.build.resolve()
     node_bin = build / "hogd/devnode/hog-devnode"
-    bench_bin = build / "hogd/loadgen/schedgateway_client_bench"
+    bench_bin = build / "hogd/hog_mempool/test/schedgateway_client_bench"
     for binary in (node_bin, bench_bin):
         if not os.access(binary, os.X_OK):
             parser.error(f"build {binary} first")
@@ -63,7 +65,8 @@ def main():
             deadline = time.monotonic() + 60
             while not (output / "readiness.json").read_text().endswith("\n"):
                 if node.poll() is not None:
-                    raise RuntimeError(f"hog-devnode exited; see {output / 'node.log'}")
+                    raise RuntimeError(
+                        f"hog-devnode exited; see {output / 'node.log'}")
                 if time.monotonic() >= deadline:
                     raise TimeoutError("hog-devnode startup timed out")
                 time.sleep(0.05)
@@ -78,12 +81,15 @@ def main():
                 timeout=args.seconds + args.warmup + 180)
             result = json.loads((output / "result.json").read_text())
             admitted = sum(result[k] for k in
-                           ("measuredSuccess", "warmupSuccess", "drainSuccess"))
+                           ("measuredSuccess", "warmupSuccess",
+                            "drainSuccess"))
             if result["error"] or not result["measuredSuccess"] or \
                     result["committedTransactions"] != admitted:
-                raise RuntimeError("benchmark did not reconcile admitted transactions")
+                raise RuntimeError(
+                    "benchmark did not reconcile admitted transactions")
             print(f"{result['measuredSuccess'] / result['seconds']:.1f} tx/s; "
-                  f"p50 {result['latencyP50Us']} us; p99 {result['latencyP99Us']} us")
+                  f"p50 {result['latencyP50Us']} us; "
+                  f"p99 {result['latencyP99Us']} us")
             print(output / "result.json")
         finally:
             if node.poll() is None:

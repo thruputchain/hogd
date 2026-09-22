@@ -3,45 +3,58 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
-#include <cstdint>
+#include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <ios>
+#include <iterator>
 #include <latch>
-#include <mutex>
 #include <numeric>
+#include <optional>
 #include <print>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "built_contracts/dev_wallet.h"
 #include "built_contracts/itc_erc20.h"
-#include "consensus.hh"
 #include "exec_result.hh"
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/json.h"
+#include "hogd/base/log.h"
 #include "hogd/base/network_hash.h"
+#include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/string.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/devnode/block_driver.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
-#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
-#include "proposal_hash.h"
+#include "parallel.hh"
 #include "sched_coord.hh"
 #include "sched_gateway.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/event.h"
 #include "x23/serialize.h"
+#include "x23/sockio.h"
+#include "x23/threadpool.h"
 
+namespace hogd {
 namespace {
-using namespace hogd;
 using Clock = std::chrono::steady_clock;
 constexpr size_t kWorkers = 8;
 
@@ -55,7 +68,7 @@ require(bool condition, const char *message)
 const json::Value &
 field(const json::Value &v, std::string_view key)
 {
-  auto p = v.find(key);
+  const auto *p = v.find(key);
   require(p != nullptr, "missing manifest field");
   return *p;
 }
@@ -64,7 +77,8 @@ std::string
 str(const json::Value &v)
 {
   auto s = v.as_string();
-  require(s.has_value(), "expected manifest string");
+  if (!s)
+    throw std::runtime_error("expected manifest string");
   return std::string(*s);
 }
 
@@ -77,7 +91,8 @@ read_manifest(const char *path)
   require(in.good(), "cannot open manifest");
   std::string bytes{std::istreambuf_iterator<char>(in), {}};
   auto parsed = json::parse(bytes);
-  require(parsed.has_value(), "invalid manifest JSON");
+  if (!parsed)
+    throw std::runtime_error("invalid manifest JSON");
   return std::move(*parsed);
 }
 
@@ -141,14 +156,16 @@ accounts_from_manifest(const json::Value &manifest)
     if (str(field(account, "role")) != "local_user")
       continue;
     const auto index = field(account, "index").as_integer();
-    require(index.has_value() && *index >= 1 && *index <= kMaxBootstrapAccounts,
-            "invalid bootstrap account index");
+    if (!index || *index < 1 ||
+        !std::cmp_less_equal(*index, kMaxBootstrapAccounts))
+      throw std::runtime_error("invalid bootstrap account index");
     auto [public_key, secret] = derive_bootstrap_account_keypair(seed, *index);
     require(public_key ==
                 hex_value<Ed25519PublicKey>(field(account, "publicKey")),
             "bootstrap public key mismatch");
     accounts.push_back(
-        {hex_value<ContractAddress>(field(account, "walletAddress")), secret});
+        {.address = hex_value<ContractAddress>(field(account, "walletAddress")),
+         .secret = secret});
   }
   require(accounts.size() >= 2,
           "start a fresh devnode with --dev-accounts >= 2");
@@ -181,37 +198,13 @@ make_transfer(const std::vector<Account> &accounts, size_t nonce,
   };
   auto bytes =
       ed25519_sign(sender.secret, transaction_signature_preimage(network, tx));
-  require(bytes.has_value(), "transaction signing failed");
+  if (!bytes)
+    throw std::runtime_error("transaction signing failed");
   Signature signature(CryptographicScheme::Ed25519);
   signature.ed25519() = *bytes;
   return {.tx = std::move(tx),
           .signatures = {
               DecoratedSignature{.public_key_id = 0, .signature = signature}}};
-}
-
-size_t
-produce_block(rpc_client_t<SchedulerCoord1> &scheduler)
-{
-  auto tip = scheduler.schedcoord_get_tip()();
-  require(tip.outcome() == SchedulerGetTipOutcome::SchedulerGetTipOK,
-          "cannot read chain tip");
-  auto proposal = scheduler.schedulercoord_propose_block(tip.db_tip().id,
-                                                         ProposalContext{})();
-  require(proposal.outcome() == SchedulerProposalOutcome::SchedulerProposalOK,
-          "block proposal failed");
-  const auto &block = proposal.proposed_block();
-  SignedTransactionBatch txs;
-  require(parallel_batch_to_t(block.txs, txs, kNoBatchSizeLimit)(),
-          "cannot decode proposed transactions");
-  ConsensusValue value{};
-  value.prev_hash = sha256(tip.db_tip().value);
-  value.proposal_header = block.proposal.header;
-  value.proposal_txs_hash =
-      proposal_txs_compatibility_hash(block.proposal.transactions);
-  require(scheduler.schedulercoord_commit_block(block.block_id, value)() ==
-              SchedulerCommitOutcome::SchedulerCommitOK,
-          "block commit failed");
-  return txs.size();
 }
 
 void
@@ -230,10 +223,8 @@ struct WorkerResult {
   int64_t warmup = 0, drain = 0;
   std::string error;
 };
-} // namespace
-
 int
-main(int argc, char **argv)
+run_benchmark(int argc, char **argv)
 {
   if (argc < 3 || argc > 8) {
     std::println(
@@ -264,7 +255,8 @@ main(int argc, char **argv)
                 std::string(protocol.begin(), protocol.end()),
             "client/backend protocol mismatch");
     auto network = parse_network_hash(str(field(manifest, "networkHash")));
-    require(network.has_value(), "invalid network hash");
+    if (!network)
+      throw std::runtime_error("invalid network hash");
     auto accounts = accounts_from_manifest(manifest);
     x23::ThreadPool pool{kWorkers};
     x23::CoroPoll cp{pool};
@@ -297,7 +289,7 @@ main(int argc, char **argv)
       corpus.push_back(t_to_parallel_batch(SignedTransactionBatch{tx})());
     }
     submit(clients[0], corpus[0]);
-    require(produce_block(scheduler) == 1,
+    require(BlockDriver(scheduler).produce_block() == 1,
             "preflight block must contain one tx");
     auto indexer = connect<IndexerBlockExplorer1>(manifest, "indexer", cp);
     require(indexer.indexer_block_explorer_intro(protocol)() ==
@@ -316,14 +308,14 @@ main(int argc, char **argv)
     }
 
     std::atomic<size_t> next{1};
-    std::atomic<bool> stop{false};
+    std::stop_source stop;
     std::latch ready{connections}, start{1};
     Clock::time_point epoch;
     std::vector<WorkerResult> results(connections);
+    BlockDriver block_driver(scheduler);
+    std::string driver_error;
     std::vector<std::jthread> callers;
     std::jthread driver;
-    uint64_t blocks = 0, committed = 0;
-    std::string driver_error;
     try {
       // One synchronous caller per connection exposes the cost of each RPC.
       for (int i = 0; i < connections; ++i) {
@@ -334,7 +326,7 @@ main(int argc, char **argv)
           const auto measured_start = epoch + std::chrono::seconds(warmup);
           const auto end = measured_start + std::chrono::seconds(duration);
           try {
-            while (!stop.load()) {
+            while (!stop.stop_requested()) {
               const auto started = Clock::now();
               if (started >= end)
                 break;
@@ -356,38 +348,24 @@ main(int argc, char **argv)
             }
           } catch (const std::exception &e) {
             r.error = e.what();
-            stop.store(true);
+            stop.request_stop();
           }
         });
       }
-      driver = std::jthread([&](std::stop_token token) {
+      driver = std::jthread([&](const std::stop_token &token) {
+        std::stop_callback cancel(token, [&] { stop.request_stop(); });
         start.wait();
-        std::mutex mutex;
-        std::unique_lock lock(mutex);
-        std::condition_variable_any wake;
         try {
-          const auto interval = std::chrono::milliseconds(block_ms);
-          auto tick = epoch + interval;
-          while (!token.stop_requested() && !stop.load()) {
-            wake.wait_until(lock, token, tick, [] { return false; });
-            if (token.stop_requested() || stop.load())
-              break;
-            committed += produce_block(scheduler);
-            ++blocks;
-            // Keep the requested cadence; skip missed ticks without bursts.
-            tick += interval;
-            const auto now = Clock::now();
-            if (tick <= now)
-              tick += interval * ((now - tick) / interval + 1);
-          }
+          block_driver.run(epoch, std::chrono::milliseconds(block_ms),
+                           stop.get_token());
         } catch (const std::exception &e) {
           driver_error = e.what();
-          stop.store(true);
+          stop.request_stop();
         }
       });
     } catch (...) {
       // Release already-created threads if another thread could not be started.
-      stop.store(true);
+      stop.request_stop();
       start.count_down();
       throw;
     }
@@ -396,7 +374,7 @@ main(int argc, char **argv)
     start.count_down();
     for (auto &caller : callers)
       caller.join();
-    driver.request_stop();
+    stop.request_stop();
     driver.join();
     WorkerResult total;
     total.error = driver_error;
@@ -411,15 +389,14 @@ main(int argc, char **argv)
     const auto admitted = total.latency_us.size() + total.warmup + total.drain;
     // Stop load first, then reconcile block inclusion outside the timed phase.
     const auto drain_deadline = Clock::now() + std::chrono::seconds(15);
-    while (total.error.empty() && committed < admitted) {
-      committed += produce_block(scheduler);
-      ++blocks;
+    while (total.error.empty() && block_driver.transactions() < admitted) {
+      block_driver.produce_block();
       if (Clock::now() >= drain_deadline)
         total.error = "block drain timeout";
     }
-    if (committed != admitted)
+    if (block_driver.transactions() != admitted)
       total.error += "committed/admitted count mismatch; ";
-    std::sort(total.latency_us.begin(), total.latency_us.end());
+    std::ranges::sort(total.latency_us);
     const auto measured = total.latency_us.size();
     auto quantile = [&](size_t percent) {
       return measured ? total.latency_us[(measured - 1) * percent / 100] : 0;
@@ -445,8 +422,8 @@ main(int argc, char **argv)
       w.field("measuredSuccess", measured);
       w.field("warmupSuccess", total.warmup);
       w.field("drainSuccess", total.drain);
-      w.field("committedTransactions", committed);
-      w.field("blocks", blocks);
+      w.field("committedTransactions", block_driver.transactions());
+      w.field("blocks", block_driver.blocks());
       w.field("latencySumUs",
               std::accumulate(total.latency_us.begin(), total.latency_us.end(),
                               int64_t{0}));
@@ -466,4 +443,13 @@ main(int argc, char **argv)
     std::println(stderr, "{}", e.what());
     return 2;
   }
+}
+
+} // namespace
+} // namespace hogd
+
+int
+main(int argc, char **argv)
+{
+  return hogd::run_benchmark(argc, argv);
 }
