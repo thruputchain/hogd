@@ -251,6 +251,90 @@ protected:
           }
           co_return InvokeStatus<void>{};
         });
+    fns.emplace(
+        9, // Peek (non-mutating reads): consume(peek=true) then PeekLen,
+           // both expected to report an empty queue
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r1 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              make_storage_key("rcq0"), true,
+              std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!r1.has_value() ||
+              r1.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          RuntimeMemoryLength len = 0;
+          auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+              make_storage_key("rcq0"), len);
+          if (!r2.has_value() ||
+              r2.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        10, // Set bytestring, then insert/consume/peek_len on the same key in
+            // the same transaction; each must be rejected as wrong-type input
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto r1 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
+              std::to_underlying(StorageDeltaFlags::None));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          uint8_t entry = 0xEE;
+          auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+              make_storage_key("rcq0"), std::as_bytes(std::span(&entry, 1)));
+          if (!r2.has_value() ||
+              r2.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r3 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              make_storage_key("rcq0"), false,
+              std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!r3.has_value() ||
+              r3.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          RuntimeMemoryLength len = 0;
+          auto r4 = co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+              make_storage_key("rcq0"), len);
+          if (!r4.has_value() ||
+              r4.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(11, // Insert calldata bytes as entries into the nnint0 key
+                [](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
+                  auto const &calldata = ctx.handler().get_calldata();
+                  auto key = make_storage_key("nnint0");
+                  for (uint8_t val : calldata) {
+                    auto res = co_await ctx.handler().retrocausal_queue_insert(
+                        key, std::as_bytes(std::span(&val, 1)));
+                    if (!res.has_value()) {
+                      co_return res.error().to_invoke_error();
+                    }
+                    if (!res.value().has_value()) {
+                      co_return InvokeError{InvokeErrorCode::Deterministic};
+                    }
+                  }
+                  co_return InvokeStatus<void>{};
+                });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -1122,6 +1206,197 @@ TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
   auto item = lookup_storage_item_from_db(addrkey);
   ASSERT_TRUE(item.has_value());
   EXPECT_EQ(item->type(), StorageItemType::kItemTypeBytestring);
+}
+
+// --- Batch 6: RCQ syscalls aimed at a key holding another type ---
+//
+// These pin the intended -- and repeatedly misreported (#1673 and the
+// amendments filed on it) -- semantics of aiming an RCQ syscall at a key
+// that already holds a committed value of some other type. Four rules,
+// one test each:
+//
+//  (1) An insert is a write, and a write may change an item's type.
+//      ItemView::set() permits that by design and leaves type checks to the
+//      individual syscall handlers, so inserting into a key holding a
+//      committed bytestring or NNInt destroys that value and replaces it
+//      with a queue. Cost tracking for the same conversion is covered by
+//      CrossBlockTypeChangeBytestringToRCQCostTracking above.
+//  (2) A queue with no live entries does not exist. Consuming a queue down
+//      to zero removes the key, whether the queue predates the block or was
+//      created within it by (1). A "net-zero" insert plus consume therefore
+//      leaves the key absent: not an implicit delete of an unrelated item,
+//      just (1) followed by (2).
+//  (3) A read is not a write. A consume or a peek that finds no entry does
+//      not pin the key to the queue type, so a committed value of another
+//      type survives it intact.
+//  (4) The wrong-type rejection is a same-transaction rule. Once this
+//      transaction has written a bytestring at the key, the queue syscalls
+//      report InvalidSyscallInput rather than converting it.
+
+// (1) A committed bytestring is replaced -- not rejected -- by an insert.
+TEST_P(RCQTest, InsertOnCommittedBytestringConvertsKeyToQueue)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  auto before = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(before->type(), StorageItemType::kItemTypeBytestring);
+
+  ASSERT_TRUE(insert({7}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  EXPECT_EQ(after->metadata().live_entries, 1);
+}
+
+// (1) The same conversion applies to a committed NNInt.
+TEST_P(RCQTest, InsertOnCommittedNNIntConvertsKeyToQueue)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "nnint0");
+
+  ASSERT_TRUE(set_nnint(42));
+  advance_block();
+
+  auto before = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(before->type(), StorageItemType::kItemTypeNonnegativeInt);
+
+  // Method 11 inserts into the nnint0 key rather than rcq0.
+  ASSERT_TRUE(invoke_contract(11, {7}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  EXPECT_EQ(after->metadata().live_entries, 1);
+}
+
+// (2) Emptying a queue removes the key. This is the plain case, with no
+// type change involved, and is the second half of the net-zero behavior.
+TEST_P(RCQTest, FullyConsumedQueueLeavesKeyAbsent)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    // MockDB keeps a zero-entry queue item instead of removing the key; see
+    // hogd/mockdb/KNOWN_ISSUES.md.
+    GTEST_SKIP() << "Requires HogDb for empty-queue removal";
+  }
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(insert({1, 2}));
+  advance_block();
+
+  auto before = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(before->type(), StorageItemType::kItemTypeRetrocausalQueue);
+
+  ASSERT_TRUE(consume({1, 2}));
+  advance_block();
+
+  EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
+}
+
+// (1) + (2): the #1673 scenario. An insert converts the key and the consume
+// empties the resulting queue, so the key is absent afterwards and the
+// bytestring the insert overwrote does not come back.
+TEST_P(RCQTest, NetZeroTouchOnCommittedBytestringLeavesKeyAbsent)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    // As above: MockDB does not remove the key when the queue ends the block
+    // empty, so only HogDb shows the end state this test is about.
+    GTEST_SKIP() << "Requires HogDb for empty-queue removal";
+  }
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  auto before = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(before->type(), StorageItemType::kItemTypeBytestring);
+  ASSERT_EQ(before->bytestring(), make_bytestring("hi"));
+
+  // One insert and one consume of that same entry, in one transaction.
+  ASSERT_TRUE(insert_and_consume({9}, {9}));
+  advance_block();
+
+  EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
+}
+
+// (3) A consume that finds no entry is not a write: the committed
+// bytestring is neither converted to an empty queue nor deleted.
+TEST_P(RCQTest, ConsumeWithNoEntryLeavesCommittedBytestringIntact)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  // Method 1 with a count of 1 attempts one consume. The queue reads as
+  // empty, so nothing is consumed and the transaction still commits.
+  ASSERT_TRUE(invoke_contract(1, {1}));
+  ASSERT_TRUE(last_consumed_values_.empty());
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeBytestring);
+  EXPECT_EQ(after->bytestring(), make_bytestring("hi"));
+}
+
+// (3) Same for the non-mutating reads: peek and PeekLen.
+TEST_P(RCQTest, PeekWithNoEntryLeavesCommittedBytestringIntact)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  // Method 9 peeks and then reads the queue length; both report an empty
+  // queue on a bytestring key.
+  ASSERT_TRUE(invoke_contract(9, {}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeBytestring);
+  EXPECT_EQ(after->bytestring(), make_bytestring("hi"));
+}
+
+// (4) Within one transaction the type check does apply: after this
+// transaction writes a bytestring, insert, consume and PeekLen on that key
+// all return InvalidSyscallInput, and the bytestring is what commits.
+TEST_P(RCQTest, SameTransactionBytestringRejectsQueueSyscalls)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  // Method 10 asserts the error code of each syscall internally, so a
+  // successful commit is the assertion.
+  ASSERT_TRUE(invoke_contract(10, {'h', 'i'}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeBytestring);
+  EXPECT_EQ(after->bytestring(), make_bytestring("hi"));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
