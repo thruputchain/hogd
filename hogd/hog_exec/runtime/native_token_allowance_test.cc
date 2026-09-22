@@ -26,6 +26,7 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -1967,6 +1968,97 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
   EXPECT_LE(final_balance, kMaxSupply - balance_cost);
   EXPECT_GT(final_balance, kMaxSupply - balance_cost - (int128_t{1} << 40))
       << "the storage refund must credit back against a near-max base";
+}
+
+// Regression for #2963: the allowance storage key is a SHA-256 over
+// caller-controlled owner/spender addresses. Deriving it is host work
+// proportional to the serialized input, so the entrypoint has to pay for the
+// digest the way any other caller does rather than producing it for the
+// method's flat entry gas. Pins the child frame at or above what the kSHA256
+// crossing plus the digest costs.
+TEST_F(NativeTokenAllowanceTest, AllowanceChargesForKeyDerivationSha256)
+{
+  constexpr static ContractAddress kCallerAddr = make_contract_address(219);
+  constexpr static ContractAddress kOwnerAddr = make_contract_address(220);
+  constexpr static ContractAddress kSpenderAddr = make_contract_address(221);
+
+  // kCallerAddr is the root invoked address and commits 1 tx; grant it enough
+  // to pay the replay-cache storage cost.
+  setup_grant_storage_token(kCallerAddr, replay_cache_cost_charged(1));
+
+  auto key_data =
+      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr, kSpenderAddr);
+  ASSERT_TRUE(key_data.has_value());
+  const GasAmount derivation_cost =
+      kSyscallBaseCost + GasCost::sha256_hash(key_data->size());
+  // Otherwise the assertion below would also pass on the unfixed code.
+  ASSERT_GT(derivation_cost, 1U);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0,
+      [derivation_cost](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata =
+            erc20_meta::make_calldata<u8"allowance">(kOwnerAddr, kSpenderAddr);
+        CopyableInvokeInputs inputs{
+            .entrypoint_id =
+                sdk_method_id(erc20_meta::entrypoint<u8"allowance">()),
+            .gas_limit = UINT64_MAX,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
+        CopyableInvokeOutputs outputs{};
+
+        auto before = ctx.total_gas_consumed();
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kNativeTokenContractAddress,
+            std::as_bytes(std::span(calldata.data(), calldata.size())),
+            std::span<const std::byte>{}, inputs, outputs);
+        auto gas_used = ctx.total_gas_consumed() - before;
+
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Return) {
+          ADD_FAILURE() << "allowance child invoke did not return successfully";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // gas_used covers the parent's own kInvoke crossing and the whole
+        // child frame, so it is only ever larger than the derivation; the
+        // point is that the derivation is no longer free.
+        EXPECT_GE(gas_used, derivation_cost)
+            << "allowance did not charge for its SHA-256 key derivation";
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kCallerNativeId = 41;
+  contract_map.emplace(kCallerNativeId, std::move(caller_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddr, caller_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

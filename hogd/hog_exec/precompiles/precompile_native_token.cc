@@ -136,12 +136,37 @@ get_msg_sender(NativeSyscallContext &ctx)
   co_return sender;
 }
 
-StorageKeyContractData
-allowance_key(ContractAddress owner, ContractAddress spender)
+// Derive the allowance storage key for (owner, spender).
+//
+// Routed through kSHA256 rather than hashing directly: the digest is host work
+// proportional to the serialized input, and a syscall body is the only place
+// this codebase prices host work. Charging GasCost::sha256_hash() here by hand
+// would be the first such charge outside one, and would then have to be kept in
+// step with syscall_SHA256_inner() by review alone. Going through the syscall
+// also makes the native token pay exactly what an RV32 caller pays to derive
+// the same key, instead of deriving it for the method's flat entry gas
+// (issue #2963).
+x23::Async<InvokeStatus<StorageKeyContractData>>
+allowance_key(NativeSyscallContext &ctx, ContractAddress owner,
+              ContractAddress spender)
 {
   auto data = Serializer<SerializationFormat::kTxs>::serialize(owner, spender);
-  assert(data.has_value());
-  return sha256(*data); // NOLINT(bugprone-unchecked-optional-access)
+  if (!data.has_value()) {
+    co_return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  SHA256Hash key{};
+  auto r = co_await ctx.syscall<SyscallNo::kSHA256>(
+      std::as_bytes(std::span(data->data(), data->size())), key);
+  if (!r.has_value()) {
+    // OutOfGas means the frame cannot pay the crossing plus the digest; the
+    // remaining codes abandon the transaction outright.
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  co_return key;
 }
 
 // Return an ERC20 contract-level revert carrying `code`, byte-identical to the
@@ -161,7 +186,11 @@ x23::Async<InvokeStatus<bool>>
 adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
 {
-  auto allow_key = allowance_key(owner, spender);
+  auto allow_key_r = co_await allowance_key(ctx, owner, spender);
+  if (!allow_key_r.has_value()) {
+    co_return allow_key_r.error();
+  }
+  auto const &allow_key = *allow_key_r;
 
   int128_t output_set{};
   bool output_set_opt{};
@@ -614,7 +643,11 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
-  auto allow_key = allowance_key(owner, spender);
+  auto allow_key_r = co_await allowance_key(ctx, owner, spender);
+  if (!allow_key_r.has_value()) {
+    co_return allow_key_r.error();
+  }
+  auto const &allow_key = *allow_key_r;
 
   int128_t output_set{};
   bool output_set_opt{};
