@@ -763,7 +763,7 @@ IndexDB::consume_events(BlockHeight block_height,
     legacy_ingest_test_hook_();
   }
 
-  auto start_ts = x23::fastclock::get_ns();
+  auto start_ts = x23::fastclock::now();
 
   // Parallelism configuration
   static constexpr size_t kNumTxIndexChunks = 8;
@@ -1013,9 +1013,10 @@ IndexDB::consume_events(BlockHeight block_height,
   record_height(static_cast<int64_t>(block_height), ingest_guard);
   legacy_mode_ = true;
 
-  auto end_ts = x23::fastclock::get_ns();
-  info("consume_events time: {} ns ({:.3f} s)", end_ts - start_ts,
-       (end_ts - start_ts) / 1'000'000'000.0);
+  auto end_ts = x23::fastclock::now();
+  auto elapsed_ns = (end_ts - start_ts).count();
+  info("consume_events time: {} ns ({:.3f} s)", elapsed_ns,
+       elapsed_ns / 1'000'000'000.0);
 
   return {};
 }

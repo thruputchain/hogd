@@ -184,7 +184,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   // Generate all event logs
   std::println("Generating event data...");
-  auto gen_start = x23::fastclock::get_ns();
+  auto gen_start = x23::fastclock::now();
   std::vector<std::vector<hogd::TxEventLog>> blocks(num_blocks);
   for (int block = 0; block < num_blocks; block++) {
     blocks[block].reserve(txs_per_block);
@@ -195,13 +195,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                                                           contract_addresses));
     }
   }
-  auto gen_end = x23::fastclock::get_ns();
-  double gen_time = (gen_end - gen_start) / 1'000'000'000.0;
+  auto gen_end = x23::fastclock::now();
+  double gen_time = (gen_end - gen_start).count() / 1'000'000'000.0;
   std::println("Generated event data in {:.3f} seconds", gen_time);
 
   // Insert events into database
   std::println("Inserting events into database...");
-  auto insert_start = x23::fastclock::get_ns();
+  auto insert_start = x23::fastclock::now();
 
   for (hogd::BlockHeight block = 0; block < num_blocks; block++) {
     auto result = db.consume_events(block, blocks[block], {});
@@ -212,8 +212,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     db.log_stats();
   }
 
-  auto insert_end = x23::fastclock::get_ns();
-  double insert_time = (insert_end - insert_start) / 1'000'000'000.0;
+  auto insert_end = x23::fastclock::now();
+  double insert_time = (insert_end - insert_start).count() / 1'000'000'000.0;
   size_t total_events = (num_blocks * txs_per_block) * num_events_per_tx;
   double events_per_sec = total_events / insert_time;
 

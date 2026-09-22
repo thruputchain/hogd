@@ -86,7 +86,10 @@ private:
     ssize_t successful_proposed_tx_count = 0;
     ssize_t failed_proposed_tx_count = 0;
     ssize_t gas_consumed = 0;
-    uint64_t time_ns = 0;
+    // Signed: this is an elapsed-time difference between two clock
+    // samples, and a regressing sample must stay negative rather than wrap
+    // into a ~584-year interval that silently zeroes the rates below.
+    int64_t time_ns = 0;
 
     MetricsSnapshot operator-(const MetricsSnapshot &other) const
     {
