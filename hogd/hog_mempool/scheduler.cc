@@ -428,7 +428,8 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
 Scheduler::add_txs_helper(const SignedTransaction &tx,
-                          const TransactionHash &tx_hash)
+                          const TransactionHash &tx_hash,
+                          BlockHeight verified_height)
 {
   const ContractAddress &account = tx.tx.invocation.invoked_address;
   const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
@@ -443,10 +444,11 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // The tx may already exist in [txs_] because it is okay to add a tx back
   // into the scheduler again. This can happen if the tx was originally added
   // to the scheduler, then removed during nomination by [schedule()], and a
-  // different validated block was committed instead.
-  const auto [tx_ptr, txs_lock] =
-      txs_.find_or_insert(tx_hash,
-                          std::make_shared<TxValue>(TxValue{.tx = tx}));
+  // different validated block was committed instead. An existing entry keeps
+  // its own [verified_height].
+  const auto [tx_ptr, txs_lock] = txs_.find_or_insert(
+      tx_hash, std::make_shared<TxValue>(
+                   TxValue{.tx = tx, .verified_height = verified_height}));
   CHECK_PTR(tx_ptr);
   return account_state->txs.insert({key, *tx_ptr}).second;
 }
@@ -481,6 +483,10 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   // [read_average_hog_ages] on a separate thread.
   const auto &[found, missing] = co_await read_average_hog_ages(txs);
 
+  // Read once under [commit_lock_] so every tx in the batch gets the same
+  // stamp.
+  const BlockHeight verified_height = current_block();
+
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), available_parallelism());
   std::vector<x23::Async<void>> handles;
@@ -491,8 +497,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
            const x23::XdrVec<TransactionHash> &tx_hashes,
            const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
-           SchedGatewaySubmitOutcomeBatch &outcomes,
-           Scheduler &scheduler) noexcept -> x23::Async<void> {
+           SchedGatewaySubmitOutcomeBatch &outcomes, Scheduler &scheduler,
+           BlockHeight verified_height) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
           size_t num_added = 0;
@@ -510,13 +516,14 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
               continue;
             }
             const TransactionHash &tx_hash = tx_hashes[tx_idx];
-            if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
+            if (scheduler.add_txs_helper(txs[tx_idx], tx_hash,
+                                         verified_height)) {
               num_added++;
             }
           }
           scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
           co_return;
-        }(&chunk, txs, tx_hashes, missing, outcomes, *this));
+        }(&chunk, txs, tx_hashes, missing, outcomes, *this, verified_height));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -537,6 +544,32 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
   co_return outcomes;
+}
+
+void
+Scheduler::record_auth_reverification(
+    x23::span<const TransactionHash> tx_hashes,
+    const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
+    BlockHeight height)
+{
+  for (const TransactionHash &tx_hash : tx_hashes) {
+    const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+    if (tx_value_ptr == nullptr) {
+      // Re-verification rejected the tx and [remove_from_scheduler()] dropped
+      // it, or it expired while the callback ran.
+      continue;
+    }
+    (*tx_value_ptr)->verified_height = height;
+  }
+
+  // Use [accounts_.find()]; [get_account_state()] panics on unknown accounts.
+  for (const ContractAddress &account : accounts) {
+    auto [account_state, lock] = accounts_.find(account);
+    if (account_state == nullptr) {
+      continue;
+    }
+    account_state->last_auth_change = height;
+  }
 }
 
 void
@@ -1018,6 +1051,10 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         hog_ages->num_hogs[kHogAgeGroupToSchedule] =
             to_xdr(hogs_available - tx.tx.invocation.gas_limit);
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
+
+        // A tx entering a block must have been verified against auth state at
+        // least as new as the account's last auth change.
+        CHECK_GE(it->second->verified_height, account_state->last_auth_change);
 
         tx_hashes.push_back(tx_hash);
         txs.push_back(tx);

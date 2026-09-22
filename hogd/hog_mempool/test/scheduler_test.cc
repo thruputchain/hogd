@@ -164,6 +164,40 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   EXPECT_TRUE(scheduler->find_tx(tx_hash));
 }
 
+// The cache entry records the auth height its signature bytes were verified
+// against, and a resubmission that reuses the entry keeps the original height.
+TEST(Scheduler, CacheEntryCarriesAuthVerificationHeight)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  EXPECT_EQ(scheduler->tx_verified_height(tx_hash), Scheduler::kNeverVerified);
+
+  scheduler->increment_current_block();
+  const BlockHeight submit_height = scheduler->current_block();
+  ASSERT_NE(submit_height, Scheduler::kNeverVerified);
+  scheduler->add_txs({txs[0]}, {tx_hash})();
+  ASSERT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(scheduler->tx_verified_height(tx_hash), submit_height);
+
+  // Resubmitting the same body reuses the cached entry, so the stamp keeps
+  // describing the signature bytes the runqueue actually holds.
+  scheduler->increment_current_block();
+  ASSERT_NE(scheduler->current_block(), submit_height);
+  scheduler->add_txs({txs[0]}, {tx_hash})();
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(scheduler->tx_verified_height(tx_hash), submit_height);
+}
+
 TEST(Scheduler, AddVettedTxDuplicate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

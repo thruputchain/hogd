@@ -141,8 +141,23 @@ public:
   x23::Async<void>
   remove_from_scheduler(x23::span<const TransactionHash> hashes);
 
+  // Stamps the surviving cache entries for [tx_hashes] as verified against
+  // [height] and records [height] as the last auth change for [accounts].
+  void record_auth_reverification(
+      x23::span<const TransactionHash> tx_hashes,
+      const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
+      BlockHeight height);
+
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
+
+  // The auth height stamped on the cache entry for [tx_hash], or
+  // [kNeverVerified] when no entry is cached.
+  BlockHeight tx_verified_height(const TransactionHash &tx_hash)
+  {
+    const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+    return tx_value_ptr ? (*tx_value_ptr)->verified_height : kNeverVerified;
+  }
 
   std::pair<HogAge *, std::unique_lock<std::mutex>>
   get_cached_hog_age(const ContractAddress &address);
@@ -198,6 +213,9 @@ public:
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
   size_t tx_cache_size() { return txs_.size(); }
 
+  // Sentinel for a cache entry that has never been auth-verified.
+  static constexpr BlockHeight kNeverVerified = -1;
+
   // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age
   // updates.
   x23::CoroLock pending_hog_age_update_lock_;
@@ -223,11 +241,17 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
+    // Auth height these signature bytes were verified against; a reused entry
+    // keeps the original.
+    BlockHeight verified_height = kNeverVerified;
   };
 
   struct AccountState {
     HogAge hog_age{};
     std::map<TxKey, std::shared_ptr<TxValue>> txs;
+    // Last height this account's auth data changed; scheduled txs must be
+    // verified at least this new.
+    BlockHeight last_auth_change = kNeverVerified;
   };
 
   struct PendingNominationState {
@@ -268,7 +292,8 @@ private:
                         bool remove_expired_txs);
 
   bool add_txs_helper(const SignedTransaction &tx,
-                      const TransactionHash &tx_hash);
+                      const TransactionHash &tx_hash,
+                      BlockHeight verified_height);
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,

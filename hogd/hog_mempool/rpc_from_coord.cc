@@ -3229,6 +3229,8 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   static SignedTransactionBatch txs;
   tx_hashes.clear();
   txs.clear();
+  std::unordered_set<ContractAddress, SipHash24Hasher> changed_accounts;
+  changed_accounts.reserve(key_changes.size());
   for (const KeyChange &change : key_changes) {
     // Get all txs for [change.address] and re-verify them. Remove any that fail
     // verification.
@@ -3240,10 +3242,14 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                     change_txs);
     tx_hashes += change_tx_hashes;
     txs += change_txs;
+    changed_accounts.insert(change.address);
   }
+  // [AuthServer::lookup_auth_data()] resolves this height exactly, so it is
+  // the auth state the results below describe.
+  const BlockHeight verify_height = scheduler_->current_block();
   AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(
-          scheduler_->current_block(), txs);
+      co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                             txs);
   CHECK_EQ(auth_ret.size(), tx_hashes.size());
   x23::Vec<TransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {
@@ -3253,6 +3259,9 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     }
   }
   co_await scheduler_->remove_from_scheduler(to_remove);
+  scheduler_->record_auth_reverification(x23::span<const TransactionHash>(
+                                             tx_hashes),
+                                         changed_accounts, verify_height);
   auth_data_height_.store(height);
   auth_data_height_.broadcast(&default_threadpool());
 }
