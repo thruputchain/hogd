@@ -144,3 +144,8 @@ if(BUILD_BENCHMARKS)
     set_property(TARGET payments_exec_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   endif()
 endif()
+
+# Native RPC diagnostic; opt in explicitly without adding it to normal builds.
+add_executable(schedgateway_client_bench EXCLUDE_FROM_ALL schedgateway_client_bench.cc)
+target_link_libraries(schedgateway_client_bench hog_devnode hogd protocol)
+target_include_directories(schedgateway_client_bench PRIVATE ${CMAKE_BINARY_DIR})
