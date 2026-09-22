@@ -26,14 +26,13 @@ x23::Async<SystemStatus<SyscallStatus<void>>>
 NativeSyscallContext::modify_native_token_balance(
     ContractAddress const &address, int128_t amount)
 {
-  auto status = co_await handler_.modify_native_token_balance(address, amount);
-  // Priced as the equivalent kNonnegativeIntSetAdd; a rejected mutation
-  // charges nothing, matching that syscall. Flat, with no load_gas on top:
-  // this stages an add-only item and never reaches the database.
-  if (status.has_value() && status->has_value()) {
-    consume_gas(kStorageAccessCost);
-  }
-  co_return std::move(status);
+  // Priced as the equivalent kNonnegativeIntSetAdd, whose exits all pay the
+  // access, so this is charged up front and unconditionally. Flat, with no
+  // load_gas on top: the mutation stages an add-only item and never reaches
+  // the database. Charging before the call also keeps this a plain forwarder
+  // rather than a coroutine, so the write costs no frame of its own.
+  consume_gas(kStorageAccessCost);
+  return handler_.modify_native_token_balance(address, amount);
 }
 
 } // namespace hogd

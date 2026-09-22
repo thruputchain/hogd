@@ -88,7 +88,13 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                  WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
+    // Both syscall-visible exits pay the access, as in the get above: the
+    // flag check and the frame walk happen before the write can tell whether
+    // the key holds the right type or the lock is available, so a rejected
+    // write is not cheaper work than an accepted one -- and charging zero
+    // would leave a caller free to probe failing writes.
+    co_return SyscallInnerResult{(*status).error().code(),
+                                 WrappedGasAmount{kStorageAccessCost}};
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
