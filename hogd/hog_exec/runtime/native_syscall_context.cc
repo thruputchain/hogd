@@ -27,11 +27,9 @@ NativeSyscallContext::modify_native_token_balance(
     ContractAddress const &address, int128_t amount)
 {
   auto status = co_await handler_.modify_native_token_balance(address, amount);
-  // Priced as the equivalent NNInt add: the mutation walks the frame and
-  // rewrites the item's staged delta, which is the work kNonnegativeIntSetAdd
-  // charges kStorageAccessCost for. It stages an add-only item rather than
-  // loading a base value, so there is no load to bill on top. A rejected
-  // mutation charges nothing, matching that syscall's failure paths.
+  // Priced as the equivalent kNonnegativeIntSetAdd; a rejected mutation
+  // charges nothing, matching that syscall. Flat, with no load_gas on top:
+  // this stages an add-only item and never reaches the database.
   if (status.has_value() && status->has_value()) {
     consume_gas(kStorageAccessCost);
   }

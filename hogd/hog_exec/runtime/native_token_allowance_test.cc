@@ -1970,12 +1970,9 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
       << "the storage refund must credit back against a near-max base";
 }
 
-// Regression for #2963: the allowance storage key is a SHA-256 over
-// caller-controlled owner/spender addresses. Deriving it is host work
-// proportional to the serialized input, so the entrypoint has to pay for the
-// digest the way any other caller does rather than producing it for the
-// method's flat entry gas. Pins the child frame at or above what the kSHA256
-// crossing plus the digest costs.
+// Regression for #2963: allowance key derivation must pay the kSHA256
+// crossing plus digest, not ride the method's flat entry gas. The floor is
+// asserted to exceed that entry gas so this cannot pass unfixed.
 TEST_F(NativeTokenAllowanceTest, AllowanceChargesForKeyDerivationSha256)
 {
   constexpr static ContractAddress kCallerAddr = make_contract_address(219);

@@ -135,16 +135,9 @@ get_msg_sender(NativeSyscallContext &ctx)
   co_return sender;
 }
 
-// Derive the allowance storage key for (owner, spender).
-//
-// Routed through kSHA256 rather than hashing directly: the digest is host work
-// proportional to the serialized input, and a syscall body is the only place
-// this codebase prices host work. Charging GasCost::sha256_hash() here by hand
-// would be the first such charge outside one, and would then have to be kept in
-// step with syscall_SHA256_inner() by review alone. Going through the syscall
-// also makes the native token pay exactly what an RV32 caller pays to derive
-// the same key, instead of deriving it for the method's flat entry gas
-// (issue #2963).
+// Derive the allowance storage key for (owner, spender). Routed through
+// kSHA256, not a direct hash, so the digest is priced in a syscall body like
+// any other caller's rather than riding the method's entry gas (issue #2963).
 x23::Async<InvokeStatus<StorageKeyContractData>>
 allowance_key(NativeSyscallContext &ctx, ContractAddress owner,
               ContractAddress spender)

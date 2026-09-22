@@ -73,9 +73,7 @@ public:
   native_token_balance(ContractAddress const &address);
 
   // Apply [amount] to [address]'s native token balance, charging this context
-  // for the write. Like the read above, the native token precompile reaches
-  // the handler directly rather than through syscall(), so this is where the
-  // mutation gets billed; call it rather than the handler's method.
+  // for the write; see native_token_balance above.
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   modify_native_token_balance(ContractAddress const &address, int128_t amount);
 

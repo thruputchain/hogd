@@ -1607,17 +1607,10 @@ TEST_F(BalanceCostTrackingTest,
                          expected_event->begin()));
 }
 
-// Regression for #3056: a native token transfer stages two balance mutations
-// through the handler, which bypasses the syscall wrapped-gas channel entirely,
-// so neither leg was billed. Each is now priced as the equivalent
-// kNonnegativeIntSetAdd.
-//
-// Measured on repeat transfers between the same pair rather than on the first
-// one: the first pays kDBRPCCost per cold key, which is orders of magnitude
-// above the charge under test and would swamp it. Once both balance keys are
-// loaded the per-transfer cost is stable, and what remains in it is the entry
-// debit, the event crossing, and the two mutations -- so the floor below is a
-// floor the unfixed code does not clear.
+// Regression for #3056: handler-side balance mutations bypassed the syscall
+// gas channel. Measured on warm repeat transfers so the cold-key kDBRPCCost
+// does not swamp the charge under test -- a single transfer would not
+// discriminate (warm is 151 unfixed against this floor of 300).
 TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
 {
   constexpr static ContractAddress kSenderAddr = make_contract_address(181);
