@@ -9,6 +9,7 @@
 #include <cstring>
 #include <functional>
 #include <future>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -184,9 +185,14 @@ class ConcurrentMap {
 public:
   using shortkey_t = uint16_t;
   using value_bucket_t = detail::ValueBucket<KeyType, Value>;
+  using bucket_array_t = std::vector<std::atomic<value_bucket_t *>>;
+
+  // Upper bound on the cleared bucket arrays retained for reuse by maps of
+  // this type; see BucketArrayPool below.
+  static constexpr size_t kMaxPooledBucketArrays = 4;
 
   ConcurrentMap(size_t n_buckets = 1'048'576, Hasher hasher = Hasher())
-    : buckets_(n_buckets), hasher_(hasher)
+    : buckets_(acquire_bucket_array(n_buckets)), hasher_(hasher)
   {
     assert(std::has_single_bit(n_buckets));
   }
@@ -196,6 +202,18 @@ public:
     if (!cleared_) {
       clear_slow();
     }
+    // Every clearing path leaves all bucket heads nullptr, which is exactly
+    // the state a freshly constructed map needs, so hand the array to the
+    // next map instead of freeing it.
+    release_bucket_array(std::move(buckets_));
+  }
+
+  // Number of bucket arrays currently held for reuse by maps of this type.
+  static size_t pooled_bucket_array_count_for_testing()
+  {
+    BucketArrayPool &pool = bucket_array_pool();
+    std::scoped_lock g(pool.mutex);
+    return pool.arrays.size();
   }
 
   static_assert(
@@ -267,8 +285,15 @@ public:
               cleared_count.fetch_add(width, std::memory_order_relaxed);
           size_t end = std::min<size_t>(start + width, buckets_.size());
           for (size_t i = start; i < end; i++) {
+            // No inserts may run concurrently with a destructive iteration,
+            // so a plain load + store is enough; it avoids a locked RMW on
+            // every one of the (mostly empty) buckets.
             value_bucket_t *bucket =
-                buckets_[i].exchange(nullptr, std::memory_order_acquire);
+                buckets_[i].load(std::memory_order_acquire);
+            if (bucket == nullptr) {
+              continue;
+            }
+            buckets_[i].store(nullptr, std::memory_order_relaxed);
             value_bucket_t::for_each_destructive(bucket, f);
           }
           if (start + width >= buckets_.size()) {
@@ -311,14 +336,81 @@ public:
     pool.for_each_parallel(
         buckets_,
         [](std::atomic<value_bucket_t *> &bucket) {
-          value_bucket_t::clear(
-              bucket.exchange(nullptr, std::memory_order_acquire));
+          // See for_each_parallel_destructive() for why this is not an
+          // exchange().
+          value_bucket_t *head = bucket.load(std::memory_order_acquire);
+          if (head == nullptr) {
+            return;
+          }
+          bucket.store(nullptr, std::memory_order_relaxed);
+          value_bucket_t::clear(head);
         },
         width);
     cleared_ = true;
   }
 
 private:
+  // Cleared bucket arrays are recycled through a small per-map-type pool.
+  //
+  // A default-size map owns 1M bucket heads (8MB) that a block-scoped user
+  // such as BlockTX's lock maps allocates, zeroes, scans and frees once per
+  // block, even though the destructive commit scan already leaves every head
+  // nullptr. Reusing the array skips the allocation, the zeroing and the page
+  // faults on the next block.
+  //
+  // The pool is bounded (kMaxPooledBucketArrays arrays of any size, so at
+  // most kMaxPooledBucketArrays * 8MB for default-size maps) and is only ever
+  // touched in the constructor and destructor, so it adds nothing to the
+  // lookup or insert paths.
+  struct BucketArrayPool {
+    std::mutex mutex;
+    std::vector<bucket_array_t> arrays;
+  };
+
+  static BucketArrayPool &bucket_array_pool()
+  {
+    // Function-local so that any static map constructed through
+    // acquire_bucket_array() finishes construction after the pool and is
+    // therefore destroyed before it.
+    static BucketArrayPool pool;
+    return pool;
+  }
+
+  static bucket_array_t acquire_bucket_array(size_t n_buckets)
+  {
+    {
+      BucketArrayPool &pool = bucket_array_pool();
+      std::scoped_lock g(pool.mutex);
+      for (auto it = pool.arrays.begin(); it != pool.arrays.end(); ++it) {
+        if (it->size() == n_buckets) {
+          bucket_array_t buckets = std::move(*it);
+          pool.arrays.erase(it);
+          return buckets;
+        }
+      }
+    }
+    // Value-initializes every head to nullptr.
+    return bucket_array_t(n_buckets);
+  }
+
+  // Requires all heads of |buckets| to be nullptr. Takes the array by value so
+  // that it is freed here if the pool is full or the push fails.
+  static void release_bucket_array(bucket_array_t buckets) noexcept
+  {
+    if (buckets.empty()) {
+      return;
+    }
+    try {
+      BucketArrayPool &pool = bucket_array_pool();
+      std::scoped_lock g(pool.mutex);
+      if (pool.arrays.size() < kMaxPooledBucketArrays) {
+        pool.arrays.push_back(std::move(buckets));
+      }
+    } catch (...) {
+      // Out of memory while growing the pool: just free the array.
+    }
+  }
+
   size_t worker_width(WorkerPool &pool) const
   {
     return std::max<size_t>(1, buckets_.size() / pool.worker_count());
@@ -327,12 +419,18 @@ private:
   void clear_slow() noexcept
   {
     for (auto &bucket : buckets_) {
-      value_bucket_t::clear(bucket.load(std::memory_order_acquire));
+      value_bucket_t *head = bucket.load(std::memory_order_acquire);
+      if (head == nullptr) {
+        continue;
+      }
+      // Null the head too so the array can be recycled by the destructor.
+      bucket.store(nullptr, std::memory_order_relaxed);
+      value_bucket_t::clear(head);
     }
     cleared_ = true;
   }
 
-  std::vector<std::atomic<value_bucket_t *>> buckets_;
+  bucket_array_t buckets_;
 
   BumpAllocator<value_bucket_t, 8192> value_allocator_;
   Hasher hasher_;
