@@ -237,7 +237,7 @@ open_block(db_sched_client_t &db_sched_client,
            BlockHeight block_height)
 {
   info("opening block {}", block_number);
-  auto start_time = x23::fastclock::get_ns();
+  auto start_time = x23::fastclock::now();
 
   auto [async, cb] = x23::make_async<void>();
   std::atomic<size_t> n_remaining_execs = exec_clients.size();
@@ -254,21 +254,22 @@ open_block(db_sched_client_t &db_sched_client,
   }
 
   auto event_async = event_sched_client.eventsched_open_block(block_number);
-  auto issue_time = x23::fastclock::get_ns();
+  auto issue_time = x23::fastclock::now();
   auto res = db_sched_client.dbsched_create_snapshot(
       parent_block_number, block_number,
       BlockExecutionMode::kBlockExecutionModeProposal);
   if (res != DbSchedResult::DbSchedResultOK) {
     panic("Failed to create snapshot");
   }
-  auto create_time = x23::fastclock::get_ns();
+  auto create_time = x23::fastclock::now();
   async();
   event_async();
-  auto done_time = x23::fastclock::get_ns();
+  auto done_time = x23::fastclock::now();
 
   std::println("opening: issue_time {} create_time {} done_time {}",
-               issue_time - start_time, create_time - issue_time,
-               done_time - create_time);
+               (issue_time - start_time).count(),
+               (create_time - issue_time).count(),
+               (done_time - create_time).count());
 };
 
 // [prev_value] chains the committed ConsensusValues: it enters holding the
@@ -280,7 +281,7 @@ close_block(db_sched_client_t &db_sched_client,
             std::vector<exec_client_t> &exec_clients, uint64_t block_number,
             ConsensusValue &prev_value, IndexerLatencyProbe *indexer_probe)
 {
-  auto start_time = x23::fastclock::get_ns();
+  auto start_time = x23::fastclock::now();
   info("closing block {}", block_number);
   auto [async, cb] = x23::make_async<void>();
   std::atomic<size_t> n_remaining_execs = exec_clients.size();
@@ -297,12 +298,12 @@ close_block(db_sched_client_t &db_sched_client,
   const BlockHeight block_height = prev_value.proposal_header.block_height + 1;
   auto event_async =
       event_sched_client.eventsched_close_block(block_number, block_height);
-  auto issue_time = x23::fastclock::get_ns();
+  auto issue_time = x23::fastclock::now();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     panic("Failed to close snapshot");
   }
-  auto close_time = x23::fastclock::get_ns();
+  auto close_time = x23::fastclock::now();
   ConsensusValue value{};
   value.proposal_header.block_height = block_height;
   auto commit_res =
@@ -310,7 +311,7 @@ close_block(db_sched_client_t &db_sched_client,
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
     panic("Failed to commit snapshot");
   }
-  auto commit_time = x23::fastclock::get_ns();
+  auto commit_time = x23::fastclock::now();
   // It's ok for finish_block to overlap with db.close_block, because we already
   // synchronized waiting for all pending txs on the block to finish.
   async();
@@ -318,7 +319,7 @@ close_block(db_sched_client_t &db_sched_client,
   if (event_result.error() != RPCError::kRPCNone) {
     panic("Failed to close event block");
   }
-  auto done_time = x23::fastclock::get_ns();
+  auto done_time = x23::fastclock::now();
   // Commit the event block the way a real finalization does, so the measured
   // lifecycle covers the durable indexer publication and not just close. The
   // finalized value chains prev_hash off the previous committed value and
@@ -334,7 +335,7 @@ close_block(db_sched_client_t &db_sched_client,
     panic("Failed to commit event block");
   }
   prev_value = event_value;
-  auto event_commit_time = x23::fastclock::get_ns();
+  auto event_commit_time = x23::fastclock::now();
   // Stamped from the same clock the probe stops on, so the recorded span is
   // commit-return to query-visible with no second clock in it.
   if (indexer_probe != nullptr) {
@@ -342,9 +343,11 @@ close_block(db_sched_client_t &db_sched_client,
   }
   std::println("closing: issue_time {} close_time {} commit_time {} "
                "done_time {} event_commit_time {}",
-               issue_time - start_time, close_time - issue_time,
-               commit_time - close_time, done_time - commit_time,
-               event_commit_time - done_time);
+               (issue_time - start_time).count(),
+               (close_time - issue_time).count(),
+               (commit_time - close_time).count(),
+               (done_time - commit_time).count(),
+               (event_commit_time - done_time).count());
 };
 
 x23::Detached
@@ -397,7 +400,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           uint64_t current_block_number, ConsensusValue &prev_value,
           IndexerLatencyProbe *indexer_probe)
 {
-  auto start_time = x23::fastclock::get_ns();
+  auto start_time = x23::fastclock::now();
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
   // Height comes off the previous committed value, never off a block number.
@@ -408,7 +411,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   BlockValidationQueue block_validation_queue(txs, batch_size);
   x23::XdrVec<NondeterministicProposalData> nominations(txs->size());
 
-  auto start_coros_time = x23::fastclock::get_ns();
+  auto start_coros_time = x23::fastclock::now();
 
   // make sure any destructors are run during the measured inner loop
   {
@@ -421,16 +424,17 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
     async();
   }
 
-  auto end_coros_time = x23::fastclock::get_ns();
-  double elapsed_time = end_coros_time - start_coros_time;
+  auto end_coros_time = x23::fastclock::now();
+  double elapsed_time = (end_coros_time - start_coros_time).count();
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
   close_block(db_sched_client, event_sched_client, exec_clients,
               current_block_number, prev_value, indexer_probe);
 
-  auto end_block_time = x23::fastclock::get_ns();
+  auto end_block_time = x23::fastclock::now();
   std::println("open_time {} middle_time {} close_time {} inner tps: {}",
-               start_coros_time - start_time, end_coros_time - start_coros_time,
-               end_block_time - end_coros_time, inner_tps);
+               (start_coros_time - start_time).count(),
+               (end_coros_time - start_coros_time).count(),
+               (end_block_time - end_coros_time).count(), inner_tps);
 }
 
 void
@@ -641,13 +645,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                  "batch_size={}",
                  i, num_txs_per_block, exec_cards.size(), n_connections,
                  n_coros_per_connection, num_accounts, batch_size);
-    auto ts = x23::fastclock::get_ns();
+    auto ts = x23::fastclock::now();
     run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number, prev_value,
               &indexer_probe);
-    auto end_time = x23::fastclock::get_ns();
-    double elapsed_time = end_time - ts;
+    auto end_time = x23::fastclock::now();
+    double elapsed_time = (end_time - ts).count();
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
     std::println("time taken: {} ns for txs={} nexecutors={} nconnections={} "
                  "ncoros_per_connection={} nacc={} "

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <thread>
+#include <type_traits>
 
 #if defined(__APPLE__)
 #define FASTCLOCK_USE_TSC 0
@@ -42,6 +43,10 @@ struct fastclock {
   // makes the expired deadline merely negative, which every implementation
   // treats as "already timed out".
   using rep = std::int64_t;
+  static_assert(std::is_signed_v<rep>,
+                "an unsigned rep turns every regressing sample into a "
+                "~584-year interval, in wait_until and in elapsed-time "
+                "telemetry alike");
   using period = std::nano;
   using duration = std::chrono::duration<rep, period>;
   using time_point = std::chrono::time_point<fastclock>;
