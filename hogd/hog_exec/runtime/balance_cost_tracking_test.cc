@@ -1608,9 +1608,8 @@ TEST_F(BalanceCostTrackingTest,
 }
 
 // Regression for #3056: handler-side balance mutations bypassed the syscall
-// gas channel. Measured on warm repeat transfers so the cold-key kDBRPCCost
-// does not swamp the charge under test -- a single transfer would not
-// discriminate (warm is 151 unfixed against this floor of 300).
+// gas channel. Measured on warm repeat transfers, since the cold-key
+// kDBRPCCost would swamp the charge under test.
 TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
 {
   constexpr static ContractAddress kSenderAddr = make_contract_address(181);

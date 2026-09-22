@@ -20,11 +20,10 @@ namespace hogd {
 
 class NativeSyscallContext;
 
-// Stage an unchecked native-token debit of `from` and credit of `to`. No
-// balance check, no Transfer event: callers on the public ERC20 surface must
-// run the strict checks first. For privileged system code whose in-tx balance
-// is transiently short by the storage deposit refunded at commit. `amount`
-// must be nonnegative; both writes are charged to `ctx`.
+// Stage an unchecked native-token debit of `from` and credit of `to`: no
+// balance check, no Transfer event, so callers on the public ERC20 surface
+// must run the strict checks first. `amount` must be nonnegative; both writes
+// are charged to `ctx`.
 [[nodiscard]] x23::Async<InvokeStatus<void>>
 native_token_unchecked_transfer(NativeSyscallContext &ctx,
                                 ContractAddress const &from,

@@ -135,9 +135,8 @@ get_msg_sender(NativeSyscallContext &ctx)
   co_return sender;
 }
 
-// Derive the allowance storage key for (owner, spender). Routed through
-// kSHA256, not a direct hash, so the digest is priced in a syscall body like
-// any other caller's rather than riding the method's entry gas (issue #2963).
+// Derive the allowance storage key; routed through kSHA256 so the digest is
+// priced as a syscall (issue #2963).
 x23::Async<InvokeStatus<StorageKeyContractData>>
 allowance_key(NativeSyscallContext &ctx, ContractAddress owner,
               ContractAddress spender)

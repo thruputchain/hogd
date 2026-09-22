@@ -1970,9 +1970,7 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
       << "the storage refund must credit back against a near-max base";
 }
 
-// Regression for #2963: allowance key derivation must pay the kSHA256
-// crossing plus digest, not ride the method's flat entry gas. The floor is
-// asserted to exceed that entry gas so this cannot pass unfixed.
+// Regression for #2963: allowance key derivation must pay for its SHA-256.
 TEST_F(NativeTokenAllowanceTest, AllowanceChargesForKeyDerivationSha256)
 {
   constexpr static ContractAddress kCallerAddr = make_contract_address(219);
@@ -2022,9 +2020,7 @@ TEST_F(NativeTokenAllowanceTest, AllowanceChargesForKeyDerivationSha256)
           ADD_FAILURE() << "allowance child invoke did not return successfully";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // gas_used covers the parent's own kInvoke crossing and the whole
-        // child frame, so it is only ever larger than the derivation; the
-        // point is that the derivation is no longer free.
+        // A floor: gas_used also covers the crossing and the child frame.
         EXPECT_GE(gas_used, derivation_cost)
             << "allowance did not charge for its SHA-256 key derivation";
         co_return InvokeStatus<void>{};

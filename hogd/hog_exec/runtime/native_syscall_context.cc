@@ -26,11 +26,8 @@ x23::Async<SystemStatus<SyscallStatus<void>>>
 NativeSyscallContext::modify_native_token_balance(
     ContractAddress const &address, int128_t amount)
 {
-  // Priced as the equivalent kNonnegativeIntSetAdd, whose exits all pay the
-  // access, so this is charged up front and unconditionally. Flat, with no
-  // load_gas on top: the mutation stages an add-only item and never reaches
-  // the database. Charging before the call also keeps this a plain forwarder
-  // rather than a coroutine, so the write costs no frame of its own.
+  // Priced as the equivalent kNonnegativeIntSetAdd, charged up front so this
+  // stays a plain forwarder. No load_gas: the write never reaches the database.
   consume_gas(kStorageAccessCost);
   return handler_.modify_native_token_balance(address, amount);
 }
