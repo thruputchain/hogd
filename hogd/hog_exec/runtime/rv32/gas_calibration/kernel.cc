@@ -417,7 +417,7 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
             ? 0
             : (chain ? kChainReg
                      : static_cast<uint8_t>(kDataBankBase +
-                                             (index % kDataBankSize)));
+                                            (index % kDataBankSize)));
     return test_program::j_type(rd, kInstructionBytes);
   }
   if (spec.target == Op::kJalr) {
@@ -825,6 +825,9 @@ op_name(Op op)
 std::string
 context_name(OperandContext context)
 {
+  if (context == OperandContext::kTargetChase) {
+    return "target_chase";
+  }
   if (context == OperandContext::kNoLink) {
     return "no_link";
   }
@@ -1049,6 +1052,209 @@ build_kernel(const KernelSpec &spec)
       ((uint64_t{spec.trip_count} - 1) * scheduled_gas_for(Op::kJal)) +
       scheduled_gas_for(Op::kEcall);
   return kernel;
+}
+
+std::string
+jump_context_name(const JumpSpec &spec)
+{
+  const char *layout =
+      spec.layout == JumpLayout::kSequential
+          ? "sequential"
+          : (spec.layout == JumpLayout::kReverse ? "reverse" : "shuffled");
+  const std::string mode =
+      spec.context == OperandContext::kChain
+          ? "link_chain"
+          : (spec.target == Op::kJalr &&
+                     spec.context != OperandContext::kTargetChase
+                 ? "fixed_base_" + context_name(spec.context)
+                 : context_name(spec.context));
+  return mode + "/" + layout + "/n" + std::to_string(spec.nodes) + "/stride" +
+         std::to_string(spec.stride_words) + "/seed" +
+         std::to_string(spec.seed);
+}
+
+std::expected<JumpKernel, KernelError>
+build_jump_kernel(const JumpSpec &spec)
+{
+  if (spec.target != Op::kJal && spec.target != Op::kJalr) {
+    return std::unexpected(KernelError::kUnsupportedTarget);
+  }
+  const bool chase = spec.context == OperandContext::kTargetChase;
+  if ((chase || spec.context == OperandContext::kChain) &&
+      spec.target != Op::kJalr) {
+    return std::unexpected(KernelError::kUnsupportedTarget);
+  }
+  if (spec.nodes < 2 || spec.stride_words == 0) {
+    return std::unexpected(KernelError::kBodyTooSmall);
+  }
+  if (spec.trip_count == 0) {
+    return std::unexpected(KernelError::kZeroTripCount);
+  }
+  // Leave space for the prologue, dispatcher and loop tail. Check before any
+  // multiplication/allocation; the encoder also checks each immediate below.
+  const uint64_t body_words = uint64_t{spec.nodes} * spec.stride_words;
+  if (body_words + 16 > kDefaultMaxCodeBytes / kInstructionBytes ||
+      (chase && (uint64_t{spec.nodes} + 1) * 8 > kDefaultMaxMemoryBytes)) {
+    return std::unexpected(KernelError::kCodeTooLarge);
+  }
+  auto permutation = [&](uint32_t seed) {
+    std::vector<uint32_t> order(spec.nodes);
+    for (uint32_t i = 0; i < spec.nodes; ++i) {
+      order[i] = i;
+    }
+    if (spec.layout == JumpLayout::kReverse) {
+      std::reverse(order.begin() + 1, order.end());
+    }
+    else if (spec.layout == JumpLayout::kShuffled) {
+      uint64_t state = seed;
+      for (uint32_t i = spec.nodes - 1; i > 1; --i) {
+        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        const auto j = 1 + static_cast<uint32_t>((state >> 32) % i);
+        std::swap(order[i], order[j]);
+      }
+    }
+    return order;
+  };
+  const auto order = permutation(spec.seed);
+  std::vector<uint32_t> words;
+  emit_load_immediate(words, kLoopCounterReg,
+                      static_cast<int32_t>(spec.trip_count));
+  JumpKernel out;
+  Kernel &kernel = out.kernel;
+  out.loop_pc = static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  const uint32_t setup = static_cast<uint32_t>(words.size());
+  // Fixed-size register initialization, executed once per traversal. This
+  // resets a link chain or linked-table cursor, not after every target jump.
+  words.resize(words.size() + 2);
+  const uint32_t hub_pc =
+      static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  if (chase) {
+    words.push_back(test_program::load(kChainReg, 2, kChainReg, 0));
+    words.push_back(test_program::load(kDataBankBase, 2, kChainReg, 4));
+    words.push_back(test_program::jalr(0, kDataBankBase, 0));
+  }
+  const uint32_t body_pc =
+      static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  kernel.body_start_pc = body_pc;
+  words.resize(words.size() + static_cast<size_t>(body_words), 0x00100073U);
+  const uint32_t tail_pc =
+      static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  const uint32_t base =
+      chase ? spec.nodes * 8 : body_pc + static_cast<uint32_t>(body_words) * 2;
+  const uint8_t base_reg = chase || spec.context == OperandContext::kChain
+                               ? kChainReg
+                               : kJalrBaseReg;
+  const int32_t lo = static_cast<int32_t>(base << 20) >> 20;
+  words[setup] =
+      test_program::u_type(0x37U, base_reg, base - static_cast<uint32_t>(lo));
+  words[setup + 1] = test_program::addi(base_reg, base_reg, lo);
+  out.iteration_pcs = {out.loop_pc, out.loop_pc + kInstructionBytes};
+  const auto pc_for = [&](uint32_t node) {
+    return body_pc + node * spec.stride_words * kInstructionBytes;
+  };
+  uint32_t previous_link = base;
+  for (uint32_t i = 0; i < spec.nodes; ++i) {
+    const uint32_t pc = pc_for(order[i]);
+    const uint32_t next = i + 1 == spec.nodes ? tail_pc : pc_for(order[i + 1]);
+    uint32_t word = 0;
+    if (chase) {
+      word = test_program::j_type(0, static_cast<int32_t>(hub_pc) -
+                                         static_cast<int32_t>(pc));
+      out.iteration_pcs.insert(out.iteration_pcs.end(),
+                               {hub_pc, hub_pc + 4, hub_pc + 8});
+      kernel.target_slot_pcs.push_back(hub_pc + 8);
+    }
+    else if (spec.target == Op::kJal) {
+      const uint8_t rd =
+          spec.context == OperandContext::kNoLink
+              ? 0
+              : static_cast<uint8_t>(kDataBankBase + i % kDataBankSize);
+      word = test_program::j_type(rd, static_cast<int32_t>(next) -
+                                          static_cast<int32_t>(pc));
+    }
+    else {
+      // In link_chain, rs1 is exactly the register the preceding JALR wrote.
+      // The immediate compensates for that preceding PC+4, not a fixed base.
+      const uint32_t input =
+          spec.context == OperandContext::kChain ? previous_link : base;
+      const int64_t offset = int64_t{next} - input;
+      if (offset < -2048 || offset > 2047) {
+        return std::unexpected(KernelError::kTargetImmediateOutOfRange);
+      }
+      const uint8_t rd =
+          spec.context == OperandContext::kChain
+              ? kChainReg
+              : (spec.context == OperandContext::kNoLink
+                     ? 0
+                     : static_cast<uint8_t>(kDataBankBase + i % kDataBankSize));
+      word = test_program::jalr(rd, base_reg, static_cast<int32_t>(offset));
+      previous_link = pc + kInstructionBytes;
+    }
+    words[pc / kInstructionBytes] = word;
+    out.iteration_pcs.push_back(pc);
+    if (!chase) {
+      kernel.target_slot_pcs.push_back(pc);
+    }
+  }
+  if (chase) {
+    // Each visit to the SAME jalr PC loads a different target. Table links and
+    // landing pads have independent permutations. Include the terminal visit.
+    const auto table_order = permutation(spec.seed ^ 0xA511E9B3U);
+    kernel.initial_memory.resize((spec.nodes + 1) * 8);
+    const auto put = [&](uint32_t address, uint32_t value) {
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        kernel.initial_memory[address + byte] =
+            static_cast<uint8_t>(value >> (8 * byte));
+      }
+    };
+    put(spec.nodes * 8, table_order.front() * 8);
+    put(spec.nodes * 8 + 4, tail_pc);
+    for (uint32_t i = 0; i < spec.nodes; ++i) {
+      put(table_order[i] * 8,
+          i + 1 == spec.nodes ? spec.nodes * 8 : table_order[i + 1] * 8);
+      put(table_order[i] * 8 + 4, pc_for(order[i]));
+    }
+    out.iteration_pcs.insert(out.iteration_pcs.end(),
+                             {hub_pc, hub_pc + 4, hub_pc + 8});
+    kernel.target_slot_pcs.push_back(hub_pc + 8);
+  }
+  words.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
+  words.push_back(test_program::branch(0, kLoopCounterReg, 0, 8));
+  words.push_back(
+      test_program::j_type(0, static_cast<int32_t>(out.loop_pc) -
+                                  static_cast<int32_t>(tail_pc + 8)));
+  out.iteration_pcs.insert(out.iteration_pcs.end(),
+                           {tail_pc, tail_pc + 4, tail_pc + 8});
+  out.exit_pc = static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  words.push_back(0x00000073U);
+  for (const uint32_t word : words) {
+    append_u32(kernel.code, word);
+  }
+  uint64_t prefix_gas = 0;
+  uint64_t iteration_gas = 0;
+  const auto gas_at = [&](uint32_t pc) {
+    return decode_instruction(words[pc / kInstructionBytes])
+        .instruction.gas_cost;
+  };
+  for (uint32_t pc = 0; pc < out.loop_pc; pc += kInstructionBytes) {
+    prefix_gas += gas_at(pc);
+  }
+  for (uint32_t pc : out.iteration_pcs) {
+    iteration_gas += gas_at(pc);
+  }
+  kernel.target_units = static_cast<uint32_t>(kernel.target_slot_pcs.size());
+  kernel.memory_bytes =
+      std::max<uint32_t>(64,
+                         static_cast<uint32_t>(kernel.initial_memory.size()));
+  kernel.instructions_per_iteration = out.iteration_pcs.size();
+  // Last traversal skips its back edge and executes the terminal ecall.
+  kernel.dynamic_instructions =
+      out.loop_pc / kInstructionBytes +
+      uint64_t{spec.trip_count} * out.iteration_pcs.size();
+  kernel.scheduled_gas = prefix_gas +
+                         uint64_t{spec.trip_count} * iteration_gas -
+                         gas_at(tail_pc + 8) + gas_at(out.exit_pc);
+  return out;
 }
 
 } // namespace hogd::rv32::gas_calibration

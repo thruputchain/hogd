@@ -30,6 +30,7 @@
 #include <memory>
 #include <print>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -78,6 +79,7 @@ struct Options {
 
 // One measured (op, context) cell.
 struct SweepResult {
+  bool jump_kernel = false;
   std::string op;
   std::string context;
   std::string working_set;
@@ -913,13 +915,8 @@ plan_sweeps(const Options &options)
     base.target = op;
     base.body_slots = options.body_slots;
 
-    if (op == Op::kJal) {
-      // A direct jump reads no register, so repeatedly writing one link
-      // register is not a dependency chain. Measure with and without a link.
-      plans.push_back({base, ""});
-      KernelSpec no_link = base;
-      no_link.context = OperandContext::kNoLink;
-      plans.push_back({no_link, ""});
+    if (op == Op::kJal || op == Op::kJalr) {
+      // These use dedicated control-flow kernels, not body-slot substitutions.
       continue;
     }
     if (is_branch_target(op)) {
@@ -1007,6 +1004,127 @@ plan_sweeps(const Options &options)
   return plans;
 }
 
+std::vector<JumpSpec>
+plan_jumps(const Options &options)
+{
+  std::vector<JumpSpec> plans;
+  for (const Op op : {Op::kJal, Op::kJalr}) {
+    if (!options.only_op.empty() && options.only_op != op_name(op)) {
+      continue;
+    }
+    for (const auto layout : {JumpLayout::kSequential, JumpLayout::kReverse,
+                              JumpLayout::kShuffled}) {
+      for (const uint32_t seed : {1U, 42U, 12345U}) {
+        if (layout != JumpLayout::kShuffled && seed != 1) {
+          continue;
+        }
+        const auto add = [&](OperandContext context, uint32_t nodes,
+                             uint32_t stride) {
+          plans.push_back({.target = op,
+                           .context = context,
+                           .layout = layout,
+                           .nodes = nodes,
+                           .stride_words = stride,
+                           .seed = seed});
+        };
+        // Equal layouts and footprints for the direct/fixed-base/link-chain
+        // comparison. The chain's 12-bit immediate limits its footprint.
+        for (const auto context :
+             {OperandContext::kIndependent, OperandContext::kNoLink,
+              OperandContext::kChain}) {
+          if (op == Op::kJal && context == OperandContext::kChain) {
+            continue;
+          }
+          add(context, 64, 1);
+          add(context, 480, 1);
+          add(context, 64, 7);
+        }
+        if (op == Op::kJalr) {
+          add(OperandContext::kTargetChase, 64, 1);
+        }
+        if (!options.quick) {
+          if (op == Op::kJal) {
+            add(OperandContext::kIndependent, 4096, 1);
+            add(OperandContext::kNoLink, 512, 16);
+          }
+          else {
+            // Same jalr PC, changing target at every visit. Includes dependent
+            // loads and pad-return jumps; report the entire cost per dispatch
+            // as an upper bound rather than subtracting a guessed load cost.
+            add(OperandContext::kTargetChase, 4096, 1);
+            add(OperandContext::kTargetChase, 512, 16);
+          }
+        }
+      }
+    }
+  }
+  return plans;
+}
+
+SweepResult
+run_jump_sweep(JumpSpec spec, const Options &options)
+{
+  SweepResult result;
+  result.jump_kernel = true;
+  result.op = op_name(spec.target);
+  result.context = jump_context_name(spec);
+  result.working_set = "none";
+  result.magnitude = "default";
+  result.scheduled_gas = scheduled_gas_for(spec.target);
+  result.saturated_note =
+      spec.context == OperandContext::kTargetChase
+          ? "absolute bound per JALR, INCLUDING two dependent loads per "
+            "dispatch, landing-pad JALs and loop setup; not an isolated cost"
+          : "absolute jump-chain bound, including loop setup/control; "
+            "excluded from normalization";
+  HaltHost host;
+  auto kernel = build_jump_kernel(spec);
+  if (!kernel) {
+    throw std::runtime_error("jump kernel: " +
+                             kernel_error_name(kernel.error()));
+  }
+  const auto lower = [](const Kernel &k) {
+    return ThreadedMachinePreInstantiation::create(k.code, k.initial_memory, 0,
+                                                   k.memory_bytes, false,
+                                                   kMaxRunGas, false);
+  };
+  auto seed = lower(kernel->kernel);
+  if (!seed) {
+    throw std::runtime_error("jump probe did not lower");
+  }
+  spec.trip_count =
+      tune_trip_count(*seed, host, spec.trip_count, options.target_ns);
+  kernel = build_jump_kernel(spec);
+  if (!kernel) {
+    throw std::runtime_error("tuned jump kernel did not build");
+  }
+  auto program = lower(kernel->kernel);
+  if (!program) {
+    throw std::runtime_error("tuned jump kernel did not lower");
+  }
+  std::vector<MeasurementPoint> points{
+      {.label = result.op + "/" + result.context,
+       .x = 0.0,
+       .program = &*program,
+       .trip_count = spec.trip_count,
+       .expected_gas = kernel->kernel.scheduled_gas}};
+  measure_interleaved(points, host,
+                      {.repeats = options.repeats,
+                       .warmup_runs = options.warmup_runs});
+  const auto &point = points.front();
+  if (!point.ran_clean || point.samples.size() != options.repeats ||
+      point.samples.size() < 3 || !std::isfinite(point.median()) ||
+      point.median() <= 0) {
+    throw std::runtime_error("invalid jump measurement: " + result.context);
+  }
+  result.ns_upper_bound = point.median() / kernel->kernel.target_units;
+  result.ns_per_instruction = result.ns_upper_bound;
+  result.worst_relative_mad = point.relative_mad();
+  result.measured_points = point.samples.size();
+  result.usable = true;
+  return result;
+}
+
 void
 emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
           const BaselineResult &baseline, double noise_floor,
@@ -1057,7 +1175,8 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
     const SweepResult &sweep = sweeps[i];
     std::println(
         out,
-        "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
+        "    {{\"jump_kernel\": {}, \"op\": \"{}\", \"context\": \"{}\", "
+        "\"working_set\": \"{}\", "
         "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"pair\": {}, "
         "\"pair_ops\": {}, \"ns_upper_bound\": {:.6f}, "
         "\"ns_saturated\": {:.6f}, \"saturated_note\": \"{}\", "
@@ -1067,15 +1186,15 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         "\"slope_stderr_ns\": {:.6f}, \"points\": {}, \"ns_per_instruction\": "
         "{:.6f}, \"worst_relative_mad\": {:.6f}, \"body_runs\": {}, "
         "\"max_run_gas_seen\": {}}}{}",
-        escape_json(sweep.op), escape_json(sweep.context),
-        escape_json(sweep.working_set), escape_json(sweep.magnitude),
-        escape_json(sweep.branch_mode), sweep.is_pair ? "true" : "false",
-        json_string_array(sweep.pair_ops), sweep.ns_upper_bound,
-        sweep.ns_saturated, escape_json(sweep.saturated_note),
-        sweep.scheduled_gas, sweep.usable ? "true" : "false",
-        escape_json(sweep.rejected_because), sweep.fit.slope,
-        sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
-        sweep.measured_points, sweep.ns_per_instruction,
+        sweep.jump_kernel ? "true" : "false", escape_json(sweep.op),
+        escape_json(sweep.context), escape_json(sweep.working_set),
+        escape_json(sweep.magnitude), escape_json(sweep.branch_mode),
+        sweep.is_pair ? "true" : "false", json_string_array(sweep.pair_ops),
+        sweep.ns_upper_bound, sweep.ns_saturated,
+        escape_json(sweep.saturated_note), sweep.scheduled_gas,
+        sweep.usable ? "true" : "false", escape_json(sweep.rejected_because),
+        sweep.fit.slope, sweep.fit.theil_sen_slope, sweep.fit.r_squared,
+        sweep.fit.slope_stderr, sweep.measured_points, sweep.ns_per_instruction,
         sweep.worst_relative_mad, sweep.audit.body_runs,
         sweep.audit.max_run_gas_seen, i + 1 == sweeps.size() ? "" : ",");
   }
@@ -1270,6 +1389,16 @@ main_impl(int argc, char **argv)
     }
     else {
       std::println(stderr, "        rejected: {}", result.rejected_because);
+    }
+  }
+
+  if (!options.syscalls_only) {
+    for (const JumpSpec &spec : plan_jumps(options)) {
+      std::println(stderr, "jump {} {}", op_name(spec.target),
+                   jump_context_name(spec));
+      sweeps.push_back(run_jump_sweep(spec, options));
+      std::println(stderr, "  {:.4f} ns/jump (absolute upper bound)",
+                   sweeps.back().ns_upper_bound);
     }
   }
 

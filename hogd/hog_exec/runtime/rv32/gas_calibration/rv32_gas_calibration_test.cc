@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -113,8 +115,8 @@ TEST(Rv32GasCalibrationKernel, TargetSlotsEncodeTheRequestedOpcode)
 TEST(Rv32GasCalibrationKernel, JalTargetsRetireEverySlotWithAndWithoutLink)
 {
   HaltHost host;
-  for (const auto context : {OperandContext::kIndependent,
-                             OperandContext::kNoLink}) {
+  for (const auto context :
+       {OperandContext::kIndependent, OperandContext::kNoLink}) {
     for (const bool saturated : {false, true}) {
       for (const uint32_t slots : {64U, 512U, 2048U}) {
         KernelSpec spec;
@@ -133,7 +135,7 @@ TEST(Rv32GasCalibrationKernel, JalTargetsRetireEverySlotWithAndWithoutLink)
               decoded->instruction_at(pc / kInstructionBytes);
           ASSERT_TRUE(instruction.has_value());
           EXPECT_EQ(instruction->op, Op::kJal);
-          EXPECT_EQ(instruction->immediate, int32_t{kInstructionBytes});
+          EXPECT_EQ(instruction->imm, int32_t{kInstructionBytes});
           if (context == OperandContext::kNoLink) {
             EXPECT_EQ(instruction->rd, 0);
           }
@@ -161,6 +163,153 @@ TEST(Rv32GasCalibrationKernel, JalTargetsRetireEverySlotWithAndWithoutLink)
   }
   // Adding a timing kernel must not silently change the fusion fingerprint.
   EXPECT_FALSE(canonical_instruction_word(Op::kJal, kDataBankBase).has_value());
+}
+
+TEST(Rv32GasCalibrationJump, ExecutesTheDeclaredPathAndTargetDependencies)
+{
+  HaltHost host;
+  for (const Op op : {Op::kJal, Op::kJalr}) {
+    for (const auto context :
+         {OperandContext::kIndependent, OperandContext::kNoLink,
+          OperandContext::kChain, OperandContext::kTargetChase}) {
+      if (op == Op::kJal && (context == OperandContext::kChain ||
+                             context == OperandContext::kTargetChase)) {
+        continue;
+      }
+      for (const auto layout : {JumpLayout::kSequential, JumpLayout::kReverse,
+                                JumpLayout::kShuffled}) {
+        for (const uint32_t seed : {1U, 42U, 12345U}) {
+          JumpSpec spec{.target = op,
+                        .context = context,
+                        .layout = layout,
+                        .nodes = 16,
+                        .stride_words = 7,
+                        .seed = seed,
+                        .trip_count = 2};
+          SCOPED_TRACE(op_name(op) + "/" + jump_context_name(spec));
+          const auto built = build_jump_kernel(spec);
+          ASSERT_TRUE(built.has_value());
+          const auto &k = built->kernel;
+          auto decoded = Program::create(k.code);
+          ASSERT_TRUE(decoded.has_value());
+          auto program = std::make_shared<Program>(std::move(*decoded));
+          Machine oracle(program, k.memory_bytes, kGasLimit);
+          std::copy(k.initial_memory.begin(), k.initial_memory.end(),
+                    oracle.memory().begin());
+          std::vector<uint32_t> expected;
+          for (uint32_t pc = 0; pc < built->loop_pc; pc += kInstructionBytes) {
+            expected.push_back(pc);
+          }
+          for (uint32_t trip = 0; trip < spec.trip_count; ++trip) {
+            expected.insert(expected.end(), built->iteration_pcs.begin(),
+                            built->iteration_pcs.end() -
+                                (trip + 1 == spec.trip_count ? 1 : 0));
+          }
+          expected.push_back(built->exit_pc);
+          const auto trace = trace_execution(oracle, host, expected.size());
+          ASSERT_EQ(trace.final_result, StepResult::kHalted);
+          ASSERT_EQ(trace.steps.size(), expected.size());
+          EXPECT_EQ(trace.steps.size(), k.dynamic_instructions);
+          EXPECT_EQ(kGasLimit - oracle.gas_remaining(), k.scheduled_gas);
+          std::set<uint32_t> sites;
+          std::set<uint32_t> destinations;
+          size_t targets = 0;
+          uint32_t last_link = 0;
+          bool forward = false;
+          bool backward = false;
+          for (size_t i = 0; i < trace.steps.size(); ++i) {
+            const auto &step = trace.steps[i];
+            const uint32_t pc = step.state_before.pc;
+            EXPECT_EQ(pc, expected[i]);
+            if (std::find(k.target_slot_pcs.begin(), k.target_slot_pcs.end(),
+                          pc) == k.target_slot_pcs.end()) {
+              continue;
+            }
+            const auto &instruction = program->instruction_at_aligned_pc(pc);
+            EXPECT_EQ(instruction.op, op);
+            if (context == OperandContext::kChain) {
+              EXPECT_EQ(instruction.rd, kChainReg);
+              EXPECT_EQ(instruction.rs1, kChainReg);
+              if (targets % spec.nodes != 0) {
+                EXPECT_EQ(step.state_before.regs[kChainReg], last_link);
+              }
+              last_link = pc + kInstructionBytes;
+            }
+            ++targets;
+            sites.insert(pc);
+            destinations.insert(step.state.pc);
+            forward |= step.state.pc > pc + kInstructionBytes;
+            backward |= step.state.pc < pc;
+          }
+          EXPECT_EQ(targets, size_t{k.target_units} * spec.trip_count);
+          if (context == OperandContext::kTargetChase) {
+            EXPECT_EQ(sites.size(), 1U);
+            EXPECT_EQ(destinations.size(), spec.nodes + 1);
+          }
+          else if (layout != JumpLayout::kSequential) {
+            EXPECT_TRUE(forward);
+            EXPECT_TRUE(backward);
+            EXPECT_EQ(sites.size(), spec.nodes);
+          }
+          for (const bool fuse : {false, true}) {
+            auto pre =
+                ThreadedMachinePreInstantiation::create(k.code,
+                                                        k.initial_memory, 0,
+                                                        k.memory_bytes, true,
+                                                        kMaxRunGas, fuse);
+            ASSERT_TRUE(pre.has_value());
+            ThreadedMachine machine(*pre, kGasLimit);
+            TraceObserver observer;
+            ASSERT_EQ(machine.run(host, observer), StepResult::kHalted);
+            ASSERT_EQ(observer.trace().steps.size(), expected.size());
+            for (size_t i = 0; i < expected.size(); ++i) {
+              EXPECT_EQ(observer.trace().steps[i].state_before.pc, expected[i]);
+            }
+            EXPECT_EQ(kGasLimit - machine.gas_remaining(), k.scheduled_gas);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(Rv32GasCalibrationJump, LargeFootprintsAndUnrepresentableSpecs)
+{
+  HaltHost host;
+  for (const auto context :
+       {OperandContext::kIndependent, OperandContext::kTargetChase}) {
+    JumpSpec spec{.target = context == OperandContext::kTargetChase ? Op::kJalr
+                                                                    : Op::kJal,
+                  .context = context,
+                  .layout = JumpLayout::kShuffled,
+                  .nodes = 512,
+                  .stride_words = 16,
+                  .seed = 42,
+                  .trip_count = 4};
+    const auto built = build_jump_kernel(spec);
+    ASSERT_TRUE(built.has_value());
+    const auto &k = built->kernel;
+    for (const bool fuse : {false, true}) {
+      auto pre =
+          ThreadedMachinePreInstantiation::create(k.code, k.initial_memory, 0,
+                                                  k.memory_bytes, false,
+                                                  kMaxRunGas, fuse);
+      ASSERT_TRUE(pre.has_value());
+      ThreadedMachine machine(*pre, kGasLimit);
+      const auto outcome = run_once(machine, host);
+      EXPECT_EQ(outcome.result, StepResult::kHalted);
+      EXPECT_EQ(outcome.gas_consumed, k.scheduled_gas);
+    }
+  }
+  JumpSpec invalid{.target = Op::kJalr,
+                   .context = OperandContext::kChain,
+                   .nodes = 4096};
+  EXPECT_EQ(build_jump_kernel(invalid).error(),
+            KernelError::kTargetImmediateOutOfRange);
+  invalid.target = Op::kJal;
+  invalid.context = OperandContext::kIndependent;
+  invalid.nodes = UINT32_MAX;
+  EXPECT_EQ(build_jump_kernel(invalid).error(), KernelError::kCodeTooLarge);
 }
 
 TEST(Rv32GasCalibrationKernel, FullRangeVisitsAllBanksAndCacheLines)

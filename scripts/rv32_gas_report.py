@@ -322,6 +322,11 @@ def resolved(cell):
     out "exceeding" it -- reported as a failure of the method rather than of
     the number feeding it.
     """
+    if cell.get("jump_kernel") and cell.get("ns_upper_bound", 0.0) > 0.0:
+        # Dedicated control-flow kernels measure an absolute per-jump bound,
+        # including setup/target generation. They do not fit a contrast and
+        # must not be silently replaced by the baseline for lacking a slope.
+        return True
     if cell.get("ns_saturated", 0.0) > 0.0:
         return True
     stderr = cell.get("slope_stderr_ns", 0.0)

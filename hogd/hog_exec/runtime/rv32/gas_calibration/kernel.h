@@ -84,6 +84,8 @@ enum class OperandContext : uint8_t {
   kIndependent,
   // Direct jump without writing a return address (JAL x0).
   kNoLink,
+  // JALR repeatedly dispatches from one PC to targets read from a linked table.
+  kTargetChase,
 };
 
 // Where a memory target's addresses land. Guest memory is capped at
@@ -238,12 +240,10 @@ enum class KernelError {
 
 [[nodiscard]] std::string kernel_error_name(KernelError error);
 
-// True for opcodes this harness knows how to place in a body slot. Excluded:
-// control transfers whose target would have to be rewritten per slot (JAL,
-// JALR), the trapping/halting ops (ECALL, EBREAK, UNIMP), and FENCE, which the
-// substitution design cannot hold constant. Branches are included: a
-// not-taken conditional branch is a legal body slot and is exactly how the
-// harness prices a run barrier.
+// True for opcodes this harness knows how to place in a body slot. The
+// trapping/halting ops (ECALL, EBREAK, UNIMP) and FENCE are excluded. JAL/JALR
+// body-slot encodings remain useful for correctness tests, but their timings
+// now come exclusively from build_jump_kernel's control-flow graphs.
 [[nodiscard]] bool is_measurable_target(Op op);
 
 // True if the op reads or writes guest memory.
@@ -338,5 +338,33 @@ void emit_prologue(std::vector<uint32_t> &words, WorkingSet working_set,
 // Builds the kernel, or the constraint the spec violated.
 [[nodiscard]] std::expected<Kernel, KernelError>
 build_kernel(const KernelSpec &spec);
+
+enum class JumpLayout : uint8_t { kSequential, kReverse, kShuffled };
+
+struct JumpSpec {
+  Op target = Op::kJal;
+  OperandContext context = OperandContext::kIndependent;
+  JumpLayout layout = JumpLayout::kShuffled;
+  uint32_t nodes = 256;
+  uint32_t stride_words = 1;
+  uint32_t seed = 1;
+  uint32_t trip_count = 64;
+};
+
+struct JumpKernel {
+  Kernel kernel;
+  // Exact PC sequence for one iteration, including setup and loop control.
+  // The final iteration omits the last (back-edge) instruction.
+  std::vector<uint32_t> iteration_pcs;
+  uint32_t loop_pc = 0;
+  uint32_t exit_pc = 0;
+};
+
+// Pure direct jumps, fixed-base indirect jumps, link-dependent indirect jumps,
+// or a shared JALR dispatcher whose target changes at every visit. Unvisited
+// padding traps, so a broken edge cannot silently retire filler instructions.
+[[nodiscard]] std::expected<JumpKernel, KernelError>
+build_jump_kernel(const JumpSpec &spec);
+[[nodiscard]] std::string jump_context_name(const JumpSpec &spec);
 
 } // namespace hogd::rv32::gas_calibration
