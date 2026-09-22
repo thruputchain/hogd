@@ -1705,6 +1705,10 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  // The transfers emit events; the handler must not be destroyed holding them.
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
