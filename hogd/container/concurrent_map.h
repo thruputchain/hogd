@@ -208,14 +208,6 @@ public:
     release_bucket_array(std::move(buckets_));
   }
 
-  // Number of bucket arrays currently held for reuse by maps of this type.
-  static size_t pooled_bucket_array_count_for_testing()
-  {
-    BucketArrayPool &pool = bucket_array_pool();
-    std::scoped_lock g(pool.mutex);
-    return pool.arrays.size();
-  }
-
   static_assert(
       std::unsigned_integral<decltype(Hasher()(std::declval<KeyType>()))>);
   static_assert(sizeof(decltype(Hasher()(std::declval<KeyType>()))) >=

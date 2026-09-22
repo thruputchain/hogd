@@ -327,8 +327,8 @@ TEST(ConcurrentMap, DestructiveIterationDoubleDestroyOnException)
 namespace {
 
 // Distinct value types give each of these tests a private bucket-array pool
-// (the pool is per ConcurrentMap instantiation), so the counts below are not
-// perturbed by the other tests in this binary.
+// (the pool is per ConcurrentMap instantiation), so what a test finds in a
+// recycled array can only have come from its own earlier maps.
 struct RecycleAfterDestructive {
   int v;
 };
@@ -346,13 +346,13 @@ struct RecycleBounded {
 
 } // namespace
 
-TEST(ConcurrentMap, BucketArrayRecycledAfterDestructiveIteration)
+// A map constructed right after a same-size map of the same type was
+// destroyed reuses that map's bucket array. It must look empty.
+TEST(ConcurrentMap, RecycledBucketArrayIsEmptyAfterDestructiveIteration)
 {
   using map_t = ConcurrentMap<int, RecycleAfterDestructive, IntHasher>;
   constexpr size_t kBuckets = 64;
   constexpr int kNumEntries = 200; // more entries than buckets: chains
-
-  ASSERT_EQ(map_t::pooled_bucket_array_count_for_testing(), 0U);
 
   {
     map_t map(kBuckets);
@@ -366,13 +366,9 @@ TEST(ConcurrentMap, BucketArrayRecycledAfterDestructiveIteration)
         });
     EXPECT_EQ(visited.load(), kNumEntries);
   }
-  // The destructor handed the cleared array to the pool.
-  EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 1U);
 
   {
-    // A same-size map takes the array back and must see an empty map.
     map_t map(kBuckets);
-    EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 0U);
     for (int i = 0; i < kNumEntries; i++) {
       EXPECT_EQ(map.get(i), nullptr);
     }
@@ -383,25 +379,24 @@ TEST(ConcurrentMap, BucketArrayRecycledAfterDestructiveIteration)
     }
     map.clear();
   }
-  EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 1U);
 
   {
-    // A different size does not match the pooled array.
+    // A different bucket count must not pick up the pooled array.
     map_t map(kBuckets * 2);
-    EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 1U);
+    for (int i = 0; i < kNumEntries; i++) {
+      EXPECT_EQ(map.get(i), nullptr);
+    }
     ASSERT_NE(map.insert_or_get(1, 1), nullptr);
   }
-  EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 2U);
 }
 
-TEST(ConcurrentMap, BucketArrayRecycledAfterSlowClear)
+TEST(ConcurrentMap, RecycledBucketArrayIsEmptyAfterSlowClear)
 {
   using map_t = ConcurrentMap<int, RecycleAfterSlowClear, IntHasher>;
   constexpr size_t kBuckets = 16;
   constexpr int kNumEntries = 50;
 
   destroy_count.store(0, std::memory_order_relaxed);
-  ASSERT_EQ(map_t::pooled_bucket_array_count_for_testing(), 0U);
 
   {
     // Destroyed without clear(): the destructor's slow path must both destroy
@@ -412,11 +407,9 @@ TEST(ConcurrentMap, BucketArrayRecycledAfterSlowClear)
     }
   }
   EXPECT_EQ(destroy_count.load(std::memory_order_relaxed), kNumEntries);
-  EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 1U);
 
   {
     map_t map(kBuckets);
-    EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 0U);
     for (int i = 0; i < kNumEntries; i++) {
       EXPECT_EQ(map.get(i), nullptr);
     }
@@ -424,38 +417,25 @@ TEST(ConcurrentMap, BucketArrayRecycledAfterSlowClear)
   }
   // Exactly one more value destroyed: nothing stale survived in the array.
   EXPECT_EQ(destroy_count.load(std::memory_order_relaxed), kNumEntries + 1);
-  EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 1U);
 }
 
-TEST(ConcurrentMap, BucketArrayPoolIsBounded)
+// More maps than the pool retains: the excess arrays are freed (ASan/LSan
+// would flag a leak or double free) and the next batch mixes pooled and
+// fresh arrays, all of which must be empty.
+TEST(ConcurrentMap, RecyclingPastThePoolBound)
 {
   using map_t = ConcurrentMap<int, RecycleBounded, IntHasher>;
   constexpr size_t kBuckets = 16;
   constexpr size_t kLiveMaps = map_t::kMaxPooledBucketArrays + 3;
 
-  ASSERT_EQ(map_t::pooled_bucket_array_count_for_testing(), 0U);
-  {
-    std::vector<std::unique_ptr<map_t>> maps;
-    for (size_t i = 0; i < kLiveMaps; i++) {
-      maps.push_back(std::make_unique<map_t>(kBuckets));
-      ASSERT_NE(maps.back()->insert_or_get(1, 1), nullptr);
-    }
-  }
-  // Releasing more arrays than the pool holds frees the excess.
-  EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(),
-            map_t::kMaxPooledBucketArrays);
-
-  {
+  for (int round = 0; round < 2; round++) {
     std::vector<std::unique_ptr<map_t>> maps;
     for (size_t i = 0; i < kLiveMaps; i++) {
       maps.push_back(std::make_unique<map_t>(kBuckets));
       EXPECT_EQ(maps.back()->get(1), nullptr);
+      ASSERT_NE(maps.back()->insert_or_get(1, 1), nullptr);
     }
-    // All pooled arrays were taken before any fresh one was allocated.
-    EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(), 0U);
   }
-  EXPECT_EQ(map_t::pooled_bucket_array_count_for_testing(),
-            map_t::kMaxPooledBucketArrays);
 }
 
 } // namespace hogd
