@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -20,6 +21,7 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -1603,6 +1605,106 @@ TEST_F(BalanceCostTrackingTest,
   EXPECT_TRUE(std::equal(event.serialized_event.begin(),
                          event.serialized_event.end(),
                          expected_event->begin()));
+}
+
+// Regression for #3056: a native token transfer stages two balance mutations
+// through the handler, which bypasses the syscall wrapped-gas channel entirely,
+// so neither leg was billed. Each is now priced as the equivalent
+// kNonnegativeIntSetAdd.
+//
+// Measured on repeat transfers between the same pair rather than on the first
+// one: the first pays kDBRPCCost per cold key, which is orders of magnitude
+// above the charge under test and would swamp it. Once both balance keys are
+// loaded the per-transfer cost is stable, and what remains in it is the entry
+// debit, the event crossing, and the two mutations -- so the floor below is a
+// floor the unfixed code does not clear.
+TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
+{
+  constexpr static ContractAddress kSenderAddr = make_contract_address(181);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(182);
+  static constexpr int128_t kTransferAmount = 10'000;
+  static constexpr uint32_t kTransferCount = 3;
+  // The debit and the credit, each priced as an NNInt add.
+  static constexpr GasAmount kMutationFloor = 2 * kStorageAccessCost;
+
+  setup_grant_storage_token(
+      kSenderAddr,
+      (kTransferAmount * kTransferCount) + replay_cache_cost_charged(1));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata = erc20_meta::make_calldata<u8"transfer">(
+            kReceiverAddr,
+            make_amount(static_cast<uint128_t>(kTransferAmount)));
+
+        std::array<GasAmount, kTransferCount> gas_per_transfer{};
+        for (uint32_t i = 0; i < kTransferCount; ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto before = ctx.total_gas_consumed();
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          gas_per_transfer[i] = ctx.total_gas_consumed() - before;
+
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "transfer " << i << " did not return successfully";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        // Both keys are loaded from the first transfer onward, so the later
+        // transfers do identical work and must cost the same.
+        EXPECT_EQ(gas_per_transfer[1], gas_per_transfer[2])
+            << "warm transfer cost is not stable; the floor below is not "
+               "measuring what it claims to";
+        // The charge under test: without it a warm transfer pays only its
+        // entry debit and its event crossing.
+        EXPECT_GE(gas_per_transfer[1], kMutationFloor)
+            << "transfer did not charge for both balance mutations";
+        co_return InvokeStatus<void>{};
+      });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 17;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_xdr);
+  write_deployment(kSenderAddr, sender_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

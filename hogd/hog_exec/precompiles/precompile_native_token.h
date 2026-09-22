@@ -18,7 +18,7 @@
 
 namespace hogd {
 
-class SystemCallHandler;
+class NativeSyscallContext;
 
 // Stage an unchecked native-token debit of `from` and credit of `to`.
 // No balance check, no Transfer event: callers on the public ERC20 surface
@@ -27,7 +27,7 @@ class SystemCallHandler;
 // storage deposit that hog_db's exclusive-delete refund nets at commit.
 // `amount` must be nonnegative.
 [[nodiscard]] x23::Async<InvokeStatus<void>>
-native_token_unchecked_transfer(SystemCallHandler &handler,
+native_token_unchecked_transfer(NativeSyscallContext &ctx,
                                 ContractAddress const &from,
                                 ContractAddress const &to, int128_t amount);
 

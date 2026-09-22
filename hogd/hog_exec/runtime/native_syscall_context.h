@@ -62,15 +62,22 @@ public:
   SystemCallHandler &handler() { return handler_; }
 
   // Read [address]'s native token balance, charging this context for any
-  // database load it does. The native token precompile is the one caller that
-  // reaches the handler directly instead of going through syscall(), so this
-  // is where that load gets billed; call it rather than the handler's method.
+  // database load it does. The native token precompile reaches the handler
+  // directly instead of going through syscall(), so this is where that load
+  // gets billed; call it rather than the handler's method.
   //
   // Out of line: an inline coroutine here would emit a body referencing the
   // handler into every translation unit that includes this header, including
   // ones whose libraries do not link the runtime.
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<int128_t>>>
   native_token_balance(ContractAddress const &address);
+
+  // Apply [amount] to [address]'s native token balance, charging this context
+  // for the write. Like the read above, the native token precompile reaches
+  // the handler directly rather than through syscall(), so this is where the
+  // mutation gets billed; call it rather than the handler's method.
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  modify_native_token_balance(ContractAddress const &address, int128_t amount);
 
   GasAmount gas_remaining() const
   {

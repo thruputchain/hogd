@@ -326,8 +326,7 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   }
 
   auto credit =
-      co_await ctx.handler().modify_native_token_balance(receiver,
-                                                         signed_amount);
+      co_await ctx.modify_native_token_balance(receiver, signed_amount);
   if (!credit) {
     co_return credit.error().to_invoke_error();
   }
@@ -391,7 +390,7 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   }
 
   auto debit =
-      co_await ctx.handler().modify_native_token_balance(owner, -signed_amount);
+      co_await ctx.modify_native_token_balance(owner, -signed_amount);
   if (!debit) {
     co_return debit.error().to_invoke_error();
   }
@@ -471,8 +470,8 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   // add-capacity bound remains the backstop for hand-crafted states.
 
   if (auto moved =
-          co_await native_token_unchecked_transfer(ctx.handler(), *owner,
-                                                   receiver, amount_signed_int);
+          co_await native_token_unchecked_transfer(ctx, *owner, receiver,
+                                                   amount_signed_int);
       !moved.has_value()) {
     co_return moved.error();
   }
@@ -559,8 +558,8 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   // add-capacity bound remains the backstop for hand-crafted states.
 
   if (auto moved =
-          co_await native_token_unchecked_transfer(ctx.handler(), owner,
-                                                   receiver, amount_signed_int);
+          co_await native_token_unchecked_transfer(ctx, owner, receiver,
+                                                   amount_signed_int);
       !moved.has_value()) {
     co_return moved.error();
   }
@@ -680,7 +679,7 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
 } // namespace
 
 x23::Async<InvokeStatus<void>>
-native_token_unchecked_transfer(SystemCallHandler &handler,
+native_token_unchecked_transfer(NativeSyscallContext &ctx,
                                 ContractAddress const &from,
                                 ContractAddress const &to, int128_t amount)
 {
@@ -688,14 +687,14 @@ native_token_unchecked_transfer(SystemCallHandler &handler,
   // genesis claim); a negative amount is a precondition violation, not a
   // recoverable input.
   CHECK(amount >= 0);
-  auto r1 = co_await handler.modify_native_token_balance(from, -amount);
+  auto r1 = co_await ctx.modify_native_token_balance(from, -amount);
   if (!r1.has_value()) {
     co_return r1.error().to_invoke_error();
   }
   if (!r1.value().has_value()) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  auto r2 = co_await handler.modify_native_token_balance(to, amount);
+  auto r2 = co_await ctx.modify_native_token_balance(to, amount);
   if (!r2.has_value()) {
     co_return r2.error().to_invoke_error();
   }

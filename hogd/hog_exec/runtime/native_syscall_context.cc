@@ -2,6 +2,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "types.hh"
 #include "x23/async.h"
@@ -19,6 +20,22 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   }
   consume_gas(status->load_gas);
   co_return std::move(status->result);
+}
+
+x23::Async<SystemStatus<SyscallStatus<void>>>
+NativeSyscallContext::modify_native_token_balance(ContractAddress const &address,
+                                                  int128_t amount)
+{
+  auto status = co_await handler_.modify_native_token_balance(address, amount);
+  // Priced as the equivalent NNInt add: the mutation walks the frame and
+  // rewrites the item's staged delta, which is the work kNonnegativeIntSetAdd
+  // charges kStorageAccessCost for. It stages an add-only item rather than
+  // loading a base value, so there is no load to bill on top. A rejected
+  // mutation charges nothing, matching that syscall's failure paths.
+  if (status.has_value() && status->has_value()) {
+    consume_gas(kStorageAccessCost);
+  }
+  co_return std::move(status);
 }
 
 } // namespace hogd
