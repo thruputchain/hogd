@@ -28,7 +28,7 @@ CoroPollImpl::~CoroPollImpl()
 {
   // Stop the SIGUSR1 dump before freeing state_: it runs on the signal
   // service thread, and sigcb_'s own destructor runs too late.
-  sigcb_ = AutoSignalCbHandle{};
+  sigcb_ = {};
   delete[] state_.load();
 }
 

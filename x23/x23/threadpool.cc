@@ -48,7 +48,7 @@ ThreadPool::~ThreadPool()
 {
   // Stop the SIGUSR1 dump before tearing down state it reads; sigcb_'s
   // own destructor runs too late (see ~CoroPollImpl).
-  sigcb_ = AutoSignalCbHandle{};
+  sigcb_ = {};
   // Helpers, including their capture destructors, may still need workers.
   external_users_.destroy_wait();
   ss_.request_stop();
