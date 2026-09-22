@@ -494,7 +494,7 @@ TEST(ConcurrentMap, RecyclingPastThePoolBound)
   using map_t = counting_map_t<RecycleBounded>;
   constexpr size_t kBuckets = 16;
   constexpr size_t kExcess = 3;
-  constexpr size_t kLiveMaps = map_t::kMaxPooledBucketArrays + kExcess;
+  constexpr size_t kLiveMaps = map_t::kMaxPooledStorages + kExcess;
 
   BucketArrayCounts counts;
   {
@@ -505,7 +505,7 @@ TEST(ConcurrentMap, RecyclingPastThePoolBound)
     }
     EXPECT_EQ(counts.allocs_since(), kLiveMaps);
   }
-  // The pool keeps kMaxPooledBucketArrays; the excess is freed.
+  // The pool keeps kMaxPooledStorages; the excess is freed.
   EXPECT_EQ(counts.frees_since(), kExcess);
 
   {
@@ -518,6 +518,42 @@ TEST(ConcurrentMap, RecyclingPastThePoolBound)
     EXPECT_EQ(counts.allocs_since(), kLiveMaps + kExcess);
   }
   EXPECT_EQ(counts.frees_since(), 2 * kExcess);
+}
+
+// Fills more than one 64MB allocator region, recycles the storage, and fills
+// it again: reset_all_regions() must hand the retained regions out again in
+// order and every old value must be destroyed exactly once.
+TEST(ConcurrentMap, RecycledStorageReusesMultipleAllocatorRegions)
+{
+  using map_t = counting_map_t<RecycleAfterSlowClear>;
+  constexpr size_t kBuckets = 1 << 16;
+  // 600k entries of a 128-byte (one cache line of key + one of value)
+  // bucket need ~77MB, i.e. two 64MB regions.
+  constexpr int kNumEntries = 600'000;
+  static_assert(static_cast<size_t>(kNumEntries) *
+                    sizeof(map_t::value_bucket_t) >
+                map_t::value_allocator_t::kMmapLength);
+
+  destroy_count.store(0, std::memory_order_relaxed);
+  BucketArrayCounts counts;
+
+  for (int round = 0; round < 3; round++) {
+    {
+      map_t map(kBuckets);
+      WorkerPool::get_default_pool().for_each_parallel(
+          std::ranges::iota_view{0, kNumEntries},
+          [&map](int i) { ASSERT_NE(map.insert_or_get(i, i), nullptr); }, 4096);
+      for (int i = 0; i < kNumEntries; i += 997) {
+        auto *value = map.get(i);
+        ASSERT_NE(value, nullptr);
+        EXPECT_EQ(value->v, i);
+      }
+    }
+    EXPECT_EQ(destroy_count.load(std::memory_order_relaxed),
+              kNumEntries * (round + 1));
+    // One bucket array for all rounds: the storage was recycled each time.
+    EXPECT_EQ(counts.allocs_since(), 1U);
+  }
 }
 
 // The map below outlives this test: it is owned by a function-local static

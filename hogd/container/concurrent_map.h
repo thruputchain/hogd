@@ -194,13 +194,14 @@ public:
   using value_bucket_t = detail::ValueBucket<KeyType, Value>;
   using bucket_array_t =
       std::vector<std::atomic<value_bucket_t *>, BucketAllocator>;
+  using value_allocator_t = BumpAllocator<value_bucket_t, 8192>;
 
-  // Upper bound on the cleared bucket arrays retained for reuse by maps of
-  // this type; see BucketArrayPool below.
-  static constexpr size_t kMaxPooledBucketArrays = 4;
+  // Upper bound on the cleared storages (bucket array + value allocator)
+  // retained for reuse by maps of this type; see StoragePool below.
+  static constexpr size_t kMaxPooledStorages = 2;
 
   ConcurrentMap(size_t n_buckets = 1'048'576, Hasher hasher = Hasher())
-    : buckets_(acquire_bucket_array(n_buckets)), hasher_(hasher)
+    : ConcurrentMap(acquire_storage(n_buckets), hasher)
   {
     assert(std::has_single_bit(n_buckets));
   }
@@ -210,9 +211,11 @@ public:
     if (!cleared_) {
       clear_slow();
     }
-    // All clearing paths leave every head nullptr, so the array can be
-    // reused as-is.
-    release_bucket_array(std::move(buckets_));
+    // All clearing paths leave every head nullptr and destroy every value, so
+    // the bucket array can be reused as-is and the allocator's regions can be
+    // handed out again from the start.
+    value_allocator_->reset_all_regions();
+    release_storage(Storage{std::move(buckets_), std::move(value_allocator_)});
   }
 
   static_assert(
@@ -243,7 +246,7 @@ public:
     assert(buckets_.size() > bucket_index);
 
     auto *bucket = &buckets_[bucket_index];
-    return value_bucket_t::insert(bucket, value_allocator_, key,
+    return value_bucket_t::insert(bucket, *value_allocator_, key,
                                   std::forward<Args>(args)...);
   }
 
@@ -336,55 +339,67 @@ public:
   }
 
 private:
-  // Cleared bucket arrays are recycled through a small bounded per-map-type
-  // pool, so a block-scoped map (e.g. BlockTX's lock maps) does not allocate
-  // and zero a fresh head array (8MB by default) per block. It retains at
-  // most kMaxPooledBucketArrays arrays, i.e. 32MB for default-size maps.
-  struct BucketArrayPool {
-    BucketArrayPool() { arrays.reserve(kMaxPooledBucketArrays); }
-
-    std::mutex mutex;
-    // Never grows past kMaxPooledBucketArrays, so with the reserve() above
-    // release_bucket_array()'s push_back cannot allocate.
-    std::vector<bucket_array_t> arrays;
+  // The memory behind a map: the bucket-head array and the bump allocator
+  // that owns every value bucket.
+  struct Storage {
+    bucket_array_t buckets;
+    std::unique_ptr<value_allocator_t> value_allocator;
   };
 
-  static BucketArrayPool &bucket_array_pool()
+  ConcurrentMap(Storage storage, Hasher hasher)
+    : buckets_(std::move(storage.buckets)),
+      value_allocator_(std::move(storage.value_allocator)), hasher_(hasher)
+  {}
+
+  // Cleared storages are recycled through a small bounded per-map-type pool,
+  // so a block-scoped map (e.g. BlockTX's lock maps) does not allocate and
+  // zero a fresh 8MB head array, nor mmap, page-fault and munmap the value
+  // regions, on every block. A pooled storage keeps the value regions its
+  // last map needed (64MB each), so the pool retains at most
+  // kMaxPooledStorages times a large map's footprint.
+  struct StoragePool {
+    StoragePool() { storages.reserve(kMaxPooledStorages); }
+
+    std::mutex mutex;
+    // Never grows past kMaxPooledStorages, so with the reserve() above
+    // release_storage()'s push_back cannot allocate.
+    std::vector<Storage> storages;
+  };
+
+  static StoragePool &storage_pool()
   {
     // Never destroyed: a map owned by a static initialized before the pool
-    // is destroyed after it, and must still be able to return its array.
-    static x23::NoDestroy<BucketArrayPool> pool;
+    // is destroyed after it, and must still be able to return its storage.
+    static x23::NoDestroy<StoragePool> pool;
     return *pool;
   }
 
-  static bucket_array_t acquire_bucket_array(size_t n_buckets)
+  static Storage acquire_storage(size_t n_buckets)
   {
     {
-      BucketArrayPool &pool = bucket_array_pool();
+      StoragePool &pool = storage_pool();
       std::scoped_lock g(pool.mutex);
-      for (auto it = pool.arrays.begin(); it != pool.arrays.end(); ++it) {
-        if (it->size() == n_buckets) {
-          bucket_array_t buckets = std::move(*it);
-          pool.arrays.erase(it);
-          return buckets;
+      for (auto it = pool.storages.begin(); it != pool.storages.end(); ++it) {
+        if (it->buckets.size() == n_buckets) {
+          Storage storage = std::move(*it);
+          pool.storages.erase(it);
+          return storage;
         }
       }
     }
-    // Value-initializes every head to nullptr.
-    return bucket_array_t(n_buckets);
+    // The vector value-initializes every head to nullptr.
+    return Storage{bucket_array_t(n_buckets),
+                   std::make_unique<value_allocator_t>()};
   }
 
-  // Requires all heads of |buckets| to be nullptr. Takes the array by value so
-  // that it is freed here if the pool is full.
-  static void release_bucket_array(bucket_array_t buckets) noexcept
+  // Requires all heads to be nullptr and the allocator to have been reset.
+  // Takes the storage by value so that it is freed here if the pool is full.
+  static void release_storage(Storage storage) noexcept
   {
-    if (buckets.empty()) {
-      return;
-    }
-    BucketArrayPool &pool = bucket_array_pool();
+    StoragePool &pool = storage_pool();
     std::scoped_lock g(pool.mutex);
-    if (pool.arrays.size() < kMaxPooledBucketArrays) {
-      pool.arrays.push_back(std::move(buckets));
+    if (pool.storages.size() < kMaxPooledStorages) {
+      pool.storages.push_back(std::move(storage));
     }
   }
 
@@ -405,8 +420,7 @@ private:
   }
 
   bucket_array_t buckets_;
-
-  BumpAllocator<value_bucket_t, 8192> value_allocator_;
+  std::unique_ptr<value_allocator_t> value_allocator_;
   Hasher hasher_;
   bool cleared_ = false;
 };
