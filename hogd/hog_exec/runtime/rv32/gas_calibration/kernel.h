@@ -82,6 +82,8 @@ enum class OperandContext : uint8_t {
   // Targets rotate over an 8-register bank: no target-to-target dependence,
   // so the measurement is throughput-bound.
   kIndependent,
+  // Direct jump without writing a return address (JAL x0).
+  kNoLink,
 };
 
 // Where a memory target's addresses land. Guest memory is capped at

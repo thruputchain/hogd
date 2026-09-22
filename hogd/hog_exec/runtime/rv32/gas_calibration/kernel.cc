@@ -409,6 +409,17 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
               : static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
     return test_program::u_type(encoding.opcode, rd, 0x0002F000U);
   }
+  if (spec.target == Op::kJal) {
+    // Like the JALR sweep, land on the next instruction so every body slot
+    // executes. JAL is PC-relative: +4 works at every slot without patching.
+    const uint8_t rd =
+        spec.context == OperandContext::kNoLink
+            ? 0
+            : (chain ? kChainReg
+                     : static_cast<uint8_t>(kDataBankBase +
+                                             (index % kDataBankSize)));
+    return test_program::j_type(rd, kInstructionBytes);
+  }
   if (spec.target == Op::kJalr) {
     // A JALR that lands on the instruction after itself: a real indirect
     // control transfer that leaves the retired instruction sequence unchanged,
@@ -613,7 +624,9 @@ pair_name(PairKind pair)
 std::expected<uint32_t, KernelError>
 canonical_instruction_word(Op op, uint8_t reg)
 {
-  if (!is_measurable_target(op)) {
+  // Keep the fingerprint's canonical fusion corpus unchanged when adding a
+  // timing kernel. Direct jumps are measured separately from that corpus.
+  if (!is_measurable_target(op) || op == Op::kJal) {
     return std::unexpected(KernelError::kUnsupportedTarget);
   }
   const Encoding encoding = encoding_for(op);
@@ -751,10 +764,8 @@ bool
 is_measurable_target(Op op)
 {
   switch (op) {
-  // Excluded by construction: JAL's target is encoded in the instruction and
-  // would have to be rewritten per slot, ECALL/EBREAK/UNIMP end the run, and
-  // FENCE is not a body-shaped op. JALR is measurable -- see target_word.
-  case Op::kJal:
+  // ECALL/EBREAK/UNIMP end the run, and FENCE is not a body-shaped op.
+  // JAL and JALR land on the next slot -- see target_word.
   case Op::kFence:
   case Op::kEcall:
   case Op::kEbreak:
@@ -814,6 +825,9 @@ op_name(Op op)
 std::string
 context_name(OperandContext context)
 {
+  if (context == OperandContext::kNoLink) {
+    return "no_link";
+  }
   return context == OperandContext::kChain ? "chain" : "independent";
 }
 

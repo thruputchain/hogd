@@ -15,6 +15,7 @@ B=build-release-ccache-tmp   # your Release build tree
 scripts/rv32_gas_calibrate.sh $B --out /tmp/gas.json      # full run, a few minutes
 scripts/rv32_gas_calibrate.sh $B -- --quick               # smoke run, ~40s
 scripts/rv32_gas_calibrate.sh $B -- --op=DIV --repeats=25 # one opcode, hard
+scripts/rv32_gas_calibrate.sh $B --out /tmp/jal.json -- --op=JAL --no-syscalls
 scripts/rv32_gas_calibrate.sh $B -- --syscalls-only       # just the ecall seam
 ```
 
@@ -528,9 +529,14 @@ get right, is where the estimator is at its strongest.
 - Independent divides sit under the engine's own dispatch cost, so their
   marginal cost is small. That is a real property of this interpreter, not a
   measurement artifact, and it is why the dependent form is measured separately.
-- `JAL`, `FENCE`, `EBREAK`, and `UNIMP` are not measured by the opcode sweeps.
-  `JAL` needs a per-slot rewritten target and the rest end the run, so neither
-  fits the substitution design. `ECALL` no longer belongs on this list: it ends
+- `FENCE`, `EBREAK`, and `UNIMP` are not measured by the opcode sweeps.
+  `JAL` now has link-writing (`independent`) and `no_link` sweeps. Each jumps
+  by +4 to the next slot, matching the existing JALR sweep's execution order.
+  This measures direct-jump dispatch and run entry, not the effects of varied
+  jump distances or code layouts. It changes no gas price. Use a full run to
+  compare JAL and JALR in the same process and normalize against the full ISA;
+  `--op=JAL` is for targeted timing, not a standalone schedule proposal.
+  `ECALL` also has its own kernel: it ends
   the run too, which is why it needed a kernel shape of its own rather than a
   substitution, and it has one.
 - What `--syscalls` reports is the crossing plus a modelled host-side write,

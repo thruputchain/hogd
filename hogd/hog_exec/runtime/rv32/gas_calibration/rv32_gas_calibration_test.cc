@@ -110,6 +110,59 @@ TEST(Rv32GasCalibrationKernel, TargetSlotsEncodeTheRequestedOpcode)
   }
 }
 
+TEST(Rv32GasCalibrationKernel, JalTargetsRetireEverySlotWithAndWithoutLink)
+{
+  HaltHost host;
+  for (const auto context : {OperandContext::kIndependent,
+                             OperandContext::kNoLink}) {
+    for (const bool saturated : {false, true}) {
+      for (const uint32_t slots : {64U, 512U, 2048U}) {
+        KernelSpec spec;
+        spec.target = Op::kJal;
+        spec.context = context;
+        spec.body_slots = slots;
+        spec.trip_count = kTestTripCount;
+        spec.saturated = saturated;
+        spec.target_slots = max_target_slots(slots, spec);
+        const auto kernel = build_kernel(spec);
+        ASSERT_TRUE(kernel.has_value());
+        const auto decoded = ThreadedProgram::create(kernel->code);
+        ASSERT_TRUE(decoded.has_value());
+        for (const uint32_t pc : kernel->target_slot_pcs) {
+          const auto instruction =
+              decoded->instruction_at(pc / kInstructionBytes);
+          ASSERT_TRUE(instruction.has_value());
+          EXPECT_EQ(instruction->op, Op::kJal);
+          EXPECT_EQ(instruction->immediate, int32_t{kInstructionBytes});
+          if (context == OperandContext::kNoLink) {
+            EXPECT_EQ(instruction->rd, 0);
+          }
+          else {
+            EXPECT_GE(instruction->rd, kDataBankBase);
+            EXPECT_LT(instruction->rd, kDataBankBase + kDataBankSize);
+          }
+        }
+        for (const bool fuse : {false, true}) {
+          const auto audit = audit_kernel(*kernel, spec, fuse);
+          EXPECT_TRUE(audit.clean());
+          EXPECT_EQ(audit.body_runs, spec.target_slots + 1);
+          auto pre = ThreadedMachinePreInstantiation::create(
+              kernel->code, kernel->initial_memory, 0, kernel->memory_bytes,
+              /*trace=*/false, kMaxRunGas, fuse);
+          ASSERT_TRUE(pre.has_value());
+          ThreadedMachine machine(*pre, kGasLimit);
+          const RunOutcome outcome = run_once(machine, host);
+          EXPECT_EQ(outcome.result, StepResult::kHalted);
+          EXPECT_EQ(outcome.trap, Trap::kNone);
+          EXPECT_EQ(outcome.gas_consumed, kernel->scheduled_gas);
+        }
+      }
+    }
+  }
+  // Adding a timing kernel must not silently change the fusion fingerprint.
+  EXPECT_FALSE(canonical_instruction_word(Op::kJal, kDataBankBase).has_value());
+}
+
 TEST(Rv32GasCalibrationKernel, FullRangeVisitsAllBanksAndCacheLines)
 {
   for (const Op op : {Op::kLb, Op::kLh, Op::kLw, Op::kLbu, Op::kLhu, Op::kSb,
@@ -1118,7 +1171,7 @@ TEST(Rv32GasCalibrationFit, MedianHandlesEvenAndOddCounts)
 TEST(Rv32GasCalibrationKernel, RejectsSpecsItCannotRepresent)
 {
   KernelSpec spec;
-  spec.target = Op::kJal; // needs a per-slot rewritten target
+  spec.target = Op::kEbreak; // terminates instead of executing the whole body
   spec.body_slots = kTestBodySlots;
   spec.trip_count = kTestTripCount;
   EXPECT_FALSE(build_kernel(spec).has_value());

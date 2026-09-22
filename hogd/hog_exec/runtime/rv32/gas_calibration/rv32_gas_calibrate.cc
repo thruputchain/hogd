@@ -913,6 +913,15 @@ plan_sweeps(const Options &options)
     base.target = op;
     base.body_slots = options.body_slots;
 
+    if (op == Op::kJal) {
+      // A direct jump reads no register, so repeatedly writing one link
+      // register is not a dependency chain. Measure with and without a link.
+      plans.push_back({base, ""});
+      KernelSpec no_link = base;
+      no_link.context = OperandContext::kNoLink;
+      plans.push_back({no_link, ""});
+      continue;
+    }
     if (is_branch_target(op)) {
       // Not-taken and taken are different amounts of engine work: both end the
       // run, but the taken path also resolves a target and re-enters there.
