@@ -29,7 +29,6 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
-#include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "standard_asset_events.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -389,8 +388,7 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
     co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
-  auto debit =
-      co_await ctx.modify_native_token_balance(owner, -signed_amount);
+  auto debit = co_await ctx.modify_native_token_balance(owner, -signed_amount);
   if (!debit) {
     co_return debit.error().to_invoke_error();
   }

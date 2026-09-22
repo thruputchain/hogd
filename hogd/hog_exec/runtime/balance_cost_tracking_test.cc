@@ -1627,9 +1627,8 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
   // The debit and the credit, each priced as an NNInt add.
   static constexpr GasAmount kMutationFloor = 2 * kStorageAccessCost;
 
-  setup_grant_storage_token(
-      kSenderAddr,
-      (kTransferAmount * kTransferCount) + replay_cache_cost_charged(1));
+  setup_grant_storage_token(kSenderAddr, (kTransferAmount * kTransferCount) +
+                                             replay_cache_cost_charged(1));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(

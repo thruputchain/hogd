@@ -1987,7 +1987,8 @@ TEST_F(NativeTokenAllowanceTest, AllowanceChargesForKeyDerivationSha256)
   setup_grant_storage_token(kCallerAddr, replay_cache_cost_charged(1));
 
   auto key_data =
-      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr, kSpenderAddr);
+      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr,
+                                                       kSpenderAddr);
   ASSERT_TRUE(key_data.has_value());
   const GasAmount derivation_cost =
       kSyscallBaseCost + GasCost::sha256_hash(key_data->size());

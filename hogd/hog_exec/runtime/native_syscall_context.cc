@@ -23,8 +23,8 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
-NativeSyscallContext::modify_native_token_balance(ContractAddress const &address,
-                                                  int128_t amount)
+NativeSyscallContext::modify_native_token_balance(
+    ContractAddress const &address, int128_t amount)
 {
   auto status = co_await handler_.modify_native_token_balance(address, amount);
   // Priced as the equivalent NNInt add: the mutation walks the frame and
