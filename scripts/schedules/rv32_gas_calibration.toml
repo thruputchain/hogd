@@ -239,6 +239,13 @@ else
 
 fi
 
+# Lifecycle rows share the syscall binary and JSON, so metrics_history already
+# preserves them. Report in the opcode unit, but do not introduce a timing gate
+# until repeated bench-host measurements establish a reference.
+echo '===== RV32 runtime lifecycle costs ====='
+python3 ./scripts/rv32_lifecycle_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+  --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json || true
+
 # File the measurement before acting on the check. A run that failed the gate is
 # the one whose numbers history most wants, so the exit is held until after.
 #
@@ -343,3 +350,4 @@ CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 # ratios to the baseline instruction measured in the same run, not nanoseconds.
 [jobs.host]
 metrics_1 = "hog10"
+

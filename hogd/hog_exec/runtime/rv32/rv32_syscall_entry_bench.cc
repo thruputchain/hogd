@@ -34,6 +34,8 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
@@ -1643,9 +1645,262 @@ bm_nnint_cold(benchmark::State &state)
   state.counters["gas"] = benchmark::Counter(static_cast<double>(warm->gas));
 }
 
+// Lifecycle costs live beside the syscall rows so they use the same production
+// runtime, build provenance, repetitions, and gas-unit calibration. Translation
+// is intentionally outside the cached invocation rows.
+enum class LifecyclePhase { kSetup, kTeardown, kRoundtrip };
+enum class LifecycleExit { kReturn, kTrap, kOutOfGas };
+
+void
+append_lifecycle_call(std::vector<uint32_t> &words,
+                      const std::array<uint32_t, 8> &args)
+{
+  for (size_t i = 0; i < args.size(); ++i) {
+    const auto reg = static_cast<uint8_t>(10 + i);
+    const int32_t lo = static_cast<int32_t>(args[i] << 20) >> 20;
+    words.push_back(rv32::test_program::u_type(
+        0x37U, reg, args[i] - static_cast<uint32_t>(lo)));
+    words.push_back(rv32::test_program::addi(reg, reg, lo));
+  }
+  words.push_back(0x00000073U);
+}
+
+Contract
+lifecycle_contract(uint32_t memory_bytes, uint32_t image_bytes,
+                    uint32_t code_words, uint32_t payload_bytes = 0,
+                    LifecycleExit exit = LifecycleExit::kReturn)
+{
+  std::vector<uint32_t> words;
+  // Keep the copy destinations away from each other, even for empty buffers.
+  if (payload_bytes != 0) {
+    append_lifecycle_call(
+        words, {std::to_underlying(SyscallNo::kGetCalldata), 64,
+                payload_bytes, 0, 0, 0, 4, 0});
+  }
+  if (exit == LifecycleExit::kTrap) {
+    words.push_back(0x00100073U); // ebreak: valid code, deterministic trap
+  }
+  else {
+    append_lifecycle_call(words,
+                          {std::to_underlying(SyscallNo::kReturn), 64,
+                           payload_bytes, 0, 0, 0, 0, 0});
+  }
+  // Unreachable but valid code: translation scales independently of execution.
+  words.resize(std::max<size_t>(code_words, words.size()),
+               rv32::test_program::addi(5, 5, 1));
+  std::vector<uint8_t> initial(image_bytes, 0x5a);
+  auto artifact = rv32::test_artifact::build_artifact(words, initial);
+  // memory_bytes is the v5 header word at byte 48. This is also how the
+  // artifact tests exercise an image with a zero-extended memory tail.
+  rv32::store_u32_le(artifact, 48, memory_bytes);
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.append_range(artifact);
+  return contract;
+}
+
+void
+bm_lifecycle_prepare(benchmark::State &state, uint32_t memory_bytes,
+                      uint32_t image_bytes, uint32_t code_words)
+{
+  const auto contract =
+      lifecycle_contract(memory_bytes, image_bytes, code_words);
+  const NetworkConfigParams params(stock_network_config().v0());
+  Rv32Context context;
+  for (auto _ : state) {
+    PreparedContract prepared;
+    const auto result = context.verify_contract(contract, params, prepared);
+    benchmark::DoNotOptimize(prepared.rv32);
+    if (result != InvokeErrorCode::None || !prepared.rv32.has_value()) {
+      state.SkipWithError("lifecycle verification failed");
+      break;
+    }
+    // Destruction is included: the prepared image is normally retained in a
+    // block cache, but its eventual release must also be accounted for.
+  }
+  state.counters["memory_bytes"] = memory_bytes;
+  state.counters["image_bytes"] = image_bytes;
+  state.counters["code_bytes"] = code_words * rv32::kInstructionBytes;
+}
+
+void
+bm_lifecycle_machine(benchmark::State &state, uint32_t memory_bytes,
+                      LifecyclePhase phase, bool pool_miss)
+{
+  const auto contract = lifecycle_contract(memory_bytes, 0, 64);
+  auto prepared = Rv32Contract::create(contract.rv32_contract(),
+                                       rv32::Rv32Limits::defaults());
+  if (!prepared.has_value()) {
+    state.SkipWithError("lifecycle preparation failed");
+    return;
+  }
+  // Warm and validate the same image before timing. No synthetic memcpy loop.
+  {
+    auto machine = prepared->instantiate(kPlentyOfGas);
+    if (machine.memory().size() != memory_bytes ||
+        !std::ranges::all_of(machine.memory(), [](uint8_t b) { return b == 0; })) {
+      state.SkipWithError("lifecycle memory initialization failed");
+      return;
+    }
+  }
+  for (auto _ : state) {
+    std::optional<rv32::ThreadedMachine> machine;
+    if (pool_miss) {
+      state.PauseTiming();
+      // Explicit allocator-miss regime, not a claim about cold CPU caches.
+      // Clearing the test thread's free list is excluded from the measurement.
+      rv32::memory_slot_pool() = {};
+      state.ResumeTiming();
+    }
+    if (phase == LifecyclePhase::kTeardown) {
+      state.PauseTiming();
+    }
+    machine.emplace(prepared->instantiate(kPlentyOfGas));
+    machine->seed_method_id(1);
+    benchmark::DoNotOptimize(machine->memory().data());
+    benchmark::ClobberMemory();
+    if (phase == LifecyclePhase::kTeardown) {
+      state.ResumeTiming();
+    }
+    if (phase == LifecyclePhase::kSetup) {
+      state.PauseTiming();
+    }
+    machine.reset();
+    if (phase == LifecyclePhase::kSetup) {
+      state.ResumeTiming();
+    }
+  }
+  state.counters["memory_bytes"] = memory_bytes;
+}
+
+void
+bm_lifecycle_invoke(benchmark::State &state, uint32_t memory_bytes,
+                     uint32_t payload_bytes, LifecycleExit exit)
+{
+  auto *fixture = fixture_or_fail(state);
+  if (fixture == nullptr) {
+    return;
+  }
+  const auto contract =
+      lifecycle_contract(memory_bytes, 0, 64, payload_bytes, exit);
+  auto prepared = Rv32Contract::create(contract.rv32_contract(),
+                                       rv32::Rv32Limits::defaults());
+  if (!prepared.has_value()) {
+    state.SkipWithError("lifecycle preparation failed");
+    return;
+  }
+  Calldata calldata;
+  calldata.resize(payload_bytes);
+  for (size_t i = 0; i < calldata.size(); ++i) {
+    calldata[i] = static_cast<uint8_t>(i * 37U + 1U);
+  }
+  const uint64_t gas_limit = exit == LifecycleExit::kOutOfGas ? 0 : kPlentyOfGas;
+  auto invoke = [&]() {
+    auto trace = fixture->handler().start_frame(
+        Invocation{.invoked_address = SyscallBenchFixture::leaf_address(),
+                   .entrypoint = ContractEntrypointID{},
+                   .gas_limit = gas_limit,
+                   .calldata = calldata},
+        std::to_underlying(InvokeFlag::None), ValidatedAuthTokens{});
+    if (!trace.has_value()) {
+      return false;
+    }
+    // Heap allocation mirrors make_new_runtime's cached-contract path. No
+    // mock host, reset/reuse of a live VM, or hand-written ecall loop.
+    auto runtime = std::make_unique<Rv32Runtime>(&*prepared, &fixture->handler());
+    const auto result = runtime->invoke(0, gas_limit)();
+    runtime.reset();
+    const auto finished = fixture->handler().finish_frame(
+        result.result_, std::move(*trace))();
+    if (!finished.has_value()) {
+      return false;
+    }
+    if (exit == LifecycleExit::kReturn) {
+      return result.is_frame_success();
+    }
+    const auto expected = exit == LifecycleExit::kTrap
+                              ? InvokeErrorCode::Deterministic
+                              : InvokeErrorCode::OutOfGas;
+    return !result.is_frame_success() &&
+           result.result_.error().code() == expected &&
+           (exit != LifecycleExit::kOutOfGas || result.gas_consumed_ == gas_limit);
+  };
+  // Check the actual copied bytes outside timing, not merely a successful
+  // Return: a broken GetCalldata call must not price a rejection as a copy.
+  if (!invoke()) {
+    state.SkipWithError("lifecycle invocation preflight failed");
+    return;
+  }
+  if (exit == LifecycleExit::kReturn) {
+    const auto returned = fixture->handler().get_return_buffer();
+    if (!returned.has_value() || !returned->has_value() ||
+        **returned == nullptr ||
+        !std::ranges::equal(***returned, calldata)) {
+      state.SkipWithError("lifecycle return payload mismatch");
+      return;
+    }
+  }
+  for (auto _ : state) {
+    if (!invoke()) {
+      state.SkipWithError("lifecycle invocation changed outcome");
+      break;
+    }
+    benchmark::ClobberMemory();
+  }
+  state.counters["memory_bytes"] = memory_bytes;
+  state.counters["payload_bytes"] = payload_bytes;
+}
+
+void
+register_lifecycle_benchmarks()
+{
+  for (uint32_t bytes : {4096U, 16384U, rv32::kDefaultMaxMemoryBytes}) {
+    for (auto [name, phase] : {
+             std::pair{"Setup", LifecyclePhase::kSetup},
+             std::pair{"Teardown", LifecyclePhase::kTeardown},
+             std::pair{"SetupTeardown", LifecyclePhase::kRoundtrip}}) {
+      benchmark::RegisterBenchmark(std::format("lifecycle/{}/{}", name, bytes),
+                                   bm_lifecycle_machine, bytes, phase, false);
+    }
+    benchmark::RegisterBenchmark(
+        std::format("lifecycle/SetupPoolMiss/{}", bytes),
+                                 bm_lifecycle_machine, bytes,
+                                 LifecyclePhase::kSetup, true);
+    benchmark::RegisterBenchmark(
+        std::format("lifecycle/InvokeReturn/{}/0", bytes),
+                                 bm_lifecycle_invoke, bytes, 0,
+                                 LifecycleExit::kReturn);
+    benchmark::RegisterBenchmark(std::format("lifecycle/InvokeTrap/{}", bytes),
+                                 bm_lifecycle_invoke, bytes, 0,
+                                 LifecycleExit::kTrap);
+    benchmark::RegisterBenchmark(
+        std::format("lifecycle/InvokeOutOfGas/{}", bytes),
+                                 bm_lifecycle_invoke, bytes, 0,
+                                 LifecycleExit::kOutOfGas);
+    benchmark::RegisterBenchmark(
+        std::format("lifecycle/PrepareMemory/{}", bytes),
+                                 bm_lifecycle_prepare, bytes, 0, 64);
+    benchmark::RegisterBenchmark(
+        std::format("lifecycle/PrepareImage/{}", bytes),
+                                 bm_lifecycle_prepare,
+                                 rv32::kDefaultMaxMemoryBytes, bytes, 64);
+  }
+  for (uint32_t words : {64U, 1024U, 4096U, 16384U}) {
+    benchmark::RegisterBenchmark(
+        std::format("lifecycle/PrepareCode/{}", words * 4),
+                                 bm_lifecycle_prepare, 4096, 0, words);
+  }
+  for (uint32_t bytes : {64U, 256U, static_cast<uint32_t>(kMaxReturnBufferLen)}) {
+    benchmark::RegisterBenchmark(
+        std::format("lifecycle/InvokeReturn/65536/{}", bytes),
+                                 bm_lifecycle_invoke, 65536, bytes,
+                                 LifecycleExit::kReturn);
+  }
+}
+
 void
 register_benchmarks()
 {
+  register_lifecycle_benchmarks();
   for (const SyscallCall &call : stateless_calls()) {
     benchmark::RegisterBenchmark(("entry/" + call.name).c_str(),
                                  bm_syscall_entry, call);
@@ -1966,3 +2221,4 @@ main(int argc, char **argv)
   benchmark::Shutdown();
   return 0;
 }
+
