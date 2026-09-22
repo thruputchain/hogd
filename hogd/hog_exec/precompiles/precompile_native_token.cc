@@ -683,9 +683,8 @@ native_token_unchecked_transfer(NativeSyscallContext &ctx,
                                 ContractAddress const &from,
                                 ContractAddress const &to, int128_t amount)
 {
-  // Callers are privileged system code (the strict trait methods and the
-  // genesis claim); a negative amount is a precondition violation, not a
-  // recoverable input.
+  // Callers are privileged system code (currently the strict trait methods);
+  // a negative amount is a precondition violation, not a recoverable input.
   CHECK(amount >= 0);
   auto r1 = co_await ctx.modify_native_token_balance(from, -amount);
   if (!r1.has_value()) {

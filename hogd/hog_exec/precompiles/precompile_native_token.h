@@ -22,10 +22,11 @@ class NativeSyscallContext;
 
 // Stage an unchecked native-token debit of `from` and credit of `to`.
 // No balance check, no Transfer event: callers on the public ERC20 surface
-// must run the strict checks first; the genesis initial-token-claim calls
-// this directly because its in-tx balance is transiently short by the
-// storage deposit that hog_db's exclusive-delete refund nets at commit.
-// `amount` must be nonnegative.
+// must run the strict checks first. The unchecked form is for privileged
+// system code whose in-tx balance is transiently short by the storage deposit
+// that hog_db's exclusive-delete refund nets at commit, where a strict check
+// would reject a transfer the block ultimately balances.
+// `amount` must be nonnegative. Both balance writes are charged to `ctx`.
 [[nodiscard]] x23::Async<InvokeStatus<void>>
 native_token_unchecked_transfer(NativeSyscallContext &ctx,
                                 ContractAddress const &from,
