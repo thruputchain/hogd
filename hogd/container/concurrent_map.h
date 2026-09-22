@@ -363,7 +363,11 @@ private:
   // touched in the constructor and destructor, so it adds nothing to the
   // lookup or insert paths.
   struct BucketArrayPool {
+    BucketArrayPool() { arrays.reserve(kMaxPooledBucketArrays); }
+
     std::mutex mutex;
+    // Never grows past kMaxPooledBucketArrays, so with the reserve() above
+    // release_bucket_array()'s push_back cannot allocate.
     std::vector<bucket_array_t> arrays;
   };
 
@@ -394,20 +398,16 @@ private:
   }
 
   // Requires all heads of |buckets| to be nullptr. Takes the array by value so
-  // that it is freed here if the pool is full or the push fails.
+  // that it is freed here if the pool is full.
   static void release_bucket_array(bucket_array_t buckets) noexcept
   {
     if (buckets.empty()) {
       return;
     }
-    try {
-      BucketArrayPool &pool = bucket_array_pool();
-      std::scoped_lock g(pool.mutex);
-      if (pool.arrays.size() < kMaxPooledBucketArrays) {
-        pool.arrays.push_back(std::move(buckets));
-      }
-    } catch (...) {
-      // Out of memory while growing the pool: just free the array.
+    BucketArrayPool &pool = bucket_array_pool();
+    std::scoped_lock g(pool.mutex);
+    if (pool.arrays.size() < kMaxPooledBucketArrays) {
+      pool.arrays.push_back(std::move(buckets));
     }
   }
 
