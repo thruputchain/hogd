@@ -284,14 +284,8 @@ public:
               cleared_count.fetch_add(width, std::memory_order_relaxed);
           size_t end = std::min<size_t>(start + width, buckets_.size());
           for (size_t i = start; i < end; i++) {
-            // No inserts run concurrently with a destructive iteration, so
-            // load + store avoids a locked RMW on every (mostly empty) bucket.
             value_bucket_t *bucket =
-                buckets_[i].load(std::memory_order_acquire);
-            if (bucket == nullptr) {
-              continue;
-            }
-            buckets_[i].store(nullptr, std::memory_order_relaxed);
+                buckets_[i].exchange(nullptr, std::memory_order_acquire);
             value_bucket_t::for_each_destructive(bucket, f);
           }
           if (start + width >= buckets_.size()) {
@@ -334,14 +328,8 @@ public:
     pool.for_each_parallel(
         buckets_,
         [](std::atomic<value_bucket_t *> &bucket) {
-          // See for_each_parallel_destructive() for why this is not an
-          // exchange().
-          value_bucket_t *head = bucket.load(std::memory_order_acquire);
-          if (head == nullptr) {
-            return;
-          }
-          bucket.store(nullptr, std::memory_order_relaxed);
-          value_bucket_t::clear(head);
+          value_bucket_t::clear(
+              bucket.exchange(nullptr, std::memory_order_acquire));
         },
         width);
     cleared_ = true;
@@ -408,13 +396,10 @@ private:
   void clear_slow() noexcept
   {
     for (auto &bucket : buckets_) {
-      value_bucket_t *head = bucket.load(std::memory_order_acquire);
-      if (head == nullptr) {
-        continue;
-      }
-      // Null the head too so the array can be recycled by the destructor.
-      bucket.store(nullptr, std::memory_order_relaxed);
-      value_bucket_t::clear(head);
+      // exchange() rather than load(): the destructor recycles the array, so
+      // every head must be nullptr afterwards.
+      value_bucket_t::clear(
+          bucket.exchange(nullptr, std::memory_order_acquire));
     }
     cleared_ = true;
   }
