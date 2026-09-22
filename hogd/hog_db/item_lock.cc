@@ -11,6 +11,7 @@
 #include <variant>
 
 #include "db_conflict.hh"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -407,6 +408,15 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
                                           const LockContext &ctx,
                                           std::unique_lock<x23::TestLock> &ul)
 {
+  // A first admission installs the lock before taking a reference. Undo the
+  // install on any exit that leaves no reference, error return or throw, so
+  // a same-key retry does not find a half-built lock (#3000).
+  Defer undo_install{[&] {
+    if (pending_refcount_ == 0) {
+      reset_lock_contents(ul);
+    }
+  }};
+
   if (pending_refcount_ == 0) {
     CHECK(std::holds_alternative<std::monostate>(lock_contents_));
     CHECK_PTR(after);
@@ -414,16 +424,9 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
   }
 
   auto res = handle_try_atomic_from_pending(nullptr, after, ctx, ul);
-
-  if (!res.has_value()) {
-    // failed to acquire lock
-    if (pending_refcount_ == 0) {
-      reset_lock_contents(ul);
-    }
-    return res;
+  if (res.has_value()) {
+    pending_refcount_++;
   }
-
-  pending_refcount_++;
   return res;
 }
 
