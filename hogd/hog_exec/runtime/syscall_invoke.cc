@@ -11,6 +11,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -102,15 +103,14 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   }
 
   auto const &calldata = syscall_handler.get_calldata();
-  output_written_len =
-      copy_to_guest_buffer(output_buffer,
-                           std::as_bytes(
-                               std::span(calldata.data(), calldata.size())));
+  auto const calldata_bytes =
+      std::as_bytes(std::span(calldata.data(), calldata.size()));
+  output_written_len = copy_to_guest_buffer(output_buffer, calldata_bytes);
 
   auto span_auth_token_list = syscall_handler.get_parent_supplied_auth_tokens();
+  auto const auth_token_bytes = std::as_bytes(span_auth_token_list);
   output_auth_token_written_len =
-      copy_to_guest_buffer(output_auth_token_list,
-                           std::as_bytes(span_auth_token_list));
+      copy_to_guest_buffer(output_auth_token_list, auth_token_bytes);
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
@@ -120,7 +120,14 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
         SyscallGetCalldataOutputs{.calldata = calldata,
                                   .auth_tokens = auth_token_list});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+
+  // Charge the bytes actually copied into guest memory, so repeated retrieval
+  // of a large frame costs more than a tiny one; the frame data needs no
+  // storage access, so only the copy term applies (#4040).
+  const WrappedGasAmount gas{GasCost::guest_buffer_copy(
+      std::min(output_buffer.size(), calldata_bytes.size()) +
+      std::min(output_auth_token_list.size(), auth_token_bytes.size()))};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, gas};
 }
 
 MaybeAsyncSyscallInnerResult

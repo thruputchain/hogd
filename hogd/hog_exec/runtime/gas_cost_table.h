@@ -157,6 +157,11 @@ constexpr static uint64_t kBytestringBlockBytes = 512;
 constexpr static uint64_t kBytestringWriteBlockCost = 13;
 constexpr static uint64_t kBytestringReadBlockCost = 7;
 
+// Per-block cost of copying a frame payload into a guest buffer (GetCalldata):
+// bytestring read rate, but a distinct entry (no storage-access term) so the
+// repricing shows up in the gas-schedule digest (#4040).
+constexpr static uint64_t kGuestBufferCopyBlockCost = 7;
+
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
@@ -236,6 +241,12 @@ struct GasCost {
            (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
+  // Copy term only, no storage access (see kGuestBufferCopyBlockCost).
+  static constexpr uint64_t guest_buffer_copy(uint64_t bytes_len)
+  {
+    return kGuestBufferCopyBlockCost * bytestring_blocks(bytes_len);
+  }
+
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
     assert(message_len <= kMaxCostBytes);
@@ -256,7 +267,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 12> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 13> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -267,6 +278,7 @@ constexpr std::array<SyscallGasCostEntry, 12> kSyscallGasCostSchedule = {{
     {.name = u8"BytestringBlockBytes", .cost = kBytestringBlockBytes},
     {.name = u8"BytestringWriteBlock", .cost = kBytestringWriteBlockCost},
     {.name = u8"BytestringReadBlock", .cost = kBytestringReadBlockCost},
+    {.name = u8"GuestBufferCopyBlock", .cost = kGuestBufferCopyBlockCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
 }};
