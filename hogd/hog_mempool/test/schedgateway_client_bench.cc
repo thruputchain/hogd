@@ -223,6 +223,171 @@ struct WorkerResult {
   int64_t warmup = 0, drain = 0;
   std::string error;
 };
+
+struct Config {
+  int connections;
+  int duration;
+  int warmup;
+  int count;
+  int block_ms;
+};
+
+struct RunResult {
+  WorkerResult samples;
+  uint64_t blocks;
+  uint64_t committed;
+};
+
+RunResult
+run_load(const Config &config,
+         std::vector<rpc_client_t<SchedGateway1>> &clients,
+         const std::vector<ParallelSignedTransactionBatch> &corpus,
+         rpc_client_t<SchedulerCoord1> &scheduler)
+{
+  std::atomic<size_t> next{1};
+  std::stop_source stop;
+  std::latch ready{config.connections}, start{1};
+  Clock::time_point epoch;
+  std::vector<WorkerResult> results(config.connections);
+  BlockDriver block_driver(scheduler);
+  std::string driver_error;
+  std::vector<std::jthread> callers;
+  std::jthread driver;
+  try {
+    // One synchronous caller per connection exposes the cost of each RPC.
+    for (int i = 0; i < config.connections; ++i) {
+      callers.emplace_back([&, i] {
+        auto &r = results[i];
+        ready.count_down();
+        start.wait();
+        const auto measured_start = epoch + std::chrono::seconds(config.warmup);
+        const auto end = measured_start + std::chrono::seconds(config.duration);
+        try {
+          while (!stop.stop_requested()) {
+            const auto started = Clock::now();
+            if (started >= end)
+              break;
+            const auto n = next.fetch_add(1);
+            require(n < corpus.size(),
+                    "corpus exhausted; increase TRANSACTIONS");
+            submit(clients[i], corpus[n]);
+            const auto completed = Clock::now();
+            // Only calls wholly inside the window contribute rate/latency.
+            if (started < measured_start)
+              ++r.warmup;
+            else if (completed > end)
+              ++r.drain;
+            else
+              r.latency_us.push_back(
+                  std::chrono::duration_cast<std::chrono::microseconds>(
+                      completed - started)
+                      .count());
+          }
+        } catch (const std::exception &e) {
+          r.error = e.what();
+          stop.request_stop();
+        }
+      });
+    }
+    driver = std::jthread([&](const std::stop_token &token) {
+      std::stop_callback cancel(token, [&] { stop.request_stop(); });
+      start.wait();
+      try {
+        block_driver.run(epoch, std::chrono::milliseconds(config.block_ms),
+                         stop.get_token());
+      } catch (const std::exception &e) {
+        driver_error = e.what();
+        stop.request_stop();
+      }
+    });
+  } catch (...) {
+    // Release already-created threads if another thread could not be started.
+    stop.request_stop();
+    start.count_down();
+    throw;
+  }
+  ready.wait();
+  epoch = Clock::now();
+  start.count_down();
+  for (auto &caller : callers)
+    caller.join();
+  stop.request_stop();
+  driver.join();
+  WorkerResult total;
+  total.error = driver_error;
+  for (const auto &r : results) {
+    total.latency_us.insert(total.latency_us.end(), r.latency_us.begin(),
+                            r.latency_us.end());
+    total.warmup += r.warmup;
+    total.drain += r.drain;
+    if (!r.error.empty())
+      total.error += r.error + "; ";
+  }
+  const auto admitted = total.latency_us.size() + total.warmup + total.drain;
+  // Stop load first, then reconcile block inclusion outside the timed phase.
+  const auto drain_deadline = Clock::now() + std::chrono::seconds(15);
+  while (total.error.empty() && block_driver.transactions() < admitted) {
+    block_driver.produce_block();
+    if (Clock::now() >= drain_deadline)
+      total.error = "block drain timeout";
+  }
+  if (block_driver.transactions() != admitted)
+    total.error += "committed/admitted count mismatch; ";
+  std::ranges::sort(total.latency_us);
+  return {.samples = std::move(total),
+          .blocks = block_driver.blocks(),
+          .committed = block_driver.transactions()};
+}
+
+void
+write_result(const char *path, const Config &config,
+             const json::Value &manifest, size_t account_count,
+             const RunResult &result)
+{
+  const auto &total = result.samples;
+  const auto measured = total.latency_us.size();
+  auto quantile = [&](size_t percent) {
+    return measured ? total.latency_us[(measured - 1) * percent / 100] : 0;
+  };
+  std::string output;
+  json::Writer(output).object([&](json::Writer &w) {
+    w.field("schema", 1);
+    w.field("workload", "native-token-transfer-singleton");
+    w.field("clientCommit", version::kHogdGitHash);
+    w.field("backendCommit",
+            str(field(field(manifest, "producer"), "commitHash")));
+    w.field("protocol", str(field(manifest, "protocol")));
+    w.field("connections", config.connections);
+    w.field("outstanding", config.connections);
+    w.field("x23Workers", kWorkers);
+    w.field("helperWorkers", available_parallelism());
+    w.field("batchSize", 1);
+    w.field("accounts", account_count);
+    w.field("preparedTransactions", config.count);
+    w.field("seconds", config.duration);
+    w.field("warmupSeconds", config.warmup);
+    w.field("blockIntervalMs", config.block_ms);
+    w.field("measuredSuccess", measured);
+    w.field("warmupSuccess", total.warmup);
+    w.field("drainSuccess", total.drain);
+    w.field("committedTransactions", result.committed);
+    w.field("blocks", result.blocks);
+    w.field("latencySumUs",
+            std::accumulate(total.latency_us.begin(), total.latency_us.end(),
+                            int64_t{0}));
+    w.field("latencyP50Us", quantile(50));
+    w.field("latencyP95Us", quantile(95));
+    w.field("latencyP99Us", quantile(99));
+    w.field("error", total.error);
+  });
+  std::ofstream out(path, std::ios::out | std::ios::noreplace);
+  require(out.good(), "cannot create output");
+  out << output << '\n';
+  out.close();
+  require(out.good(), "cannot write output");
+  std::println("{}", output);
+}
+
 int
 run_benchmark(int argc, char **argv)
 {
@@ -237,11 +402,13 @@ run_benchmark(int argc, char **argv)
     return 2;
   }
   try {
-    const int connections = argc > 3 ? number(argv[3], 64) : 4;
-    const int duration = argc > 4 ? number(argv[4], 60) : 5;
-    const int warmup = argc > 5 ? number(argv[5], 10) : 1;
-    const int count = argc > 6 ? number(argv[6], 1'000'000) : 60000;
-    const int block_ms = argc > 7 ? number(argv[7], 10000) : 500;
+    const Config config{
+        .connections = argc > 3 ? number(argv[3], 64) : 4,
+        .duration = argc > 4 ? number(argv[4], 60) : 5,
+        .warmup = argc > 5 ? number(argv[5], 10) : 1,
+        .count = argc > 6 ? number(argv[6], 1'000'000) : 60000,
+        .block_ms = argc > 7 ? number(argv[7], 10000) : 500,
+    };
     require(!std::filesystem::exists(argv[2]), "output already exists");
     if (hogd_init(argc, argv, false, LogLevel::kError))
       return 2;
@@ -266,7 +433,7 @@ run_benchmark(int argc, char **argv)
                 tip.db_tip().value.proposal_header.block_height == 1,
             "requires a newly bootstrapped node with no produced blocks");
     std::vector<rpc_client_t<SchedGateway1>> clients;
-    for (int i = 0; i < connections; ++i) {
+    for (int i = 0; i < config.connections; ++i) {
       auto client = connect<SchedGateway1>(manifest, "schedulerGateway", cp);
       require(client.schedgateway_intro(protocol)() ==
                   SchedGatewayIntroOutcome::SchedGatewayIntroSuccess,
@@ -280,9 +447,9 @@ run_benchmark(int argc, char **argv)
     // preflight; measured callers consume the remaining corpus once, never
     // replay.
     std::vector<ParallelSignedTransactionBatch> corpus;
-    corpus.reserve(count + 1);
+    corpus.reserve(config.count + 1);
     TransactionHash preflight_hash{};
-    for (int n = 0; n <= count; ++n) {
+    for (int n = 0; n <= config.count; ++n) {
       auto tx = make_transfer(accounts, n, *network);
       if (n == 0)
         preflight_hash = sha256(tx.tx);
@@ -307,138 +474,11 @@ run_benchmark(int argc, char **argv)
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    std::atomic<size_t> next{1};
-    std::stop_source stop;
-    std::latch ready{connections}, start{1};
-    Clock::time_point epoch;
-    std::vector<WorkerResult> results(connections);
-    BlockDriver block_driver(scheduler);
-    std::string driver_error;
-    std::vector<std::jthread> callers;
-    std::jthread driver;
-    try {
-      // One synchronous caller per connection exposes the cost of each RPC.
-      for (int i = 0; i < connections; ++i) {
-        callers.emplace_back([&, i] {
-          auto &r = results[i];
-          ready.count_down();
-          start.wait();
-          const auto measured_start = epoch + std::chrono::seconds(warmup);
-          const auto end = measured_start + std::chrono::seconds(duration);
-          try {
-            while (!stop.stop_requested()) {
-              const auto started = Clock::now();
-              if (started >= end)
-                break;
-              const auto n = next.fetch_add(1);
-              require(n < corpus.size(),
-                      "corpus exhausted; increase TRANSACTIONS");
-              submit(clients[i], corpus[n]);
-              const auto completed = Clock::now();
-              // Only calls wholly inside the window contribute rate/latency.
-              if (started < measured_start)
-                ++r.warmup;
-              else if (completed > end)
-                ++r.drain;
-              else
-                r.latency_us.push_back(
-                    std::chrono::duration_cast<std::chrono::microseconds>(
-                        completed - started)
-                        .count());
-            }
-          } catch (const std::exception &e) {
-            r.error = e.what();
-            stop.request_stop();
-          }
-        });
-      }
-      driver = std::jthread([&](const std::stop_token &token) {
-        std::stop_callback cancel(token, [&] { stop.request_stop(); });
-        start.wait();
-        try {
-          block_driver.run(epoch, std::chrono::milliseconds(block_ms),
-                           stop.get_token());
-        } catch (const std::exception &e) {
-          driver_error = e.what();
-          stop.request_stop();
-        }
-      });
-    } catch (...) {
-      // Release already-created threads if another thread could not be started.
-      stop.request_stop();
-      start.count_down();
-      throw;
-    }
-    ready.wait();
-    epoch = Clock::now();
-    start.count_down();
-    for (auto &caller : callers)
-      caller.join();
-    stop.request_stop();
-    driver.join();
-    WorkerResult total;
-    total.error = driver_error;
-    for (const auto &r : results) {
-      total.latency_us.insert(total.latency_us.end(), r.latency_us.begin(),
-                              r.latency_us.end());
-      total.warmup += r.warmup;
-      total.drain += r.drain;
-      if (!r.error.empty())
-        total.error += r.error + "; ";
-    }
-    const auto admitted = total.latency_us.size() + total.warmup + total.drain;
-    // Stop load first, then reconcile block inclusion outside the timed phase.
-    const auto drain_deadline = Clock::now() + std::chrono::seconds(15);
-    while (total.error.empty() && block_driver.transactions() < admitted) {
-      block_driver.produce_block();
-      if (Clock::now() >= drain_deadline)
-        total.error = "block drain timeout";
-    }
-    if (block_driver.transactions() != admitted)
-      total.error += "committed/admitted count mismatch; ";
-    std::ranges::sort(total.latency_us);
-    const auto measured = total.latency_us.size();
-    auto quantile = [&](size_t percent) {
-      return measured ? total.latency_us[(measured - 1) * percent / 100] : 0;
-    };
-    std::string output;
-    json::Writer(output).object([&](json::Writer &w) {
-      w.field("schema", 1);
-      w.field("workload", "native-token-transfer-singleton");
-      w.field("clientCommit", version::kHogdGitHash);
-      w.field("backendCommit",
-              str(field(field(manifest, "producer"), "commitHash")));
-      w.field("protocol", str(field(manifest, "protocol")));
-      w.field("connections", connections);
-      w.field("outstanding", connections);
-      w.field("x23Workers", kWorkers);
-      w.field("helperWorkers", available_parallelism());
-      w.field("batchSize", 1);
-      w.field("accounts", accounts.size());
-      w.field("preparedTransactions", count);
-      w.field("seconds", duration);
-      w.field("warmupSeconds", warmup);
-      w.field("blockIntervalMs", block_ms);
-      w.field("measuredSuccess", measured);
-      w.field("warmupSuccess", total.warmup);
-      w.field("drainSuccess", total.drain);
-      w.field("committedTransactions", block_driver.transactions());
-      w.field("blocks", block_driver.blocks());
-      w.field("latencySumUs",
-              std::accumulate(total.latency_us.begin(), total.latency_us.end(),
-                              int64_t{0}));
-      w.field("latencyP50Us", quantile(50));
-      w.field("latencyP95Us", quantile(95));
-      w.field("latencyP99Us", quantile(99));
-      w.field("error", total.error);
-    });
-    std::ofstream out(argv[2], std::ios::out | std::ios::noreplace);
-    require(out.good(), "cannot create output");
-    out << output << '\n';
-    out.close();
-    require(out.good(), "cannot write output");
-    std::println("{}", output);
-    return !total.error.empty() || !measured ? 1 : 0;
+    const auto result = run_load(config, clients, corpus, scheduler);
+    write_result(argv[2], config, manifest, accounts.size(), result);
+    return !result.samples.error.empty() || result.samples.latency_us.empty()
+               ? 1
+               : 0;
   } catch (const std::exception &e) {
     std::println(stderr, "{}", e.what());
     return 2;
@@ -449,7 +489,7 @@ run_benchmark(int argc, char **argv)
 } // namespace hogd
 
 int
-main(int argc, char **argv)
+main(int argc, char **argv) // NOLINT(bugprone-exception-escape)
 {
   return hogd::run_benchmark(argc, argv);
 }
