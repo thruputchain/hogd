@@ -174,6 +174,92 @@ TEST(ExecutionModeTest, QueueEntryObservations)
   EXPECT_TRUE(validation.check_all_consumed());
 }
 
+// #1946: a current-block queue position never empties once filled, so once a
+// replay holds the entry at (addrkey, index), every later presence bit for
+// that index must say present. Proposal mode logs a bit per lookup but holds
+// one entry, which is what a proposer tampering the second bit exploits.
+TEST(ExecutionModeTest, ValidationRejectsAbsentBitAfterPresentObservation)
+{
+  AddressAndKey addrkey{.address = ContractAddress{1},
+                        .key = make_storage_key(1)};
+
+  // Honest proposal: two peeks of index 0, present both times.
+  ProposalModeData proposal;
+  proposal.log_nondeterministic_bit(true);
+  proposal.log_queue_entry_observation(addrkey, 0, QueueEntry{1});
+  proposal.log_nondeterministic_bit(true);
+  proposal.log_queue_entry_observation(addrkey, 0, QueueEntry{1});
+  ASSERT_EQ(proposal.proposal_data().nondeterministic_bit_count, 2U);
+  ASSERT_EQ(proposal.proposal_data().observed_queue_entry_sequence.size(), 1U);
+
+  {
+    ValidationModeData validation(proposal.proposal_data());
+    auto first = validation.consume_queue_entry_presence_bit(addrkey, 0);
+    ASSERT_TRUE(first.has_value());
+    EXPECT_TRUE(first->get());
+    auto entry = validation.consume_queue_entry_observation(addrkey, 0);
+    ASSERT_NE(entry.get(), nullptr);
+
+    auto second = validation.consume_queue_entry_presence_bit(addrkey, 0);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_TRUE(second->get());
+    auto again = validation.consume_queue_entry_observation(addrkey, 0);
+    EXPECT_EQ(again.get(), entry.get());
+    EXPECT_TRUE(validation.check_all_consumed());
+  }
+
+  // Tampered: the second bit says absent.
+  auto tampered = proposal.proposal_data();
+  tampered.nondeterministic_bits[0] = uint8_t{0b01};
+  {
+    ValidationModeData validation(tampered);
+    ASSERT_TRUE(validation.validate());
+    auto first = validation.consume_queue_entry_presence_bit(addrkey, 0);
+    ASSERT_TRUE(first.has_value());
+    EXPECT_TRUE(first->get());
+    ASSERT_NE(validation.consume_queue_entry_observation(addrkey, 0).get(),
+              nullptr);
+
+    EXPECT_FALSE(
+        validation.consume_queue_entry_presence_bit(addrkey, 0).has_value())
+        << "an absent bit contradicts the entry already held at index 0";
+  }
+}
+
+// An absent bit is an ordinary empty read wherever nothing is held yet: the
+// first read of a key, the position after the last held entry, and a re-read
+// of a position that was absent before (a concurrent producer may have filled
+// it since, so absent-then-present stays a valid sequence).
+TEST(ExecutionModeTest, ValidationAcceptsAbsentBitAtUnheldIndex)
+{
+  AddressAndKey addrkey{.address = ContractAddress{1},
+                        .key = make_storage_key(1)};
+
+  // bits, LSB first: index 0 absent, index 0 present, index 1 absent.
+  NondeterministicProposalData data;
+  data.nondeterministic_bit_count = 3;
+  data.nondeterministic_bits = {uint8_t{0b010}};
+  data.observed_queue_entry_sequence = {QueueEntry{1}};
+
+  ValidationModeData validation(data);
+  ASSERT_TRUE(validation.validate());
+
+  auto absent = validation.consume_queue_entry_presence_bit(addrkey, 0);
+  ASSERT_TRUE(absent.has_value());
+  EXPECT_FALSE(absent->get());
+
+  auto present = validation.consume_queue_entry_presence_bit(addrkey, 0);
+  ASSERT_TRUE(present.has_value());
+  EXPECT_TRUE(present->get());
+  ASSERT_NE(validation.consume_queue_entry_observation(addrkey, 0).get(),
+            nullptr);
+
+  auto past_end = validation.consume_queue_entry_presence_bit(addrkey, 1);
+  ASSERT_TRUE(past_end.has_value());
+  EXPECT_FALSE(past_end->get());
+  EXPECT_TRUE(validation.check_all_consumed());
+}
+
 TEST(ExecutionModeTest, ViewingModeDefaultsTryInvokeBitToTrue)
 {
   ViewingModeCtor empty_ctor{.proposal_data_segment_ = {}};

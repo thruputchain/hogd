@@ -128,6 +128,19 @@ public:
   // failure)
   std::optional<Nondeterministic<bool>> consume_nondeterministic_bit();
 
+  // Consumes the presence bit for a concurrent queue read at (addrkey, index).
+  // Returns nullopt, a validation failure, when the bit stream is exhausted or
+  // when the bit says absent for an index whose entry this replay already
+  // holds: a current-block queue position never empties once filled, so
+  // proposal mode reads it present on every later lookup, and a proposal that
+  // says otherwise describes a run no proposer made (#1946). A false bit at an
+  // index not yet held stays an ordinary empty read, including a re-read of a
+  // position that was absent before, since a concurrent producer may have
+  // filled it in between.
+  std::optional<Nondeterministic<bool>>
+  consume_queue_entry_presence_bit(AddressAndKey const &addrkey,
+                                   uint32_t index);
+
   // Consumes the next nondeterministic queue entry from the proposal and
   // returns a (nondeterministic) pointer to it, or a wrapped nullptr if no more
   // queue entries are available (which is a validation failure). The pointer
