@@ -4153,6 +4153,8 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
     std::shared_ptr<Scheduler> scheduler =
         proposer.mempool_coord_rpc().scheduler();
 
+    // The fat wrapper arrives second and is what this node retains: a later
+    // authenticated signing of a cached body replaces the earlier one.
     EXPECT_EQ(submit_through_gateway(proposer, variants.thin),
               SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
     submit_through_gateway(proposer, variants.fat);
@@ -4160,7 +4162,7 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
     const std::shared_ptr<const SignedTransaction> retained =
         scheduler->find_tx(variants.tx_hash);
     ASSERT_NE(retained, nullptr);
-    EXPECT_EQ(x23::xdr_size(*retained), x23::xdr_size(variants.thin));
+    EXPECT_EQ(x23::xdr_size(*retained), x23::xdr_size(variants.fat));
 
     const SchedulerGetTipResult tip =
         proposer.mempool_coord_rpc().schedcoord_get_tip()();
@@ -4182,7 +4184,8 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
     std::shared_ptr<Scheduler> scheduler =
         validator.mempool_coord_rpc().scheduler();
 
-    // The fat wrapper arrives first and is what this node retains.
+    // The thin wrapper arrives second and is what this node retains, so the
+    // two nodes hold different wrappers for the nominated hash.
     EXPECT_EQ(submit_through_gateway(validator, variants.fat),
               SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
     submit_through_gateway(validator, variants.thin);
@@ -4190,7 +4193,7 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
     const std::shared_ptr<const SignedTransaction> retained =
         scheduler->find_tx(variants.tx_hash);
     ASSERT_NE(retained, nullptr);
-    EXPECT_EQ(x23::xdr_size(*retained), x23::xdr_size(variants.fat));
+    EXPECT_EQ(x23::xdr_size(*retained), x23::xdr_size(variants.thin));
 
     const SchedulerGetTipResult tip =
         validator.mempool_coord_rpc().schedcoord_get_tip()();
