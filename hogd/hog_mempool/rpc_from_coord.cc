@@ -311,17 +311,17 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
   submission_auth_.push_back(pending);
   BlockHeight verify_height = scheduler_->current_block();
   while (true) {
-    // A commit can finish before its auth callback. Let that callback mark
-    // changed accounts before deciding which results are still valid.
     const BlockHeight height = scheduler_->current_block();
+    // Wait for the [auth_data_changed()] callback to complete for [height].
     if (auth_data_height_.load() < height) {
       commit_guard.reset();
       co_await wait_for_block_commit(height);
       co_await commit_guard(commit_lock_);
       continue;
     }
-    // Auth may reject an old height even for an unchanged account. Those
-    // transactions have not actually been authenticated and also need retry.
+
+    // The authentication server cannot authenticate txs against an older block
+    // height--it returns [AuthErrorCode::kAuthStaleBlockHeight] in this case.
     if (verify_height != height) {
       for (size_t i = 0; i < results.size(); i++) {
         if (results[i] == AuthErrorCode::kAuthStaleBlockHeight) {
@@ -332,6 +332,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     if (pending->dirty.empty()) {
       co_return results;
     }
+
     std::unordered_set<ContractAddress, SipHash24Hasher> dirty =
         std::exchange(pending->dirty, {});
     verify_height = height;
