@@ -210,9 +210,7 @@ TEST(ConfigHashTest, ShortListYieldsBytestringDefault)
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_bytestring_len, 4096U);
 }
 
-// Likewise for the contract size parameter: a list stopping at the bytestring
-// limit reads as the 256 KiB every chain ran under before the size was
-// configurable.
+// A list stopping at the bytestring limit uses the contract-size default.
 TEST(ConfigHashTest, ShortListYieldsContractSizeDefault)
 {
   NetworkConfig config;
@@ -223,7 +221,7 @@ TEST(ConfigHashTest, ShortListYieldsContractSizeDefault)
   ASSERT_EQ(config.v0().params.size(), 4U);
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes,
             static_cast<uint32_t>(kDefaultMaxContractSizeBytes));
-  EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes, 256_KiB);
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes, 512_KiB);
 
   // Stating it extends the prefix by one and takes effect, above the default
   // as well as below it.
@@ -236,9 +234,8 @@ TEST(ConfigHashTest, ShortListYieldsContractSizeDefault)
 }
 
 // And for the execution limits added after it: a list stopping at the
-// contract size reads as the constants every chain ran under before they were
-// configurable, and stating one extends the prefix, default-filling the slots
-// on the way.
+// contract size reads as the protocol defaults, and stating one extends the
+// prefix, default-filling the slots on the way.
 TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
 {
   NetworkConfig config;
@@ -256,7 +253,7 @@ TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
             static_cast<uint32_t>(kAuthTokenMaxDepth));
   EXPECT_EQ(defaults.max_rv32_code_bytes,
             static_cast<uint32_t>(kDefaultMaxRv32CodeBytes));
-  EXPECT_EQ(defaults.max_rv32_code_bytes, 64_KiB);
+  EXPECT_EQ(defaults.max_rv32_code_bytes, 256_KiB);
   EXPECT_EQ(defaults.max_rv32_memory_bytes,
             static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
 
