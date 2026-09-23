@@ -69,7 +69,10 @@
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/rv32/artifact.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
+#include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
@@ -3381,7 +3384,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
     Contract large_contract(ContractType::kRv32);
     large_contract.rv32_contract().data.append_range(bytes);
     ASSERT_EQ(large_contract.rv32_contract().data.size(),
-              320 * 1024U + rv32::kArtifactHeaderBytes);
+              (320 * 1024U) + rv32::kArtifactHeaderBytes);
 
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
