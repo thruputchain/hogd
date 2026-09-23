@@ -2939,11 +2939,8 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
   advance_block();
 }
 
-// #1946: two non-consuming peeks of the same current-block entry log a
-// presence bit each but hold one cached entry, so proposal data saying
-// present-then-absent for that position describes a run no proposer made.
-// Validation must reject it rather than let the contract take a branch honest
-// execution cannot reach.
+// #1946: two peeks of one current-block position log two presence bits but
+// hold one entry, so present-then-absent is a proposal no honest run makes.
 TEST_P(ProposeValidateRoundtripTest, RCQRepeatedPeekPresentThenAbsentRejected)
 {
   // Bit 4 set: first peek saw an entry. Bit 0 set: second peek saw an entry.
@@ -3022,11 +3019,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQRepeatedPeekPresentThenAbsentRejected)
   }
 }
 
-// The absent-then-present variant of #1946: bits {false, true} plus one entry
-// for two peeks of a key nothing in the block inserts. Proposal data alone
-// cannot rule this out, since a concurrent producer may fill a position
-// between two reads, so the guard is block close, where the replayed
-// observation has no matching insert.
+// Absent-then-present variant of #1946: per-tx replay accepts it (a producer
+// may appear between reads); block close rejects it, since no insert matches.
 TEST_P(ProposeValidateRoundtripTest,
        RCQRepeatedPeekAbsentThenPresentWithoutProducerFailsBlockClose)
 {

@@ -110,9 +110,7 @@ make_obs_key(uint32_t index)
   return AddressAndKey{.address = ContractAddress{1}, .key = key};
 }
 
-// Unwraps a consumed presence bit for an expectation. The nullopt of an
-// exhausted or contradicted stream stays nullopt, so a test compares the whole
-// result against what replay should have seen.
+// Unwraps a consumed presence bit; nullopt stays nullopt.
 std::optional<bool>
 presence_bit(std::optional<Nondeterministic<bool>> bit)
 {
@@ -187,10 +185,8 @@ TEST(ExecutionModeTest, QueueEntryObservations)
   EXPECT_TRUE(validation.check_all_consumed());
 }
 
-// #1946: a current-block queue position never empties once filled, so once a
-// replay holds the entry at (addrkey, index), every later presence bit for
-// that index must say present. Proposal mode logs a bit per lookup but holds
-// one entry, which is what a proposer tampering the second bit exploits.
+// #1946: once a replay holds the entry at (addrkey, index), a later absent bit
+// for that index is a validation failure.
 TEST(ExecutionModeTest, ValidationRejectsAbsentBitAfterPresentObservation)
 {
   AddressAndKey addrkey{.address = ContractAddress{1},
@@ -239,10 +235,8 @@ TEST(ExecutionModeTest, ValidationRejectsAbsentBitAfterPresentObservation)
   }
 }
 
-// An absent bit is an ordinary empty read wherever nothing is held yet: the
-// first read of a key, the position after the last held entry, and a re-read
-// of a position that was absent before (a concurrent producer may have filled
-// it since, so absent-then-present stays a valid sequence).
+// An absent bit is fine wherever no entry is held yet: a first read, the
+// position past the last held entry, or a previously absent position.
 TEST(ExecutionModeTest, ValidationAcceptsAbsentBitAtUnheldIndex)
 {
   AddressAndKey addrkey{.address = ContractAddress{1},
