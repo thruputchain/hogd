@@ -29,7 +29,6 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
-#include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "standard_asset_events.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -136,12 +135,36 @@ get_msg_sender(NativeSyscallContext &ctx)
   co_return sender;
 }
 
-StorageKeyContractData
-allowance_key(ContractAddress owner, ContractAddress spender)
+// Derive the allowance storage key; routed through kSHA256 so the digest is
+// priced as a syscall (issue #2963).
+x23::Async<InvokeStatus<StorageKeyContractData>>
+allowance_key(NativeSyscallContext &ctx, ContractAddress owner,
+              ContractAddress spender)
 {
   auto data = Serializer<SerializationFormat::kTxs>::serialize(owner, spender);
-  assert(data.has_value());
-  return sha256(*data); // NOLINT(bugprone-unchecked-optional-access)
+  if (!data.has_value()) {
+    // Two fixed-size addresses cannot fail to serialize; if they do, the host
+    // is broken, not the contract.
+    error("Unrecoverable: could not serialize the allowance key");
+    co_return InvokeError{InvokeErrorCode::Unrecoverable};
+  }
+
+  SHA256Hash key{};
+  auto r = co_await ctx.syscall<SyscallNo::kSHA256>(
+      std::as_bytes(std::span(data->data(), data->size())), key);
+  if (!r.has_value()) {
+    // OutOfGas means the frame cannot pay the crossing plus the digest; the
+    // remaining codes abandon the transaction outright.
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    // kSHA256 documents no error codes, so this is a host fault rather than
+    // anything the caller did. Unlike get_msg_sender above, whose
+    // kSyscallErrorCodeIsRootTransaction is reachable and is the contract's.
+    error("Unrecoverable: kSHA256 returned {}", x23::show(*r));
+    co_return InvokeError{InvokeErrorCode::Unrecoverable};
+  }
+  co_return key;
 }
 
 // Return an ERC20 contract-level revert carrying `code`, byte-identical to the
@@ -161,7 +184,11 @@ x23::Async<InvokeStatus<bool>>
 adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
 {
-  auto allow_key = allowance_key(owner, spender);
+  auto allow_key_r = co_await allowance_key(ctx, owner, spender);
+  if (!allow_key_r.has_value()) {
+    co_return allow_key_r.error();
+  }
+  auto const &allow_key = *allow_key_r;
 
   int128_t output_set{};
   bool output_set_opt{};
@@ -297,8 +324,7 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   }
 
   auto credit =
-      co_await ctx.handler().modify_native_token_balance(receiver,
-                                                         signed_amount);
+      co_await ctx.modify_native_token_balance(receiver, signed_amount);
   if (!credit) {
     co_return credit.error().to_invoke_error();
   }
@@ -361,8 +387,7 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
     co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
-  auto debit =
-      co_await ctx.handler().modify_native_token_balance(owner, -signed_amount);
+  auto debit = co_await ctx.modify_native_token_balance(owner, -signed_amount);
   if (!debit) {
     co_return debit.error().to_invoke_error();
   }
@@ -442,8 +467,8 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   // add-capacity bound remains the backstop for hand-crafted states.
 
   if (auto moved =
-          co_await native_token_unchecked_transfer(ctx.handler(), *owner,
-                                                   receiver, amount_signed_int);
+          co_await native_token_unchecked_transfer(ctx, *owner, receiver,
+                                                   amount_signed_int);
       !moved.has_value()) {
     co_return moved.error();
   }
@@ -530,8 +555,8 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   // add-capacity bound remains the backstop for hand-crafted states.
 
   if (auto moved =
-          co_await native_token_unchecked_transfer(ctx.handler(), owner,
-                                                   receiver, amount_signed_int);
+          co_await native_token_unchecked_transfer(ctx, owner, receiver,
+                                                   amount_signed_int);
       !moved.has_value()) {
     co_return moved.error();
   }
@@ -614,7 +639,11 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
-  auto allow_key = allowance_key(owner, spender);
+  auto allow_key_r = co_await allowance_key(ctx, owner, spender);
+  if (!allow_key_r.has_value()) {
+    co_return allow_key_r.error();
+  }
+  auto const &allow_key = *allow_key_r;
 
   int128_t output_set{};
   bool output_set_opt{};
@@ -647,22 +676,21 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
 } // namespace
 
 x23::Async<InvokeStatus<void>>
-native_token_unchecked_transfer(SystemCallHandler &handler,
+native_token_unchecked_transfer(NativeSyscallContext &ctx,
                                 ContractAddress const &from,
                                 ContractAddress const &to, int128_t amount)
 {
-  // Callers are privileged system code (the strict trait methods and the
-  // genesis claim); a negative amount is a precondition violation, not a
-  // recoverable input.
+  // Callers are privileged system code (currently the strict trait methods);
+  // a negative amount is a precondition violation, not a recoverable input.
   CHECK(amount >= 0);
-  auto r1 = co_await handler.modify_native_token_balance(from, -amount);
+  auto r1 = co_await ctx.modify_native_token_balance(from, -amount);
   if (!r1.has_value()) {
     co_return r1.error().to_invoke_error();
   }
   if (!r1.value().has_value()) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  auto r2 = co_await handler.modify_native_token_balance(to, amount);
+  auto r2 = co_await ctx.modify_native_token_balance(to, amount);
   if (!r2.has_value()) {
     co_return r2.error().to_invoke_error();
   }

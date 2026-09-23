@@ -88,7 +88,9 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                  WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
+    // Rejected writes pay the access too, as in the get above.
+    co_return SyscallInnerResult{(*status).error().code(),
+                                 WrappedGasAmount{kStorageAccessCost}};
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
