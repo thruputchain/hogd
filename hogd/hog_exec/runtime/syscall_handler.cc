@@ -1886,17 +1886,19 @@ get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
   co_return co_await base_item.get_retrocausally_consumed_entries(count);
 }
 
-// An RCQ access to a DeletedItem key resolves against a fully-consumed view
-// of the snapshot's queue: the tx-local delete hides every entry, but the
-// retrocausally-consumed count already recorded on the view must be carried
-// forward. Loads the snapshot base item fresh (the DeletedItem holds none)
-// and builds that view.
+// An RCQ access to a key this transaction already replaced -- deleted, or
+// overwritten with a value of another type -- resolves against a
+// fully-consumed view of the snapshot's queue: the tx-local write hides every
+// entry, but the retrocausally-consumed count already recorded on the view
+// must be carried forward, or an entry could be consumed both before and
+// after the replacement. Loads the snapshot base item fresh (the frame's item
+// holds none) and builds that view.
 x23::Async<SystemStatus<RetrocausalQueueItem>>
-make_deleted_key_queue_item(FrameItemKey const &item_key,
-                            AddressAndKey const &addrkey,
-                            uint32_t retrocausally_consumed_count,
-                            StorageSnapshotCache &snapshot_cache,
-                            ExecutionModeData &execution_mode_data)
+make_replaced_key_queue_item(FrameItemKey const &item_key,
+                             AddressAndKey const &addrkey,
+                             uint32_t retrocausally_consumed_count,
+                             StorageSnapshotCache &snapshot_cache,
+                             ExecutionModeData &execution_mode_data)
 {
   UnmodifiedItem unmodified_item;
   auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
@@ -1938,23 +1940,26 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     co_return item_view->get<RetrocausalQueueItem>();
   }
 
-  if (item_view->get<DeletedItem>()) {
-    auto new_item = co_await make_deleted_key_queue_item(
-        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
-        snapshot_cache, execution_mode_data);
-    if (!new_item.has_value()) {
-      co_return new_item.error();
-    }
-
-    auto set_status = item_view->set(new_item.value());
-    if (!set_status.has_value()) {
-      co_return set_status.error();
-    }
-    co_return item_view->get<RetrocausalQueueItem>();
+  // The frame holds some other kind of value for this key: this transaction
+  // deleted it, or overwrote it with a bytestring or an NNInt. An insert is a
+  // write, and a write replaces whatever a key held -- ItemView::set() permits
+  // the type change for exactly this reason, and rejecting here would make an
+  // insert behave differently depending on whether the value it replaces was
+  // written by this transaction or committed in an earlier block. The old
+  // queue, if there was one, is gone either way, so start a fresh one over a
+  // fully-consumed view of the snapshot.
+  auto new_item = co_await make_replaced_key_queue_item(
+      item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+      snapshot_cache, execution_mode_data);
+  if (!new_item.has_value()) {
+    co_return new_item.error();
   }
 
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  auto set_status = item_view->set(new_item.value());
+  if (!set_status.has_value()) {
+    co_return set_status.error();
+  }
+  co_return item_view->get<RetrocausalQueueItem>();
 }
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
@@ -1993,6 +1998,45 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
+// A read never changes the type of an item, so a key that holds some other
+// kind of value is wrong-type input rather than an empty queue. This is the
+// same split get_bytestring() and get_nnint() make between a key holding the
+// wrong type (InvalidSyscallInput) and a key holding nothing at all, and it
+// has to hold against a committed value as well as against one this
+// transaction wrote, or a read could tell the two apart.
+//
+// The snapshot type alone does not settle it: another transaction in this
+// block may have converted the key with an insert, and those entries are
+// still there to be consumed. Only a read that produced no entry has
+// established that this key holds no queue for us, so only then does the
+// snapshot's type decide between wrong-type input and an empty queue. A key
+// that holds nothing is an empty queue.
+//
+// A read the per-transaction observation cap blocked counts as producing no
+// entry here, so that the type error keeps beating the read-limit error as it
+// does for a value written earlier in this transaction, where the dispatch
+// below never reaches the read at all. Letting the cap answer first would let
+// a contract tell the two cases apart by tripping it.
+SyscallStatus<QueueEntry>
+reject_unsatisfied_read_of_other_type(SyscallStatus<QueueEntry> entry,
+                                      UnmodifiedItem const &unmodified_item)
+{
+  if (entry.has_value()) {
+    return entry;
+  }
+  auto const code = entry.error().code();
+  if (code != SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry &&
+      code !=
+          SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
+    return entry;
+  }
+  auto type = unmodified_item.base_item().type();
+  if (type.has_value() && *type != ItemViewType::kRetrocausalQueue) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  return entry;
+}
+
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 retrocausal_queue_peek_from_view(ItemView *item_view,
                                  FrameItemKey const &item_key,
@@ -2011,14 +2055,18 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
         !loaded.has_value()) {
       co_return loaded.error();
     }
-
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
-    co_return co_await load_next_queue_entry(queue_item, execution_mode_data,
-                                             /*advance_cursor=*/false);
+    auto entry = co_await load_next_queue_entry(queue_item, execution_mode_data,
+                                                /*advance_cursor=*/false);
+    if (!entry.has_value()) {
+      co_return entry.error();
+    }
+    co_return reject_unsatisfied_read_of_other_type(std::move(entry.value()),
+                                                    *unmodified_item);
   }
 
   if (item_view->get<DeletedItem>()) {
-    auto queue_item = co_await make_deleted_key_queue_item(
+    auto queue_item = co_await make_replaced_key_queue_item(
         item_key, addrkey, item_view->get_retrocausally_consumed_count(),
         snapshot_cache, execution_mode_data);
     if (!queue_item.has_value()) {
@@ -2093,14 +2141,18 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
-    if (entry.has_value() && entry.value().has_value()) {
+    if (!entry.has_value()) {
+      co_return entry.error();
+    }
+    if (entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
         co_return set_status.error();
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
-    co_return entry;
+    co_return reject_unsatisfied_read_of_other_type(std::move(entry.value()),
+                                                    *unmodified_item);
   }
 
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
@@ -2114,7 +2166,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   // Same treatment for deleted keys: a no-op consume should leave the
   // key deleted rather than converting it to an empty RCQ.
   if (item_view->get<DeletedItem>()) {
-    auto queue_item_res = co_await make_deleted_key_queue_item(
+    auto queue_item_res = co_await make_replaced_key_queue_item(
         item_key, addrkey, item_view->get_retrocausally_consumed_count(),
         snapshot_cache_, execution_mode_data_);
     if (!queue_item_res.has_value()) {
