@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -1722,9 +1723,48 @@ bm_lifecycle_prepare(benchmark::State &state, uint32_t memory_bytes,
   state.counters["code_bytes"] = code_words * rv32::kInstructionBytes;
 }
 
+// Bound the batch by the recycling pool: larger batches would turn the warm
+// setup row into allocation misses and teardown into overflow/free work.
+constexpr size_t kLifecycleBatch = rv32::kMemorySlotPoolCap;
+using LifecycleMachines =
+    std::array<std::optional<rv32::ThreadedMachine>, kLifecycleBatch>;
+
+// Manual time excludes fixture work without calling Google Benchmark's costly
+// PauseTiming/ResumeTiming around each tiny operation. Report seconds per
+// machine, not per batch. Do not subtract the clock floor: unresolved timings
+// are marked by the report instead of manufacturing a small/negative cost.
+template <typename Fn>
+void
+time_lifecycle_batch(benchmark::State &state, Fn &&fn)
+{
+  benchmark::ClobberMemory();
+  const auto begin = std::chrono::steady_clock::now();
+  fn();
+  benchmark::ClobberMemory();
+  const auto end = std::chrono::steady_clock::now();
+  state.SetIterationTime(std::chrono::duration<double>(end - begin).count() /
+                         static_cast<double>(kLifecycleBatch));
+}
+
+void
+bm_lifecycle_timer_floor(benchmark::State &state)
+{
+  LifecycleMachines machines;
+  for (auto _ : state) {
+    time_lifecycle_batch(state, [&] {
+      for (auto &machine : machines) {
+        benchmark::DoNotOptimize(&machine);
+        benchmark::ClobberMemory();
+      }
+    });
+  }
+  state.counters["batch_size"] = kLifecycleBatch;
+}
+
 void
 bm_lifecycle_machine(benchmark::State &state, uint32_t memory_bytes,
-                      LifecyclePhase phase, bool pool_miss)
+                      LifecyclePhase phase, bool pool_miss,
+                      bool batched_roundtrip)
 {
   const auto contract = lifecycle_contract(memory_bytes, 0, 64);
   auto prepared = Rv32Contract::create(contract.rv32_contract(),
@@ -1733,43 +1773,65 @@ bm_lifecycle_machine(benchmark::State &state, uint32_t memory_bytes,
     state.SkipWithError("lifecycle preparation failed");
     return;
   }
-  // Warm and validate the same image before timing. No synthetic memcpy loop.
-  {
-    auto machine = prepared->instantiate(kPlentyOfGas);
-    if (machine.memory().size() != memory_bytes ||
-        !std::ranges::all_of(machine.memory(), [](uint8_t b) { return b == 0; })) {
+  LifecycleMachines machines;
+  auto setup = [&] {
+    for (auto &machine : machines) {
+      machine.emplace(prepared->instantiate(kPlentyOfGas));
+      machine->seed_method_id(1);
+      benchmark::DoNotOptimize(machine->memory().data());
+      benchmark::ClobberMemory();
+    }
+  };
+  auto teardown = [&] {
+    for (auto &machine : machines) {
+      machine.reset();
+      benchmark::ClobberMemory();
+    }
+  };
+  // Warm all batch slots, not just one. These are the production constructors
+  // and destructors; no synthetic memcpy loop or mocked recycling pool.
+  setup();
+  for (const auto &machine : machines) {
+    if (machine->memory().size() != memory_bytes ||
+        !std::ranges::all_of(machine->memory(), [](uint8_t b) { return b == 0; })) {
       state.SkipWithError("lifecycle memory initialization failed");
       return;
     }
   }
+  teardown();
   for (auto _ : state) {
-    std::optional<rv32::ThreadedMachine> machine;
+    if (phase == LifecyclePhase::kRoundtrip && !batched_roundtrip) {
+      // Keep the original uninterrupted one-machine row as an independent
+      // check. It uses Google Benchmark's ordinary wall-clock timing.
+      auto machine = prepared->instantiate(kPlentyOfGas);
+      machine.seed_method_id(1);
+      benchmark::DoNotOptimize(machine.memory().data());
+      benchmark::ClobberMemory();
+      continue;
+    }
     if (pool_miss) {
-      state.PauseTiming();
-      // Explicit allocator-miss regime, not a claim about cold CPU caches.
-      // Clearing the test thread's free list is excluded from the measurement.
+      // Outside manual time. This means allocator misses, not cold CPU caches.
       rv32::memory_slot_pool() = {};
-      state.ResumeTiming();
     }
     if (phase == LifecyclePhase::kTeardown) {
-      state.PauseTiming();
+      setup();
+      time_lifecycle_batch(state, teardown);
     }
-    machine.emplace(prepared->instantiate(kPlentyOfGas));
-    machine->seed_method_id(1);
-    benchmark::DoNotOptimize(machine->memory().data());
-    benchmark::ClobberMemory();
-    if (phase == LifecyclePhase::kTeardown) {
-      state.ResumeTiming();
+    else if (phase == LifecyclePhase::kSetup) {
+      time_lifecycle_batch(state, setup);
+      teardown();
     }
-    if (phase == LifecyclePhase::kSetup) {
-      state.PauseTiming();
-    }
-    machine.reset();
-    if (phase == LifecyclePhase::kSetup) {
-      state.ResumeTiming();
+    else {
+      time_lifecycle_batch(state, [&] {
+        setup();
+        teardown();
+      });
     }
   }
   state.counters["memory_bytes"] = memory_bytes;
+  state.counters["batch_size"] =
+      phase == LifecyclePhase::kRoundtrip && !batched_roundtrip ? 1
+                                                              : kLifecycleBatch;
 }
 
 void
@@ -1853,18 +1915,29 @@ bm_lifecycle_invoke(benchmark::State &state, uint32_t memory_bytes,
 void
 register_lifecycle_benchmarks()
 {
+  // Fixed samples bound untimed setup work: adaptive calibration against a
+  // few-ns teardown would otherwise spend minutes constructing machines.
+  benchmark::RegisterBenchmark("lifecycle/TimerFloor",
+                               bm_lifecycle_timer_floor)->UseManualTime()->Iterations(100'000);
   for (uint32_t bytes : {4096U, 16384U, rv32::kDefaultMaxMemoryBytes}) {
     for (auto [name, phase] : {
              std::pair{"Setup", LifecyclePhase::kSetup},
-             std::pair{"Teardown", LifecyclePhase::kTeardown},
-             std::pair{"SetupTeardown", LifecyclePhase::kRoundtrip}}) {
+             std::pair{"Teardown", LifecyclePhase::kTeardown}}) {
       benchmark::RegisterBenchmark(std::format("lifecycle/{}/{}", name, bytes),
-                                   bm_lifecycle_machine, bytes, phase, false);
+                                   bm_lifecycle_machine, bytes, phase, false,
+                                   false)->UseManualTime()->Iterations(100'000);
     }
     benchmark::RegisterBenchmark(
+        std::format("lifecycle/SetupTeardown/{}", bytes),
+        bm_lifecycle_machine, bytes, LifecyclePhase::kRoundtrip, false, false);
+    benchmark::RegisterBenchmark(
+        std::format("lifecycle/SetupTeardownBatch/{}", bytes),
+        bm_lifecycle_machine, bytes, LifecyclePhase::kRoundtrip, false, true)
+        ->UseManualTime()->Iterations(100'000);
+    benchmark::RegisterBenchmark(
         std::format("lifecycle/SetupPoolMiss/{}", bytes),
-                                 bm_lifecycle_machine, bytes,
-                                 LifecyclePhase::kSetup, true);
+        bm_lifecycle_machine, bytes, LifecyclePhase::kSetup, true, false)
+        ->UseManualTime()->Iterations(100'000);
     benchmark::RegisterBenchmark(
         std::format("lifecycle/InvokeReturn/{}/0", bytes),
                                  bm_lifecycle_invoke, bytes, 0,
@@ -2131,6 +2204,7 @@ add_provenance_context()
   // bench moved off the light server, which is what lets the report decline to
   // label those rather than claim this backend for them.
   benchmark::AddCustomContext("syscall_bench_item_backend", "hog_db");
+  benchmark::AddCustomContext("lifecycle_timing_version", "2");
   benchmark::AddCustomContext("engine_fingerprint",
                               provenance.engine_fingerprint);
   benchmark::AddCustomContext("engine_source_digest",

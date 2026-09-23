@@ -30,13 +30,16 @@ scripts/rv32_syscall_bench.sh build/release --repetitions 1 \
 | `PrepareCode/N` | Same preparation lifecycle, varying code bytes at 4 KiB memory; padded instructions are valid but never executed. |
 | `Setup/N` | Instantiate the production machine from a prepared contract and seed its method ID; destruction excluded. |
 | `Teardown/N` | Destroy the machine and recycle its memory slot; construction excluded. |
-| `SetupTeardown/N` | Both phases together, with no per-iteration timer pauses. |
+| `SetupTeardown/N` | Both phases for one machine, using uninterrupted ordinary timing. |
+| `SetupTeardownBatch/N` | Both phases for the same batch as the isolated measurements, using manual timing. |
+| `TimerFloor` | Empty batch traversal with the same clock and compiler barriers; diagnostic only. |
 | `SetupPoolMiss/N` | Setup after explicitly emptying the thread-local free list outside timing; measures allocation misses, not cold CPU caches. |
 | `InvokeReturn/N/P` | Copy P calldata bytes into a fresh frame, allocate the runtime, invoke, destroy it, and finish the frame. Nonzero P runs real GetCalldata and Return syscalls, copying through guest memory. |
 | `InvokeTrap/N` | Same invocation lifecycle with a deterministic guest trap. |
 | `InvokeOutOfGas/N` | Same lifecycle with zero gas, failing at the first instruction run. |
 
-N is bytes. Memory sweeps include 4 KiB, 16 KiB and the VM default maximum (currently 64 KiB). Ordinary setup, teardown and invocation rows use a warmed memory pool;
+N is bytes. Memory sweeps include 4 KiB, 16 KiB and the VM default maximum
+(currently 64 KiB). Ordinary setup, teardown and invocation rows use a warmed memory pool;
 only `SetupPoolMiss` explicitly empties it. Teardown measures return to a
 non-full pool, not the overflow/free path. Payload sweeps use deterministic,
 nonzero calldata and verify the returned bytes before timing. Each timed
@@ -55,6 +58,32 @@ lookup, the outer Invoke syscall's argument parsing, transaction validation,
 DB commit and RCQ/storage operations. They measure runtime lifecycle plus frame
 and payload handling, not whole-transaction latency. Calldata entry copying is
 performed by the Invocation value copy; the outer Invoke syscall is not timed.
-Tiny isolated teardown timings are particularly sensitive to timer overhead;
-use the uninterrupted SetupTeardown and Invoke rows as the primary costs, and
-repeat full runs on bench hardware before adopting prices.
+## Timing the isolated phases
+
+The first run exposed pause/resume overhead: 4 KiB teardown alone appeared to
+cost 710 ns while uninterrupted setup plus teardown took 65 ns. Those old
+isolated rows must not be used for pricing.
+
+Timing version 2 replaces per-operation PauseTiming/ResumeTiming with
+steady-clock manual timing around a batch of eight machines (the memory-slot
+pool capacity). All eight slots are warmed before sampling. Limiting the batch
+to the pool capacity keeps setup on the reuse path and teardown on the recycle
+path; a larger batch would benchmark allocator misses and frees instead.
+Each repetition takes 100,000 batches (800,000 operations), bounding untimed
+work: calibrating teardown to half a second of manual time could otherwise
+spend minutes constructing machines. Preparation and cleanup run outside the
+explicit clock interval. Timings are
+normalized per machine before SetIterationTime, so JSON real_time is already
+ns/machine. CPU time includes untimed work and must not be used for these rows.
+
+Use SetupTeardownBatch when comparing isolated phases: its simultaneously live
+machines and memory working set match theirs. The one-machine SetupTeardown
+row remains an independent ordinary-timer measurement, but its hotter memory
+working set can be faster than the batch, especially at 64 KiB per machine.
+
+The report rejects old pause/resume data and requires TimerFloor alongside
+isolated rows. It labels measurements below ten times the floor `unresolved`
+and withholds a gas estimate. The floor is never subtracted. The displayed
+unresolved time includes overhead and is not an isolated operation's price.
+Keep TimerFloor in filters (the default `^lifecycle/` includes it). Repeat full
+runs on bench hardware before adopting prices.
