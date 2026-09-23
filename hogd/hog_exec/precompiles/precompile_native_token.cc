@@ -158,7 +158,11 @@ allowance_key(NativeSyscallContext &ctx, ContractAddress owner,
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
+    // kSHA256 documents no error codes, so this is a host fault rather than
+    // anything the caller did. Unlike get_msg_sender above, whose
+    // kSyscallErrorCodeIsRootTransaction is reachable and is the contract's.
+    error("Unrecoverable: kSHA256 returned {}", x23::show(*r));
+    co_return InvokeError{InvokeErrorCode::Unrecoverable};
   }
   co_return key;
 }
