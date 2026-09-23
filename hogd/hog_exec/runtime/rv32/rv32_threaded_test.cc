@@ -607,7 +607,8 @@ TEST(Rv32Threaded, jalBadTargetTrapsAfterGas)
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadPc);
-  EXPECT_EQ(machine.gas_remaining(), 99U); // jal gas charged before the trap
+  // JAL gas is charged before the trap.
+  EXPECT_EQ(machine.gas_remaining(), 100 - kDirectJumpGas);
 }
 
 TEST(Rv32Threaded, branchBadTargetTakenTrapsBadPc)
@@ -1599,7 +1600,8 @@ TEST(Rv32ThreadedTrapGas, misalignedControlFlowTargetsTrapLikeCanonical)
   {
     const std::vector<uint32_t> words = {j_type(0, 6), addi(1, 0, 1)};
     expect_trap_gas_parity(words, Trap::kBadPc,
-                           /*expected_gas_remaining=*/99, /*check_pc=*/false);
+                           /*expected_gas_remaining=*/100 - kDirectJumpGas,
+                           /*check_pc=*/false);
   }
   {
     const std::vector<uint32_t> words = {branch(0, 0, 0, 6), addi(1, 0, 1)};
@@ -1629,7 +1631,9 @@ TEST(Rv32ThreadedTrapGas, jumpToExactCodeEndTrapsLikeCanonical)
   {
     const std::vector<uint32_t> words = {addi(1, 0, 1), j_type(0, 4)};
     expect_trap_gas_parity(words, Trap::kBadPc,
-                           /*expected_gas_remaining=*/98, /*check_pc=*/false);
+                           /*expected_gas_remaining=*/100 -
+                               (kBaseInstructionGas + kDirectJumpGas),
+                           /*check_pc=*/false);
   }
   {
     const std::vector<uint32_t> words = {addi(1, 0, 8), jalr(0, 1, 0)};
@@ -2376,13 +2380,15 @@ TEST(Rv32ThreadedTrapGas, jalOutOfRangeGasParity)
 {
   using test_program::j_type;
   // Out-of-range jal bakes trap_at<kBadPc> as the slot's own handler; jal is
-  // a barrier so its run charge is exact. Charged: addi, jal = 2 -> 98.
+  // a barrier so its run charge is exact. Charged: addi, jal = 4 -> 96.
   const std::vector<uint32_t> words = {
       addi(5, 0, 1),   // x5 = 1
       j_type(1, 4096), // jal x1, +4096 -> target OOB
   };
   expect_trap_gas_parity(words, Trap::kBadPc,
-                         /*expected_gas_remaining=*/98, /*check_pc=*/false);
+                         /*expected_gas_remaining=*/100 -
+                             (kBaseInstructionGas + kDirectJumpGas),
+                         /*check_pc=*/false);
 }
 
 TEST(Rv32ThreadedTrapGas, fallOffEndGasParity)

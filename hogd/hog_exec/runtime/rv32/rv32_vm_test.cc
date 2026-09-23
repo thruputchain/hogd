@@ -1604,7 +1604,7 @@ TEST(Rv32ExecutionTest, bad_jump_targets_trap_before_state_mutation)
     EXPECT_EQ(machine.trap(), Trap::kBadPc);
     EXPECT_EQ(machine.pc(), 0U);
     EXPECT_EQ(machine.reg(1), 0U);
-    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_EQ(machine.gas_remaining(), 100 - kDirectJumpGas);
   }
   {
     const auto program = make_program({jalr(1, 2, 0), addi(3, 0, 1)});
@@ -1958,7 +1958,7 @@ TEST(Rv32GasTest, repeatedEcallsStopBeforeAnUnfundedHostCall)
   constexpr uint64_t kCompletedCalls = 2;
   constexpr uint64_t kGasLimit =
       kCompletedCalls *
-      (kBaseInstructionGas + kHostGasPerCall + kBaseInstructionGas);
+      (kBaseInstructionGas + kHostGasPerCall + kDirectJumpGas);
   const auto words = std::array{0x00000073U, j_type(0, -4)};
 
   const auto program = make_program(words);
