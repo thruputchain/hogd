@@ -3421,6 +3421,12 @@ TEST(Mempool, FreshSigningAdmittedBeforeAuthCallbackSurvivesIt)
                                                                   key_changes));
       },
       [] {})();
+  // Let the callback through however the test exits: teardown waits on it,
+  // so a failed assertion before the release below would hang, not report.
+  x23::Defer release_callback([&] {
+    release.store(true);
+    release.broadcast(&default_threadpool());
+  });
 
   // Commit the threshold change. The commit path completes, and the
   // scheduler's current block advances, before the auth callback for the
