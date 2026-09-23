@@ -294,18 +294,23 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
 {
   auto pending = std::make_shared<SubmissionAuth>();
   for (size_t i = 0; i < txs.size(); i++) {
-    const auto &account = txs[i].tx.invocation.invoked_address;
+    const ContractAddress &account = txs[i].tx.invocation.invoked_address;
     pending->accounts[account].push_back(i);
     pending->dirty.insert(account);
   }
+
   AuthErrorCodeBatch results;
   results.resize(txs.size());
+
   co_await commit_guard(commit_lock_);
+
   std::erase_if(submission_auth_,
-                [](const auto &entry) { return entry.expired(); });
+                [](const std::weak_ptr<SubmissionAuth> &entry) {
+                  return entry.expired();
+                });
   submission_auth_.push_back(pending);
   BlockHeight verify_height = scheduler_->current_block();
-  for (;;) {
+  while (true) {
     // A commit can finish before its auth callback. Let that callback mark
     // changed accounts before deciding which results are still valid.
     const BlockHeight height = scheduler_->current_block();
@@ -327,13 +332,14 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     if (pending->dirty.empty()) {
       co_return results;
     }
-    auto dirty = std::exchange(pending->dirty, {});
+    std::unordered_set<ContractAddress, SipHash24Hasher> dirty =
+        std::exchange(pending->dirty, {});
     verify_height = height;
     commit_guard.reset();
 
     SignedTransactionBatch retry_txs;
     x23::Vec<size_t> indices;
-    for (const auto &account : dirty) {
+    for (const ContractAddress &account : dirty) {
       for (size_t i : pending->accounts.at(account)) {
         retry_txs.push_back(txs[i]);
         indices.push_back(i);
@@ -342,10 +348,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     const AuthErrorCodeBatch verified =
         co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                                retry_txs);
-    if (verified.size() != indices.size()) {
-      throw std::runtime_error(
-          "authentication returned the wrong number of outcomes");
-    }
+    CHECK_EQ(verified.size(), indices.size());
     for (size_t i = 0; i < indices.size(); i++) {
       results[indices[i]] = verified[i];
     }
@@ -3272,9 +3275,11 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   co_await cg(commit_lock_);
 
   std::erase_if(submission_auth_,
-                [](const auto &entry) { return entry.expired(); });
-  for (const auto &entry : submission_auth_) {
-    if (auto pending = entry.lock()) {
+                [](const std::weak_ptr<SubmissionAuth> &entry) {
+                  return entry.expired();
+                });
+  for (const std::weak_ptr<SubmissionAuth> &entry : submission_auth_) {
+    if (std::shared_ptr<SubmissionAuth> pending = entry.lock()) {
       for (const KeyChange &change : key_changes) {
         if (pending->accounts.contains(change.address)) {
           pending->dirty.insert(change.address);
