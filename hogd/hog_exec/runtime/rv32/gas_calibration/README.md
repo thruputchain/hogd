@@ -544,8 +544,17 @@ get right, is where the estimator is at its strongest.
   linked table to changing landing pads. Each visit performs two dependent
   loads; a landing-pad JAL returns to the dispatcher. These cases also sweep
   larger code/table footprints. Their `ns_upper_bound` includes ALL of that
-  work per JALR, explicitly labelled `target_chase`: it is a conservative bound,
-  not an isolated JALR cost obtained by subtracting guessed load overhead.
+  work per dispatch, explicitly labelled `target_chase`. The reporter excludes
+  these rows from individual opcode prices and checks the sequence against
+  `2 * gas(LW) + gas(JALR) + gas(JAL)`, using the run's median saturated
+  normalizer. Timing includes loop/setup overhead while the budget omits its
+  gas, making this check conservative. No helper timing is subtracted.
+  Normal reporting and `--predict` show current gas; `--schedule` additionally
+  checks proposed prices. `--predict`, `--check`, and `--emit-reference` reject
+  a sequence over budget (allowing the existing 5% measurement margin), invalid
+  measurements, or missing participating opcode measurements. References retain
+  sequence coverage with `guard_sequence` entries. Existing JSON is supported;
+  the benchmark need not be rerun to correct this attribution.
   All jump rows include loop setup/control in their absolute bounds and are
   excluded from the median gas-unit normalizer, so adding layout cases cannot
   redefine a gas. Timing failures or incorrect gas totals abort the run.

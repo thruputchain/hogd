@@ -1073,8 +1073,8 @@ run_jump_sweep(JumpSpec spec, const Options &options)
   result.scheduled_gas = scheduled_gas_for(spec.target);
   result.saturated_note =
       spec.context == OperandContext::kTargetChase
-          ? "absolute bound per JALR, INCLUDING two dependent loads per "
-            "dispatch, landing-pad JALs and loop setup; not an isolated cost"
+          ? "sequence validation: 2 LW + JALR + JAL per dispatch, including "
+            "loop/setup overhead; excluded from individual opcode pricing"
           : "absolute jump-chain bound, including loop setup/control; "
             "excluded from normalization";
   HaltHost host;
@@ -1397,8 +1397,15 @@ main_impl(int argc, char **argv)
       std::println(stderr, "jump {} {}", op_name(spec.target),
                    jump_context_name(spec));
       sweeps.push_back(run_jump_sweep(spec, options));
-      std::println(stderr, "  {:.4f} ns/jump (absolute upper bound)",
-                   sweeps.back().ns_upper_bound);
+      if (spec.context == OperandContext::kTargetChase) {
+        std::println(stderr, "  {:.4f} ns/sequence (2 LW + JALR + JAL; "
+                             "includes loop/setup overhead)",
+                     sweeps.back().ns_upper_bound);
+      }
+      else {
+        std::println(stderr, "  {:.4f} ns/jump (absolute upper bound)",
+                     sweeps.back().ns_upper_bound);
+      }
     }
   }
 
