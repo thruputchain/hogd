@@ -69,6 +69,7 @@
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
@@ -1826,6 +1827,11 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
   BootstrapAccountArtifact second =
       build_local_bootstrap_account_artifact(config);
 
+  const NetworkConfigParams params(
+      first.genesis_configuration.network_config.v0());
+  EXPECT_EQ(params.max_rv32_code_bytes, 256 * 1024U);
+  EXPECT_EQ(params.max_contract_size_bytes, 512 * 1024U);
+
   ASSERT_EQ(first.accounts.size(), 4UL);
   ASSERT_EQ(first.initialization_txs.size(), 1UL);
   ASSERT_EQ(second.accounts.size(), first.accounts.size());
@@ -3333,7 +3339,7 @@ TEST(HogDevnode, DataDirRejectsCorruptMetadataOnRecovery)
       "hog-devnode data metadata JSON parse failed");
 }
 
-TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
+TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--dev-accounts",
@@ -3360,8 +3366,22 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
-    auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
-    ASSERT_TRUE(fibonacci_contract);
+    // Exercise the stock code cap through real devnode admission and deployment
+    // without overrides. Header + code + memory also exceeds the old blob cap.
+    std::vector<uint32_t> words(256 * 1024 / rv32::kInstructionBytes,
+                                rv32::test_program::addi(0, 0, 0));
+    // Return an empty buffer, with the rest of the code padded by valid NOPs.
+    words[0] = rv32::test_program::addi(10, 0, 6); // Return syscall
+    words[1] = rv32::test_program::addi(11, 0, 0); // buffer
+    words[2] = rv32::test_program::addi(12, 0, 0); // length
+    words[3] = 0x00000073U;                        // ecall
+    const std::vector<uint8_t> initial_memory(64 * 1024, 0);
+    const auto bytes =
+        rv32::test_artifact::build_artifact(words, initial_memory);
+    Contract large_contract(ContractType::kRv32);
+    large_contract.rv32_contract().data.append_range(bytes);
+    ASSERT_EQ(large_contract.rv32_contract().data.size(),
+              320 * 1024U + rv32::kArtifactHeaderBytes);
 
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
@@ -3373,7 +3393,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     EXPECT_EQ(hex_string(wallet_address),
               readiness.bootstrap_accounts[1].address);
     const SHA256Hash deploy_nonce = make_nonce(7);
-    const SHA256Hash contract_hash = sha256(*fibonacci_contract);
+    const SHA256Hash contract_hash = sha256(large_contract);
 
     Transaction tx{
         .invocation =
@@ -3388,7 +3408,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 7},
-        .contracts_to_deploy = {*fibonacci_contract},
+        .contracts_to_deploy = {large_contract},
         .auth_claim = source_address_auth_claim(),
     };
 
@@ -3432,6 +3452,24 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
     EXPECT_EQ(result.info().events.tx_hash, tx_hash);
+    const ContractAddress deployed_address = sha256(
+        ContractDeploymentHashPreimage{.deployer_address = wallet_address,
+                                       .nonce = deploy_nonce,
+                                       .contract_hash = contract_hash});
+    auto view = create_client<ViewGateway1>(readiness.view_gateway.host,
+                                            readiness.view_gateway.port,
+                                            /*retry=*/true)()
+                    .value();
+    ASSERT_EQ(view.viewgateway_intro(version::kHogdProtocol())(),
+              ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+    const auto output = view.viewgateway_view(TransactionViewQuery{
+        .invocation = Invocation{.invoked_address = deployed_address,
+                                 .gas_limit = GasAmount{10'000'000}},
+        .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+    })();
+    ASSERT_EQ(output.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    EXPECT_EQ(output.payload().output.status_code(),
+              InvocationFrameStatusCode::Return);
   }
 
   expect_clean_exit(process);

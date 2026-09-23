@@ -14,6 +14,12 @@ protocol names no value for any parameter, so whoever creates a chain chooses:
 and `stock_network_config()` holds the values this repository's own dev and
 test chains use.
 
+Fresh `hog-devnode` chains (including those started by `groundhog node`) use
+256 KiB for RV32 code and 512 KiB for the complete contract artifact, including
+its header and initial memory, without network-config overrides. Existing
+chains keep their genesis configuration; omitted parameters still resolve to
+the frozen protocol defaults of 64 KiB code and 256 KiB total contract size.
+
 From there it rides the `DbTip`, exactly as `default_wallet` does:
 
 - `dbsched_load_genesis_configuration` installs it via

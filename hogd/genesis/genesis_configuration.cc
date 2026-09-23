@@ -126,6 +126,10 @@ load_stock_genesis_root_contract()
 
 // max_new_contracts_per_tx for this repository's dev and test chains.
 constexpr uint32_t kStockMaxNewContractsPerTx = 4;
+// Stock genesis choices; the protocol's omitted-parameter defaults are frozen.
+constexpr uint32_t kStockMaxRv32CodeBytes = 256_KiB;
+// Leave room for the artifact header and initial memory as well as code.
+constexpr uint32_t kStockMaxContractSizeBytes = 512_KiB;
 
 NetworkConfig
 stock_network_config()
@@ -151,7 +155,7 @@ stock_network_config()
                                      kDefaultMaxBytestringLen));
   NetworkConfigParams::set_param(
       config, ConfigParamID::kConfigParamMaxContractSizeBytes,
-      static_cast<uint32_t>(kDefaultMaxContractSizeBytes));
+      kStockMaxContractSizeBytes);
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxSavepointDepth,
                                  static_cast<uint32_t>(kMaxSavepointDepth));
@@ -163,8 +167,7 @@ stock_network_config()
                                  static_cast<uint32_t>(kAuthTokenMaxDepth));
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxRv32CodeBytes,
-                                 static_cast<uint32_t>(
-                                     kDefaultMaxRv32CodeBytes));
+                                 kStockMaxRv32CodeBytes);
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxRv32MemoryBytes,
                                  static_cast<uint32_t>(
