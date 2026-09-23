@@ -220,6 +220,62 @@ def op_width(names):
     return max(8, max((len(str(name)) for name in names), default=0) + 2)
 
 
+def is_jump_sequence(cell):
+    # Recognize existing benchmark JSON too: no new timing run is needed.
+    return (cell.get("jump_kernel") and cell.get("op") == "JALR"
+            and cell.get("context", "").startswith("target_chase/"))
+
+
+JUMP_SEQUENCE_OPS = {"LW": 2, "JALR": 1, "JAL": 1}
+
+
+def jump_sequence_rows(data, gas_for_op=None, unit=None):
+    """Compare the whole timed sequence with its core instructions' gas.
+
+    Timing also includes sentinel/loop/setup overhead. Omitting their gas
+    makes this check conservative; no guessed timing is subtracted.
+    """
+    if unit is None:
+        unit = baseline_ns(data)
+    if gas_for_op is None:
+        gas_for_op = {c["op"]: c["scheduled_gas"] for c in usable_cells(data)}
+    rows = []
+    for cell in data.get("opcodes", []):
+        if not is_jump_sequence(cell):
+            continue
+        name = context_label(cell)
+        missing = set(JUMP_SEQUENCE_OPS) - gas_for_op.keys()
+        ns = cell.get("ns_upper_bound", 0.0)
+        error = None
+        if not cell.get("usable") or not math.isfinite(ns) or ns <= 0:
+            error = "invalid sequence measurement"
+        elif missing:
+            error = "unmeasured sequence opcodes: " + ", ".join(sorted(missing))
+        elif not math.isfinite(unit) or unit <= 0:
+            error = "invalid gas unit"
+        gas = sum(gas_for_op.get(op, 0) * count
+                  for op, count in JUMP_SEQUENCE_OPS.items())
+        budget = gas * unit
+        if not error and ns > budget * (1 + BOUND_VIOLATION_MARGIN):
+            error = f"sequence exceeds gas budget ({ns:.4f} > {budget:.4f} ns)"
+        rows.append(dict(name=name, ns=ns, gas=gas, budget=budget, error=error))
+    return rows
+
+
+def print_jump_sequences(data, gas_for_op=None, unit=None):
+    rows = jump_sequence_rows(data, gas_for_op, unit)
+    if rows:
+        schedule_name = "current" if gas_for_op is None else "proposed"
+        print(f"\nChanging-target sequences ({schedule_name} gas): 2 LW + JALR + JAL per dispatch")
+        print("Timing includes loop/setup overhead; budget counts core instructions only.")
+        print("Excluded from individual opcode prices. Budget check allows 5% scatter.")
+        print(f"{'context':<55} {'ns/sequence':>12} {'gas/sequence':>13} {'budget ns':>10}  result")
+        for row in rows:
+            print(f"{row['name']:<55} {row['ns']:12.4f} {row['gas']:13} "
+                  f"{row['budget']:10.4f}  {row['error'] or 'PASS'}")
+    return [f"{r['name']}: {r['error']}" for r in rows if r['error']]
+
+
 def usable_cells(data):
     """Per-opcode cells only.
 
@@ -228,7 +284,8 @@ def usable_cells(data):
     separately, against the bound their two opcodes imply.
     """
     return [cell for cell in data["opcodes"]
-            if cell["usable"] and not cell.get("pair")]
+            if cell["usable"] and not cell.get("pair")
+            and not is_jump_sequence(cell)]
 
 
 def pair_cells(data):
@@ -322,6 +379,11 @@ def resolved(cell):
     out "exceeding" it -- reported as a failure of the method rather than of
     the number feeding it.
     """
+    if cell.get("jump_kernel") and cell.get("ns_upper_bound", 0.0) > 0.0:
+        # Dedicated control-flow kernels measure an absolute per-jump bound,
+        # including setup/target generation. They do not fit a contrast and
+        # must not be silently replaced by the baseline for lacking a slope.
+        return True
     if cell.get("ns_saturated", 0.0) > 0.0:
         return True
     stderr = cell.get("slope_stderr_ns", 0.0)
@@ -460,6 +522,8 @@ def print_table(data):
     print(header)
     print("-" * len(header))
     for cell in data["opcodes"]:
+        if is_jump_sequence(cell):
+            continue
         if not cell["usable"]:
             print(f"{cell['op']:<{ow}}{context_label(cell):<26}{'--':>10}"
                   f"{'--':>9}{'--':>9}{'--':>8}{'--':>7}"
@@ -487,6 +551,8 @@ def print_table(data):
             f"{cell.get('slope_stderr_ns', 0.0):>8.4f}{sigmas(cell):>7.1f}"
             f"{cell['scheduled_gas']:>5}  {verdict}"
         )
+
+    print_jump_sequences(data)
 
 
 def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
@@ -620,12 +686,16 @@ def print_schedule(runs, resolution=DEFAULT_RESOLUTION):
             print_repricing(run, schedule)
             break
     print()
+    sequence_failures = []
+    for run in runs:
+        sequence_failures.extend(print_jump_sequences(
+            run, {op: entry["proposed_gas"] for op, entry in schedule.items()}, unit))
     print("This is a proposal, not a patch. Changing any cost in")
     print("program.h's kInstructionGasSchedule is a coordinated gas-schedule")
     print("update: it moves rv32::kGasScheduleDigest, so the pinned digest in")
     print("artifact.h and every committed RV32 artifact must be regenerated in")
     print("the same change.")
-    return 0
+    return 1 if sequence_failures else 0
 
 
 def price_workload(workload, gas_for_op):
@@ -843,7 +913,8 @@ REQUIRED_WORKLOADS = frozenset({
 
 
 def workload_failures(data):
-    failures = []
+    failures = [f"{r['name']}: {r['error']}"
+                for r in jump_sequence_rows(data) if r["error"]]
     workloads = data.get("workloads") or []
     names = [w.get("name") for w in workloads]
     missing = REQUIRED_WORKLOADS - set(names)
@@ -916,6 +987,7 @@ def print_prediction(data):
     So the honest additivity test is the unfused, independent workload:
     alu_mix. If the model is sound anywhere, it is sound there.
     """
+    print_jump_sequences(data)
     failures = workload_failures(data)
     if failures:
         for failure in failures:
@@ -1306,6 +1378,8 @@ def emit_reference(data):
             continue
         print(f"guard {cell['op']} {context_label(cell)} {ratio:.3f} "
               f"{cell['scheduled_gas']}")
+    for row in jump_sequence_rows(data):
+        print(f"guard_sequence {row['name']}")
     syscalls = syscall_rows(data)
     if syscalls:
         print()
@@ -1333,7 +1407,7 @@ def emit_reference(data):
 
 
 def load_reference(path):
-    reference = {"guards": {}, "syscall_guards": {}, "fingerprint": None,
+    reference = {"guards": {}, "sequences": set(), "syscall_guards": {}, "fingerprint": None,
                  "source_digest": None, "spread": None,
                  "tolerance": GUARD_TOLERANCE}
     with open(path) as handle:
@@ -1355,6 +1429,8 @@ def load_reference(path):
                     "ratio": float(fields[3]),
                     "gas": int(fields[4]),
                 }
+            elif fields[0] == "guard_sequence" and len(fields) == 2:
+                reference["sequences"].add(fields[1])
             elif fields[0] == "guard_syscall" and len(fields) == 3:
                 reference["syscall_guards"][fields[1]] = float(fields[2])
     return reference
@@ -1386,6 +1462,10 @@ def check_against_reference(data, reference_path):
     # when relative opcode guards and workload spread have not changed.
     workload_errors = workload_failures(data)
     failures.extend(workload_errors)
+    measured_sequences = {r["name"] for r in jump_sequence_rows(data)}
+    for name in sorted(reference["sequences"] - measured_sequences):
+        failures.append(f"{name}: sequence not measured in this run")
+    print_jump_sequences(data)
 
     fingerprint = prov.get("engine_fingerprint")
     if reference["fingerprint"] and fingerprint != reference["fingerprint"]:

@@ -15,6 +15,8 @@ B=build-release-ccache-tmp   # your Release build tree
 scripts/rv32_gas_calibrate.sh $B --out /tmp/gas.json      # full run, a few minutes
 scripts/rv32_gas_calibrate.sh $B -- --quick               # smoke run, ~40s
 scripts/rv32_gas_calibrate.sh $B -- --op=DIV --repeats=25 # one opcode, hard
+scripts/rv32_gas_calibrate.sh $B --out /tmp/jal.json -- --op=JAL --no-syscalls
+scripts/rv32_gas_calibrate.sh $B --out /tmp/jalr.json -- --op=JALR --no-syscalls
 scripts/rv32_gas_calibrate.sh $B -- --syscalls-only       # just the ecall seam
 ```
 
@@ -528,9 +530,44 @@ get right, is where the estimator is at its strongest.
 - Independent divides sit under the engine's own dispatch cost, so their
   marginal cost is small. That is a real property of this interpreter, not a
   measurement artifact, and it is why the dependent form is measured separately.
-- `JAL`, `FENCE`, `EBREAK`, and `UNIMP` are not measured by the opcode sweeps.
-  `JAL` needs a per-slot rewritten target and the rest end the run, so neither
-  fits the substitution design. `ECALL` no longer belongs on this list: it ends
+- `FENCE`, `EBREAK`, and `UNIMP` are not measured by the opcode sweeps.
+  `JAL` and `JALR` use dedicated control-flow graphs. Sequential traversal is
+  only a control; reversed and three seeded shuffled traversals measure
+  forward/backward jumps with both dense and spaced code layouts. Every node
+  executes once per traversal; untouched padding traps. JAL is measured with
+  and without a link write. JALR has fixed-base controls and a real link chain:
+  each jump reads the register written by the previous JALR, with its immediate
+  calculated from that previous instruction's PC+4. The 12-bit immediate bounds
+  that pure chain's footprint, and out-of-range shapes fail construction.
+
+  A further JALR case dispatches repeatedly from **one instruction** through a
+  linked table to changing landing pads. Each visit performs two dependent
+  loads; a landing-pad JAL returns to the dispatcher. These cases also sweep
+  larger code/table footprints. Their `ns_upper_bound` includes ALL of that
+  work per dispatch, explicitly labelled `target_chase`. The reporter excludes
+  these rows from individual opcode prices and checks the sequence against
+  `2 * gas(LW) + gas(JALR) + gas(JAL)`, using the run's median saturated
+  normalizer. Timing includes loop/setup overhead while the budget omits its
+  gas, making this check conservative. No helper timing is subtracted.
+  Normal reporting and `--predict` show current gas; `--schedule` additionally
+  checks proposed prices. `--predict`, `--check`, and `--emit-reference` reject
+  a sequence over budget (allowing the existing 5% measurement margin), invalid
+  measurements, or missing participating opcode measurements. References retain
+  sequence coverage with `guard_sequence` entries. Existing JSON is supported;
+  the benchmark need not be rerun to correct this attribution.
+  All jump rows include loop setup/control in their absolute bounds and are
+  excluded from the median gas-unit normalizer, so adding layout cases cannot
+  redefine a gas. Timing failures or incorrect gas totals abort the run.
+
+  These deterministic layouts broaden coverage; they do not prove a global
+  worst case or guarantee host branch mispredictions. The old sequential JALR
+  `chain` case had no target dependency, and timings from it or the PC+4-only
+  JAL benchmark are insufficient to settle prices. Old JALR reference guards
+  describe those removed cases; regenerate reviewed jump guards after fresh
+  bench-host runs rather than treating the old reference as current.
+  Use a full run for common normalization and price proposals; `--op=JAL` and
+  `--op=JALR` are for targeted timing. This change adopts no gas prices.
+  `ECALL` also has its own kernel: it ends
   the run too, which is why it needed a kernel shape of its own rather than a
   substitution, and it has one.
 - What `--syscalls` reports is the crossing plus a modelled host-side write,
