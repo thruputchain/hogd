@@ -244,6 +244,9 @@ public:
     return *mempool_coord_server_->impl();
   }
 
+  // Auth-facing RPC handler; tests replace its callback to control delivery.
+  MempoolAuthRpc &mempool_auth_rpc() { return *mempool_auth_server_->impl(); }
+
   sched_coord_client_t mempool_coord_client()
   {
     auto client =

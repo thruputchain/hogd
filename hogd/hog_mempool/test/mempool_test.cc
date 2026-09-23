@@ -3317,6 +3317,166 @@ TEST(Mempool, RejectedSigningIsReverifiedOnEveryResubmission)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
+// A signing admitted between a commit and its auth callback must survive the
+// callback: it is what the scheduler holds and the next nomination carries.
+// The callback is held at the auth handler and delivered by hand.
+TEST(Mempool, FreshSigningAdmittedBeforeAuthCallbackSurvivesIt)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+
+  // Outlives [server]: the callback registered below waits on it.
+  x23::CoroFutex<bool> release{false};
+
+  MempoolTestInfra server;
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  // The fixture commits genesis and the ceremony. Let their auth callbacks
+  // finish before the callback is taken over below, or the nomination that
+  // follows would wait on a delivery this test holds back.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+
+  // Key 0 carries weight 1 and key 1 carries weight 2, behind a threshold of
+  // 1. Raising the threshold to 2 revokes a signing by key 0 alone while a
+  // signing by key 1 alone still qualifies.
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key_0 =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  const Ed25519SecretKey private_key_1 =
+      create_key_pair(auth_data, /*idx=*/1, /*weight=*/2);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  SecretKey key_0(CryptographicScheme::Ed25519);
+  key_0.ed25519() = private_key_0;
+  SecretKey key_1(CryptographicScheme::Ed25519);
+  key_1.ed25519() = private_key_1;
+
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 0b11;
+  claim.source_address_claim().required_weight = 1;
+
+  // Raises the threshold to 2. Signed by key 1, so it qualifies before and
+  // after the change.
+  SignedTransactionBatch raise_txs = generate_unsigned_txs(fib_client, 1);
+  raise_txs[0].tx.invocation =
+      fib_client.make_invocation<u8"change_nonce_config">(
+          /*gas_amount=*/5'000'000'000, uint32_t{2});
+  raise_txs[0].tx.uniquifier.nonce = 99;
+  raise_txs[0].tx.auth_claim = claim;
+  SignedTransaction raise_threshold = raise_txs[0];
+  raise_threshold.signatures.push_back(
+      make_signature(key_1, raise_txs[0].tx, /*public_key_id=*/1,
+                     MempoolTestInfra::kNetworkHash));
+
+  // Two signings of one body: [stale] by key 0 alone, which the threshold of
+  // 1 admits and the threshold of 2 will not, and [fresh] by key 1 alone.
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  txs[0].tx.auth_claim = claim;
+  const Transaction &body = txs[0].tx;
+  const TransactionHash tx_hash = sha256(body);
+  SignedTransaction stale = txs[0];
+  stale.signatures.push_back(make_signature(key_0, body, /*public_key_id=*/0,
+                                            MempoolTestInfra::kNetworkHash));
+  SignedTransaction fresh = txs[0];
+  fresh.signatures.push_back(make_signature(key_1, body, /*public_key_id=*/1,
+                                            MempoolTestInfra::kNetworkHash));
+  ASSERT_EQ(sha256(fresh.tx), tx_hash);
+  ASSERT_NE(sha256(fresh), sha256(stale));
+
+  // Nominate the threshold change on its own, then admit [stale] against the
+  // threshold still in force. It waits on the runqueue.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{raise_threshold})())();
+  ASSERT_EQ(scheduler->size(), 1UL);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent = get_tip.db_tip();
+  const BlockHeight committed_height =
+      parent.value.proposal_header.block_height + 1;
+  SchedulerProposalResult res_nominate = propose_block(server, parent);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  ASSERT_EQ(scheduler->size(), 0UL);
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{stale})())();
+  ASSERT_EQ(scheduler->size(), 1UL);
+  ASSERT_EQ(scheduler->tx_cache_size(), 2UL);
+
+  // Take over the auth callback: hold every delivery until [release] is set,
+  // then forward it to the coordinator exactly as its own registration does.
+  MempoolAuthRpc &auth_rpc = server.mempool_auth_rpc();
+  auth_rpc.unregister_callback()();
+  auth_rpc.register_callback(
+      [&](BlockHeight height, KeyChangeBatch key_changes) -> x23::Async<void> {
+        while (!release.load()) {
+          co_await release.wait(false);
+        }
+        co_await server.mempool_coord_rpc().auth_data_changed(height,
+                                                              std::move(
+                                                                  key_changes));
+      },
+      [] {})();
+
+  // Commit the threshold change. The commit path completes, and the
+  // scheduler's current block advances, before the auth callback for the
+  // height can run; with the callback held, the auth height stays behind.
+  ASSERT_EQ(commit_block(server, parent, res_nominate.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  ASSERT_EQ(scheduler->current_block(), committed_height);
+  ASSERT_EQ(server.mempool_coord_rpc().auth_data_height(),
+            committed_height - 1);
+  ASSERT_EQ(scheduler->size(), 1UL);
+  ASSERT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  // In the window: the same body signed to meet the new threshold. The auth
+  // server has already published the new height, so the signing is verified
+  // against the raised threshold, and the gateway reports it admitted.
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(SignedTransactionBatch{fresh})())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  ASSERT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  ASSERT_EQ(scheduler->size(), 1UL);
+  ASSERT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  // Deliver the callback. It re-verifies what the account has queued and
+  // evicts any signing the raised threshold no longer admits.
+  release.store(true);
+  release.broadcast(&default_threadpool());
+  server.mempool_coord_rpc().wait_for_block_commit(committed_height)();
+
+  // The admitted signing is what survives. Had the scheduler kept [stale] in
+  // its place, the callback would have left it with nothing.
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  const std::shared_ptr<const SignedTransaction> cached =
+      scheduler->find_tx(tx_hash);
+  ASSERT_TRUE(cached);
+  EXPECT_EQ(sha256(*cached), sha256(fresh));
+  auto lookup = gateway.schedgateway_lookup_tx({tx_hash})();
+  ASSERT_EQ(lookup.size(), 1UL);
+  EXPECT_TRUE(lookup[0]);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ASSERT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            committed_height);
+  res_nominate = propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  SignedTransactionBatch nominated_txs;
+  ASSERT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
+                                  nominated_txs, kNoBatchSizeLimit)());
+  ASSERT_EQ(nominated_txs.size(), 1UL);
+  EXPECT_EQ(sha256(nominated_txs[0].tx), tx_hash);
+  EXPECT_EQ(sha256(nominated_txs[0]), sha256(fresh));
+}
+
 // A body supplied for a nomination is always authenticated, whatever this
 // node concluded about the same bytes over the gateway: dropping one
 // unexamined would keep this node from validating the block that referenced
