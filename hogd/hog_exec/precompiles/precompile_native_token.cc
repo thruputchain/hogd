@@ -143,7 +143,10 @@ allowance_key(NativeSyscallContext &ctx, ContractAddress owner,
 {
   auto data = Serializer<SerializationFormat::kTxs>::serialize(owner, spender);
   if (!data.has_value()) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
+    // Two fixed-size addresses cannot fail to serialize; if they do, the host
+    // is broken, not the contract.
+    error("Unrecoverable: could not serialize the allowance key");
+    co_return InvokeError{InvokeErrorCode::Unrecoverable};
   }
 
   SHA256Hash key{};
