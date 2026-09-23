@@ -217,8 +217,8 @@ TEST(ExecutionModeTest, ValidationRejectsAbsentBitAfterPresentObservation)
     auto first = validation.consume_queue_entry_presence_bit(addrkey, 0);
     ASSERT_TRUE(first.has_value());
     EXPECT_TRUE(first->get());
-    ASSERT_NE(validation.consume_queue_entry_observation(addrkey, 0).get(),
-              nullptr);
+    auto held = validation.consume_queue_entry_observation(addrkey, 0);
+    ASSERT_NE(held.get(), nullptr);
 
     EXPECT_FALSE(
         validation.consume_queue_entry_presence_bit(addrkey, 0).has_value())
@@ -251,8 +251,8 @@ TEST(ExecutionModeTest, ValidationAcceptsAbsentBitAtUnheldIndex)
   auto present = validation.consume_queue_entry_presence_bit(addrkey, 0);
   ASSERT_TRUE(present.has_value());
   EXPECT_TRUE(present->get());
-  ASSERT_NE(validation.consume_queue_entry_observation(addrkey, 0).get(),
-            nullptr);
+  auto held = validation.consume_queue_entry_observation(addrkey, 0);
+  ASSERT_NE(held.get(), nullptr);
 
   auto past_end = validation.consume_queue_entry_presence_bit(addrkey, 1);
   ASSERT_TRUE(past_end.has_value());
