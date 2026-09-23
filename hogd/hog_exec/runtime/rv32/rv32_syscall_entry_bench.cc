@@ -1791,7 +1791,7 @@ bm_lifecycle_machine(benchmark::State &state, uint32_t memory_bytes,
   // Warm all batch slots, not just one. These are the production constructors
   // and destructors; no synthetic memcpy loop or mocked recycling pool.
   setup();
-  for (const auto &machine : machines) {
+  for (auto &machine : machines) {
     if (machine->memory().size() != memory_bytes ||
         !std::ranges::all_of(machine->memory(), [](uint8_t b) { return b == 0; })) {
       state.SkipWithError("lifecycle memory initialization failed");
