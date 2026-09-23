@@ -2198,6 +2198,56 @@ protected:
           co_return InvokeStatus<void>{};
         });
 
+    builder.add<SerializationFormat::kTxs>(
+        71, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          // reads never convert a key, so consuming a bytestring is wrong-type
+          // input, even if another transaction converted it this block
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+              written_len);
+          if (!res.has_value() ||
+              res.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            ADD_FAILURE() << "expected InvalidSyscallInput consuming from a "
+                             "key that holds a bytestring";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+
+    builder.add<SerializationFormat::kTxs>(
+        72,
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
+          // delete, then retrocausally consume a concurrent entry: the delete
+          // is a write, so the key is no longer a bytestring for this tx
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+              written_len);
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "failed to consume element after delete";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (written_len != 4 || out != value) {
+            ADD_FAILURE() << "Got bad result from RCQ: expected " << value
+                          << " but got " << out;
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -2858,8 +2908,33 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
   // delete, then insert a new item
   invoke_method(13, uint32_t{42});
 
-  // Then retrocausally consume the item
+  // A reader that has not written the key sees the committed bytestring, not
+  // this block's conversion, and is rejected; the entry survives the block.
+  invoke_method(71);
+
+  advance_block();
+
+  // Now the queue is the committed value, and the entry is consumable.
   invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  // Verify the queue is now empty (item was consumed)
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Same block as above: tx1 deletes and inserts, tx2 deletes and consumes.
+// The delete is a write, so tx2's base is the deleted key rather than the
+// committed bytestring, and tx1's concurrent entry is in reach.
+TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestringSameBlock)
+{
+  set_bytestring(make_bytestring("test"));
+  advance_block();
+  // tx1: delete, then insert a new item
+  invoke_method(13, uint32_t{42});
+
+  // tx2, same block: delete, then retrocausally consume tx1's item
+  invoke_method(72, uint32_t{42});
 
   advance_block();
 
@@ -3357,7 +3432,12 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
   // Delete the bytestring, then insert into RCQ at the same key
   invoke_method(13, uint32_t{42});
 
-  // Another tx retrocausally consumes the entry
+  // Another tx in the same block still sees the bytestring and is rejected.
+  invoke_method(71);
+
+  advance_block();
+
+  // Next block the key is a queue with the one entry; consume it.
   invoke_method(1, uint32_t{42});
 
   advance_block();
@@ -3365,6 +3445,33 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
   // The queue should be empty: one insert, one consume, net zero.
   // If the bogus metadata leaked through, we'd see 9999+ live entries or
   // a conservation invariant failure.
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Same block as above: the delete in tx2 lets it consume tx1's entry without
+// ever reading the bogus bytes as queue metadata.
+TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnoredSameBlock)
+{
+  RetrocausalQueueMetadata bogus_meta{};
+  bogus_meta.live_entries = 9999;
+  bogus_meta.max_live_block_num = 42;
+  bogus_meta.consume_state.max_fully_consumed_block_number = 10;
+  bogus_meta.consume_state.partial_consumed_number = 5;
+
+  auto buf = x23::serialize(bogus_meta);
+  Bytestring bs(buf.begin(), buf.end());
+  set_bytestring(bs);
+  advance_block();
+
+  // tx1: delete the bytestring, then insert into RCQ at the same key
+  invoke_method(13, uint32_t{42});
+
+  // tx2, same block: delete, then retrocausally consume tx1's entry
+  invoke_method(72, uint32_t{42});
+
+  advance_block();
+
+  // One insert, one consume, net zero; bogus metadata never leaked through.
   ASSERT_TRUE(check_rcq_empty());
 }
 

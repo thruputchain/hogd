@@ -1176,7 +1176,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                 DbDiagnosticLevel::kDbDiagnosticAll);
       bool found_excl = false;
       for (auto const &c : child_trace.commit_conflict.conflicts()) {
-        if (c.code == DbConflictCode::kDbConflictExclusiveLock) {
+        if (c.code == DbConflictCode::ExclusiveLockDenied) {
           found_excl = true;
         }
       }

@@ -489,7 +489,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
     return HogDbError(HogDbCode::kOverflow);
   }
   if (sum < std::min<int128_t>(base, 0)) {
-    last_conflict_reason_ = DbConflictCode::kDbConflictBoundsExceeded;
+    last_conflict_reason_ = DbConflictCode::BoundsExceeded;
     return HogDbError(HogDbCode::kConflict);
   }
 
@@ -507,7 +507,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 {
   if (key.is_address_balance()) {
     if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
-      last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
+      last_conflict_reason_ = DbConflictCode::ExclusiveLockDenied;
       return HogDbError(HogDbCode::kConflict);
     }
     request_balance_change(key.get_address(), delta);
@@ -540,7 +540,7 @@ InvokeTX::request_auth_data(Address const &addr,
   AuthDataItem auth_data_item(std::move(base_auth_data.value()));
   for (const auto &signer : auth_data_change.auth_data_change_signers) {
     if (signer.public_key_id >= kMaxSigners) {
-      last_conflict_reason_ = DbConflictCode::kDbConflictCapacityExceeded;
+      last_conflict_reason_ = DbConflictCode::CapacityExceeded;
       return HogDbError(HogDbCode::kConflict);
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
@@ -597,7 +597,7 @@ DbConflictCode
 InvokeTX::conflict_reason_for(HogDbCode code) const
 {
   if (code == HogDbCode::kOverflow) {
-    return DbConflictCode::kDbConflictOverflow;
+    return DbConflictCode::Overflow;
   }
   CHECK(code == HogDbCode::kConflict);
   // CHECK below guarantees last_conflict_reason_ has a value.

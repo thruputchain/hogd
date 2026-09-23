@@ -26,7 +26,7 @@ NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
 
   if (after != nullptr &&
       after->deployed_contract_hash() != deployed_contract_hash_) {
-    return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
+    return ctx.conflict(DbConflictCode::ValueMismatch);
   }
 
   return ctx.cost_model->get_deployment_cost(deployed_contract_hash_);

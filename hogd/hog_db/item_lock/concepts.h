@@ -43,7 +43,7 @@ struct LockContext {
 
   // Records the conflict reason (if a sink is attached) and returns the
   // generic conflict error, so leaf sites stay one-liners:
-  //   return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
+  //   return ctx.conflict(DbConflictCode::ValueMismatch);
   HogDbError conflict(DbConflictCode code) const
   {
     if (conflict_reason != nullptr) {

@@ -394,6 +394,12 @@ private:
 
   // Requires all heads to be nullptr and the allocator to have been reset.
   // Takes the storage by value so that it is freed here if the pool is full.
+  //
+  // Every storage released here was handed out by acquire_storage(), which
+  // constructs the pool first, so the reserve() in StoragePool's constructor
+  // never runs on this path and nothing here can throw. clang-tidy cannot see
+  // that ordering through the function-local static.
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   static void release_storage(Storage storage) noexcept
   {
     StoragePool &pool = storage_pool();

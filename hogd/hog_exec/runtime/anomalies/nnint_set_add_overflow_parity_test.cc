@@ -172,12 +172,12 @@ public:
         return false;
       }
       return std::ranges::any_of(conflict.conflicts(), [](auto const &c) {
-        return c.code == DbConflictCode::kDbConflictOverflow;
+        return c.code == DbConflictCode::Overflow;
       });
     }
     else {
       return conflict.level() == DbDiagnosticLevel::kDbDiagnosticFirst &&
-             conflict.first().code == DbConflictCode::kDbConflictOverflow;
+             conflict.first().code == DbConflictCode::Overflow;
     }
   }
 
