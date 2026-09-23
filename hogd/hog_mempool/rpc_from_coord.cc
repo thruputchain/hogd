@@ -288,6 +288,72 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
                                      /*malformed_is_protocol_error=*/true);
 }
 
+x23::Async<AuthErrorCodeBatch>
+MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
+                                         x23::CoroGuard &commit_guard)
+{
+  auto pending = std::make_shared<SubmissionAuth>();
+  for (size_t i = 0; i < txs.size(); i++) {
+    const auto &account = txs[i].tx.invocation.invoked_address;
+    pending->accounts[account].push_back(i);
+    pending->dirty.insert(account);
+  }
+  AuthErrorCodeBatch results;
+  results.resize(txs.size());
+  co_await commit_guard(commit_lock_);
+  std::erase_if(submission_auth_,
+                [](const auto &entry) { return entry.expired(); });
+  submission_auth_.push_back(pending);
+  BlockHeight verify_height = scheduler_->current_block();
+  for (;;) {
+    // A commit can finish before its auth callback. Let that callback mark
+    // changed accounts before deciding which results are still valid.
+    const BlockHeight height = scheduler_->current_block();
+    if (auth_data_height_.load() < height) {
+      commit_guard.reset();
+      co_await wait_for_block_commit(height);
+      co_await commit_guard(commit_lock_);
+      continue;
+    }
+    // Auth may reject an old height even for an unchanged account. Those
+    // transactions have not actually been authenticated and also need retry.
+    if (verify_height != height) {
+      for (size_t i = 0; i < results.size(); i++) {
+        if (results[i] == AuthErrorCode::kAuthStaleBlockHeight) {
+          pending->dirty.insert(txs[i].tx.invocation.invoked_address);
+        }
+      }
+    }
+    if (pending->dirty.empty()) {
+      co_return results;
+    }
+    auto dirty = std::exchange(pending->dirty, {});
+    verify_height = height;
+    commit_guard.reset();
+
+    SignedTransactionBatch retry_txs;
+    x23::Vec<size_t> indices;
+    for (const auto &account : dirty) {
+      for (size_t i : pending->accounts.at(account)) {
+        retry_txs.push_back(txs[i]);
+        indices.push_back(i);
+      }
+    }
+    const AuthErrorCodeBatch verified =
+        co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                               retry_txs);
+    if (verified.size() != indices.size()) {
+      throw std::runtime_error(
+          "authentication returned the wrong number of outcomes");
+    }
+    for (size_t i = 0; i < indices.size(); i++) {
+      results[indices[i]] = verified[i];
+    }
+    // Changes during this RPC remain in [pending->dirty] for the next pass.
+    co_await commit_guard(commit_lock_);
+  }
+}
+
 x23::Async<SchedGatewaySubmitOutcomeBatch>
 MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                                        bool malformed_is_protocol_error)
@@ -341,20 +407,10 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                                co_await hash_transactions(*txs, *tx_hashes);
                              });
 
-  auto lock_commit_node =
-      submit_dag.async<void>("lock commit",
-                             submit_dag.after(ready_node, hash_node),
-                             [&, commit_guard]() -> x23::Async<void> {
-                               co_await (*commit_guard)(commit_lock_);
-                               co_return;
-                             });
-
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(lock_commit_node),
+      "verify transactions", submit_dag.after(ready_node, hash_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
-        const BlockHeight verify_height = scheduler_->current_block();
-        co_return co_await auth_client_->authmempool_verify_transactions(
-            verify_height, *txs);
+        co_return co_await verify_submission(*txs, *commit_guard);
       });
 
   auto prune_node = submit_dag.async<void>(
@@ -596,20 +652,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
                                co_await hash_transactions(*txs, *tx_hashes);
                              });
 
-  auto lock_commit_node =
-      submit_dag.async<void>("lock commit",
-                             submit_dag.after(decode_node, hash_node),
-                             [&, commit_guard]() -> x23::Async<void> {
-                               co_await (*commit_guard)(commit_lock_);
-                               co_return;
-                             });
-
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(lock_commit_node),
+      "verify transactions", submit_dag.after(hash_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
-        const BlockHeight verify_height = scheduler_->current_block();
-        co_return co_await auth_client_->authmempool_verify_transactions(
-            verify_height, *txs);
+        co_return co_await verify_submission(*txs, *commit_guard);
       });
 
   auto prune_node = submit_dag.async<void>(
@@ -3224,6 +3270,18 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
+
+  std::erase_if(submission_auth_,
+                [](const auto &entry) { return entry.expired(); });
+  for (const auto &entry : submission_auth_) {
+    if (auto pending = entry.lock()) {
+      for (const KeyChange &change : key_changes) {
+        if (pending->accounts.contains(change.address)) {
+          pending->dirty.insert(change.address);
+        }
+      }
+    }
+  }
 
   static TransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;

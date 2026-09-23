@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -409,6 +410,17 @@ public:
   }
 
 private:
+  struct SubmissionAuth {
+    std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
+        accounts;
+    std::unordered_set<ContractAddress, SipHash24Hasher> dirty;
+  };
+
+  // Returns with [commit_guard] held, so results stay valid through admission.
+  x23::Async<AuthErrorCodeBatch>
+  verify_submission(const SignedTransactionBatch &txs,
+                    x23::CoroGuard &commit_guard);
+
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   submit_unvetted(ParallelSignedTransactionBatch batch,
                   bool malformed_is_protocol_error);
@@ -753,11 +765,11 @@ private:
   // validated concurrently, [validated_block_cache_] could be accessed in
   // parallel without this lock.
   x23::CoroLock validated_block_cache_lock_;
-  // Ensures that a commit does not occur while txs are being verified. Txs
-  // are verified against a certain block height, so if they race with a block
-  // commit, we could add txs to the scheduler that are no longer verified as
-  // of the last committed block.
+  // Serializes commits, auth-data updates, and final submission admission.
   x23::CoroLock commit_lock_;
+  // Protected by [commit_lock_]. Weak references also handle failed or
+  // cancelled authentication without requiring asynchronous cleanup.
+  std::vector<std::weak_ptr<SubmissionAuth>> submission_auth_;
   // [num_validations_in_progress_] is a gate: values > 0 are active
   // validations, 0 means validation is open, and -1 means commit has closed
   // validation admission.
