@@ -1997,6 +1997,7 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
 bool
 committed_value_is_not_a_queue(UnmodifiedItem const &unmodified_item)
 {
+  CHECK(unmodified_item.is_loaded());
   auto type = unmodified_item.base_item().type();
   return type.has_value() && *type != ItemViewType::kRetrocausalQueue;
 }
