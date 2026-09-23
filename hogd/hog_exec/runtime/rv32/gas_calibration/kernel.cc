@@ -414,9 +414,10 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
     // executes. JAL is PC-relative: +4 works at every slot without patching.
     uint8_t rd = 0;
     if (spec.context != OperandContext::kNoLink) {
-      rd = chain ? kChainReg
-                 : static_cast<uint8_t>(kDataBankBase +
-                                        (index % kDataBankSize));
+      rd = static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
+      if (chain) {
+        rd = kChainReg;
+      }
     }
     return test_program::j_type(rd, kInstructionBytes);
   }
@@ -1143,8 +1144,10 @@ build_jump_kernel(const JumpSpec &spec)
   words.resize(words.size() + static_cast<size_t>(body_words), 0x00100073U);
   const uint32_t tail_pc =
       static_cast<uint32_t>(words.size()) * kInstructionBytes;
-  const uint32_t base =
-      chase ? spec.nodes * 8 : body_pc + (static_cast<uint32_t>(body_words) * 2);
+  uint32_t base = body_pc + (static_cast<uint32_t>(body_words) * 2);
+  if (chase) {
+    base = spec.nodes * 8;
+  }
   const uint8_t base_reg = chase || spec.context == OperandContext::kChain
                                ? kChainReg
                                : kJalrBaseReg;
