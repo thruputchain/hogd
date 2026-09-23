@@ -2637,6 +2637,202 @@ TEST(Mempool, GetTip)
             x23::serialize(db_tip.value));
 }
 
+class MempoolSubmissionAuthTest : public testing::TestWithParam<bool> {
+protected:
+  SchedGatewaySubmitOutcomeBatch submit(MempoolTestInfra &server,
+                                        const SignedTransactionBatch &txs)
+  {
+    auto batch = t_to_parallel_batch(txs)();
+    if (GetParam()) {
+      server.mempool_coord_rpc().schedulercoord_submit_vetted(ValidatorID{},
+                                                              std::move(
+                                                                  batch))();
+      return {};
+    }
+    return server.mempool_coord_rpc().submit_unvetted_with_outcomes(
+        std::move(batch))();
+  }
+
+  void commit_empty_block(MempoolTestInfra &server)
+  {
+    auto tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    auto proposed = propose_block(server, tip.db_tip());
+    ASSERT_EQ(proposed.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), proposed.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    server.mempool_coord_rpc().wait_for_block_commit(
+        tip.db_tip().value.proposal_header.block_height + 1)();
+  }
+};
+
+TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
+{
+  MempoolTestInfra server;
+  auto &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+  fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
+  auto txs = generate_unsigned_txs(client, 1);
+  std::vector<BlockHeight> heights;
+  coord.set_submission_auth_test_hook([&](BlockHeight height,
+                                          const SignedTransactionBatch &batch,
+                                          bool after_auth) {
+    if (after_auth) {
+      return;
+    }
+    heights.push_back(height);
+    EXPECT_EQ(batch.size(), 1UL);
+    EXPECT_EQ(coord.scheduler()->size(), 0);
+    if (heights.size() == 1) {
+      // Auth receives height 1 after a real commit has advanced it to 2.
+      // No account changed, so only the stale-height result causes retry.
+      commit_empty_block(server);
+    }
+  });
+  auto outcomes = submit(server, txs);
+  coord.set_submission_auth_test_hook({});
+  EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 2}));
+  EXPECT_TRUE(coord.scheduler()->is_pending(txs[0], sha256(txs[0].tx)));
+  if (!GetParam()) {
+    ASSERT_EQ(outcomes.size(), 1UL);
+    EXPECT_EQ(outcomes[0],
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  }
+}
+
+TEST_P(MempoolSubmissionAuthTest, CommitKeepsVerifiedUnchangedAccounts)
+{
+  MempoolTestInfra server;
+  auto &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+  fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
+  auto txs = generate_unsigned_txs(client, 1);
+  size_t calls = 0;
+  coord.set_submission_auth_test_hook(
+      [&](BlockHeight height, const SignedTransactionBatch &, bool after_auth) {
+        if (!after_auth) {
+          return;
+        }
+        ++calls;
+        EXPECT_EQ(height, 1);
+        EXPECT_EQ(coord.scheduler()->size(), 0);
+        if (calls == 1) {
+          // The response is already valid. An empty commit must be allowed to
+          // finish here, without forcing another auth RPC for unchanged keys.
+          commit_empty_block(server);
+        }
+      });
+  submit(server, txs);
+  coord.set_submission_auth_test_hook({});
+  EXPECT_EQ(calls, 1UL);
+  EXPECT_EQ(coord.scheduler()->current_block(), 2);
+  EXPECT_TRUE(coord.scheduler()->is_pending(txs[0], sha256(txs[0].tx)));
+}
+
+TEST_P(MempoolSubmissionAuthTest,
+       RetriesOnlyAccountsChangedAcrossMultipleHeights)
+{
+  MempoolTestInfra server;
+  auto &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+  const auto &addresses = MempoolTestInfra::kAccountAddresses;
+  fib_client_t client_a(addresses[0]);
+  fib_client_t client_b(addresses[1]);
+  fib_client_t client_c(addresses[2]);
+  auto a = generate_unsigned_txs(client_a, 2);
+  auto b = generate_unsigned_txs(client_b, 1);
+  auto c = generate_unsigned_txs(client_c, 1);
+  AddressAuthData auth_a = get_default_account();
+  AddressAuthData auth_b = get_default_account();
+  auto sign = [&](SignedTransactionBatch &batch, AddressAuthData &auth,
+                  Weight required_weight) {
+    SecretKey key(CryptographicScheme::Ed25519);
+    key.ed25519() = create_key_pair(auth, 0, 1);
+    auth.required_weight = required_weight;
+    auth.last_written_height = 1;
+    server.set_address_auth_data(batch[0].tx.invocation.invoked_address, auth);
+    for (auto &tx : batch) {
+      tx.tx.auth_claim = make_sign_claim(0);
+      tx.signatures.push_back(
+          make_signature(key, tx.tx, 0, MempoolTestInfra::kNetworkHash));
+    }
+  };
+  sign(a, auth_a, 1);
+  sign(b, auth_b, 2);
+  // Interleave accounts to check that retried results retain their indices.
+  SignedTransactionBatch txs{a[0], b[0], c[0], a[1]};
+  auto change = [&](BlockHeight height, size_t account, AddressAuthData &auth,
+                    Weight required_weight) {
+    auth.required_weight = required_weight;
+    auth.last_written_height = height;
+    server.set_address_auth_data(addresses[account], auth);
+    // Inject the commit's height and auth callback to isolate retry behavior.
+    coord.scheduler()->set_current_block(height);
+    server.register_auth_data_updates(
+        height,
+        KeyChangeBatch{{.address = addresses[account],
+                        .auth_data = x23::Ptr<AddressAuthData>(auth)}})();
+  };
+  std::vector<BlockHeight> heights;
+  std::vector<std::multiset<ContractAddress>> accounts;
+  coord.set_submission_auth_test_hook([&](BlockHeight height,
+                                          const SignedTransactionBatch &batch,
+                                          bool after_auth) {
+    if (!after_auth) {
+      return;
+    }
+    heights.push_back(height);
+    accounts.emplace_back();
+    for (const auto &tx : batch) {
+      accounts.back().insert(tx.tx.invocation.invoked_address);
+    }
+    EXPECT_EQ(coord.scheduler()->size(), 0);
+    if (heights.size() == 1) {
+      // A becomes invalid, B becomes valid, and C stays unchanged.
+      change(2, 0, auth_a, 2);
+      change(3, 0, auth_a, 3);
+      change(4, 1, auth_b, 1);
+    }
+    else if (heights.size() == 2) {
+      // A changes again while its retry is in flight. Clearing dirty
+      // accounts after the RPC would lose this update.
+      change(5, 0, auth_a, 4);
+    }
+  });
+  auto outcomes = submit(server, txs);
+  coord.set_submission_auth_test_hook({});
+  EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 4, 5}));
+  ASSERT_EQ(accounts.size(), 3UL);
+  EXPECT_EQ(accounts[0],
+            (std::multiset<ContractAddress>{addresses[0], addresses[0],
+                                            addresses[1], addresses[2]}));
+  EXPECT_EQ(accounts[1],
+            (std::multiset<ContractAddress>{addresses[0], addresses[0],
+                                            addresses[1]}));
+  EXPECT_EQ(accounts[2],
+            (std::multiset<ContractAddress>{addresses[0], addresses[0]}));
+  EXPECT_EQ(coord.scheduler()->size(), 2);
+  for (size_t i = 0; i < txs.size(); i++) {
+    const bool admitted = i == 1 || i == 2;
+    EXPECT_EQ(coord.scheduler()->is_pending(txs[i], sha256(txs[i].tx)),
+              admitted);
+    if (!GetParam()) {
+      ASSERT_EQ(outcomes.size(), txs.size());
+      EXPECT_EQ(outcomes[i],
+                admitted ? SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted
+                         : SchedGatewaySubmitOutcome::
+                               SchedGatewaySubmitAuthenticationRejected);
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(SubmissionPaths, MempoolSubmissionAuthTest,
+                         testing::Bool(),
+                         [](const testing::TestParamInfo<bool> &info) {
+                           return info.param ? "Vetted" : "Unvetted";
+                         });
+
 TEST(Mempool, AuthChangedEvictsInvalidTxs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

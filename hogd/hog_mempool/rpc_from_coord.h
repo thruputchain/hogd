@@ -404,6 +404,15 @@ public:
     propose_batch_result_test_hook_ = std::move(hook);
   }
 
+  // Runs immediately before/after the submission auth RPC, with commit
+  // unlocked.
+  void set_submission_auth_test_hook(
+      std::function<void(BlockHeight, const SignedTransactionBatch &, bool)>
+          hook)
+  {
+    submission_auth_test_hook_ = std::move(hook);
+  }
+
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
@@ -755,6 +764,8 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
+  std::function<void(BlockHeight, const SignedTransactionBatch &, bool)>
+      submission_auth_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
