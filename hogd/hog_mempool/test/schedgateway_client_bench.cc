@@ -443,9 +443,7 @@ run_benchmark(int argc, char **argv)
     require(clients[0].schedgateway_pending_tx_count()() == 0,
             "requires an empty mempool");
 
-    // Sign and pack before timing. Nonce zero is reserved for the execution
-    // preflight; measured callers consume the remaining corpus once, never
-    // replay.
+    // Sign and pack before timing; nonce 0 is the preflight tx.
     std::vector<ParallelSignedTransactionBatch> corpus;
     corpus.reserve(config.count + 1);
     TransactionHash preflight_hash{};
