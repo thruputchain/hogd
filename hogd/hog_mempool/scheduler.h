@@ -187,11 +187,8 @@ public:
   {
     current_block_.store(height, std::memory_order_relaxed);
   }
-  // The height of the block being built next, i.e. the block after the last
-  // committed one. Txs are nominated for this block, so expiry is judged
-  // against it: the replay cache rejects a tx at execution when
-  // [block_expiry_height < ctx.block_height], which makes a tx that expires at
-  // [current_block()] already unusable (#1493).
+  // Height of the block being built, i.e. the block after the last committed
+  // one; tx expiry is judged against it (#1493).
   BlockHeight next_block() const { return current_block() + 1; }
 
   // Returns whether this transaction body is already pending in the account's

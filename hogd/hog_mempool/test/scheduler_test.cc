@@ -455,11 +455,7 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
 }
 
-// Regression tests for #1493. [schedule()] picks txs for block
-// [current_block() + 1], the block after the last committed one. The replay
-// cache rejects a tx at execution when [block_expiry_height <
-// ctx.block_height], so a tx whose expiry equals [current_block()] is already
-// invalid for the block being built and must be pruned rather than nominated.
+// Regression tests for #1493: txs are nominated for [current_block() + 1].
 
 TEST(Scheduler, ScheduleDropsTxExpiringAtLastCommittedBlock)
 {
@@ -547,9 +543,8 @@ TEST(Scheduler, TxValidForNextBlockExpiresOnceThatBlockCommits)
   scheduler->add_txs(txs, hash_txs(txs))();
   ASSERT_EQ(scheduler->size(), 2UL);
 
-  // Block [kCommittedHeight + 1] commits without including either tx. txs[0]
-  // is now only valid through the committed block, so it must not be
-  // nominated for block [kCommittedHeight + 2].
+  // Block [kCommittedHeight + 1] commits without either tx, so txs[0] is now
+  // expired.
   scheduler->increment_current_block();
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
@@ -578,9 +573,8 @@ TEST(Scheduler, CommitPrunesLeftoverTxExpiringAtCommittedBlock)
   scheduler->add_txs(txs, hash_txs(txs))();
   ASSERT_EQ(scheduler->size(), 3UL);
 
-  // Commit a validated block [kCommittedHeight + 1] containing txs[0] only,
-  // mirroring the coordinator commit path: the committed txs are removed from
-  // the scheduler and then the current block advances.
+  // Commit block [kCommittedHeight + 1] with txs[0] only, as the coordinator
+  // does.
   x23::Vec<TransactionHash> committed;
   committed.push_back(sha256(txs[0].tx));
   scheduler->remove_from_scheduler(
