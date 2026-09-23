@@ -39,6 +39,27 @@
 #include "x23/vec.h"
 #include "x23/x23.h"
 
+// The sanitizer runtimes define the replaceable global allocation functions
+// themselves (libclang_rt.tsan_cxx / libclang_rt.asan_cxx, and gcc's libtsan /
+// libasan). clang links those runtimes with --whole-archive, so a translation
+// unit that also replaces operator new makes the link fail with a duplicate
+// symbol, which is what broke the TSAN build in #4130. Under a sanitizer that
+// owns the allocation functions we leave them alone and skip the one test that
+// needs the fault injection; the unsanitized jobs still run it.
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
+#define HOGD_SANITIZER_OWNS_OPERATOR_NEW 1
+#endif
+#endif
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+#define HOGD_SANITIZER_OWNS_OPERATOR_NEW 1
+#endif
+#ifndef HOGD_SANITIZER_OWNS_OPERATOR_NEW
+#define HOGD_SANITIZER_OWNS_OPERATOR_NEW 0
+#endif
+
+#if !HOGD_SANITIZER_OWNS_OPERATOR_NEW
+
 // Thread-local allocation fault injection: while a ScopedAllocationFailure is
 // alive, the Nth allocation on this thread throws std::bad_alloc once (#3000).
 namespace {
@@ -114,6 +135,8 @@ operator delete[](void *ptr, std::size_t /*size*/) noexcept
 {
   std::free(ptr);
 }
+
+#endif // !HOGD_SANITIZER_OWNS_OPERATOR_NEW
 
 namespace hogd {
 
@@ -1560,6 +1583,8 @@ TEST(ItemLockTest, ExclusiveDeployContractReportsRefundAgainstSnapshotCost)
   EXPECT_EQ(committed.value(), -5000);
 }
 
+#if !HOGD_SANITIZER_OWNS_OPERATOR_NEW
+
 namespace {
 
 // Faults the Nth allocation of a first admission for every N until admission
@@ -1610,9 +1635,15 @@ sweep_first_admission_allocation_faults(MakeChange make_change,
 
 } // namespace
 
+#endif // !HOGD_SANITIZER_OWNS_OPERATOR_NEW
+
 // Regression test for issue #3000.
 TEST(ItemLockTest, FirstAdmissionAllocationFailureLeavesLockReusable)
 {
+#if HOGD_SANITIZER_OWNS_OPERATOR_NEW
+  GTEST_SKIP() << "faulting an allocation means replacing the global operator "
+                  "new, which the sanitizer runtime already defines";
+#else
   // Expect at least two fault points: the PointerLock itself and one inside
   // the installed sub-lock.
   EXPECT_GE(sweep_first_admission_allocation_faults(
@@ -1622,6 +1653,7 @@ TEST(ItemLockTest, FirstAdmissionAllocationFailureLeavesLockReusable)
                 [] { return ItemChange(ReplayCacheIt(Uniquifier(1, 101))); },
                 make_replay_cache_context),
             2);
+#endif
 }
 
 } // namespace hogd
