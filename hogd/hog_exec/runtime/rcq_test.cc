@@ -1264,6 +1264,11 @@ TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
 //      between the wrong type and a key that holds nothing. A key with no
 //      value at all is still an empty queue, so it still returns
 //      NoRetrocausalQueueEntry (EmptyConsumeOnAbsentKeyDoesNotPinType).
+//      The decision is made on the base value as this transaction sees it,
+//      before any read, so entries other transactions inserted this block
+//      are consulted only when that base is a queue or absent. Another
+//      transaction converting a bytestring key this block is a write like
+//      any other and reaches readers at the block boundary.
 //
 // A queue with no live entries does not exist, so (1) has a second half: a
 // key whose queue is consumed to zero is absent at the end of the block, and
@@ -1373,6 +1378,46 @@ TEST_P(RCQTest, ReadsOnBytestringWrittenInSameTransactionAreWrongTypeInput)
   ASSERT_TRUE(after.has_value());
   EXPECT_EQ(after->type(), StorageItemType::kItemTypeBytestring);
   EXPECT_EQ(after->bytestring(), make_bytestring("hi"));
+}
+
+// (2) Two writers in one block, from an absent base: tx1 inserts, tx2 inserts
+// and then reads, and sees its own entry followed by tx1's. The key is a
+// queue as far as tx2 is concerned, so the concurrent entry is in reach.
+TEST_P(RCQTest, ConcurrentInsertIsReadableFromQueueBase)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  ASSERT_TRUE(insert({10}));
+  // Self entries come before concurrent ones in consumption order.
+  ASSERT_TRUE(insert_and_consume({20}, {20, 10}));
+}
+
+// (1)+(2) The same two writers over a committed bytestring. Each insert
+// converts the key for its own transaction, so tx2 reads a queue and sees
+// tx1's entry exactly as above. tx3 writes nothing, so its base is the
+// bytestring and every read is rejected -- tx1's conversion is not visible
+// to it until the block closes. What separates tx2 from tx3 is the write,
+// not when anything happened.
+TEST_P(RCQTest, ConcurrentInsertOverBytestringIsReadableOnlyAfterOwnWrite)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  ASSERT_TRUE(insert({10}));
+  ASSERT_TRUE(insert_and_consume({20}, {20, 10}));
+  // Method 9 asserts InvalidSyscallInput on each of the three reads.
+  ASSERT_TRUE(invoke_contract(9, {}));
+  advance_block();
+
+  // tx2 consumed both entries, so the converted key holds an empty queue,
+  // which on HogDb means it is gone (see KNOWN_ISSUES.md for MockDB).
+  if (GetParam() == TestDB::kHogDb) {
+    EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
+  }
 }
 
 // Emptying a queue removes the key. This is the plain case, with no type

@@ -2198,6 +2198,26 @@ protected:
           co_return InvokeStatus<void>{};
         });
 
+    builder.add<SerializationFormat::kTxs>(
+        71, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          // consume from a key whose committed value is not a queue: a read
+          // never converts a key, so this is wrong-type input, even if
+          // another transaction in this block has already converted it
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+              written_len);
+          if (!res.has_value() ||
+              res.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            ADD_FAILURE() << "expected InvalidSyscallInput consuming from a "
+                             "key that holds a bytestring";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -2858,7 +2878,13 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
   // delete, then insert a new item
   invoke_method(13, uint32_t{42});
 
-  // Then retrocausally consume the item
+  // A reader that has not written the key sees the committed bytestring, not
+  // this block's conversion, and is rejected; the entry survives the block.
+  invoke_method(71);
+
+  advance_block();
+
+  // Now the queue is the committed value, and the entry is consumable.
   invoke_method(1, uint32_t{42});
 
   advance_block();
@@ -3357,7 +3383,12 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
   // Delete the bytestring, then insert into RCQ at the same key
   invoke_method(13, uint32_t{42});
 
-  // Another tx retrocausally consumes the entry
+  // Another tx in the same block still sees the bytestring and is rejected.
+  invoke_method(71);
+
+  advance_block();
+
+  // Next block the key is a queue with the one entry; consume it.
   invoke_method(1, uint32_t{42});
 
   advance_block();

@@ -1998,43 +1998,26 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
-// A read never changes the type of an item, so a key that holds some other
-// kind of value is wrong-type input rather than an empty queue. This is the
+// A read never changes the type of an item, so a key whose base value is of
+// some other kind is wrong-type input rather than an empty queue. This is the
 // same split get_bytestring() and get_nnint() make between a key holding the
-// wrong type (InvalidSyscallInput) and a key holding nothing at all, and it
-// has to hold against a committed value as well as against one this
-// transaction wrote, or a read could tell the two apart.
+// wrong type (InvalidSyscallInput) and a key holding nothing at all.
 //
-// The snapshot type alone does not settle it: another transaction in this
-// block may have converted the key with an insert, and those entries are
-// still there to be consumed. Only a read that produced no entry has
-// established that this key holds no queue for us, so only then does the
-// snapshot's type decide between wrong-type input and an empty queue. A key
-// that holds nothing is an empty queue.
-//
-// A read the per-transaction observation cap blocked counts as producing no
-// entry here, so that the type error keeps beating the read-limit error as it
-// does for a value written earlier in this transaction, where the dispatch
-// below never reaches the read at all. Letting the cap answer first would let
-// a contract tell the two cases apart by tripping it.
-SyscallStatus<QueueEntry>
-reject_unsatisfied_read_of_other_type(SyscallStatus<QueueEntry> entry,
-                                      UnmodifiedItem const &unmodified_item)
+// The base value is the one this transaction sees: a value it wrote itself
+// earlier, or else the snapshot. Both must dispatch the same way -- a
+// bytestring written a frame ago and one committed a block ago are the same
+// bytestring -- so the decision is made here, on the base type, before any
+// read. In particular, entries other transactions inserted into this key in
+// the current block are consulted only when the base is a queue (or absent,
+// which is an empty queue), never to rescue a read of a bytestring. A same-
+// block type change is a write like any other and becomes visible to readers
+// at the block boundary. Deciding before the read also keeps the type error
+// ahead of the read-limit error, as it already is for a tx-local value.
+bool
+snapshot_holds_other_type(UnmodifiedItem const &unmodified_item)
 {
-  if (entry.has_value()) {
-    return entry;
-  }
-  auto const code = entry.error().code();
-  if (code != SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry &&
-      code !=
-          SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
-    return entry;
-  }
   auto type = unmodified_item.base_item().type();
-  if (type.has_value() && *type != ItemViewType::kRetrocausalQueue) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  return entry;
+  return type.has_value() && *type != ItemViewType::kRetrocausalQueue;
 }
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
@@ -2055,14 +2038,13 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
         !loaded.has_value()) {
       co_return loaded.error();
     }
-    RetrocausalQueueItem queue_item(unmodified_item->base_item());
-    auto entry = co_await load_next_queue_entry(queue_item, execution_mode_data,
-                                                /*advance_cursor=*/false);
-    if (!entry.has_value()) {
-      co_return entry.error();
+    if (snapshot_holds_other_type(*unmodified_item)) {
+      co_return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
-    co_return reject_unsatisfied_read_of_other_type(std::move(entry.value()),
-                                                    *unmodified_item);
+    RetrocausalQueueItem queue_item(unmodified_item->base_item());
+    co_return co_await load_next_queue_entry(queue_item, execution_mode_data,
+                                             /*advance_cursor=*/false);
   }
 
   if (item_view->get<DeletedItem>()) {
@@ -2137,22 +2119,22 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
         !loaded.has_value()) {
       co_return loaded.error();
     }
+    if (snapshot_holds_other_type(*unmodified_item)) {
+      co_return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
-    if (!entry.has_value()) {
-      co_return entry.error();
-    }
-    if (entry.value().has_value()) {
+    if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
         co_return set_status.error();
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
-    co_return reject_unsatisfied_read_of_other_type(std::move(entry.value()),
-                                                    *unmodified_item);
+    co_return entry;
   }
 
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
