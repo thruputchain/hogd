@@ -2639,8 +2639,8 @@ TEST(Mempool, GetTip)
 
 class MempoolSubmissionAuthTest : public testing::TestWithParam<bool> {
 protected:
-  SchedGatewaySubmitOutcomeBatch submit(MempoolTestInfra &server,
-                                        const SignedTransactionBatch &txs)
+  static SchedGatewaySubmitOutcomeBatch
+  submit(MempoolTestInfra &server, const SignedTransactionBatch &txs)
   {
     auto batch = t_to_parallel_batch(txs)();
     if (GetParam()) {
@@ -2653,17 +2653,30 @@ protected:
         std::move(batch))();
   }
 
-  void commit_empty_block(MempoolTestInfra &server)
+  static x23::Async<void> commit_empty_block(MempoolTestInfra &server)
   {
-    auto tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    auto proposed = propose_block(server, tip.db_tip());
-    ASSERT_EQ(proposed.outcome(),
+    auto &coord = server.mempool_coord_rpc();
+    auto tip = co_await coord.schedcoord_get_tip();
+    EXPECT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    if (tip.outcome() != SchedulerGetTipOutcome::SchedulerGetTipOK) {
+      co_return;
+    }
+    auto proposed =
+        co_await coord.schedulercoord_propose_block(tip.db_tip().id, {});
+    EXPECT_EQ(proposed.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
-    ASSERT_EQ(commit_block(server, tip.db_tip(), proposed.proposed_block()),
-              SchedulerCommitOutcome::SchedulerCommitOK);
-    server.mempool_coord_rpc().wait_for_block_commit(
-        tip.db_tip().value.proposal_header.block_height + 1)();
+    if (proposed.outcome() != SchedulerProposalOutcome::SchedulerProposalOK) {
+      co_return;
+    }
+    auto committed = co_await coord.schedulercoord_commit_block(
+        proposed.proposed_block().block_id,
+        consensus_value(tip.db_tip(), proposed.proposed_block().proposal));
+    EXPECT_EQ(committed, SchedulerCommitOutcome::SchedulerCommitOK);
+    if (committed != SchedulerCommitOutcome::SchedulerCommitOK) {
+      co_return;
+    }
+    co_await coord.wait_for_block_commit(
+        tip.db_tip().value.proposal_header.block_height + 1);
   }
 };
 
@@ -2677,9 +2690,9 @@ TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
   std::vector<BlockHeight> heights;
   coord.set_submission_auth_test_hook([&](BlockHeight height,
                                           const SignedTransactionBatch &batch,
-                                          bool after_auth) {
+                                          bool after_auth) -> x23::Async<void> {
     if (after_auth) {
-      return;
+      co_return;
     }
     heights.push_back(height);
     EXPECT_EQ(batch.size(), 1UL);
@@ -2687,7 +2700,7 @@ TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
     if (heights.size() == 1) {
       // Auth receives height 1 after a real commit has advanced it to 2.
       // No account changed, so only the stale-height result causes retry.
-      commit_empty_block(server);
+      co_await commit_empty_block(server);
     }
   });
   auto outcomes = submit(server, txs);
@@ -2709,20 +2722,21 @@ TEST_P(MempoolSubmissionAuthTest, CommitKeepsVerifiedUnchangedAccounts)
   fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
   auto txs = generate_unsigned_txs(client, 1);
   size_t calls = 0;
-  coord.set_submission_auth_test_hook(
-      [&](BlockHeight height, const SignedTransactionBatch &, bool after_auth) {
-        if (!after_auth) {
-          return;
-        }
-        ++calls;
-        EXPECT_EQ(height, 1);
-        EXPECT_EQ(coord.scheduler()->size(), 0);
-        if (calls == 1) {
-          // The response is already valid. An empty commit must be allowed to
-          // finish here, without forcing another auth RPC for unchanged keys.
-          commit_empty_block(server);
-        }
-      });
+  coord.set_submission_auth_test_hook([&](BlockHeight height,
+                                          const SignedTransactionBatch &,
+                                          bool after_auth) -> x23::Async<void> {
+    if (!after_auth) {
+      co_return;
+    }
+    ++calls;
+    EXPECT_EQ(height, 1);
+    EXPECT_EQ(coord.scheduler()->size(), 0);
+    if (calls == 1) {
+      // The response is already valid. An empty commit must be allowed to
+      // finish here, without forcing another auth RPC for unchanged keys.
+      co_await commit_empty_block(server);
+    }
+  });
   submit(server, txs);
   coord.set_submission_auth_test_hook({});
   EXPECT_EQ(calls, 1UL);
@@ -2763,24 +2777,23 @@ TEST_P(MempoolSubmissionAuthTest,
   // Interleave accounts to check that retried results retain their indices.
   SignedTransactionBatch txs{a[0], b[0], c[0], a[1]};
   auto change = [&](BlockHeight height, size_t account, AddressAuthData &auth,
-                    Weight required_weight) {
+                    Weight required_weight) -> x23::Async<void> {
     auth.required_weight = required_weight;
     auth.last_written_height = height;
     server.set_address_auth_data(addresses[account], auth);
     // Inject the commit's height and auth callback to isolate retry behavior.
     coord.scheduler()->set_current_block(height);
-    server.register_auth_data_updates(
-        height,
-        KeyChangeBatch{{.address = addresses[account],
-                        .auth_data = x23::Ptr<AddressAuthData>(auth)}})();
+    co_await server.register_auth_data_updates(
+        height, KeyChangeBatch{{.address = addresses[account],
+                                .auth_data = x23::Ptr<AddressAuthData>(auth)}});
   };
   std::vector<BlockHeight> heights;
   std::vector<std::multiset<ContractAddress>> accounts;
   coord.set_submission_auth_test_hook([&](BlockHeight height,
                                           const SignedTransactionBatch &batch,
-                                          bool after_auth) {
+                                          bool after_auth) -> x23::Async<void> {
     if (!after_auth) {
-      return;
+      co_return;
     }
     heights.push_back(height);
     accounts.emplace_back();
@@ -2790,14 +2803,14 @@ TEST_P(MempoolSubmissionAuthTest,
     EXPECT_EQ(coord.scheduler()->size(), 0);
     if (heights.size() == 1) {
       // A becomes invalid, B becomes valid, and C stays unchanged.
-      change(2, 0, auth_a, 2);
-      change(3, 0, auth_a, 3);
-      change(4, 1, auth_b, 1);
+      co_await change(2, 0, auth_a, 2);
+      co_await change(3, 0, auth_a, 3);
+      co_await change(4, 1, auth_b, 1);
     }
     else if (heights.size() == 2) {
       // A changes again while its retry is in flight. Clearing dirty
       // accounts after the RPC would lose this update.
-      change(5, 0, auth_a, 4);
+      co_await change(5, 0, auth_a, 4);
     }
   });
   auto outcomes = submit(server, txs);

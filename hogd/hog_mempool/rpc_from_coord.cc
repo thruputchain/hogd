@@ -347,14 +347,15 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
       }
     }
     if (submission_auth_test_hook_) {
-      submission_auth_test_hook_(verify_height, retry_txs,
-                                 /*after_auth=*/false);
+      co_await submission_auth_test_hook_(verify_height, retry_txs,
+                                          /*after_auth=*/false);
     }
     const AuthErrorCodeBatch verified =
         co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                                retry_txs);
     if (submission_auth_test_hook_) {
-      submission_auth_test_hook_(verify_height, retry_txs, /*after_auth=*/true);
+      co_await submission_auth_test_hook_(verify_height, retry_txs,
+                                          /*after_auth=*/true);
     }
     CHECK_EQ(verified.size(), indices.size());
     for (size_t i = 0; i < indices.size(); i++) {
