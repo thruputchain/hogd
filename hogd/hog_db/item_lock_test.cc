@@ -46,7 +46,7 @@
 // symbol, which is what broke the TSAN build in #4130. Under a sanitizer that
 // owns the allocation functions we leave them alone and skip the one test that
 // needs the fault injection; the unsanitized jobs still run it.
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
 #define HOGD_SANITIZER_OWNS_OPERATOR_NEW 1
 #endif
