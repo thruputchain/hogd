@@ -199,19 +199,18 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsConflicts)
   if constexpr (is_debug_build()) {
     ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticAll);
     ASSERT_EQ(r.conflict().conflicts().size(), 2U);
-    // key_a then key_b, both kDbConflictValueMismatch (order: hog_db
-    // preserves batch order).
+    // key_a then key_b, both ValueMismatch (order: hog_db preserves batch
+    // order).
     EXPECT_EQ(r.conflict().conflicts()[0].addrkey, key_a);
     EXPECT_EQ(r.conflict().conflicts()[1].addrkey, key_b);
     for (auto const &d : r.conflict().conflicts()) {
-      EXPECT_EQ(d.code, DbConflictCode::kDbConflictValueMismatch);
+      EXPECT_EQ(d.code, DbConflictCode::ValueMismatch);
     }
   }
   else {
     ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
     EXPECT_EQ(r.conflict().first().addrkey, key_a);
-    EXPECT_EQ(r.conflict().first().code,
-              DbConflictCode::kDbConflictValueMismatch);
+    EXPECT_EQ(r.conflict().first().code, DbConflictCode::ValueMismatch);
   }
 }
 
@@ -245,7 +244,7 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsAllBalanceConflicts)
     std::set<ContractAddress> expected{addr_a, addr_b};
     std::set<ContractAddress> actual;
     for (auto const &d : r.conflict().conflicts()) {
-      EXPECT_EQ(d.code, DbConflictCode::kDbConflictBoundsExceeded);
+      EXPECT_EQ(d.code, DbConflictCode::BoundsExceeded);
       EXPECT_EQ(d.addrkey.key.key_type(),
                 StorageKeyType::FreeNativeTokenBalance);
       actual.insert(d.addrkey.address);
@@ -254,8 +253,7 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsAllBalanceConflicts)
   }
   else {
     ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
-    EXPECT_EQ(r.conflict().first().code,
-              DbConflictCode::kDbConflictBoundsExceeded);
+    EXPECT_EQ(r.conflict().first().code, DbConflictCode::BoundsExceeded);
     EXPECT_EQ(r.conflict().first().addrkey.key.key_type(),
               StorageKeyType::FreeNativeTokenBalance);
     EXPECT_TRUE(r.conflict().first().addrkey.address == addr_a ||
@@ -381,14 +379,13 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractExclusiveFlagBlocksConcurrent)
     EXPECT_EQ(r2.conflict().conflicts()[0].addrkey.key.key_type(),
               StorageKeyType::Metadata);
     EXPECT_EQ(r2.conflict().conflicts()[0].code,
-              DbConflictCode::kDbConflictExclusiveLock);
+              DbConflictCode::ExclusiveLockDenied);
   }
   else {
     ASSERT_EQ(r2.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
     EXPECT_EQ(r2.conflict().first().addrkey.key.key_type(),
               StorageKeyType::Metadata);
-    EXPECT_EQ(r2.conflict().first().code,
-              DbConflictCode::kDbConflictExclusiveLock);
+    EXPECT_EQ(r2.conflict().first().code, DbConflictCode::ExclusiveLockDenied);
   }
 }
 

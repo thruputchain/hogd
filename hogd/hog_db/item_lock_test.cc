@@ -1363,7 +1363,7 @@ TEST(ItemLockTest, ExclusiveNNIntFailedCommitAdmissionReturnsError)
       auto res = lock.try_atomic_change_lock(nullptr, &change, ctx);
       ASSERT_FALSE(res.has_value());
       EXPECT_EQ(res.error(), HogDbError{HogDbCode::kConflict});
-      EXPECT_EQ(reason, DbConflictCode::kDbConflictBoundsExceeded);
+      EXPECT_EQ(reason, DbConflictCode::BoundsExceeded);
     }
 
     // Exclusive acquisition accepts the same change without semantic
@@ -1385,7 +1385,7 @@ TEST(ItemLockTest, ExclusiveNNIntFailedCommitAdmissionReturnsError)
     auto commit_res = lock.commit_change(change, ctx);
     ASSERT_FALSE(commit_res.has_value());
     EXPECT_EQ(commit_res.error(), HogDbError{HogDbCode::kConflict});
-    EXPECT_EQ(reason, DbConflictCode::kDbConflictBoundsExceeded);
+    EXPECT_EQ(reason, DbConflictCode::BoundsExceeded);
     EXPECT_FALSE(lock.is_finalized());
   }
 }
@@ -1425,7 +1425,7 @@ TEST(ItemLockTest, ExclusiveNNIntDowngradeToRegularRevalidates)
     peer_ctx.conflict_reason = &reason;
     auto blocked = lock.try_atomic_change_lock(nullptr, &peer, peer_ctx);
     ASSERT_FALSE(blocked.has_value());
-    EXPECT_EQ(reason, DbConflictCode::kDbConflictExclusiveLock);
+    EXPECT_EQ(reason, DbConflictCode::ExclusiveLockDenied);
   }
 
   // Downgrade: restore the original regular change, as rollback_to_savepoint
@@ -1487,7 +1487,7 @@ TEST(ItemLockTest, ExclusiveDeployContractIsPricedAndBlocksPeers)
     auto blocked = lock.try_atomic_change_lock(nullptr, &peer, peer_ctx);
     ASSERT_FALSE(blocked.has_value());
     EXPECT_EQ(blocked.error(), HogDbError{HogDbCode::kConflict});
-    EXPECT_EQ(reason, DbConflictCode::kDbConflictExclusiveLock);
+    EXPECT_EQ(reason, DbConflictCode::ExclusiveLockDenied);
   }
 
   // Committing installs a real NewDeploymentLock and finalizes permanently.
@@ -1506,7 +1506,7 @@ TEST(ItemLockTest, ExclusiveDeployContractIsPricedAndBlocksPeers)
     peer_ctx.conflict_reason = &reason;
     auto blocked = lock.try_atomic_change_lock(nullptr, &peer, peer_ctx);
     ASSERT_FALSE(blocked.has_value());
-    EXPECT_EQ(reason, DbConflictCode::kDbConflictExclusiveLock);
+    EXPECT_EQ(reason, DbConflictCode::ExclusiveLockDenied);
   }
 }
 
@@ -1527,7 +1527,7 @@ TEST(ItemLockTest, ExclusiveDeployContractBlockedByExistingHolder)
   ctx.conflict_reason = &reason;
   auto blocked = lock.try_atomic_change_lock(nullptr, &exclusive, ctx);
   ASSERT_FALSE(blocked.has_value());
-  EXPECT_EQ(reason, DbConflictCode::kDbConflictExclusiveLock);
+  EXPECT_EQ(reason, DbConflictCode::ExclusiveLockDenied);
 
   // The refusal is a no-op: the original holder still commits normally.
   auto committed = lock.commit_change(held, make_dummy_context());

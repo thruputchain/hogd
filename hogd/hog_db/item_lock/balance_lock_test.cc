@@ -288,7 +288,7 @@ TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
         lock.try_atomic_change_lock(&first, &second, make_ctx(&reason));
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
-    EXPECT_EQ(reason, DbConflictCode::kDbConflictBoundsExceeded);
+    EXPECT_EQ(reason, DbConflictCode::BoundsExceeded);
   }
 
   // Positive-then-negative: delta_before = +1, delta_after = INT128_MIN.
@@ -307,7 +307,7 @@ TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
         lock.try_atomic_change_lock(&first, &second, make_ctx(&reason));
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
-    EXPECT_EQ(reason, DbConflictCode::kDbConflictBoundsExceeded);
+    EXPECT_EQ(reason, DbConflictCode::BoundsExceeded);
   }
 }
 

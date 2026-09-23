@@ -337,7 +337,7 @@ insert_into_recovered_rcq(uint64_t live_entries)
   if (!insert_result.has_value()) {
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     EXPECT_TRUE(invoke_tx.last_conflict_reason().has_value());
-    EXPECT_EQ(DbConflictCode::kDbConflictCapacityExceeded,
+    EXPECT_EQ(DbConflictCode::CapacityExceeded,
               *invoke_tx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
     invoke_tx.rollback_to_savepoint(0);

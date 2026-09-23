@@ -4280,7 +4280,7 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
     bool found_replay = false;
     for (auto const &c : conflict.conflicts()) {
-      if (c.code == DbConflictCode::kDbConflictReplayProtection) {
+      if (c.code == DbConflictCode::ReplayProtection) {
         found_replay = true;
       }
     }

@@ -47,7 +47,7 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
     if (after != nullptr) {
       int128_t delta_after = after->delta();
       if (delta_after < get_storage_cost_of_committed_value(ctx.cost_model)) {
-        return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+        return ctx.conflict(DbConflictCode::BoundsExceeded);
       }
     }
   }
@@ -64,12 +64,12 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
   int128_t snapshot = snapshot_value.value_or(0);
   auto [committed, committed_overflow] = overflowing_add(snapshot, delta_after);
   if (committed_overflow || committed < 0) {
-    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+    return ctx.conflict(DbConflictCode::BoundsExceeded);
   }
 
   if (!delta_bounds_.try_reserve_delta(delta_before, delta_after, add_before,
                                        add_after, sub_before, sub_after)) {
-    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+    return ctx.conflict(DbConflictCode::BoundsExceeded);
   }
 
   return 0;

@@ -274,13 +274,12 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
     ASSERT_EQ(conflict.conflicts().size(), 1U);
     EXPECT_EQ(conflict.conflicts()[0].addrkey, key);
-    EXPECT_EQ(conflict.conflicts()[0].code,
-              DbConflictCode::kDbConflictValueMismatch);
+    EXPECT_EQ(conflict.conflicts()[0].code, DbConflictCode::ValueMismatch);
   }
   else {
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
     EXPECT_EQ(conflict.first().addrkey, key);
-    EXPECT_EQ(conflict.first().code, DbConflictCode::kDbConflictValueMismatch);
+    EXPECT_EQ(conflict.first().code, DbConflictCode::ValueMismatch);
   }
 }
 
