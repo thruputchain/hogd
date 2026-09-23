@@ -208,9 +208,8 @@ public:
   bool contains(T value) { return do_contains(value, false); }
   bool erase(T value) { return do_contains(value, true); }
 
-  // Iterator over the live values. Each advance loads a slot once, skips
-  // empty, erased, and claimed slots, and keeps the value for operator*. The
-  // level count is sampled at begin(), so a resize mid-walk is unsupported.
+  // Iterates the live values. The level count is sampled at begin(), so a
+  // resize mid-walk is unsupported.
   class Iterator {
     const ConcurrentSet *set_;
     const std::atomic<T> *entries_{nullptr}; // the level being walked
@@ -240,8 +239,7 @@ public:
       }
     }
 
-    // Rest on the first live slot at or after the current one, or at end(),
-    // loading each slot once and keeping the live value for operator*.
+    // Rest on the first live slot at or after the current one, or at end().
     void settle()
     {
       while (level_ < n_levels_) {

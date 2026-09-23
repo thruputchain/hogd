@@ -295,9 +295,7 @@ TEST(ConcurrentSet, FillAFewLevels)
   ASSERT_EQ(kExpectedLevels, ConcurrentSetHelper::levels(s));
 }
 
-// Iteration yields each live value exactly once and nothing else: not the
-// tombstones erase leaves behind, and not a slot an in-flight insert has
-// claimed but not yet published.
+// Each live value comes out once; tombstones and claimed slots do not.
 TEST(ConcurrentSet, IterationSkipsErasedAndClaimedSlots)
 {
   ConcurrentSet<uint128_t> s;
@@ -334,9 +332,7 @@ TEST(ConcurrentSet, IterationSkipsErasedAndClaimedSlots)
   ConcurrentSetHelper::settle_claim_as_tombstone(s, deepest, claimed);
 }
 
-// The value an iterator rests on was read when it got there. Erasing it
-// afterwards tombstones the slot but does not change what the iterator hands
-// back, so a caller can test a value and then use it.
+// *it keeps the value read on arrival, even after that value is erased.
 TEST(ConcurrentSet, IteratorValueSurvivesErase)
 {
   ConcurrentSet<uint128_t> s;
@@ -351,9 +347,7 @@ TEST(ConcurrentSet, IteratorValueSurvivesErase)
   EXPECT_NE(ConcurrentSetHelper::kTombstone, *it);
 }
 
-// A set with no live values iterates as empty, whether it never held one or
-// every slot it filled is now a tombstone, in which case the walk to end()
-// crosses every level.
+// An empty set and an all-tombstone set both iterate as empty.
 TEST(ConcurrentSet, IterationOverNoLiveValues)
 {
   ConcurrentSet<uint128_t> s;
