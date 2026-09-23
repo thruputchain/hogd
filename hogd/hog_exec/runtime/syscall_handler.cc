@@ -1995,7 +1995,7 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
 // earlier in this transaction. Decided before any read: concurrent entries
 // from this block are consulted only when the base is a queue or absent.
 bool
-snapshot_holds_other_type(UnmodifiedItem const &unmodified_item)
+committed_value_is_not_a_queue(UnmodifiedItem const &unmodified_item)
 {
   auto type = unmodified_item.base_item().type();
   return type.has_value() && *type != ItemViewType::kRetrocausalQueue;
@@ -2019,7 +2019,7 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
         !loaded.has_value()) {
       co_return loaded.error();
     }
-    if (snapshot_holds_other_type(*unmodified_item)) {
+    if (committed_value_is_not_a_queue(*unmodified_item)) {
       co_return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
@@ -2100,7 +2100,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
         !loaded.has_value()) {
       co_return loaded.error();
     }
-    if (snapshot_holds_other_type(*unmodified_item)) {
+    if (committed_value_is_not_a_queue(*unmodified_item)) {
       co_return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
