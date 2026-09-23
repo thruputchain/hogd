@@ -1886,10 +1886,8 @@ get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
   co_return co_await base_item.get_retrocausally_consumed_entries(count);
 }
 
-// Queue item for a key this transaction already replaced (deleted, or
-// overwritten with another type): a fully-consumed view of the snapshot's
-// queue, carrying the retrocausally-consumed count forward so no entry can be
-// consumed both before and after the replacement.
+// Fully-consumed view of the snapshot's queue for a key this transaction
+// replaced, keeping the consumed count so no entry is consumed twice.
 x23::Async<SystemStatus<RetrocausalQueueItem>>
 make_replaced_key_queue_item(FrameItemKey const &item_key,
                              AddressAndKey const &addrkey,
@@ -1990,10 +1988,8 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
-// A read never changes the type of a key, so a base value of another type is
-// wrong-type input, not an empty queue, whether it was committed or written
-// earlier in this transaction. Decided before any read: concurrent entries
-// from this block are consulted only when the base is a queue or absent.
+// A read never converts a key, so a non-queue base is wrong-type input
+// rather than an empty queue.
 bool
 committed_value_is_not_a_queue(UnmodifiedItem const &unmodified_item)
 {

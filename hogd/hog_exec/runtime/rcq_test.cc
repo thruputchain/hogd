@@ -1245,13 +1245,9 @@ TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
   EXPECT_EQ(item->type(), StorageItemType::kItemTypeBytestring);
 }
 
-// --- Batch 6: RCQ syscalls aimed at a key holding another type ---
-//
-// The answer must not depend on whether that value was written earlier in
-// this transaction or committed in an earlier block (#1673). Two rules: an
-// insert replaces the value like any other write, and a read reports it as
-// InvalidSyscallInput rather than as an empty queue. Concurrent entries from
-// this block are consulted only when the base value is a queue or absent.
+// --- Batch 6: RCQ syscalls aimed at a key holding another type (#1673) ---
+// An insert replaces the value; a read rejects it as InvalidSyscallInput.
+// Neither answer depends on whether the value is tx-local or committed.
 
 // (1) A committed bytestring is replaced by an insert, not rejected.
 TEST_P(RCQTest, InsertOnCommittedBytestringConvertsKeyToQueue)
@@ -1369,9 +1365,8 @@ TEST_P(RCQTest, ConcurrentInsertIsReadableFromQueueBase)
   ASSERT_TRUE(insert_and_consume({20}, {20, 10}));
 }
 
-// (1)+(2) The same two writers over a committed bytestring: tx2's own insert
-// makes the key a queue, so it sees tx1's entry; tx3 writes nothing and is
-// rejected, since tx1's conversion reaches readers only at the block boundary.
+// (1)+(2) Over a committed bytestring, tx2's own insert lets it see tx1's
+// entry; tx3 writes nothing and is rejected until the next block.
 TEST_P(RCQTest, ConcurrentInsertOverBytestringIsReadableOnlyAfterOwnWrite)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
@@ -1420,9 +1415,7 @@ TEST_P(RCQTest, FullyConsumedQueueLeavesKeyAbsent)
   EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
 }
 
-// Both halves of rule (1) together: the #1673 scenario. The insert converts
-// the key and the consume empties the resulting queue, so the key is absent
-// afterwards and the bytestring the insert overwrote does not come back.
+// The #1673 scenario: insert converts, consume empties, key ends up absent.
 TEST_P(RCQTest, NetZeroTouchOnCommittedBytestringLeavesKeyAbsent)
 {
   if (GetParam() == TestDB::kMockInMemory) {
