@@ -21,6 +21,9 @@ echo 'configure'
 
 echo 'build'
 cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
+# EXCLUDE_FROM_ALL, so the full build above skips it; the metrics job runs it
+# on a bench host through [schedgateway_bench_remote.sh].
+cmake --build release --parallel "$(nproc)" --target schedgateway_client_bench > build2b.log 2>&1 || (cat build2b.log && exit 1)
 # These build scripts place the binaries in the current working directory, so we
 # [pushd release] so that the binaries are placed in the [release] directory.
 pushd release >/dev/null
@@ -164,20 +167,26 @@ ci_run_bench_step mempool_multi_node_bench \
   env MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 \
   ./scripts/ci/mempool_multi_node_bench.sh
 
-echo 'release hog4, hog5, hog6, hog7, and hog9'
-ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog9
+echo 'release hog4, hog5, hog6, and hog9'
+# hog7 stays up to run the schedgateway benchmark alongside [metrics.sh].
+ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog9
 
 echo 'run event server benchmarks'
 kill_stale_benchmark_processes
 ci_run_bench_step event_bench ./scripts/ci/event_bench.sh
 
-echo 'run schedgateway submission benchmark'
+echo 'run metrics, with the schedgateway benchmark on otherwise idle hog7'
+# [metrics.sh] runs on hog10, hog11, and hog8 only, so hog7 is free. The
+# benchmark stays on hog7's loopback and touches none of those hosts.
 kill_stale_benchmark_processes
-ci_run_bench_step schedgateway_bench ./scripts/ci/schedgateway_bench.sh
-
-echo 'run metrics'
-kill_stale_benchmark_processes
+ci_run_bench_step schedgateway_bench_start \
+  ./scripts/ci/schedgateway_bench_remote.sh start hog7
 ci_run_bench_step metrics ./scripts/ci/metrics.sh
+ci_run_bench_step schedgateway_bench \
+  ./scripts/ci/schedgateway_bench_remote.sh collect hog7
+
+echo 'release hog7'
+ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog7
 
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
