@@ -208,13 +208,9 @@ public:
   bool contains(T value) { return do_contains(value, false); }
   bool erase(T value) { return do_contains(value, true); }
 
-  // Iterator over the live values. It rests on a live value or at end().
-  // Each advance loads a slot once and skips the empty, erased, and claimed
-  // ones, and operator* returns the value that advance observed rather than
-  // re-reading the slot, so a value cannot turn into a tombstone between the
-  // test and the use of it. This is a bulk read of a quiescent set: an insert
-  // or erase during the walk may or may not be observed, and the level count is
-  // sampled once at begin(), so a resize during the walk is not supported.
+  // Iterator over the live values. Each advance loads a slot once, skips
+  // empty, erased, and claimed slots, and keeps the value for operator*. The
+  // level count is sampled at begin(), so a resize mid-walk is unsupported.
   class Iterator {
     const ConcurrentSet *set_;
     const std::atomic<T> *entries_{nullptr}; // the level being walked
