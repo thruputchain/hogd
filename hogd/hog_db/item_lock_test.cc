@@ -71,7 +71,40 @@ public:
   ScopedAllocationFailure &operator=(const ScopedAllocationFailure &) = delete;
 };
 
+void *
+allocate(std::size_t size) noexcept
+{
+  // malloc(0) may return nullptr, which operator new must not treat as
+  // success.
+  return std::malloc(size == 0 ? 1 : size);
+}
+
+void *
+allocate(std::size_t size, std::size_t alignment) noexcept
+{
+  // aligned_alloc() wants a size that is a multiple of the alignment, and an
+  // alignment that is at least a pointer's. Neither costs anything to satisfy
+  // here, and the result is still freed with free().
+  alignment = std::max(alignment, alignof(void *));
+  std::size_t rounded =
+      ((std::max<std::size_t>(size, 1) + alignment - 1) / alignment) *
+      alignment;
+  return std::aligned_alloc(alignment, rounded);
+}
+
 } // namespace
+
+// Replacing the global allocation functions means replacing the WHOLE family.
+// The sanitizer builds supply their own operator new/delete, so any overload
+// left to them keeps handing out sanitizer-allocated memory while the matching
+// deallocation lands in a replacement here that just calls free(). ASan calls
+// that alloc-dealloc-mismatch, and the sanitizer schedule runs with
+// ASAN_OPTIONS=abort_on_error=1, so the process aborts -- for a single
+// nothrow-new anywhere under a test, that is every test in this binary (#4128).
+//
+// So every overload below allocates through malloc()/aligned_alloc() and every
+// deallocation frees through free(), and every allocating overload runs the
+// fault injection before it allocates.
 
 void *
 operator new(std::size_t size)
@@ -79,7 +112,7 @@ operator new(std::size_t size)
   if (should_fail_allocation()) {
     throw std::bad_alloc();
   }
-  if (void *ptr = std::malloc(size == 0 ? 1 : size)) {
+  if (void *ptr = allocate(size)) {
     return ptr;
   }
   throw std::bad_alloc();
@@ -91,14 +124,58 @@ operator new[](std::size_t size)
   return ::operator new(size);
 }
 
-void
-operator delete(void *ptr) noexcept
+void *
+operator new(std::size_t size, std::align_val_t alignment)
 {
-  std::free(ptr);
+  if (should_fail_allocation()) {
+    throw std::bad_alloc();
+  }
+  if (void *ptr = allocate(size, static_cast<std::size_t>(alignment))) {
+    return ptr;
+  }
+  throw std::bad_alloc();
+}
+
+void *
+operator new[](std::size_t size, std::align_val_t alignment)
+{
+  return ::operator new(size, alignment);
+}
+
+void *
+operator new(std::size_t size, const std::nothrow_t & /*tag*/) noexcept
+{
+  if (should_fail_allocation()) {
+    return nullptr;
+  }
+  return allocate(size);
+}
+
+void *
+operator new[](std::size_t size, const std::nothrow_t &tag) noexcept
+{
+  return ::operator new(size, tag);
+}
+
+void *
+operator new(std::size_t size, std::align_val_t alignment,
+             const std::nothrow_t & /*tag*/) noexcept
+{
+  if (should_fail_allocation()) {
+    return nullptr;
+  }
+  return allocate(size, static_cast<std::size_t>(alignment));
+}
+
+void *
+operator new[](std::size_t size, std::align_val_t alignment,
+               const std::nothrow_t &tag) noexcept
+{
+  return ::operator new(size, alignment, tag);
 }
 
 void
-operator delete(void *ptr, std::size_t /*size*/) noexcept
+operator delete(void *ptr) noexcept
 {
   std::free(ptr);
 }
@@ -110,7 +187,65 @@ operator delete[](void *ptr) noexcept
 }
 
 void
+operator delete(void *ptr, std::size_t /*size*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
 operator delete[](void *ptr, std::size_t /*size*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
+operator delete(void *ptr, std::align_val_t /*alignment*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
+operator delete[](void *ptr, std::align_val_t /*alignment*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
+operator delete(void *ptr, std::size_t /*size*/,
+                std::align_val_t /*alignment*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
+operator delete[](void *ptr, std::size_t /*size*/,
+                  std::align_val_t /*alignment*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
+operator delete(void *ptr, const std::nothrow_t & /*tag*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
+operator delete[](void *ptr, const std::nothrow_t & /*tag*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
+operator delete(void *ptr, std::align_val_t /*alignment*/,
+                const std::nothrow_t & /*tag*/) noexcept
+{
+  std::free(ptr);
+}
+
+void
+operator delete[](void *ptr, std::align_val_t /*alignment*/,
+                  const std::nothrow_t & /*tag*/) noexcept
 {
   std::free(ptr);
 }
