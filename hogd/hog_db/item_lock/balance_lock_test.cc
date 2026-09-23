@@ -259,7 +259,7 @@ TEST(BalanceLockTest, NewBalanceStorageCost)
 // NNInt128DeltaBounds::try_reserve_delta. Unlike NNInt128 deltas, balance
 // deltas are not bounded against a base, so a contract can reach this via a
 // narrowed reservation (e.g. -1 then INT128_MAX, or +1 then INT128_MIN). This
-// must surface as a recoverable bounds conflict, not abort the process.
+// must surface as a recoverable conflict, not abort the process.
 TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
 {
   static ItemKey balance_key =
@@ -288,7 +288,7 @@ TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
         lock.try_atomic_change_lock(&first, &second, make_ctx(&reason));
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
-    EXPECT_EQ(reason, DbConflictCode::BoundsExceeded);
+    EXPECT_EQ(reason, DbConflictCode::Overflow);
   }
 
   // Positive-then-negative: delta_before = +1, delta_after = INT128_MIN.
@@ -307,7 +307,7 @@ TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
         lock.try_atomic_change_lock(&first, &second, make_ctx(&reason));
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
-    EXPECT_EQ(reason, DbConflictCode::BoundsExceeded);
+    EXPECT_EQ(reason, DbConflictCode::InsufficientFunds);
   }
 }
 

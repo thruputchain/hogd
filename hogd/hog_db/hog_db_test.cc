@@ -2582,7 +2582,7 @@ TEST_F(HogDbTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
     EXPECT_EQ(HogDbCode::kConflict, sync_result.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
-    EXPECT_EQ(DbConflictCode::BoundsExceeded,
+    EXPECT_EQ(DbConflictCode::InsufficientFunds,
               *invoke_tx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
     EXPECT_EQ(failed_addr, conflict_addr.get_raw());
@@ -2653,7 +2653,7 @@ TEST_F(HogDbTest, SyncBalanceLocksReportsAllBalanceConflicts)
   std::set<ContractAddress> expected_addrs{addr_a.get_raw(), addr_b.get_raw()};
   std::set<ContractAddress> actual_addrs;
   for (auto const &c : conflicts) {
-    EXPECT_EQ(DbConflictCode::BoundsExceeded, c.reason);
+    EXPECT_EQ(DbConflictCode::InsufficientFunds, c.reason);
     actual_addrs.insert(c.addr);
   }
   EXPECT_EQ(expected_addrs, actual_addrs);

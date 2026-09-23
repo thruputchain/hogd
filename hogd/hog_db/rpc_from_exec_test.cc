@@ -244,7 +244,7 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsAllBalanceConflicts)
     std::set<ContractAddress> expected{addr_a, addr_b};
     std::set<ContractAddress> actual;
     for (auto const &d : r.conflict().conflicts()) {
-      EXPECT_EQ(d.code, DbConflictCode::BoundsExceeded);
+      EXPECT_EQ(d.code, DbConflictCode::InsufficientFunds);
       EXPECT_EQ(d.addrkey.key.key_type(),
                 StorageKeyType::FreeNativeTokenBalance);
       actual.insert(d.addrkey.address);
@@ -253,7 +253,7 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsAllBalanceConflicts)
   }
   else {
     ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
-    EXPECT_EQ(r.conflict().first().code, DbConflictCode::BoundsExceeded);
+    EXPECT_EQ(r.conflict().first().code, DbConflictCode::InsufficientFunds);
     EXPECT_EQ(r.conflict().first().addrkey.key.key_type(),
               StorageKeyType::FreeNativeTokenBalance);
     EXPECT_TRUE(r.conflict().first().addrkey.address == addr_a ||
