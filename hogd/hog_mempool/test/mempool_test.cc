@@ -3330,14 +3330,10 @@ TEST(Mempool, FreshSigningAdmittedBeforeAuthCallbackSurvivesIt)
   MempoolTestInfra server;
   MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  // The fixture commits genesis and the ceremony. Let their auth callbacks
-  // finish before the callback is taken over below, or the nomination that
-  // follows would wait on a delivery this test holds back.
+  // Let the genesis and ceremony auth callbacks finish before the takeover.
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
 
-  // Key 0 carries weight 1 and key 1 carries weight 2, behind a threshold of
-  // 1. Raising the threshold to 2 revokes a signing by key 0 alone while a
-  // signing by key 1 alone still qualifies.
+  // Weights 1 and 2 under threshold 1; raising it to 2 revokes key 0 alone.
   AddressAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key_0 =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
@@ -3428,9 +3424,8 @@ TEST(Mempool, FreshSigningAdmittedBeforeAuthCallbackSurvivesIt)
     release.broadcast(&default_threadpool());
   });
 
-  // Commit the threshold change. The commit path completes, and the
-  // scheduler's current block advances, before the auth callback for the
-  // height can run; with the callback held, the auth height stays behind.
+  // Commit advances the scheduler's block; the held callback keeps the auth
+  // height behind.
   ASSERT_EQ(commit_block(server, parent, res_nominate.proposed_block()),
             SchedulerCommitOutcome::SchedulerCommitOK);
   ASSERT_EQ(scheduler->current_block(), committed_height);
@@ -3439,9 +3434,8 @@ TEST(Mempool, FreshSigningAdmittedBeforeAuthCallbackSurvivesIt)
   ASSERT_EQ(scheduler->size(), 1UL);
   ASSERT_EQ(scheduler->tx_cache_size(), 1UL);
 
-  // In the window: the same body signed to meet the new threshold. The auth
-  // server has already published the new height, so the signing is verified
-  // against the raised threshold, and the gateway reports it admitted.
+  // Same body, re-signed for the new threshold the auth server has already
+  // published; the gateway admits it.
   const SchedGatewaySubmitOutcomeBatch outcomes =
       gateway.schedgateway_submit_tx_batch(
           t_to_parallel_batch(SignedTransactionBatch{fresh})())();

@@ -455,9 +455,8 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   }
   else if ((*tx_ptr)->tx.signatures != tx.signatures) {
-    // Keep the incoming signing: an auth change may have revoked the cached
-    // one, and the re-verification callback would then evict it. Swap the
-    // entry rather than mutate it; [find_tx()] hands it out lock-free.
+    // Keep the incoming signing; an auth change may have revoked the cached
+    // one. Swap rather than mutate: [find_tx()] hands the entry out lock-free.
     *tx_ptr = std::make_shared<TxValue>(TxValue{.tx = tx});
   }
   auto [it, queued] = account_state->txs.insert({key, *tx_ptr});
