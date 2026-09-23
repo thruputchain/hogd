@@ -216,39 +216,57 @@ public:
     const std::atomic<T> *entries_{nullptr}; // the level being walked
     size_t index_{0};
     size_t level_end_{0}; // entries_for_level(level_)
-    size_t level_;
+    size_t level_{0};
     size_t n_levels_;
     T value_{Traits::kEmpty};
 
-  public:
-    Iterator(const ConcurrentSet *set, size_t level, size_t n_levels)
-      : set_(set), level_(level), n_levels_(n_levels)
+    // Start walking level from its first slot. Past the last level, the
+    // iterator is end() and nothing is loaded.
+    void enter_level(size_t level)
     {
+      level_ = level;
+      index_ = 0;
       if (level_ < n_levels_) {
         entries_ = set_->get_level(level_);
         level_end_ = entries_for_level(level_);
-        value_ = entries_[0].load(std::memory_order_acquire);
-        if (is_reserved(value_)) {
-          ++*this;
-        }
       }
+    }
+
+    // Move one slot forward, crossing into the next level after the last slot.
+    void step()
+    {
+      if (++index_ == level_end_) {
+        enter_level(level_ + 1);
+      }
+    }
+
+    // Rest on the first live slot at or after the current one, or at end(),
+    // loading each slot once and keeping the live value for operator*.
+    void settle()
+    {
+      while (level_ < n_levels_) {
+        value_ = entries_[index_].load(std::memory_order_acquire);
+        if (!is_reserved(value_)) {
+          return;
+        }
+        step();
+      }
+    }
+
+  public:
+    Iterator(const ConcurrentSet *set, size_t level, size_t n_levels)
+      : set_(set), n_levels_(n_levels)
+    {
+      enter_level(level);
+      settle();
     }
 
     T operator*() const { return value_; }
 
     Iterator &operator++()
     {
-      do {
-        if (++index_ == level_end_) {
-          index_ = 0;
-          if (++level_ == n_levels_) {
-            return *this;
-          }
-          entries_ = set_->get_level(level_);
-          level_end_ = entries_for_level(level_);
-        }
-        value_ = entries_[index_].load(std::memory_order_acquire);
-      } while (is_reserved(value_));
+      step();
+      settle();
       return *this;
     }
 
