@@ -2939,6 +2939,153 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
   advance_block();
 }
 
+// #1946: two peeks of one current-block position log two presence bits but
+// hold one entry, so present-then-absent is a proposal no honest run makes.
+TEST_P(ProposeValidateRoundtripTest, RCQRepeatedPeekPresentThenAbsentRejected)
+{
+  // Bit 4 set: first peek saw an entry. Bit 0 set: second peek saw an entry.
+  uint8_t peeks_seen = 0;
+
+  auto contract = make_contract(
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 10;
+        auto res = co_await ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!res.has_value())
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
+      },
+      [&peeks_seen](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = make_storage_key("rcq0");
+        auto first =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
+        if (!first.has_value())
+          co_return first.error().to_invoke_error();
+        auto second =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
+        if (!second.has_value())
+          co_return second.error().to_invoke_error();
+        peeks_seen =
+            static_cast<uint8_t>((first.value().has_value() ? 0x10 : 0x00) |
+                                 (second.value().has_value() ? 0x01 : 0x00));
+        co_return InvokeStatus<void>{};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto tx_insert = make_rcq_tx(0);
+  auto tx_peek = make_rcq_tx(1);
+
+  NondeterministicProposalData insert_p, peek_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.get_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+    auto hb = make_new_system_call_handler(tx_peek, *ctx);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    peek_p = hb.get_proposal_data();
+    EXPECT_EQ(peeks_seen, 0x11) << "Both peeks see the same present entry";
+    ASSERT_EQ(peek_p.nondeterministic_bit_count, 2U);
+    ASSERT_EQ(peek_p.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
+  }
+
+  // Tamper: the second presence bit now says absent.
+  auto tampered = peek_p;
+  tampered.nondeterministic_bits[0] &= static_cast<uint8_t>(~(uint8_t{1} << 1));
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+    peeks_seen = 0;
+    auto hb = make_new_system_call_handler_validation(tx_peek, *ctx,
+                                                      std::move(tampered));
+    auto res = hb.root_invoke()();
+    ASSERT_FALSE(res.is_root_success())
+        << "Validation must reject present-then-absent for one queue position";
+    EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
+    EXPECT_EQ(peeks_seen, 0) << "The contract never reached the absent branch";
+    ASSERT_TRUE(hb.abort_transaction()().has_value());
+  }
+}
+
+// Absent-then-present variant of #1946: per-tx replay accepts it (a producer
+// may appear between reads); block close rejects it, since no insert matches.
+TEST_P(ProposeValidateRoundtripTest,
+       RCQRepeatedPeekAbsentThenPresentWithoutProducerFailsBlockClose)
+{
+  if (GetParam() != TestDB::kHogDb)
+    GTEST_SKIP() << "observation matching requires kHogDb";
+
+  static const QueueEntry kFabricatedEntry{1, 2, 3, 4};
+
+  auto contract = make_contract(
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = make_storage_key("rcq0");
+
+        auto first =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
+        if (!first.has_value())
+          co_return first.error().to_invoke_error();
+        if (first.value().has_value() ||
+            first.value().error().code() !=
+                SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto second =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
+        if (!second.has_value())
+          co_return second.error().to_invoke_error();
+        if (!second.value().has_value() ||
+            second.value().value() != kFabricatedEntry) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto marker = std::string_view("seen");
+        auto [ws, _gas] = co_await syscall_BytestringSet_inner(
+            ctx.handler(), make_storage_key("marker"),
+            std::as_bytes(std::span(marker)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!ws.has_value() ||
+            ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
+  auto tx = make_invoke_a_tx(0);
+
+  NondeterministicProposalData forged;
+  forged.nondeterministic_bit_count = 2;
+  forged.nondeterministic_bits = {uint8_t{0b10}};
+  forged.observed_queue_entry_sequence = {kFabricatedEntry};
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(forged));
+  ASSERT_TRUE(handler.root_invoke()().is_root_success())
+      << "Per-tx replay accepts the sequence: a producer could have appeared";
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+  EXPECT_FALSE(try_advance_block().has_value())
+      << "Block close must reject the fabricated peek observation, which no "
+         "insert in the block matches";
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDb),
