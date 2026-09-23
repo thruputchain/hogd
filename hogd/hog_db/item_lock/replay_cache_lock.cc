@@ -171,7 +171,7 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     auto pending = pending_new_heights_.fetch_add(1, std::memory_order_relaxed);
     if (live_height_count + pending + 1 > kReplayCacheHeightsMaxLen) {
       pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
-      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+      return ctx.conflict(DbConflictCode::CapacityExceeded);
     }
     auto [res, inserted] = bases_.try_emplace(block_height);
     CHECK(inserted);
@@ -220,7 +220,7 @@ ReplayCacheLock::try_atomic_change_lock(
 {
   // No single transaction is allowed to add to the replay cache twice.
   if (before != nullptr && after != nullptr) {
-    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
+    return ctx.conflict(DbConflictCode::ReplayProtection);
   }
 
   // Need to remove a previously added Uniquifier (e.g. if a tx aborts).
@@ -242,7 +242,7 @@ ReplayCacheLock::try_atomic_change_lock(
   if (addition.block_expiry_height < ctx.block_height) {
     trace("attempted to consume {}.{} at height {}",
           addition.block_expiry_height, addition.nonce, ctx.block_height);
-    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
+    return ctx.conflict(DbConflictCode::ReplayProtection);
   }
 
   auto addition_key = UniquifierHelper::to_uint128(addition);
@@ -258,7 +258,7 @@ ReplayCacheLock::try_atomic_change_lock(
                                  base.data.nonces.end(), addition.nonce)) {
     trace("attempted to consume {}.{} but it was already the base cache",
           addition.block_expiry_height, addition.nonce);
-    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
+    return ctx.conflict(DbConflictCode::ReplayProtection);
   }
 
   // Reserve slot
@@ -268,7 +268,7 @@ ReplayCacheLock::try_atomic_change_lock(
   // Check limit
   if (base.data.nonces.size() + additions + 1 > kReplayCacheNoncesMaxLen) {
     base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
-    return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+    return ctx.conflict(DbConflictCode::CapacityExceeded);
   }
 
   // Either rejection is invalid replay input. kAlreadyPresent means another
@@ -277,7 +277,7 @@ ReplayCacheLock::try_atomic_change_lock(
   // {expiry=0, nonce=0}, reachable at executing height 0 (#3188).
   if (conflicts_.try_insert(addition_key) != InsertResult::kInserted) {
     base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
-    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
+    return ctx.conflict(DbConflictCode::ReplayProtection);
   }
 
   auto meta = get_meta(&ctx);

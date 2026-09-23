@@ -52,7 +52,7 @@
 // The flag does exactly what it says when it is on the delta that commits:
 // each admission test below is paired with a control in which the final write
 // keeps the flag and the later transaction is rejected with
-// `kDbConflictExclusiveLock`.
+// `ExclusiveLockDenied`.
 //
 // See: https://github.com/groundhogchain/hogd/issues/3006
 
@@ -416,7 +416,7 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
                                             kNoFlags);
     ASSERT_FALSE(admitted.has_value());
     EXPECT_EQ(invoke_tx.conflict_reason_for(admitted.error().code()),
-              DbConflictCode::kDbConflictExclusiveLock);
+              DbConflictCode::ExclusiveLockDenied);
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
@@ -507,7 +507,7 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
                                                /*delta=*/1, kNoFlags);
     ASSERT_FALSE(admitted.has_value());
     EXPECT_EQ(invoke_tx.conflict_reason_for(admitted.error().code()),
-              DbConflictCode::kDbConflictExclusiveLock);
+              DbConflictCode::ExclusiveLockDenied);
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
@@ -610,7 +610,7 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
     ASSERT_FALSE(admitted.has_value())
         << "the restored version is the flagged one, so the freeze applies";
     EXPECT_EQ(invoke_tx.conflict_reason_for(admitted.error().code()),
-              DbConflictCode::kDbConflictExclusiveLock);
+              DbConflictCode::ExclusiveLockDenied);
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());

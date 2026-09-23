@@ -911,7 +911,7 @@ TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
 }
 
 // A redundant refund must leave add-capacity for later txs (#4096). Before the
-// fix the transfer below was rejected with kDbConflictBoundsExceeded.
+// fix the transfer below was rejected with BoundsExceeded.
 TEST_F(HogDbTest, DuplicateBytestringRefundLeavesAddCapacityForLaterTransfer)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
@@ -2582,7 +2582,7 @@ TEST_F(HogDbTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
     EXPECT_EQ(HogDbCode::kConflict, sync_result.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
-    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
+    EXPECT_EQ(DbConflictCode::InsufficientFunds,
               *invoke_tx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
     EXPECT_EQ(failed_addr, conflict_addr.get_raw());
@@ -2653,7 +2653,7 @@ TEST_F(HogDbTest, SyncBalanceLocksReportsAllBalanceConflicts)
   std::set<ContractAddress> expected_addrs{addr_a.get_raw(), addr_b.get_raw()};
   std::set<ContractAddress> actual_addrs;
   for (auto const &c : conflicts) {
-    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded, c.reason);
+    EXPECT_EQ(DbConflictCode::InsufficientFunds, c.reason);
     actual_addrs.insert(c.addr);
   }
   EXPECT_EQ(expected_addrs, actual_addrs);
@@ -4007,8 +4007,7 @@ TEST_F(HogDbTest, BytestringConflictRecordsDbConflictReason)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictValueMismatch,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::ValueMismatch, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
@@ -4016,7 +4015,7 @@ TEST_F(HogDbTest, BytestringConflictRecordsDbConflictReason)
 }
 
 // Regression test for #2759: requesting a different item type than what is
-// already locked at a key must record kDbConflictTypeMismatch.
+// already locked at a key must record TypeMismatch.
 TEST_F(HogDbTest, ConflictReasonTypeMismatch)
 {
   Address addr = make_address(kAddress + 303);
@@ -4043,8 +4042,7 @@ TEST_F(HogDbTest, ConflictReasonTypeMismatch)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictTypeMismatch,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::TypeMismatch, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
@@ -4052,7 +4050,7 @@ TEST_F(HogDbTest, ConflictReasonTypeMismatch)
 }
 
 // Regression test for #2759: consuming the same uniquifier twice in the same
-// block must record kDbConflictReplayProtection.
+// block must record ReplayProtection.
 TEST_F(HogDbTest, ConflictReasonReplayProtection)
 {
   Address addr = make_address(kAddress + 304);
@@ -4078,8 +4076,7 @@ TEST_F(HogDbTest, ConflictReasonReplayProtection)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictReplayProtection,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::ReplayProtection, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
@@ -4088,7 +4085,7 @@ TEST_F(HogDbTest, ConflictReasonReplayProtection)
 
 // Regression test for #2759: setting ExclusiveLock on a balance key is
 // rejected directly by InvokeTX (before reaching any lock) and must record
-// kDbConflictExclusiveLock.
+// ExclusiveLockDenied.
 TEST_F(HogDbTest, ConflictReasonExclusiveLockBalanceFlag)
 {
   Address addr = make_address(kAddress + 305);
@@ -4108,7 +4105,7 @@ TEST_F(HogDbTest, ConflictReasonExclusiveLockBalanceFlag)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
+  EXPECT_EQ(DbConflictCode::ExclusiveLockDenied,
             *invoke_tx.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
@@ -4195,8 +4192,7 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
     EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_TRUE(itx.last_conflict_reason().has_value());
-    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
-              *itx.last_conflict_reason());
+    EXPECT_EQ(DbConflictCode::BoundsExceeded, *itx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
 
     // The explicit set-add form of the same delta is rejected identically.
@@ -4244,8 +4240,7 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnFreshKeyRejectedAtReservation)
   EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
-            *itx.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::BoundsExceeded, *itx.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   // The rejection is independent of the flag: the non-exclusive form fails
@@ -4341,8 +4336,7 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnBytestringRejectedAtReservation)
     EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_TRUE(itx.last_conflict_reason().has_value());
-    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
-              *itx.last_conflict_reason());
+    EXPECT_EQ(DbConflictCode::BoundsExceeded, *itx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
 
     itx.abort();
@@ -4401,8 +4395,7 @@ TEST_F(HogDbTest, ExclusiveDeployBlocksConcurrentDeploy)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::ExclusiveLockDenied, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
@@ -4470,8 +4463,7 @@ TEST_F(HogDbTest, ExclusiveDeployStaysLockedAfterCommitAndPersists)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::ExclusiveLockDenied, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
   itx_b.abort();
 

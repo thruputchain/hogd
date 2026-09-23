@@ -75,14 +75,14 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
 
   std::unique_lock<x23::TestLock> ul(lock_);
   if (locked_ && before == nullptr) {
-    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
+    return ctx.conflict(DbConflictCode::ExclusiveLockDenied);
   }
   assert(before == nullptr ||
          before->get()->base_auth_data() == base_auth_data_);
 
   if (after != nullptr) {
     if (after->get()->base_auth_data() != base_auth_data_) {
-      return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
+      return ctx.conflict(DbConflictCode::ValueMismatch);
     }
     locked_ = true;
   }

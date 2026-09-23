@@ -407,7 +407,7 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
   // The getter surfaces the same diagnostic the FFI serializes out. handler4's
   // add conflicts: handler3 committed set=0 (locking base_=0 in HogDb), but
   // handler4's executor sees snapshot base=200, so the push is rejected with
-  // kDbConflictValueMismatch.
+  // ValueMismatch.
   // Proposal mode: hog_db selects All in debug builds, First in release
   // builds.
   if constexpr (is_debug_build()) {
@@ -415,7 +415,7 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
               DbDiagnosticLevel::kDbDiagnosticAll);
     bool found_conflict = false;
     for (auto const &c : handler4.last_commit_conflict().conflicts()) {
-      if (c.code == DbConflictCode::kDbConflictValueMismatch) {
+      if (c.code == DbConflictCode::ValueMismatch) {
         found_conflict = true;
       }
     }
@@ -425,7 +425,7 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
     ASSERT_EQ(handler4.last_commit_conflict().level(),
               DbDiagnosticLevel::kDbDiagnosticFirst);
     EXPECT_EQ(handler4.last_commit_conflict().first().code,
-              DbConflictCode::kDbConflictValueMismatch);
+              DbConflictCode::ValueMismatch);
   }
 
   advance_block();

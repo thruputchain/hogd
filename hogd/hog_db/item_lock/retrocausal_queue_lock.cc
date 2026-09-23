@@ -155,13 +155,13 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       // any entries before, then some other transaction set delta.consume.
       // Hence, there would be two consumers for the block, which is a
       // conflict.
-      return ctx.conflict(DbConflictCode::kDbConflictQueueConsumer);
+      return ctx.conflict(DbConflictCode::QueueConsumer);
     }
 
     if (!this_tx_already_consumed) {
       bool expected = false;
       if (!consumed_.compare_exchange_strong(expected, true)) {
-        return ctx.conflict(DbConflictCode::kDbConflictQueueConsumer);
+        return ctx.conflict(DbConflictCode::QueueConsumer);
       }
       undo.push([this] { consumed_.store(false, std::memory_order_relaxed); });
     }
@@ -206,7 +206,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     // block-start snapshot keeps the decision deterministic across
     // concurrent transactions.
     if (meta.live_entries >= kMaxRetrocausalQueueLiveEntries) {
-      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+      return ctx.conflict(DbConflictCode::CapacityExceeded);
     }
 
     const size_t additional_entries =
@@ -224,7 +224,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
     if (reserved_before + additional_entries >
         kRetrocausalQueueBlockEntriesMaxLen) {
-      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+      return ctx.conflict(DbConflictCode::CapacityExceeded);
     }
   }
   else if (new_entries_count < previous_entries_count) {

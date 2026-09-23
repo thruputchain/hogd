@@ -54,7 +54,7 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
   // block for the first (non-conflicting) pair. The second pair keeps
   // NNIntAddTest's original same-block shape: method 0's set_add resets the
   // block's capacity to base 0, so method 1's add -100 fails the push --
-  // still a genuine hog_db 2pc conflict (kDbConflictBoundsExceeded rather
+  // still a genuine hog_db 2pc conflict (BoundsExceeded rather
   // than the value-mismatch NNIntAddTest's comment describes, but exactly
   // the failed-push diagnostic path this test exists to exercise).
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
