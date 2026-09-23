@@ -87,3 +87,23 @@ combines them at commit time.
 - **See also**: `hogd/db_interface/transaction_state.h` line 27 ("THE STORAGE
   COST ACCOUNTING HERE IS BROKEN")
 - **Test**: `BalanceTransferAtNewDepthPreservesLockedStorage` (skipped on MockDB)
+
+## An emptied retrocausal queue keeps its storage item
+
+On HogDb a queue with no live entries does not exist: once the final entry is
+consumed, `RetrocausalQueueLock::stage_committed_changes()` removes the
+contract-data key (the `updated_metadata.live_entries == 0` branch). MockDB's
+`RetrocausalQueueArgs::to_item()` always materializes a `StorageItemWrapper`
+for the queue, with no zero-entry case, so the key remains readable as an empty
+RCQ item after the block closes.
+
+This also hides the end state of a type-changing insert: on HogDb, inserting
+into a key that holds a committed bytestring and then consuming that entry
+leaves the key absent, while on MockDB the bytestring is replaced by an empty
+queue item that stays.
+
+- **File**: `hogd/storage_item/refcounted_delta_variant.cc`
+  (`RetrocausalQueueArgs::to_item`)
+- **Tests**: `FullyConsumedQueueLeavesKeyAbsent` and
+  `NetZeroTouchOnCommittedBytestringLeavesKeyAbsent` in `rcq_test.cc`
+  (skipped on MockDB)

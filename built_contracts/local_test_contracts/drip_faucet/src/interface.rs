@@ -1,7 +1,7 @@
 use sdk::*;
 
 #[contract_exception]
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 pub enum DripError {
     /// The requested amount exceeds what is left of the current window's
     /// budget (as visible within this transaction).

@@ -1886,17 +1886,14 @@ get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
   co_return co_await base_item.get_retrocausally_consumed_entries(count);
 }
 
-// An RCQ access to a DeletedItem key resolves against a fully-consumed view
-// of the snapshot's queue: the tx-local delete hides every entry, but the
-// retrocausally-consumed count already recorded on the view must be carried
-// forward. Loads the snapshot base item fresh (the DeletedItem holds none)
-// and builds that view.
+// Fully-consumed view of the snapshot's queue for a key this transaction
+// replaced, keeping the consumed count so no entry is consumed twice.
 x23::Async<SystemStatus<RetrocausalQueueItem>>
-make_deleted_key_queue_item(FrameItemKey const &item_key,
-                            AddressAndKey const &addrkey,
-                            uint32_t retrocausally_consumed_count,
-                            StorageSnapshotCache &snapshot_cache,
-                            ExecutionModeData &execution_mode_data)
+make_replaced_key_queue_item(FrameItemKey const &item_key,
+                             AddressAndKey const &addrkey,
+                             uint32_t retrocausally_consumed_count,
+                             StorageSnapshotCache &snapshot_cache,
+                             ExecutionModeData &execution_mode_data)
 {
   UnmodifiedItem unmodified_item;
   auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
@@ -1938,23 +1935,21 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     co_return item_view->get<RetrocausalQueueItem>();
   }
 
-  if (item_view->get<DeletedItem>()) {
-    auto new_item = co_await make_deleted_key_queue_item(
-        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
-        snapshot_cache, execution_mode_data);
-    if (!new_item.has_value()) {
-      co_return new_item.error();
-    }
-
-    auto set_status = item_view->set(new_item.value());
-    if (!set_status.has_value()) {
-      co_return set_status.error();
-    }
-    co_return item_view->get<RetrocausalQueueItem>();
+  // The frame holds a deleted or other-typed value. An insert is a write and
+  // replaces whatever the key held, as it would a committed value, so start a
+  // fresh queue over a fully-consumed view of the snapshot.
+  auto new_item = co_await make_replaced_key_queue_item(
+      item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+      snapshot_cache, execution_mode_data);
+  if (!new_item.has_value()) {
+    co_return new_item.error();
   }
 
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  auto set_status = item_view->set(new_item.value());
+  if (!set_status.has_value()) {
+    co_return set_status.error();
+  }
+  co_return item_view->get<RetrocausalQueueItem>();
 }
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
@@ -1993,6 +1988,16 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
+// A read never converts a key, so a non-queue base is wrong-type input
+// rather than an empty queue.
+bool
+committed_value_is_not_a_queue(UnmodifiedItem const &unmodified_item)
+{
+  CHECK(unmodified_item.is_loaded());
+  auto type = unmodified_item.base_item().type();
+  return type.has_value() && *type != ItemViewType::kRetrocausalQueue;
+}
+
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 retrocausal_queue_peek_from_view(ItemView *item_view,
                                  FrameItemKey const &item_key,
@@ -2011,14 +2016,17 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
         !loaded.has_value()) {
       co_return loaded.error();
     }
-
+    if (committed_value_is_not_a_queue(*unmodified_item)) {
+      co_return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     co_return co_await load_next_queue_entry(queue_item, execution_mode_data,
                                              /*advance_cursor=*/false);
   }
 
   if (item_view->get<DeletedItem>()) {
-    auto queue_item = co_await make_deleted_key_queue_item(
+    auto queue_item = co_await make_replaced_key_queue_item(
         item_key, addrkey, item_view->get_retrocausally_consumed_count(),
         snapshot_cache, execution_mode_data);
     if (!queue_item.has_value()) {
@@ -2089,6 +2097,10 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
         !loaded.has_value()) {
       co_return loaded.error();
     }
+    if (committed_value_is_not_a_queue(*unmodified_item)) {
+      co_return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
@@ -2114,7 +2126,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   // Same treatment for deleted keys: a no-op consume should leave the
   // key deleted rather than converting it to an empty RCQ.
   if (item_view->get<DeletedItem>()) {
-    auto queue_item_res = co_await make_deleted_key_queue_item(
+    auto queue_item_res = co_await make_replaced_key_queue_item(
         item_key, addrkey, item_view->get_retrocausally_consumed_count(),
         snapshot_cache_, execution_mode_data_);
     if (!queue_item_res.has_value()) {
