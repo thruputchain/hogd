@@ -1,3 +1,4 @@
+#include <optional>
 #include <utility>
 
 #include <gtest/gtest.h>
@@ -108,6 +109,18 @@ make_obs_key(uint32_t index)
   key.contract_data_key() = data;
   return AddressAndKey{.address = ContractAddress{1}, .key = key};
 }
+
+// Unwraps a consumed presence bit for an expectation. The nullopt of an
+// exhausted or contradicted stream stays nullopt, so a test compares the whole
+// result against what replay should have seen.
+std::optional<bool>
+presence_bit(std::optional<Nondeterministic<bool>> bit)
+{
+  if (!bit.has_value()) {
+    return std::nullopt;
+  }
+  return bit->get();
+}
 } // namespace
 
 TEST(ExecutionModeTest, QueueEntryObservations)
@@ -194,15 +207,15 @@ TEST(ExecutionModeTest, ValidationRejectsAbsentBitAfterPresentObservation)
 
   {
     ValidationModeData validation(proposal.proposal_data());
-    auto first = validation.consume_queue_entry_presence_bit(addrkey, 0);
-    ASSERT_TRUE(first.has_value());
-    EXPECT_TRUE(first->get());
+    EXPECT_EQ(presence_bit(
+                  validation.consume_queue_entry_presence_bit(addrkey, 0)),
+              true);
     auto entry = validation.consume_queue_entry_observation(addrkey, 0);
     ASSERT_NE(entry.get(), nullptr);
 
-    auto second = validation.consume_queue_entry_presence_bit(addrkey, 0);
-    ASSERT_TRUE(second.has_value());
-    EXPECT_TRUE(second->get());
+    EXPECT_EQ(presence_bit(
+                  validation.consume_queue_entry_presence_bit(addrkey, 0)),
+              true);
     auto again = validation.consume_queue_entry_observation(addrkey, 0);
     EXPECT_EQ(again.get(), entry.get());
     EXPECT_TRUE(validation.check_all_consumed());
@@ -214,9 +227,9 @@ TEST(ExecutionModeTest, ValidationRejectsAbsentBitAfterPresentObservation)
   {
     ValidationModeData validation(tampered);
     ASSERT_TRUE(validation.validate());
-    auto first = validation.consume_queue_entry_presence_bit(addrkey, 0);
-    ASSERT_TRUE(first.has_value());
-    EXPECT_TRUE(first->get());
+    EXPECT_EQ(presence_bit(
+                  validation.consume_queue_entry_presence_bit(addrkey, 0)),
+              true);
     auto held = validation.consume_queue_entry_observation(addrkey, 0);
     ASSERT_NE(held.get(), nullptr);
 
@@ -244,19 +257,18 @@ TEST(ExecutionModeTest, ValidationAcceptsAbsentBitAtUnheldIndex)
   ValidationModeData validation(data);
   ASSERT_TRUE(validation.validate());
 
-  auto absent = validation.consume_queue_entry_presence_bit(addrkey, 0);
-  ASSERT_TRUE(absent.has_value());
-  EXPECT_FALSE(absent->get());
-
-  auto present = validation.consume_queue_entry_presence_bit(addrkey, 0);
-  ASSERT_TRUE(present.has_value());
-  EXPECT_TRUE(present->get());
+  EXPECT_EQ(presence_bit(
+                validation.consume_queue_entry_presence_bit(addrkey, 0)),
+            false);
+  EXPECT_EQ(presence_bit(
+                validation.consume_queue_entry_presence_bit(addrkey, 0)),
+            true);
   auto held = validation.consume_queue_entry_observation(addrkey, 0);
   ASSERT_NE(held.get(), nullptr);
 
-  auto past_end = validation.consume_queue_entry_presence_bit(addrkey, 1);
-  ASSERT_TRUE(past_end.has_value());
-  EXPECT_FALSE(past_end->get());
+  EXPECT_EQ(presence_bit(
+                validation.consume_queue_entry_presence_bit(addrkey, 1)),
+            false);
   EXPECT_TRUE(validation.check_all_consumed());
 }
 
