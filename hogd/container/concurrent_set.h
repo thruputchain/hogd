@@ -208,30 +208,51 @@ public:
   bool contains(T value) { return do_contains(value, false); }
   bool erase(T value) { return do_contains(value, true); }
 
-  // iterator over all of the non-erased values
+  // Iterator over the live values. It rests on a live value or at end().
+  // Each advance loads a slot once and skips the empty, erased, and claimed
+  // ones, and operator* returns the value that advance observed rather than
+  // re-reading the slot, so a value cannot turn into a tombstone between the
+  // test and the use of it. This is a bulk read of a quiescent set: an insert
+  // or erase during the walk may or may not be observed, and the level count is
+  // sampled once at begin(), so a resize during the walk is not supported.
   class Iterator {
-    ConcurrentSet *set_;
-    size_t index_;
+    const ConcurrentSet *set_;
+    const std::atomic<T> *entries_{nullptr}; // the level being walked
+    size_t index_{0};
+    size_t level_end_{0}; // entries_for_level(level_)
     size_t level_;
+    size_t n_levels_;
+    T value_{Traits::kEmpty};
 
   public:
-    Iterator(ConcurrentSet *set, size_t index, size_t level)
-      : set_(set), index_(index), level_(level)
-    {}
-    T operator*() const
+    Iterator(const ConcurrentSet *set, size_t level, size_t n_levels)
+      : set_(set), level_(level), n_levels_(n_levels)
     {
-      return set_->get_level(level_)[index_].load(std::memory_order_acquire);
+      if (level_ < n_levels_) {
+        entries_ = set_->get_level(level_);
+        level_end_ = entries_for_level(level_);
+        value_ = entries_[0].load(std::memory_order_acquire);
+        if (is_reserved(value_)) {
+          ++*this;
+        }
+      }
     }
+
+    T operator*() const { return value_; }
 
     Iterator &operator++()
     {
       do {
-        index_++;
-        if (index_ == entries_for_level(level_)) {
-          level_++;
+        if (++index_ == level_end_) {
           index_ = 0;
+          if (++level_ == n_levels_) {
+            return *this;
+          }
+          entries_ = set_->get_level(level_);
+          level_end_ = entries_for_level(level_);
         }
-      } while (*this != set_->end() && is_reserved(**this));
+        value_ = entries_[index_].load(std::memory_order_acquire);
+      } while (is_reserved(value_));
       return *this;
     }
 
@@ -242,16 +263,13 @@ public:
     bool operator!=(const Iterator &other) const { return !(*this == other); }
   };
 
-  Iterator begin()
-  {
-    auto it = Iterator(this, 0, 0);
-    if (is_reserved(*it)) {
-      ++it;
-    }
-    return it;
-  }
+  Iterator begin() const { return Iterator(this, 0, levels()); }
 
-  Iterator end() { return Iterator(this, 0, levels()); }
+  Iterator end() const
+  {
+    size_t n_levels = levels();
+    return Iterator(this, n_levels, n_levels);
+  }
 
 private:
   // The values the set reserves to mark slot state, which it therefore cannot
@@ -288,6 +306,14 @@ private:
   }
 
   std::atomic<T> *get_level(size_t level)
+  {
+    if (level == 0) {
+      return initial_level_;
+    }
+    return extra_levels_[level - 1].get();
+  }
+
+  const std::atomic<T> *get_level(size_t level) const
   {
     if (level == 0) {
       return initial_level_;

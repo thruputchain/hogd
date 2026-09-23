@@ -295,6 +295,82 @@ TEST(ConcurrentSet, FillAFewLevels)
   ASSERT_EQ(kExpectedLevels, ConcurrentSetHelper::levels(s));
 }
 
+// Iteration yields each live value exactly once and nothing else: not the
+// tombstones erase leaves behind, and not a slot an in-flight insert has
+// claimed but not yet published.
+TEST(ConcurrentSet, IterationSkipsErasedAndClaimedSlots)
+{
+  ConcurrentSet<uint128_t> s;
+  constexpr size_t kInserts = ConcurrentSetHelper::kInitialCapacity * 8;
+  for (uint128_t i = 1; i <= kInserts; ++i) {
+    ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+  }
+  ASSERT_GT(ConcurrentSetHelper::levels(s), 2);
+
+  std::set<uint128_t> expected;
+  for (uint128_t i = 1; i <= kInserts; ++i) {
+    if (i % 2 == 0) {
+      ASSERT_TRUE(s.erase(i));
+    }
+    else {
+      expected.insert(i);
+    }
+  }
+  ASSERT_GT(ConcurrentSetHelper::tombstone_count(s), 0);
+
+  const uint128_t claimed_value = uint128_t{1} << 100;
+  const size_t deepest = ConcurrentSetHelper::levels(s) - 1;
+  const size_t claimed =
+      ConcurrentSetHelper::first_probe_index(s, claimed_value, deepest);
+  ConcurrentSetHelper::claim_slot(s, deepest, claimed);
+
+  std::vector<uint128_t> seen;
+  for (uint128_t value : s) {
+    seen.push_back(value);
+  }
+  EXPECT_EQ(expected.size(), seen.size());
+  EXPECT_EQ(expected, std::set<uint128_t>(seen.begin(), seen.end()));
+
+  ConcurrentSetHelper::settle_claim_as_tombstone(s, deepest, claimed);
+}
+
+// The value an iterator rests on was read when it got there. Erasing it
+// afterwards tombstones the slot but does not change what the iterator hands
+// back, so a caller can test a value and then use it.
+TEST(ConcurrentSet, IteratorValueSurvivesErase)
+{
+  ConcurrentSet<uint128_t> s;
+  ASSERT_EQ(InsertResult::kInserted, s.try_insert(1));
+  ASSERT_EQ(InsertResult::kInserted, s.try_insert(2));
+
+  auto it = s.begin();
+  ASSERT_TRUE(it != s.end());
+  const uint128_t value = *it;
+  ASSERT_TRUE(s.erase(value));
+  EXPECT_EQ(value, *it);
+  EXPECT_NE(ConcurrentSetHelper::kTombstone, *it);
+}
+
+// A set with no live values iterates as empty, whether it never held one or
+// every slot it filled is now a tombstone, in which case the walk to end()
+// crosses every level.
+TEST(ConcurrentSet, IterationOverNoLiveValues)
+{
+  ConcurrentSet<uint128_t> s;
+  EXPECT_TRUE(s.begin() == s.end());
+
+  constexpr size_t kInserts = ConcurrentSetHelper::kInitialCapacity * 4;
+  for (uint128_t i = 1; i <= kInserts; ++i) {
+    ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+  }
+  for (uint128_t i = 1; i <= kInserts; ++i) {
+    ASSERT_TRUE(s.erase(i));
+  }
+  ASSERT_GT(ConcurrentSetHelper::levels(s), 1);
+  EXPECT_EQ(0, s.size());
+  EXPECT_TRUE(s.begin() == s.end());
+}
+
 TEST(ConcurrentSet, Contains)
 {
   ConcurrentSet<uint128_t> s;
