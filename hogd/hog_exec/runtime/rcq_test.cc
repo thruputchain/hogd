@@ -1247,35 +1247,13 @@ TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
 
 // --- Batch 6: RCQ syscalls aimed at a key holding another type ---
 //
-// A contract must not be able to tell whether the value it is working against
-// was written earlier in this transaction or committed in an earlier block.
-// These pin that for the RCQ syscalls, which used to answer differently in
-// the two cases (#1673 and the four amendments filed on it). Two rules,
-// applied to both timings:
-//
-//  (1) An insert is a write, and a write replaces whatever the key held.
-//      Inserting over a bytestring or an NNInt destroys that value and leaves
-//      a queue, whether the value was committed or written a syscall ago.
-//      ItemView::set() permits the type change by design, and the other
-//      setters (set_bytestring, set_nnint) overwrite unconditionally too.
-//  (2) A read is not a write. Consume, peek and PeekLen report a key holding
-//      another type as InvalidSyscallInput rather than as an empty queue, in
-//      both timings -- the same split get_bytestring() and get_nnint() make
-//      between the wrong type and a key that holds nothing. A key with no
-//      value at all is still an empty queue, so it still returns
-//      NoRetrocausalQueueEntry (EmptyConsumeOnAbsentKeyDoesNotPinType).
-//      The decision is made on the base value as this transaction sees it,
-//      before any read, so entries other transactions inserted this block
-//      are consulted only when that base is a queue or absent. Another
-//      transaction converting a bytestring key this block is a write like
-//      any other and reaches readers at the block boundary.
-//
-// A queue with no live entries does not exist, so (1) has a second half: a
-// key whose queue is consumed to zero is absent at the end of the block, and
-// an insert followed by a consume of that entry therefore leaves the key
-// absent rather than restoring the value the insert overwrote.
+// The answer must not depend on whether that value was written earlier in
+// this transaction or committed in an earlier block (#1673). Two rules: an
+// insert replaces the value like any other write, and a read reports it as
+// InvalidSyscallInput rather than as an empty queue. Concurrent entries from
+// this block are consulted only when the base value is a queue or absent.
 
-// (1) A committed bytestring is replaced -- not rejected -- by an insert.
+// (1) A committed bytestring is replaced by an insert, not rejected.
 TEST_P(RCQTest, InsertOnCommittedBytestringConvertsKeyToQueue)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
@@ -1380,9 +1358,8 @@ TEST_P(RCQTest, ReadsOnBytestringWrittenInSameTransactionAreWrongTypeInput)
   EXPECT_EQ(after->bytestring(), make_bytestring("hi"));
 }
 
-// (2) Two writers in one block, from an absent base: tx1 inserts, tx2 inserts
-// and then reads, and sees its own entry followed by tx1's. The key is a
-// queue as far as tx2 is concerned, so the concurrent entry is in reach.
+// (2) Two writers in one block from an absent base: tx2 inserts, then reads
+// its own entry followed by tx1's concurrent one.
 TEST_P(RCQTest, ConcurrentInsertIsReadableFromQueueBase)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
@@ -1392,12 +1369,9 @@ TEST_P(RCQTest, ConcurrentInsertIsReadableFromQueueBase)
   ASSERT_TRUE(insert_and_consume({20}, {20, 10}));
 }
 
-// (1)+(2) The same two writers over a committed bytestring. Each insert
-// converts the key for its own transaction, so tx2 reads a queue and sees
-// tx1's entry exactly as above. tx3 writes nothing, so its base is the
-// bytestring and every read is rejected -- tx1's conversion is not visible
-// to it until the block closes. What separates tx2 from tx3 is the write,
-// not when anything happened.
+// (1)+(2) The same two writers over a committed bytestring: tx2's own insert
+// makes the key a queue, so it sees tx1's entry; tx3 writes nothing and is
+// rejected, since tx1's conversion reaches readers only at the block boundary.
 TEST_P(RCQTest, ConcurrentInsertOverBytestringIsReadableOnlyAfterOwnWrite)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);

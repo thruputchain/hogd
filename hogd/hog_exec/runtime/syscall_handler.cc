@@ -1886,13 +1886,10 @@ get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
   co_return co_await base_item.get_retrocausally_consumed_entries(count);
 }
 
-// An RCQ access to a key this transaction already replaced -- deleted, or
-// overwritten with a value of another type -- resolves against a
-// fully-consumed view of the snapshot's queue: the tx-local write hides every
-// entry, but the retrocausally-consumed count already recorded on the view
-// must be carried forward, or an entry could be consumed both before and
-// after the replacement. Loads the snapshot base item fresh (the frame's item
-// holds none) and builds that view.
+// Queue item for a key this transaction already replaced (deleted, or
+// overwritten with another type): a fully-consumed view of the snapshot's
+// queue, carrying the retrocausally-consumed count forward so no entry can be
+// consumed both before and after the replacement.
 x23::Async<SystemStatus<RetrocausalQueueItem>>
 make_replaced_key_queue_item(FrameItemKey const &item_key,
                              AddressAndKey const &addrkey,
@@ -1940,14 +1937,9 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     co_return item_view->get<RetrocausalQueueItem>();
   }
 
-  // The frame holds some other kind of value for this key: this transaction
-  // deleted it, or overwrote it with a bytestring or an NNInt. An insert is a
-  // write, and a write replaces whatever a key held -- ItemView::set() permits
-  // the type change for exactly this reason, and rejecting here would make an
-  // insert behave differently depending on whether the value it replaces was
-  // written by this transaction or committed in an earlier block. The old
-  // queue, if there was one, is gone either way, so start a fresh one over a
-  // fully-consumed view of the snapshot.
+  // The frame holds a deleted or other-typed value. An insert is a write and
+  // replaces whatever the key held, as it would a committed value, so start a
+  // fresh queue over a fully-consumed view of the snapshot.
   auto new_item = co_await make_replaced_key_queue_item(
       item_key, addrkey, item_view->get_retrocausally_consumed_count(),
       snapshot_cache, execution_mode_data);
@@ -1998,21 +1990,10 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
-// A read never changes the type of an item, so a key whose base value is of
-// some other kind is wrong-type input rather than an empty queue. This is the
-// same split get_bytestring() and get_nnint() make between a key holding the
-// wrong type (InvalidSyscallInput) and a key holding nothing at all.
-//
-// The base value is the one this transaction sees: a value it wrote itself
-// earlier, or else the snapshot. Both must dispatch the same way -- a
-// bytestring written a frame ago and one committed a block ago are the same
-// bytestring -- so the decision is made here, on the base type, before any
-// read. In particular, entries other transactions inserted into this key in
-// the current block are consulted only when the base is a queue (or absent,
-// which is an empty queue), never to rescue a read of a bytestring. A same-
-// block type change is a write like any other and becomes visible to readers
-// at the block boundary. Deciding before the read also keeps the type error
-// ahead of the read-limit error, as it already is for a tx-local value.
+// A read never changes the type of a key, so a base value of another type is
+// wrong-type input, not an empty queue, whether it was committed or written
+// earlier in this transaction. Decided before any read: concurrent entries
+// from this block are consulted only when the base is a queue or absent.
 bool
 snapshot_holds_other_type(UnmodifiedItem const &unmodified_item)
 {

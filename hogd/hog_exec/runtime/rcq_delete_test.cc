@@ -2200,9 +2200,8 @@ protected:
 
     builder.add<SerializationFormat::kTxs>(
         71, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          // consume from a key whose committed value is not a queue: a read
-          // never converts a key, so this is wrong-type input, even if
-          // another transaction in this block has already converted it
+          // reads never convert a key, so consuming a bytestring is wrong-type
+          // input, even if another transaction converted it this block
           uint32_t out = 0;
           RuntimeMemoryLength written_len = 0;
           auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
