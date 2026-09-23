@@ -412,12 +412,12 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
   if (spec.target == Op::kJal) {
     // Like the JALR sweep, land on the next instruction so every body slot
     // executes. JAL is PC-relative: +4 works at every slot without patching.
-    const uint8_t rd =
-        spec.context == OperandContext::kNoLink
-            ? 0
-            : (chain ? kChainReg
-                     : static_cast<uint8_t>(kDataBankBase +
-                                            (index % kDataBankSize)));
+    uint8_t rd = 0;
+    if (spec.context != OperandContext::kNoLink) {
+      rd = chain ? kChainReg
+                 : static_cast<uint8_t>(kDataBankBase +
+                                        (index % kDataBankSize));
+    }
     return test_program::j_type(rd, kInstructionBytes);
   }
   if (spec.target == Op::kJalr) {
@@ -1057,17 +1057,21 @@ build_kernel(const KernelSpec &spec)
 std::string
 jump_context_name(const JumpSpec &spec)
 {
-  const char *layout =
-      spec.layout == JumpLayout::kSequential
-          ? "sequential"
-          : (spec.layout == JumpLayout::kReverse ? "reverse" : "shuffled");
-  const std::string mode =
-      spec.context == OperandContext::kChain
-          ? "link_chain"
-          : (spec.target == Op::kJalr &&
-                     spec.context != OperandContext::kTargetChase
-                 ? "fixed_base_" + context_name(spec.context)
-                 : context_name(spec.context));
+  const char *layout = "shuffled";
+  if (spec.layout == JumpLayout::kSequential) {
+    layout = "sequential";
+  }
+  else if (spec.layout == JumpLayout::kReverse) {
+    layout = "reverse";
+  }
+  std::string mode = context_name(spec.context);
+  if (spec.context == OperandContext::kChain) {
+    mode = "link_chain";
+  }
+  else if (spec.target == Op::kJalr &&
+           spec.context != OperandContext::kTargetChase) {
+    mode = "fixed_base_" + mode;
+  }
   return mode + "/" + layout + "/n" + std::to_string(spec.nodes) + "/stride" +
          std::to_string(spec.stride_words) + "/seed" +
          std::to_string(spec.seed);
@@ -1108,7 +1112,7 @@ build_jump_kernel(const JumpSpec &spec)
     else if (spec.layout == JumpLayout::kShuffled) {
       uint64_t state = seed;
       for (uint32_t i = spec.nodes - 1; i > 1; --i) {
-        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        state = (state * 6364136223846793005ULL) + 1442695040888963407ULL;
         const auto j = 1 + static_cast<uint32_t>((state >> 32) % i);
         std::swap(order[i], order[j]);
       }
@@ -1122,7 +1126,7 @@ build_jump_kernel(const JumpSpec &spec)
   JumpKernel out;
   Kernel &kernel = out.kernel;
   out.loop_pc = static_cast<uint32_t>(words.size()) * kInstructionBytes;
-  const uint32_t setup = static_cast<uint32_t>(words.size());
+  const auto setup = static_cast<uint32_t>(words.size());
   // Fixed-size register initialization, executed once per traversal. This
   // resets a link chain or linked-table cursor, not after every target jump.
   words.resize(words.size() + 2);
@@ -1140,7 +1144,7 @@ build_jump_kernel(const JumpSpec &spec)
   const uint32_t tail_pc =
       static_cast<uint32_t>(words.size()) * kInstructionBytes;
   const uint32_t base =
-      chase ? spec.nodes * 8 : body_pc + static_cast<uint32_t>(body_words) * 2;
+      chase ? spec.nodes * 8 : body_pc + (static_cast<uint32_t>(body_words) * 2);
   const uint8_t base_reg = chase || spec.context == OperandContext::kChain
                                ? kChainReg
                                : kJalrBaseReg;
@@ -1150,7 +1154,7 @@ build_jump_kernel(const JumpSpec &spec)
   words[setup + 1] = test_program::addi(base_reg, base_reg, lo);
   out.iteration_pcs = {out.loop_pc, out.loop_pc + kInstructionBytes};
   const auto pc_for = [&](uint32_t node) {
-    return body_pc + node * spec.stride_words * kInstructionBytes;
+    return body_pc + (node * spec.stride_words * kInstructionBytes);
   };
   uint32_t previous_link = base;
   for (uint32_t i = 0; i < spec.nodes; ++i) {
@@ -1168,7 +1172,7 @@ build_jump_kernel(const JumpSpec &spec)
       const uint8_t rd =
           spec.context == OperandContext::kNoLink
               ? 0
-              : static_cast<uint8_t>(kDataBankBase + i % kDataBankSize);
+              : static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
       word = test_program::j_type(rd, static_cast<int32_t>(next) -
                                           static_cast<int32_t>(pc));
     }
@@ -1181,12 +1185,13 @@ build_jump_kernel(const JumpSpec &spec)
       if (offset < -2048 || offset > 2047) {
         return std::unexpected(KernelError::kTargetImmediateOutOfRange);
       }
-      const uint8_t rd =
-          spec.context == OperandContext::kChain
-              ? kChainReg
-              : (spec.context == OperandContext::kNoLink
-                     ? 0
-                     : static_cast<uint8_t>(kDataBankBase + i % kDataBankSize));
+      uint8_t rd = 0;
+      if (spec.context == OperandContext::kChain) {
+        rd = kChainReg;
+      }
+      else if (spec.context != OperandContext::kNoLink) {
+        rd = static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+      }
       word = test_program::jalr(rd, base_reg, static_cast<int32_t>(offset));
       previous_link = pc + kInstructionBytes;
     }
@@ -1208,11 +1213,11 @@ build_jump_kernel(const JumpSpec &spec)
       }
     };
     put(spec.nodes * 8, table_order.front() * 8);
-    put(spec.nodes * 8 + 4, tail_pc);
+    put((spec.nodes * 8) + 4, tail_pc);
     for (uint32_t i = 0; i < spec.nodes; ++i) {
       put(table_order[i] * 8,
           i + 1 == spec.nodes ? spec.nodes * 8 : table_order[i + 1] * 8);
-      put(table_order[i] * 8 + 4, pc_for(order[i]));
+      put((table_order[i] * 8) + 4, pc_for(order[i]));
     }
     out.iteration_pcs.insert(out.iteration_pcs.end(),
                              {hub_pc, hub_pc + 4, hub_pc + 8});
@@ -1249,10 +1254,10 @@ build_jump_kernel(const JumpSpec &spec)
   kernel.instructions_per_iteration = out.iteration_pcs.size();
   // Last traversal skips its back edge and executes the terminal ecall.
   kernel.dynamic_instructions =
-      out.loop_pc / kInstructionBytes +
-      uint64_t{spec.trip_count} * out.iteration_pcs.size();
+      (out.loop_pc / kInstructionBytes) +
+      (uint64_t{spec.trip_count} * out.iteration_pcs.size());
   kernel.scheduled_gas = prefix_gas +
-                         uint64_t{spec.trip_count} * iteration_gas -
+                         (uint64_t{spec.trip_count} * iteration_gas) -
                          gas_at(tail_pc + 8) + gas_at(out.exit_pc);
   return out;
 }

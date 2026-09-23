@@ -1191,7 +1191,7 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
       {u_type(0x17, 6, 0xfffff000U), InstructionKind::kAuipc, Op::kAuipc, 6, -1,
        -1, -4096, kBaseInstructionGas},
       {j_type(7, -2048), InstructionKind::kJal, Op::kJal, 7, -1, -1, -2048,
-       kBaseInstructionGas},
+       kDirectJumpGas},
       {jalr(8, 9, 12), InstructionKind::kJalr, Op::kJalr, 8, 9, 12, 12,
        kIndirectJumpGas},
       {b_type(0, 1, 2, -16), InstructionKind::kBranch, Op::kBeq, -1, 1, 2, -16,
@@ -1251,7 +1251,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
 
   const std::array<ExpectedGasEntry, kOpCount> expected = {{
       {Op::kLui, u8"LUI", 1},     {Op::kAuipc, u8"AUIPC", 1},
-      {Op::kJal, u8"JAL", 1},     {Op::kJalr, u8"JALR", 3},
+      {Op::kJal, u8"JAL", 3},     {Op::kJalr, u8"JALR", 3},
       {Op::kBeq, u8"BEQ", 2},     {Op::kBne, u8"BNE", 2},
       {Op::kBlt, u8"BLT", 2},     {Op::kBge, u8"BGE", 2},
       {Op::kBltu, u8"BLTU", 2},   {Op::kBgeu, u8"BGEU", 2},
@@ -1293,7 +1293,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
 
   EXPECT_EQ(kOpCount, 49U);
   EXPECT_EQ(kGasTableVersion, 4U);
-  EXPECT_EQ(kGasScheduleDigest, 0x9019deb606f5759bULL);
+  EXPECT_EQ(kGasScheduleDigest, 0x3dd1fbedf37a5719ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);

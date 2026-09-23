@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hogd/hog_exec/runtime/rv32/arch_trace.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/kernel.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/lowering_audit.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
@@ -18,6 +19,7 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/syscall_kernel.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/workloads.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
+#include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
@@ -194,8 +196,7 @@ TEST(Rv32GasCalibrationJump, ExecutesTheDeclaredPathAndTargetDependencies)
           ASSERT_TRUE(decoded.has_value());
           auto program = std::make_shared<Program>(std::move(*decoded));
           Machine oracle(program, k.memory_bytes, kGasLimit);
-          std::copy(k.initial_memory.begin(), k.initial_memory.end(),
-                    oracle.memory().begin());
+          std::ranges::copy(k.initial_memory, oracle.memory().begin());
           std::vector<uint32_t> expected;
           for (uint32_t pc = 0; pc < built->loop_pc; pc += kInstructionBytes) {
             expected.push_back(pc);
@@ -221,8 +222,8 @@ TEST(Rv32GasCalibrationJump, ExecutesTheDeclaredPathAndTargetDependencies)
             const auto &step = trace.steps[i];
             const uint32_t pc = step.state_before.pc;
             EXPECT_EQ(pc, expected[i]);
-            if (std::find(k.target_slot_pcs.begin(), k.target_slot_pcs.end(),
-                          pc) == k.target_slot_pcs.end()) {
+            if (std::ranges::find(k.target_slot_pcs, pc) ==
+                k.target_slot_pcs.end()) {
               continue;
             }
             const auto &instruction = program->instruction_at_aligned_pc(pc);

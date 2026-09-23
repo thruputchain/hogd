@@ -1398,9 +1398,10 @@ main_impl(int argc, char **argv)
                    jump_context_name(spec));
       sweeps.push_back(run_jump_sweep(spec, options));
       if (spec.context == OperandContext::kTargetChase) {
-        std::println(stderr, "  {:.4f} ns/sequence (2 LW + JALR + JAL; "
-                             "includes loop/setup overhead)",
-                     sweeps.back().ns_upper_bound);
+        std::println(
+            stderr,
+            "  {:.4f} ns/sequence (2 LW + JALR + JAL; includes loop/setup overhead)",
+            sweeps.back().ns_upper_bound);
       }
       else {
         std::println(stderr, "  {:.4f} ns/jump (absolute upper bound)",

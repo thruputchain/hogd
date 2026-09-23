@@ -676,24 +676,9 @@ TEST(Rv32Threaded, outOfGasMidRunSettlesAtNextSeam)
 
 TEST(Rv32Threaded, fusedRunGasMatchesPerInstructionAccountingOnOutOfGas)
 {
-  using test_program::j_type;
-  // The block-granular charger bills a whole run at its head in one check. For
-  // a run of 1-gas instructions, that must be indistinguishable from debiting
-  // one gas per instruction: under every budget, the gas left at termination --
-  // including the out-of-gas case -- must agree with per-instruction metering.
-  //
-  // Two programs do the same kWork units of 1-gas work, then fall off the end:
-  //   fused:     kWork back-to-back addi nops -> ONE run of run_gas == kWork.
-  //   per_instr: (kWork-1) jal(+4), each landing on the next, then a trailing
-  //              addi nop -> kWork single-instruction runs (run_gas 1 each).
-  //              jal is a barrier that still costs kBaseInstructionGas, so this
-  //              is literal one-gas-at-a-time accounting -- the ground truth.
-  //              A taken branch would also end each run, but branches cost more
-  //              than one gas, which would make the two programs do different
-  //              amounts of work and the comparison meaningless.
-  // Block metering must match it for all budgets, so on OOG the fused run head
-  // debits the whole (unaffordable) run -- saturating gas_remaining to 0 --
-  // exactly as the per-instruction program drains to 0 before it traps.
+  // Compare the same ADDI stream under block and per-instruction metering.
+  // JAL is no longer a one-gas barrier, so use the canonical interpreter as
+  // the per-instruction oracle instead of changing the instruction stream.
   constexpr uint32_t kWork = 6;
 
   std::vector<uint32_t> fused_words;
@@ -703,19 +688,13 @@ TEST(Rv32Threaded, fusedRunGasMatchesPerInstructionAccountingOnOutOfGas)
   }
   auto fused_program = threaded_from_words(fused_words);
 
-  std::vector<uint32_t> per_instr_words;
-  per_instr_words.reserve(kWork);
-  for (uint32_t i = 0; i + 1 < kWork; ++i) {
-    per_instr_words.push_back(j_type(0, 4)); // jal x0,+4 -> next instruction
-  }
-  per_instr_words.push_back(
-      addi(0, 0, 0)); // trailing nop the last jump lands on
-  auto per_instr_program = threaded_from_words(per_instr_words);
+  const auto per_instr_program = make_program(fused_words);
+  ASSERT_NE(per_instr_program, nullptr);
 
   // Sweep every budget from starved through comfortably past the work.
   for (uint64_t gas = 0; gas <= kWork + 2; ++gas) {
     ThreadedMachine fused_machine(*fused_program, gas);
-    ThreadedMachine per_instr_machine(*per_instr_program, gas);
+    Machine per_instr_machine(per_instr_program, 1024, gas);
     RecordingHost host;
     const StepResult fused_result = fused_machine.run(host);
     const StepResult per_instr_result = per_instr_machine.run(host);

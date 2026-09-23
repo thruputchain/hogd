@@ -58,9 +58,11 @@ constexpr uint64_t kBaseInstructionGas = 1;
 // of them costs about twice a dispatch, not eight times.
 constexpr uint64_t kBranchInstructionGas = 2;
 constexpr uint64_t kDivInstructionGas = 2;
-// Indirect jump (2.61x) and the loads that can carry a pointer (2.49-2.65x).
-// These are the ISA's most expensive instructions -- JALR because the engine
-// cannot predict the target, LH/LHU/LW because a dependent chain of them pays
+// Direct jump: 4.8832 ns / 1.6213 ns = 3.012 units on hog10's largest
+// shuffled layout. Use 3 gas; the 0.4% excess is measurement-scale variation.
+constexpr uint64_t kDirectJumpGas = 3;
+// Indirect jump (2.72x) and the loads that can carry a pointer (2.49-2.65x).
+// LH/LHU/LW carry pointers: a dependent chain of them pays
 // full cache latency the interpreter's dispatch cannot hide.
 constexpr uint64_t kIndirectJumpGas = 3;
 constexpr uint64_t kWideLoadGas = 3;
@@ -159,7 +161,7 @@ struct InstructionGasEntry {
 constexpr std::array<InstructionGasEntry, kOpCount> kInstructionGasSchedule = {{
     {.op = Op::kLui, .name = u8"LUI", .cost = kBaseInstructionGas},
     {.op = Op::kAuipc, .name = u8"AUIPC", .cost = kBaseInstructionGas},
-    {.op = Op::kJal, .name = u8"JAL", .cost = kBaseInstructionGas},
+    {.op = Op::kJal, .name = u8"JAL", .cost = kDirectJumpGas},
     {.op = Op::kJalr, .name = u8"JALR", .cost = kIndirectJumpGas},
     {.op = Op::kBeq, .name = u8"BEQ", .cost = kBranchInstructionGas},
     {.op = Op::kBne, .name = u8"BNE", .cost = kBranchInstructionGas},
