@@ -5,15 +5,18 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
+#include "built_contracts/itc_erc20.h"
 #include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
@@ -21,6 +24,7 @@
 #include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -126,6 +130,34 @@ check_root_pubkey_auth(NativeSyscallContext &ctx)
     co_return std::optional{WalletError::InvalidAuthClaim};
   }
   co_return std::optional<WalletError>{};
+}
+
+deploy_result_t
+deployment_syscall_error(SyscallNo call, SyscallErrorCode error)
+{
+  LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
+  exn.syscall_exn() = SyscallExn{
+      .call_number = call,
+      .err_number = static_cast<SysErr>(error),
+  };
+  return deploy_result_t::make_err(LibraryException{std::move(exn)});
+}
+
+x23::Async<InvokeStatus<deploy_result_t>>
+deploy_contract(NativeSyscallContext &ctx, SHA256Hash const &nonce,
+                SHA256Hash const &contract_hash)
+{
+  ContractAddress deployed{};
+  auto r =
+      co_await ctx.syscall<SyscallNo::kDeployContract>(nonce, contract_hash,
+                                                       deployed);
+  if (!r.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return deployment_syscall_error(SyscallNo::kDeployContract, *r);
+  }
+  co_return deploy_result_t::make_ok(deployed);
 }
 
 } // namespace
@@ -252,25 +284,51 @@ make_native_default_wallet_contract()
           co_return deploy_result_t::make_err(WalletException{**auth_err});
         }
 
-        ContractAddress deployed{};
-        auto r = co_await ctx.syscall<SyscallNo::kDeployContract>(nonce,
-                                                                  contract_hash,
-                                                                  deployed);
+        co_return co_await deploy_contract(ctx, nonce, contract_hash);
+      });
+
+  builder.add<default_wallet::DefaultWallet, u8"deploy_funded">(
+      [](NativeSyscallContext &ctx, SHA256Hash nonce, SHA256Hash contract_hash,
+         std::tuple<uint64_t, uint64_t> amount)
+          -> x23::Async<InvokeStatus<deploy_result_t>> {
+        auto auth_err = co_await check_root_pubkey_auth(ctx);
+        if (!auth_err.has_value()) {
+          co_return auth_err.error();
+        }
+        if (auth_err->has_value()) {
+          co_return deploy_result_t::make_err(WalletException{**auth_err});
+        }
+
+        ContractAddress target{};
+        auto r = co_await ctx.syscall<SyscallNo::kGetDeployAddress>(
+            static_cast<ContractAddress const *>(nullptr), nonce, contract_hash,
+            target);
         if (!r.has_value()) {
           co_return NativeContractBuilder::host_fn_error_conversion(r.error());
         }
         if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-          // The sdk's deploy_contract syscall_throw()s on error — a library
-          // abort encoding LibraryExn::Syscall{kDeployContract, errno}, not a
-          // WalletError and not a frame fault.
-          LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
-          exn.syscall_exn() = SyscallExn{
-              .call_number = SyscallNo::kDeployContract,
-              .err_number = static_cast<SysErr>(*r),
-          };
-          co_return deploy_result_t::make_err(LibraryException{std::move(exn)});
+          co_return deployment_syscall_error(SyscallNo::kGetDeployAddress, *r);
         }
-        co_return deploy_result_t::make_ok(deployed);
+        // Invoke the ordinary token contract to preserve validation, caller
+        // identity and events. Both effects remain inside the wallet root
+        // frame.
+        ContractTraitClient<itc_erc20::ERC20> token(
+            kNativeTokenContractAddress);
+        auto transfer =
+            co_await token.invoke_opt<u8"transfer">(ctx, target, amount);
+        if (!transfer.has_value()) {
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              transfer.error());
+        }
+        if (!transfer->has_value() || !transfer->value().has_value()) {
+          co_return deploy_result_t::make_err(
+              WalletException{WalletError::CallFaulted});
+        }
+        if (!transfer->value()->is_ok()) {
+          co_return deploy_result_t::make_err(
+              WalletException{WalletError::CallAborted});
+        }
+        co_return co_await deploy_contract(ctx, nonce, contract_hash);
       });
 
   assert(builder.check_methods<default_wallet::DefaultWallet>());

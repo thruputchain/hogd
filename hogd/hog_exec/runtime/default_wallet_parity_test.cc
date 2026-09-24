@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -24,10 +25,12 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
+#include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
@@ -39,6 +42,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "precompiles.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -68,6 +72,9 @@ TEST(DefaultWalletPrecompile, ConstructsAndCoversAllEntrypoints)
 {
   auto contract = make_native_default_wallet_contract();
   ASSERT_NE(contract, nullptr);
+  EXPECT_EQ(wallet_meta::method_id<u8"execute">(), 0xc3edb11fdd6d5d58ULL);
+  EXPECT_EQ(wallet_meta::method_id<u8"deploy">(), 0x6be0cb0f6de0917aULL);
+  EXPECT_EQ(wallet_meta::method_id<u8"deploy_funded">(), 0x1f843596f5b57b18ULL);
 }
 
 // Differential test: the native default_wallet precompile vs the rv32
@@ -115,6 +122,10 @@ protected:
   {
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(kNativeWalletId, make_native_default_wallet_contract());
+    native_map.emplace(
+        std::to_underlying(
+            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+        make_native_token_contract());
     for (auto &[id, c] : extra) {
       native_map.emplace(id, std::move(c));
     }
@@ -161,6 +172,11 @@ protected:
     write_contract(abort_obj);
     write_deployment(kAbortAddr, abort_obj);
     setup_grant_storage_token(kAbortAddr, 1'000'000'000);
+
+    auto token = make_native_contract(std::to_underlying(
+        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+    write_contract(token);
+    write_deployment(kNativeTokenContractAddress, token);
   }
 
   static AuthClaim make_pubkey_claim(PubkeyAccountPreimage const &preimage)
@@ -757,6 +773,92 @@ TEST_F(DefaultWalletParityTest, DeployHappyPath)
   expect_addr(rv32,
               SystemCallHandler::static_get_deploy_address(rv32_wallet_, nonce,
                                                            target_hash));
+}
+
+TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicate)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  auto code = echo_meta::load_rv32();
+  ASSERT_TRUE(code);
+  auto hash = sha256(*code);
+  SHA256Hash nonce{};
+  nonce.fill(42);
+  auto calldata = wallet_meta::make_calldata<u8"deploy_funded">(
+      nonce, hash, std::tuple<uint64_t, uint64_t>{0, 10'000'000});
+  std::vector<uint8_t> raw(calldata.begin(), calldata.end());
+  auto id = wallet_meta::method_id<u8"deploy_funded">();
+  auto native = run_wallet_raw_tx(native_wallet_, native_preimage_, id, raw);
+  auto rv32 = run_wallet_raw_tx(rv32_wallet_, rv32_preimage_, id, raw);
+  for (auto const &[record, wallet] :
+       {std::pair{native, native_wallet_}, std::pair{rv32, rv32_wallet_}}) {
+    ASSERT_EQ(record.size(), 34U);
+    EXPECT_EQ(record[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+    auto expected =
+        SystemCallHandler::static_get_deploy_address(wallet, nonce, hash);
+    EXPECT_TRUE(
+        std::equal(expected.begin(), expected.end(), record.begin() + 2));
+    EXPECT_TRUE(lookup_deployment_from_db(expected));
+  }
+  // Both reject a second deployment with the same syscall exception.
+  expect_raw_parity(id, raw);
+}
+
+TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  auto code = echo_meta::load_rv32();
+  ASSERT_TRUE(code);
+  auto hash = sha256(*code);
+  SHA256Hash nonce{};
+  auto id = wallet_meta::method_id<u8"deploy_funded">();
+  for (auto amount : {
+           uint128_t{0},
+           uint128_t{1},
+           uint128_t{2'000'000'000},
+           uint128_t{1} << 127U,
+       }) {
+    SCOPED_TRACE(
+        std::get<1>(std::tuple<uint64_t, uint64_t>{amount >> 64U, amount}));
+    auto calldata = wallet_meta::make_calldata<u8"deploy_funded">(
+        nonce, hash,
+        std::tuple<uint64_t, uint64_t>{amount >> 64U,
+                                       static_cast<uint64_t>(amount)});
+    if (amount <= 1) {
+      // Execution returns the per-wallet address, then collateral validation
+      // rejects the commit. Compare each return with its own derived address.
+      for (auto const &[wallet, preimage] : {
+               std::pair{native_wallet_, native_preimage_},
+               std::pair{rv32_wallet_, rv32_preimage_},
+           }) {
+        auto rec = run_wallet_raw_tx(wallet, preimage, id,
+                                     {calldata.begin(), calldata.end()});
+        ASSERT_EQ(rec.size(), 34U);
+        EXPECT_EQ(rec[1], static_cast<uint8_t>(
+                              ExecResult::ExecResultTxNonDeterministicError));
+        auto target =
+            SystemCallHandler::static_get_deploy_address(wallet, nonce, hash);
+        EXPECT_TRUE(std::equal(target.begin(), target.end(), rec.begin() + 2));
+        EXPECT_FALSE(lookup_deployment_from_db(target));
+      }
+    }
+    else {
+      expect_raw_parity(id, {calldata.begin(), calldata.end()});
+    }
+    ++nonce[0];
+  }
+  SHA256Hash missing{};
+  missing.fill(0xEE);
+  auto calldata = wallet_meta::make_calldata<u8"deploy_funded">(
+      nonce, missing, std::tuple<uint64_t, uint64_t>{0, 10'000'000});
+  expect_raw_parity(id, {calldata.begin(), calldata.end()});
+  expect_raw_parity(id, {});
+  std::vector<uint8_t> truncated(calldata.begin(), calldata.end() - 1);
+  expect_raw_parity(id, truncated);
+  std::vector<uint8_t> trailing(calldata.begin(), calldata.end());
+  trailing.push_back(0);
+  expect_raw_parity(id, trailing);
 }
 
 TEST_F(DefaultWalletParityTest, DeployUnknownHashFaults)
