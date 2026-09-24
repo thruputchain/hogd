@@ -2700,11 +2700,14 @@ TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
   coord.set_submission_auth_test_hook([&](BlockHeight height,
                                           const SignedTransactionBatch &batch,
                                           bool after_auth) -> x23::Async<void> {
+    EXPECT_EQ(batch.size(), 1UL);
+    EXPECT_EQ(batch[0], txs[0]);
+
     if (after_auth) {
       co_return;
     }
+
     heights.push_back(height);
-    EXPECT_EQ(batch.size(), 1UL);
     EXPECT_EQ(coord.scheduler()->size(), 0);
     if (heights.size() == 1) {
       co_await commit_empty_block(server);
@@ -2723,37 +2726,51 @@ TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
   }
 }
 
-// A commit after authentication must be able to finish before admission.
-// When no account's keys changed, both submission paths must reuse the valid
-// auth result and admit the transaction without another auth RPC.
+// When a block is committed immediately after a tx is authenticated but before
+// that tx is added to the scheduler runqueue, the tx must be added to the
+// scheduler runqueue without authenticating it again *as long as the tx
+// wallet's auth data does not change in the newly committed block*.
 TEST_P(MempoolSubmissionAuthTest, CommitKeepsVerifiedUnchangedAccounts)
 {
   MempoolTestInfra server;
   MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
   coord.wait_for_block_commit(1)();
+
   fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(client, 1);
   size_t calls = 0;
+
   coord.set_submission_auth_test_hook([&](BlockHeight height,
-                                          const SignedTransactionBatch &,
+                                          const SignedTransactionBatch &batch,
                                           bool after_auth) -> x23::Async<void> {
+    EXPECT_EQ(batch.size(), 1UL);
+    EXPECT_EQ(batch[0], txs[0]);
+
     if (!after_auth) {
       co_return;
     }
+
     ++calls;
+    EXPECT_EQ(calls, 1UL);
     EXPECT_EQ(height, 1);
     EXPECT_EQ(coord.scheduler()->size(), 0);
-    if (calls == 1) {
-      // The response is already valid. An empty commit must be allowed to
-      // finish here, without forcing another auth RPC for unchanged keys.
-      co_await commit_empty_block(server);
-    }
+
+    // We enforce above that [calls == 1], so we do not need to worry about
+    // calling [commit_empty_block()] multiple times.
+    co_await commit_empty_block(server);
   });
-  submit(server, txs);
+
+  SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
   coord.set_submission_auth_test_hook({});
+
   EXPECT_EQ(calls, 1UL);
   EXPECT_EQ(coord.scheduler()->current_block(), 2);
   EXPECT_TRUE(coord.scheduler()->is_pending(txs[0], sha256(txs[0].tx)));
+  if (!is_submit_vetted()) {
+    ASSERT_EQ(outcomes.size(), 1UL);
+    EXPECT_EQ(outcomes[0],
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  }
 }
 
 // Auth updates across multiple heights must retry only affected accounts,
@@ -2766,6 +2783,7 @@ TEST_P(MempoolSubmissionAuthTest,
   MempoolTestInfra server;
   MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
   coord.wait_for_block_commit(1)();
+
   const std::array<ContractAddress, 4> &addresses =
       MempoolTestInfra::kAccountAddresses;
   fib_client_t client_a(addresses[0]);
@@ -2774,34 +2792,38 @@ TEST_P(MempoolSubmissionAuthTest,
   SignedTransactionBatch a = generate_unsigned_txs(client_a, 2);
   SignedTransactionBatch b = generate_unsigned_txs(client_b, 1);
   SignedTransactionBatch c = generate_unsigned_txs(client_c, 1);
+
   AddressAuthData auth_a = get_default_account();
   AddressAuthData auth_b = get_default_account();
   auto sign = [&](SignedTransactionBatch &batch, AddressAuthData &auth,
                   Weight required_weight) {
     SecretKey key(CryptographicScheme::Ed25519);
-    key.ed25519() = create_key_pair(auth, 0, 1);
+    key.ed25519() = create_key_pair(auth, /*idx=*/0, /*weight=*/1);
     auth.required_weight = required_weight;
     auth.last_written_height = 1;
+
     server.set_address_auth_data(batch[0].tx.invocation.invoked_address, auth);
     for (SignedTransaction &tx : batch) {
       tx.tx.auth_claim = make_sign_claim(0);
-      tx.signatures.push_back(
-          make_signature(key, tx.tx, 0, MempoolTestInfra::kNetworkHash));
+      tx.signatures.push_back(make_signature(key, tx.tx, /*public_key_id=*/0,
+                                             MempoolTestInfra::kNetworkHash));
     }
   };
-  sign(a, auth_a, 1);
-  sign(b, auth_b, 2);
+  sign(a, auth_a, /*required_weight=*/1);
+  sign(b, auth_b, /*required_weight=*/2);
+
   // Interleave accounts to check that retried results retain their indices.
   SignedTransactionBatch txs{a[0], b[0], c[0], a[1]};
-  auto change = [&](BlockHeight height, size_t account, AddressAuthData &auth,
+  auto change = [&](BlockHeight height, size_t account_idx,
+                    AddressAuthData &auth,
                     Weight required_weight) -> x23::Async<void> {
     auth.required_weight = required_weight;
     auth.last_written_height = height;
-    server.set_address_auth_data(addresses[account], auth);
+    server.set_address_auth_data(addresses[account_idx], auth);
     // Inject the commit's height and auth callback to isolate retry behavior.
     coord.scheduler()->set_current_block(height);
     co_await server.register_auth_data_updates(
-        height, KeyChangeBatch{{.address = addresses[account],
+        height, KeyChangeBatch{{.address = addresses[account_idx],
                                 .auth_data = x23::Ptr<AddressAuthData>(auth)}});
   };
   std::vector<BlockHeight> heights;
@@ -2812,39 +2834,66 @@ TEST_P(MempoolSubmissionAuthTest,
     if (!after_auth) {
       co_return;
     }
+
     heights.push_back(height);
     accounts.emplace_back();
     for (const SignedTransaction &tx : batch) {
       accounts.back().insert(tx.tx.invocation.invoked_address);
     }
     EXPECT_EQ(coord.scheduler()->size(), 0);
+
     if (heights.size() == 1) {
-      // A becomes invalid, B becomes valid, and C stays unchanged.
-      co_await change(2, 0, auth_a, 2);
-      co_await change(3, 0, auth_a, 3);
-      co_await change(4, 1, auth_b, 1);
+      EXPECT_EQ(heights, (std::vector<BlockHeight>{1}));
+
+      // Account A goes from valid to invalid.
+      co_await change(/*height=*/2, /*account_idx=*/0, auth_a,
+                      /*required_weight=*/2);
+      co_await change(/*height=*/3, /*account_idx=*/0, auth_a,
+                      /*required_weight=*/3);
+      // Account B goes from invalid to valid.
+      co_await change(/*height=*/4, /*account_idx=*/1, auth_b,
+                      /*required_weight=*/1);
+      // Account C stays unchanged.
     }
     else if (heights.size() == 2) {
-      // A changes again while its retry is in flight. Clearing dirty
-      // accounts after the RPC would lose this update.
-      co_await change(5, 0, auth_a, 4);
+      EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 4}));
+
+      // Change the auth data for account A again while we are already retrying
+      // the authentication for its txs. Account A now goes from invalid to
+      // still invalid, though we still need to re-authenticate A's txs against
+      // the new auth data.
+      co_await change(/*height=*/5, /*account_idx=*/0, auth_a,
+                      /*required_weight=*/4);
     }
   });
+
   SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
   coord.set_submission_auth_test_hook({});
+
   EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 4, 5}));
   ASSERT_EQ(accounts.size(), 3UL);
+  // Txs for all three accounts are authenticated.
   EXPECT_EQ(accounts[0],
             (std::multiset<ContractAddress>{addresses[0], addresses[0],
                                             addresses[1], addresses[2]}));
+  // Txs just for accounts A and B are re-authenticated.
   EXPECT_EQ(accounts[1],
             (std::multiset<ContractAddress>{addresses[0], addresses[0],
                                             addresses[1]}));
+  // Txs just for account A are re-authenticated.
   EXPECT_EQ(accounts[2],
             (std::multiset<ContractAddress>{addresses[0], addresses[0]}));
   EXPECT_EQ(coord.scheduler()->size(), 2);
   for (size_t i = 0; i < txs.size(); i++) {
+    // Only B's tx (txs[1]) and C's tx (txs[2]) are admitted. A's txs are
+    // rejected (txs[0] and txs[3]).
+    //
+    // C's tx is authenticated successfully--despite no [sign()] call above for
+    // C--because C's auth data is default-initialized to have a required weight
+    // of 0. Therefore, any tx submitted for C is authenticated successfully,
+    // even if the tx is unsigned (as in this case).
     const bool admitted = i == 1 || i == 2;
+
     EXPECT_EQ(coord.scheduler()->is_pending(txs[i], sha256(txs[i].tx)),
               admitted);
     if (!is_submit_vetted()) {
