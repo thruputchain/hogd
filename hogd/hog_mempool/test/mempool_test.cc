@@ -2639,11 +2639,13 @@ TEST(Mempool, GetTip)
 
 class MempoolSubmissionAuthTest : public testing::TestWithParam<bool> {
 protected:
+  static bool is_submit_vetted() { return GetParam(); }
+
   static SchedGatewaySubmitOutcomeBatch
   submit(MempoolTestInfra &server, const SignedTransactionBatch &txs)
   {
-    auto batch = t_to_parallel_batch(txs)();
-    if (GetParam()) {
+    ParallelSignedTransactionBatch batch = t_to_parallel_batch(txs)();
+    if (is_submit_vetted()) {
       server.mempool_coord_rpc().schedulercoord_submit_vetted(ValidatorID{},
                                                               std::move(
                                                                   batch))();
@@ -2655,22 +2657,23 @@ protected:
 
   static x23::Async<void> commit_empty_block(MempoolTestInfra &server)
   {
-    auto &coord = server.mempool_coord_rpc();
-    auto tip = co_await coord.schedcoord_get_tip();
+    MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+    SchedulerGetTipResult tip = co_await coord.schedcoord_get_tip();
     EXPECT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     if (tip.outcome() != SchedulerGetTipOutcome::SchedulerGetTipOK) {
       co_return;
     }
-    auto proposed =
+    SchedulerProposalResult proposed =
         co_await coord.schedulercoord_propose_block(tip.db_tip().id, {});
     EXPECT_EQ(proposed.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
     if (proposed.outcome() != SchedulerProposalOutcome::SchedulerProposalOK) {
       co_return;
     }
-    auto committed = co_await coord.schedulercoord_commit_block(
-        proposed.proposed_block().block_id,
-        consensus_value(tip.db_tip(), proposed.proposed_block().proposal));
+    SchedulerCommitOutcome committed =
+        co_await coord.schedulercoord_commit_block(
+            proposed.proposed_block().block_id,
+            consensus_value(tip.db_tip(), proposed.proposed_block().proposal));
     EXPECT_EQ(committed, SchedulerCommitOutcome::SchedulerCommitOK);
     if (committed != SchedulerCommitOutcome::SchedulerCommitOK) {
       co_return;
@@ -2680,17 +2683,20 @@ protected:
   }
 };
 
-// A commit before auth handles the request makes its height stale even when
-// no account's keys changed. Both submission paths must retry at the new
-// height and admit the transaction.
+// A block is committed before the tx starts being verified, so the block height
+// advances while the previous block height is what the tx is authenticated
+// against. The authentication returns a stale height error, so we check that
+// the tx is verified again against the new block height.
 TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
 {
   MempoolTestInfra server;
-  auto &coord = server.mempool_coord_rpc();
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
   coord.wait_for_block_commit(1)();
+
   fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
-  auto txs = generate_unsigned_txs(client, 1);
+  SignedTransactionBatch txs = generate_unsigned_txs(client, 1);
   std::vector<BlockHeight> heights;
+
   coord.set_submission_auth_test_hook([&](BlockHeight height,
                                           const SignedTransactionBatch &batch,
                                           bool after_auth) -> x23::Async<void> {
@@ -2701,16 +2707,16 @@ TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
     EXPECT_EQ(batch.size(), 1UL);
     EXPECT_EQ(coord.scheduler()->size(), 0);
     if (heights.size() == 1) {
-      // Auth receives height 1 after a real commit has advanced it to 2.
-      // No account changed, so only the stale-height result causes retry.
       co_await commit_empty_block(server);
     }
   });
-  auto outcomes = submit(server, txs);
+
+  SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
   coord.set_submission_auth_test_hook({});
+
   EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 2}));
   EXPECT_TRUE(coord.scheduler()->is_pending(txs[0], sha256(txs[0].tx)));
-  if (!GetParam()) {
+  if (!is_submit_vetted()) {
     ASSERT_EQ(outcomes.size(), 1UL);
     EXPECT_EQ(outcomes[0],
               SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
@@ -2723,10 +2729,10 @@ TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
 TEST_P(MempoolSubmissionAuthTest, CommitKeepsVerifiedUnchangedAccounts)
 {
   MempoolTestInfra server;
-  auto &coord = server.mempool_coord_rpc();
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
   coord.wait_for_block_commit(1)();
   fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
-  auto txs = generate_unsigned_txs(client, 1);
+  SignedTransactionBatch txs = generate_unsigned_txs(client, 1);
   size_t calls = 0;
   coord.set_submission_auth_test_hook([&](BlockHeight height,
                                           const SignedTransactionBatch &,
@@ -2758,15 +2764,16 @@ TEST_P(MempoolSubmissionAuthTest,
        RetriesOnlyAccountsChangedAcrossMultipleHeights)
 {
   MempoolTestInfra server;
-  auto &coord = server.mempool_coord_rpc();
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
   coord.wait_for_block_commit(1)();
-  const auto &addresses = MempoolTestInfra::kAccountAddresses;
+  const std::array<ContractAddress, 4> &addresses =
+      MempoolTestInfra::kAccountAddresses;
   fib_client_t client_a(addresses[0]);
   fib_client_t client_b(addresses[1]);
   fib_client_t client_c(addresses[2]);
-  auto a = generate_unsigned_txs(client_a, 2);
-  auto b = generate_unsigned_txs(client_b, 1);
-  auto c = generate_unsigned_txs(client_c, 1);
+  SignedTransactionBatch a = generate_unsigned_txs(client_a, 2);
+  SignedTransactionBatch b = generate_unsigned_txs(client_b, 1);
+  SignedTransactionBatch c = generate_unsigned_txs(client_c, 1);
   AddressAuthData auth_a = get_default_account();
   AddressAuthData auth_b = get_default_account();
   auto sign = [&](SignedTransactionBatch &batch, AddressAuthData &auth,
@@ -2776,7 +2783,7 @@ TEST_P(MempoolSubmissionAuthTest,
     auth.required_weight = required_weight;
     auth.last_written_height = 1;
     server.set_address_auth_data(batch[0].tx.invocation.invoked_address, auth);
-    for (auto &tx : batch) {
+    for (SignedTransaction &tx : batch) {
       tx.tx.auth_claim = make_sign_claim(0);
       tx.signatures.push_back(
           make_signature(key, tx.tx, 0, MempoolTestInfra::kNetworkHash));
@@ -2807,7 +2814,7 @@ TEST_P(MempoolSubmissionAuthTest,
     }
     heights.push_back(height);
     accounts.emplace_back();
-    for (const auto &tx : batch) {
+    for (const SignedTransaction &tx : batch) {
       accounts.back().insert(tx.tx.invocation.invoked_address);
     }
     EXPECT_EQ(coord.scheduler()->size(), 0);
@@ -2823,7 +2830,7 @@ TEST_P(MempoolSubmissionAuthTest,
       co_await change(5, 0, auth_a, 4);
     }
   });
-  auto outcomes = submit(server, txs);
+  SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
   coord.set_submission_auth_test_hook({});
   EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 4, 5}));
   ASSERT_EQ(accounts.size(), 3UL);
@@ -2840,7 +2847,7 @@ TEST_P(MempoolSubmissionAuthTest,
     const bool admitted = i == 1 || i == 2;
     EXPECT_EQ(coord.scheduler()->is_pending(txs[i], sha256(txs[i].tx)),
               admitted);
-    if (!GetParam()) {
+    if (!is_submit_vetted()) {
       ASSERT_EQ(outcomes.size(), txs.size());
       EXPECT_EQ(outcomes[i],
                 admitted ? SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted
