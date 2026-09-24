@@ -2680,6 +2680,9 @@ protected:
   }
 };
 
+// A commit before auth handles the request makes its height stale even when
+// no account's keys changed. Both submission paths must retry at the new
+// height and admit the transaction.
 TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
 {
   MempoolTestInfra server;
@@ -2714,6 +2717,9 @@ TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
   }
 }
 
+// A commit after authentication must be able to finish before admission.
+// When no account's keys changed, both submission paths must reuse the valid
+// auth result and admit the transaction without another auth RPC.
 TEST_P(MempoolSubmissionAuthTest, CommitKeepsVerifiedUnchangedAccounts)
 {
   MempoolTestInfra server;
@@ -2744,6 +2750,10 @@ TEST_P(MempoolSubmissionAuthTest, CommitKeepsVerifiedUnchangedAccounts)
   EXPECT_TRUE(coord.scheduler()->is_pending(txs[0], sha256(txs[0].tx)));
 }
 
+// Auth updates across multiple heights must retry only affected accounts,
+// coalesce repeated changes, and retain changes received during a retry.
+// Both submission paths must apply the latest results, including a rejection
+// becoming valid, while preserving the original transaction/result ordering.
 TEST_P(MempoolSubmissionAuthTest,
        RetriesOnlyAccountsChangedAcrossMultipleHeights)
 {
