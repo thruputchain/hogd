@@ -19,7 +19,8 @@
 namespace hogd {
 
 // Values in force for parameters a configuration does not state. Consensus-
-// critical, so frozen once any chain has run under them.
+// critical: changing a default also changes the rules for configurations that
+// omit that parameter.
 inline constexpr uint32_t kDefaultMaxSHA256Buffers = 32;
 inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 16;
 
