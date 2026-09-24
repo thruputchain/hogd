@@ -233,6 +233,13 @@ protected:
     rec.push_back(res.is_root_success() ? 1 : 0);
     auto frame_output = handler.get_most_recent_frame_output();
     ExecResult commit = handler.try_commit_transaction()();
+    // Included transactions must flush events before the handler is destroyed.
+    if (commit == ExecResult::ExecResultOK ||
+        commit == ExecResult::ExecResultTxRootFrameReverted ||
+        commit == ExecResult::ExecResultTxDeterministicError) {
+      EXPECT_TRUE(
+          handler.emit_events(commit, ProposedTransaction{.signed_tx = stx})());
+    }
     rec.push_back(static_cast<uint8_t>(commit));
     switch (frame_output.status_code()) {
     case InvocationFrameStatusCode::Return:
