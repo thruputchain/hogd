@@ -9,40 +9,15 @@
 
 #include "hogd/hog_exec/runtime/rv32/program.h"
 
-// Deterministic kernel synthesis for gas calibration.
-//
-// A kernel is a loop whose body is a fixed number of *slots*. Every slot holds
-// either the filler instruction or the target instruction under measurement;
-// the sweep varies only how many slots are targets. Holding the slot count,
-// code size, loop trip count, and register/operand pattern fixed across a
-// sweep is what makes the resulting cost estimate a clean contrast instead of
-// a regression coefficient: the only thing that differs between two kernels in
-// a sweep is the identity of `target_slots` opcodes, so the fixed per-iteration
-// overhead (loop induction, back edge, run entry, timer) lands entirely in the
-// fit's intercept and cancels out of the slope.
-//
-// The filler is `add rd, rs1, rs2` on registers disjoint from every target
-// operand. R-type ADD is the one ALU op that no fusion rule in
-// threaded_machine.h will fuse in either position: as a head it matches
-// neither `alu_alu_handler` (which wants sll/addi/srl) nor any rule keyed on
-// lui/auipc/load/store/addi, and as a tail it is not or/addi/sll/load/store/
-// branch. Register disjointness additionally keeps `fuse_load_use` from
-// pairing a load target with the filler that follows it. lowering_audit.h
-// verifies that property per kernel rather than trusting this reasoning.
+// Deterministic instruction kernels. Saturated bodies provide absolute costs;
+// substitution sweeps vary target count in a fixed body as a diagnostic.
+// The ADD filler uses private registers; lowering_audit.h checks for unintended
+// fusion. Saturated single-opcode bodies are lowered with fusion disabled.
 namespace hogd::rv32::gas_calibration {
 
-// Register assignment. Disjoint banks keep the filler, the loop control, and
-// every target operand from aliasing, which is what keeps fusion off and keeps
-// the dependence structure of a sweep constant.
-//
-// The filler writes a *rotating* destination and reads only registers the body
-// never writes, so consecutive fillers have no true dependence on each other.
-// That matters more than it looks: a filler that chains through one register
-// (add x14, x14, x15) makes the all-filler baseline store-forward-latency
-// bound rather than dispatch-throughput bound, and then substituting any
-// target that writes elsewhere *shortens* the chain and measures as a negative
-// cost. The rotating filler removes the chain, so the baseline measures what
-// it claims to -- the engine's cost of retiring one more instruction.
+// Separate target, filler, and loop-control registers preserve the requested
+// dependencies. Filler destinations rotate, with read-only sources, so the
+// baseline does not acquire a latency chain of its own.
 inline constexpr uint8_t kSrcLargeReg = 1; // never written by the body
 inline constexpr uint8_t kLoopCounterReg = 2;
 inline constexpr uint8_t kSrcSmallReg = 3;   // never written by the body
@@ -65,16 +40,10 @@ inline constexpr uint8_t kAddressBankSize = 8; // x18..x25
 // cannot pair them.
 inline constexpr uint8_t kLoadDstBase = 26;
 inline constexpr uint8_t kLoadDstSize = 4; // x26..x29
-// Holds 1. Chaining a divide through `rd = rd / 1` is the only way to build a
-// true divide latency chain: any other divisor shrinks the dividend toward
-// zero within a few slots, after which the sweep is measuring the divider's
-// zero fast path instead of the case it set out to measure.
+// Divide by one keeps a dependent chain from converging to the zero fast path.
 inline constexpr uint8_t kOneReg = 30;
 
-// Operand shape for the target instruction. This is the axis that turns "the
-// cost of MUL" into a measurable range rather than a single number: the same
-// opcode costs differently when its results feed the next instruction than
-// when they do not, and the price an adversary can force is the worse one.
+// Operand dependencies expose latency as well as throughput.
 enum class OperandContext : uint8_t {
   // Every target writes and reads one register: a serial dependence chain, so
   // the target's own latency is exposed.
@@ -88,27 +57,16 @@ enum class OperandContext : uint8_t {
   kTargetChase,
 };
 
-// Where a memory target's addresses land. Guest memory is capped at
-// kDefaultMaxMemoryBytes (64 KiB), which is smaller than this machine class's
-// L2, so the spread between these two is the whole cache-behaviour range a
-// guest can reach -- there is no cold-DRAM case to price.
+// Memory contexts use the default guest memory size. They do not cover the
+// larger memory sizes permitted by configured runtime limits.
 enum class WorkingSet : uint8_t {
   kNone,      // non-memory target
   kL1Region,  // all bases inside one 4 KiB region
   kFullRange, // bases spread across the full guest memory
-  // Dependent loads: `lw rd, 0(rd)` walking a shuffled cycle through the full
-  // 64 KiB. Each load's address is the previous load's result, so the engine
-  // cannot overlap them and every one pays full cache latency. Independent
-  // loads measure load throughput, which the interpreter's own dispatch hides;
-  // this measures load latency, which it cannot. A guest that wants the most
-  // work per gas out of a load writes exactly this, so this is the arrangement
-  // the schedule has to be able to afford. LW only -- a narrower load cannot
-  // carry a pointer.
+  // Dependent loads through a shuffled address cycle. Wide loads carry
+  // pointers; byte loads use a restricted cycle. See target_word().
   kPointerChase,
-  // Every store to one address. A store produces no value, so it cannot chain
-  // through its result the way a load can -- but repeatedly hitting one address
-  // contends for the same store-buffer entry, which is the arrangement that
-  // costs a store the most and which an independent-address sweep cannot see.
+  // Repeated writes to one address exercise store-buffer contention.
   kSameAddress,
 };
 
@@ -121,24 +79,10 @@ enum class OperandMagnitude : uint8_t {
   kLarge, // full-width dividend, small divisor: longest divider latency
 };
 
-// True if `op` is an M-extension divide or remainder. These are the only
-// opcodes whose cost depends on operand magnitude, and the only ones that need
-// the divide-specific chain form.
 [[nodiscard]] bool is_divide_target(Op op);
 
-// An adjacent instruction *pair* to substitute, instead of a single opcode.
-//
-// Per-opcode sweeps can only measure instructions in isolation, so they cannot
-// see a cost that exists only in the interaction between two of them. The
-// validation workloads found one -- word_copy runs far slower than its opcodes
-// predict, because each store writes the address the next load reads and the
-// pair serializes on store-to-load forwarding.
-//
-// A pair substitution measures that directly: two adjacent slots replace two
-// fillers, and the sweep's slope is nanoseconds per pair. The two kinds below
-// differ only in whether the load reads the address the store just wrote, so
-// the difference between them *is* the forwarding penalty, with the register
-// chain and instruction mix held identical.
+// Adjacent pairs measure interactions absent from isolated opcode costs.
+// Store/load cases differ only in address overlap, isolating forwarding.
 enum class PairKind : uint8_t {
   kNone,
   // sw rX, off(base) ; lw rX, off(base) -- the load reads back what the store
@@ -171,24 +115,10 @@ struct KernelSpec {
   // How many of those slots hold the target. Swept 0..body_slots/2 so that
   // spread placement never puts two targets adjacent.
   uint32_t target_slots = 0;
-  // Fill every interior slot with the target instead of capping at half.
-  //
-  // The cap exists to keep a contrast clean -- targets non-adjacent, so no
-  // fusion appears or disappears as target_slots varies. A saturated body
-  // needs no contrast: its time over its substitution count is directly what a
-  // program made of this opcode costs, so it cannot go negative and does not
-  // depend on the filler.
-  //
-  // Adjacent targets would fuse, so single targets are lowered with fusion off
-  // and pairs keep it; run_sweep decides, and the audit checks either way.
+  // Fill interior slots with targets. Single-opcode bodies disable fusion;
+  // pair bodies retain it. run_sweep selects this and the audit verifies it.
   bool saturated = false;
-  // Rotates the target placement within the body without changing how many
-  // targets there are. Two kernels differing only in phase do identical work,
-  // so any difference between them is pure layout systematics -- code
-  // alignment, which slots share a cache line, what the indirect-branch
-  // predictor has learned. That bias is fixed per kernel, so repeating a
-  // measurement does not remove it; measuring several phases at the same
-  // target count does.
+  // Vary placement at a fixed count to expose layout-dependent timing bias.
   uint32_t placement_phase = 0;
   // Loop iterations. Chosen by the driver so each kernel runs long enough to
   // dominate timer overhead.
@@ -208,23 +138,13 @@ struct Kernel {
   // Byte offsets of the body slots that hold the target instruction, in
   // program order. lowering_audit.h uses these to check the lowering.
   std::vector<uint32_t> target_slot_pcs;
-  // Substitutions placed in the body: one per target instruction for a single
-  // target, one per *pair* for a pair. target_slot_pcs holds every slot they
-  // occupy, so it is twice this for a pair -- which is why the two are not
-  // interchangeable. This is the denominator a saturated timing divides by,
-  // because it is the unit the cost is quoted in: ns per instruction for a
-  // single target, ns per pair for a pair, which is what a pair's ceiling
-  // (its two opcodes' costs summed) is compared against.
+  // Timing denominator: instructions for a single target, pairs for a pair
+  // target. target_slot_pcs contains two entries per pair.
   uint32_t target_units = 0;
   // Byte offset of the first body slot.
   uint32_t body_start_pc = 0;
 };
 
-// Why a kernel could not be built. Reported rather than collapsed into an empty
-// optional so a rejected sweep says which constraint it hit -- and so the
-// harness matches the rest of runtime/rv32, where every fallible construction
-// (Program::create, ThreadedProgram::create, PreInstantiation::create) returns
-// std::expected with a named error.
 enum class KernelError {
   kUnsupportedTarget, // no body-slot encoding for this opcode
   kBodyTooSmall,      // fewer slots than the fixed boundaries need
@@ -262,36 +182,17 @@ enum class KernelError {
 [[nodiscard]] std::string magnitude_name(OperandMagnitude magnitude);
 [[nodiscard]] std::string pair_name(PairKind pair);
 
-// True when the lowering is *expected* to fuse this pair, so the audit should
-// require that it did rather than that it did not.
-//
-// Most substitutions must lower one slot per instruction, or the slope is not a
-// per-instruction cost. A pair chosen precisely because the engine fuses it --
-// auipc;jalr, the pc-relative call idiom -- inverts that: fusion is the thing
-// being measured, and its absence would mean the sweep is measuring something
-// else. Either way the audit checks the lowering against intent; only the
-// direction of the expectation changes.
+// Pair measurements can require fusion instead of rejecting it.
 [[nodiscard]] bool pair_expects_fusion(PairKind pair);
 
-// The two opcodes a pair substitution actually places.
-//
-// Every consumer that reasons about a pair in terms of its parts -- the gas it
-// should be credited with, and the worst-case ceiling its interaction has to
-// respect -- needs this, and each one hardcoding a guess is how the bound came
-// to be checked against the wrong opcodes: the ceiling was written as SW+LW
-// back when both pairs were a store and a load, and auipc;jalr inherited it
-// silently. Derive it here so a new PairKind cannot be added without saying
-// what it is made of.
+// Shared by instruction counting and the per-pair cost bound.
 [[nodiscard]] std::pair<Op, Op> pair_components(PairKind pair);
 
 // Instructions one substitution places: 2 for a pair, 1 otherwise.
 [[nodiscard]] uint32_t slots_per_target(const KernelSpec &spec);
 
-// The most substitutions a body of `body_slots` can hold while keeping at least
-// one filler between them. Shared so the sweep planner and the kernel builder
-// cannot disagree: when they did, the densest kernel placed two pairs adjacent,
-// the trailing load of one fused with the leading store of the next, and the
-// audit rejected the sweep.
+// Maximum substitutions with a filler between them. Shared by the planner
+// and builder so adjacent pairs cannot introduce unintended fusion.
 [[nodiscard]] uint32_t max_target_slots(uint32_t body_slots,
                                         const KernelSpec &spec);
 
@@ -299,8 +200,7 @@ enum class KernelError {
 [[nodiscard]] uint64_t scheduled_gas_for(Op op);
 
 // Total gas the current schedule charges for `code`, decoded with the same
-// production decoder the engine uses. Returns nullopt if the code does not
-// decode.
+// production decoder the engine uses. Returns an error if decoding fails.
 [[nodiscard]] std::expected<uint64_t, KernelError>
 scheduled_gas_for_code(std::span<const uint8_t> code);
 
@@ -309,17 +209,8 @@ scheduled_gas_for_code(std::span<const uint8_t> code);
 // writes.
 [[nodiscard]] uint32_t filler_instruction_word(uint32_t index);
 
-// A canonical encoding of `op` with every register field set to `reg`.
-//
-// This is the opposite of what the calibration kernels want: pointing every
-// register field at one register is what makes adjacent instructions satisfy
-// the lowering's same-register fusion conditions (lui+addi and load-use both
-// require the pair to share a register). That makes it the right shape for
-// probing which pairs the engine fuses -- see engine_fingerprint() in
-// provenance.h -- and the wrong shape for measuring anything.
-//
-// Returns nullopt for opcodes with no register-uniform encoding
-// (JAL/JALR/FENCE/ECALL/EBREAK/UNIMP).
+// Uniform register fields expose same-register fusion rules for fingerprint
+// probes. Returns an error for opcodes without a register-uniform encoding.
 [[nodiscard]] std::expected<uint32_t, KernelError>
 canonical_instruction_word(Op op, uint8_t reg);
 

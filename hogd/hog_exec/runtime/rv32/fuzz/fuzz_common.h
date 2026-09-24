@@ -16,10 +16,8 @@
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
 
-// Pure, header-only helpers shared by the rv32 fuzz targets: deterministic
-// input carving and decoder-parity scans. No fuzzer/sanitizer dependency, so a
-// plain gtest can unit-test the logic. Kept out of the production headers
-// because it is harness-only.
+// Input carving and decoder comparisons shared by the fuzz targets and their
+// unit tests. No libFuzzer or sanitizer dependency.
 namespace hogd::rv32::fuzz {
 
 inline constexpr uint64_t kFuzzGasCap = 2048;
@@ -38,8 +36,7 @@ inline constexpr std::size_t kFuzzTraceMaxSteps = kFuzzGasCap + 64;
 static_assert(kFuzzGasCap < kFuzzTraceMaxSteps);
 static_assert(kFuzzMemCap <= kDefaultMaxMemoryBytes);
 
-// Consume-from-front little-endian reader. Reads past the end yield zero bytes
-// (never over-read), so a short fuzzer input degrades gracefully into zeros.
+// Little-endian reader; missing input bytes read as zero.
 class ByteReader {
 public:
   explicit ByteReader(std::span<const uint8_t> data) : data_(data) {}
@@ -108,15 +105,10 @@ threaded_scan_error(std::span<const uint8_t> code)
   return std::nullopt;
 }
 
-// Decode verdict of the PRODUCTION lowering gate over `code` alone (memory
-// arguments chosen so they can never reject). The forward scan above checks
-// exact first-error parity with the canonical decoder, but production
-// (rv32_contract.cc) runs ThreadedMachinePreInstantiation::create, whose
-// single backward lowering pass reports the LAST invalid word's error rather
-// than the first. All decode errors collapse into the same deterministic
-// deploy rejection, so across multiple invalid words only the accept/reject
-// verdict -- not the error code -- is required to match; compare has_value(),
-// not the payload.
+// Production lowering scans backwards and can report a different invalid word
+// from the forward decoder scans. Compare acceptance only: all decode errors
+// produce the same deployment rejection. Memory arguments are valid so they
+// cannot affect this verdict.
 inline std::optional<ProgramError>
 production_scan_error(std::span<const uint8_t> code)
 {
@@ -142,13 +134,9 @@ struct EngineDiffInput {
   std::vector<uint8_t> code; // non-empty, multiple of kInstructionBytes
 };
 
-// Run-gas chunk cap for the threaded lowering, from the fuzzer-chosen knob.
-// Production always runs with kMaxRunGas, but at fuzz budgets (<= kFuzzGasCap)
-// a straight line long enough to split at that cap is unreachable, so break
-// carriers -- and their refund and deficit seams -- would never appear. Bias
-// 3/4 of inputs to a small cap (kFuzzMinRunGasCap..+63) so carriers land in
-// short programs; the remaining 1/4 (including every short input, which reads
-// knob 0) keep the production cap.
+// Small caps make run splitting reachable within the fuzz gas budget. Three
+// quarters of inputs use kFuzzMinRunGasCap..+63; the rest, including missing
+// knob bytes, retain the production cap.
 inline uint32_t
 run_gas_cap_from_knob(uint32_t knob)
 {
@@ -224,17 +212,10 @@ ecall_args_equal(const EcallArgs &a, const EcallArgs &b)
          a.a4 == b.a4 && a.a5 == b.a5 && a.a6 == b.a6 && a.a7 == b.a7;
 }
 
-// Deterministic host schedule derived from a fuzzer-carved seed. Call i's
-// result is a pure function of (seed, i) -- never of machine state -- so two
-// machines given hosts with the same seed observe identical host behavior,
-// which is the requirement for an engine differential run. The schedule
-// exercises the host boundary the constant RecordingHost cannot: nonzero
-// continue values landing in a0, host gas debits (including occasional
-// over-budget ones that trip the engines' host-OOG debit branch), halts with
-// a code, host out-of-gas results, and guest-memory writes through the
-// MachineView (out-of-range addresses exercise the view's bounds rejection).
-// HostStatus::kTrap is deliberately never produced: the threaded ecall seam
-// forbids it by contract (ThreadedMachine::apply_ecall aborts).
+// Results depend only on (seed, call index), so engine state cannot change
+// the host schedule. Covers return values, gas debits, halt/OOG, and memory
+// writes, including rejected ranges. HostStatus::kTrap is excluded because
+// ThreadedMachine::apply_ecall forbids it.
 class ScriptedHost final : public Host {
 public:
   explicit ScriptedHost(uint64_t seed) : seed_(seed) {}

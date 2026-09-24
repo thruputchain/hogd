@@ -15,11 +15,8 @@
 #include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 
-// Differential-testing substrate for the portable RV32IM core. Everything here
-// depends only on rv32_isa_core (machine/program/host) -- no artifact,
-// consensus, or syscall layer -- so the same primitives drive the in-tree
-// spec-model crosscheck today and an external reference oracle (Sail/Spike)
-// later. There is no production code here; it is harness infrastructure.
+// Trace and state comparison for canonical, threaded, spec-model, and external
+// oracle tests. Depends only on the portable ISA core.
 
 namespace hogd::rv32 {
 
@@ -86,10 +83,7 @@ capture_arch_state(const Machine &machine)
   return state;
 }
 
-// Empty string if the states are identical, otherwise a description of the
-// FIRST differing field. Ordering reports the most localizing difference first
-// (pc, then a specific register, then a specific memory byte) -- the "where did
-// the two models first disagree" that differential testing exists to answer.
+// Empty on equality; otherwise report the first differing field.
 inline std::string
 describe_divergence(const ArchState &expected, const ArchState &actual)
 {
@@ -181,13 +175,9 @@ struct ExecTrace {
   StepResult final_result = StepResult::kTrap;
 };
 
-// Observer contract for differential tracing. A machine that runs to completion
-// (e.g. a tail-call-threaded interpreter) templates its run loop on an observer
-// and, after each retired instruction, calls on_retire. Instantiated with
-// NullObserver the calls compile to nothing (kEnabled == false guards them via
-// `if constexpr`), so the production path pays zero cost; instantiated with
-// TraceObserver it accumulates the same ExecTrace that trace_execution
-// produces, so describe_trace_divergence compares any machine uniformly.
+// TraceObserver records instruction observations in ExecTrace. Threaded
+// preparation selects handlers templated on a Trace boolean; untraced production
+// handlers omit observation. NullObserver is not used by the threaded engine.
 struct NullObserver {
   static constexpr bool kEnabled = false;
   void on_initial(const ArchState & /*state*/) {}
@@ -212,9 +202,7 @@ public:
   // terminal final_result), exactly as trace_execution never stores kEcall.
   void on_retire(const ArchState &state, StepResult result)
   {
-    // on_initial() must run first, or state_before would be a zeroed ArchState
-    // for step[0] (silently wrong). The production run() always calls it; this
-    // guards a future caller that wires the observer up out of order.
+    // The traced run() overload initializes observation before the first step.
     assert(initialized_ && "on_initial() must be called before on_retire()");
     trace_.steps.push_back(TraceStep{.result = result,
                                      .state_before = pending_before_,

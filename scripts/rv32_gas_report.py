@@ -398,52 +398,15 @@ def sigmas(cell):
 
 
 def merge_runs(runs):
-    """Combine several calibration runs into one set of cells.
+    """Merge costs by opcode and context.
 
-    Per (opcode, context), the cost is the median across runs and the cell
-    counts as resolved only if *every* run resolved it. The two halves do
-    different jobs: the median estimates how much the opcode costs, unanimity
-    decides whether it costs more than the baseline at all.
+    Use the median of repeated samples on each host, then the maximum across
+    hosts. Unresolved samples contribute their run's baseline. The merged
+    resolved flag requires coverage and resolution in every run; it is report
+    metadata and does not gate build_schedule's pricing.
 
-    Median *within* a host and max *across* hosts, because the two axes are
-    different questions. Repeated runs on one host measure one quantity, so
-    their max is not a conservative estimate of it -- it is a statistic that
-    grows with N, pricing the unluckiest sample and climbing as nights
-    accumulate: over three hog10 runs a plain max rose 241 -> 245 -> 246 gas
-    with nothing about the machine changing. It also priced noise into
-    individual opcodes, splitting identical single-dispatch instructions across
-    a rounding boundary on sub-tenth-of-a-percent differences. The median
-    converges instead.
-
-    Different hosts are not repeats of one measurement, though. Mixing them is
-    a deliberate workflow (see check_comparable) precisely because a schedule
-    has to hold on the slowest supported machine, so a host that finds an
-    opcode expensive must not be averaged away by two that do not. Hence the
-    max there.
-
-    The conservatism on the third axis is untouched: worst_by_op still takes
-    the max across *contexts*, which is the choice a guest author gets to make.
-
-    The cross-host max is over raw nanoseconds, which is what it has always
-    been. That is conservative but blunt: a host uniformly slower at everything
-    wins every opcode, and build_schedule then divides by the *fastest* host's
-    baseline, so the whole schedule inflates rather than just the opcodes that
-    host is relatively worse at. Comparing each host's cost against its own
-    baseline first would price the relative worst case instead. Left alone here
-    -- only hog10 has ever been merged, so nothing exercises it, and choosing
-    what a multi-host schedule means is a decision for whoever needs one.
-
-    Requiring unanimity is what makes a schedule reproducible: a cell's
-    within-run standard error captures scatter between that run's kernels, but
-    not drift between runs on a shared or thermally variable machine, and on
-    such a host the near-baseline cells move by tens of percent between runs
-    while the genuinely expensive ones move by one or two. Demanding that every
-    run agree an opcode is more expensive than the baseline is what separates
-    those two populations.
-
-    With a single run this reduces to that run's own cells, which is why one
-    run is enough to find the large effects and not enough to price the small
-    ones.
+    Cross-host maxima use raw nanoseconds. build_schedule divides by the
+    smallest run baseline, so a uniformly slower host can inflate all prices.
     """
     merged = {}
     total_runs = len(runs)
@@ -556,11 +519,11 @@ def print_table(data):
 
 
 def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
-    """Integer gas costs from the measured per-instruction times.
+    """Propose integer gas costs from the worst measured context per opcode.
 
-    One gas is 1/resolution of a baseline instruction, and every cost rounds up.
-    The unit comes from the *smallest* baseline across the runs, which makes
-    every ratio -- and so every cost -- the conservative one.
+    One gas is 1/resolution of the smallest run baseline. Costs within
+    VERDICT_MARGIN of that baseline are priced at baseline; higher costs round
+    up to the next gas unit.
     """
     worst = worst_by_op(runs)
     if not worst:
@@ -572,35 +535,13 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
     unit = gas_unit_ns(baseline, resolution)
     schedule = {}
     for op, cell in sorted(worst.items()):
-        # Floor every opcode at the baseline. Some opcodes measure *below* it:
-        # the substitution estimator attributes the whole difference between
-        # target and filler to the target, so an opcode that touches fewer
-        # registers than the filler (LUI writes an immediate and reads nothing)
-        # can come out with a slope steep enough to imply a per-instruction cost
-        # well under one dispatch. That is not a cheaper dispatch -- every
-        # instruction pays one, and the baseline sweep is what one costs -- it
-        # is the model straining where target and filler differ too much for
-        # the difference to belong to the target alone. Pricing there would
-        # undercharge, so the floor holds.
+        # Keep the minimum price at one baseline instruction. Saturated cells
+        # can measure below the median normalizer; old contrast estimates can
+        # also fall below it when substituting a cheaper target for the filler.
         ns = max(cost_ns(cell), baseline)
 
-        # An opcode the table calls "same as ADD" is priced as ADD. Without
-        # this, whether a single-dispatch opcode lands a hair under the
-        # baseline or a hair over it decides its price: the floor above pins
-        # the former to exactly one unit while the latter rounds up to the next
-        # one. At resolution 1 that put ANDI at 1 gas and AND at 2, and SLTIU
-        # at 1 against SLTI at 2, on differences invisible at two decimal
-        # places. Charging one price for opcodes the report already calls
-        # indistinguishable is what makes the schedule legible, and it keeps
-        # the table and the schedule telling the reader the same story.
-        #
-        # VERDICT_MARGIN rather than a new constant: it is already this file's
-        # answer to "how far from the baseline is far enough to mean
-        # something". It is wider than the noise -- three hog10 runs reproduced
-        # to 0.9% at p90 -- so this can undercharge an opcode genuinely a few
-        # percent dearer than a dispatch, against rounding that otherwise
-        # overcharges by a whole unit, which is 100% of a dispatch at
-        # resolution 1.
+        # Snap near-baseline costs to the floor before rounding. Otherwise a
+        # small timing difference can add a whole gas unit at resolution 1.
         same_as_baseline = ns <= baseline * (1.0 + VERDICT_MARGIN)
         if same_as_baseline:
             ns = baseline
@@ -790,18 +731,9 @@ def cost_model(data, worst_case=False):
         cost = cost_ns(cell) if resolved(cell) else baseline
         op = cell["op"]
         if worst_case:
-            # Floored at the baseline, exactly as build_schedule floors it and
-            # for the same reason: an opcode measuring under one dispatch has
-            # not found a cheaper dispatch, it is the estimator straining. The
-            # floor has to be applied in both places or this vector is not the
-            # one the schedule prices at, and the bound check is checking a
-            # schedule nobody proposed. On hog10 sixteen opcodes measure at
-            # 0.83x a dispatch, which put four workloads' bounds below what the
-            # schedule would actually charge them.
-            #
-            # Only the worst-case vector. The workload-matched vector below is
-            # testing whether the decomposition predicts real time, and
-            # flooring that one would bias the very quantity under test.
+            # Apply the same baseline floor as build_schedule. Saturated costs
+            # below the median normalizer are expected. Leave workload-matched
+            # costs unfloored so the prediction can be compared with real time.
             floored = max(cost, baseline)
             if op not in best or floored > best[op]:
                 best[op] = floored
@@ -965,27 +897,13 @@ def workload_failures(data):
 
 
 def print_prediction(data):
-    """Does the sum of separately measured opcode costs equal a real program?
+    """Compare summed opcode costs with measured mixed workloads.
 
-    This is the check that the per-opcode decomposition means anything. Each
-    cost was measured in isolation, by substituting one opcode into an otherwise
-    fixed body; nothing so far has verified that those costs *add up* over a
-    program that mixes them. Here they are summed over each validation
-    workload's opcode histogram and compared against that workload's measured
-    time.
-
-    Two effects are expected, and separating them is the point:
-
-    - A workload the lowering fuses retires the same instructions in fewer
-      dispatches, so it should come in *under* the prediction. The `fused`
-      column is how many body slots that applies to.
-    - A workload whose operands chain (multiply_mix and divide_mix feed each
-      result straight into the next add) should come in *over* a prediction
-      built from independent-context costs, because that is the cheap end of
-      those opcodes' range.
-
-    So the honest additivity test is the unfused, independent workload:
-    alu_mix. If the model is sound anywhere, it is sound there.
+    cost_ns selects saturated measurements, absolute estimates, or substitution
+    estimates according to the available data. Sum those costs over each
+    workload's opcode histogram. Fusion can reduce dispatch cost; dependent
+    operands can cost more than independent-context estimates. alu_mix supplies
+    an unfused workload with independent operands.
     """
     print_jump_sequences(data)
     failures = workload_failures(data)
@@ -1309,13 +1227,10 @@ def print_syscalls(data):
 
 
 def relative_cost(cell, baseline):
-    """Cost as a multiple of the baseline instruction.
+    """Normalize common speed variation within a hardware class.
 
-    Ratios rather than nanoseconds is what makes a reference file portable. An
-    absolute cost is a fact about one machine and expires the moment the
-    nightly job lands on a different runner; "a dependent load costs 5.9 times
-    what a plain ALU op costs on the same machine" is a fact about the engine,
-    and holds across hosts well enough to gate on.
+    Opcode ratios can differ across microarchitectures; a reference remains
+    specific to the hardware class on which it was measured.
     """
     return cost_ns(cell) / baseline if baseline > 0 else 0.0
 

@@ -116,10 +116,8 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
     ExternHostCallContext host_fn_ctx = syscall_handler_;
     assert(host_fn_ctx != nullptr);
 
-    // Production RV32 intentionally exposes live guest memory to syscall_entry:
-    // generated syscall output spans write directly into the ThreadedMachine's
-    // memory for speed. Syscall handlers that need all-or-nothing output
-    // semantics must stage internally before touching those spans.
+    // Syscall outputs write directly into live guest memory. Handlers requiring
+    // atomic output must stage their writes before touching the output spans.
     ExecutionContext context = {
         .memory = std::as_writable_bytes(machine.memory()),
         .gas_remaining = machine.gas_remaining(),
@@ -150,9 +148,8 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
 
     switch (host_result.error().code()) {
     case HostFnErrorCode::NoneOrRecoverable:
-      // from_trampoline_result routes panic == 0 to the continue branch, so
-      // this arm is reachable only if that contract changes; abort loudly in
-      // debug test runs rather than silently reporting Unrecoverable.
+      // from_trampoline_result maps panic == 0 to success, so this error is
+      // unreachable under the trampoline contract.
       assert(false);
       error("Unrecoverable: HostFnErrorCode::NoneOrRecoverable is not expected "
             "from TrampolineResult");

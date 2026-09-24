@@ -265,15 +265,9 @@ TEST(Rv32Threaded, decodeRejectVerdictMatchesCanonicalOnMultiErrorPrograms)
 TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
 {
   using test_program::op;
-  // A straight-line run whose total gas exceeds kMaxRunGas is split into chunks
-  // of <= kMaxRunGas by the lowering (rather than metered as one run, or
-  // rejected). div gas is 8; kMaxRunGas/8 = 1250 divs per chunk, so 1258 divs
-  // (10064 gas) form two chunks and thus exactly one break carrier. We assert
-  // the carrier *count* rather than a position, since the exact split point is
-  // an implementation detail (the lowering places breaks greedily). (A run that
-  // exceeds the ORIGINAL 65535 bound -- formerly rejected -- is covered by
-  // splitRunBudgetSweepMatchesCanonical below.)
-  constexpr size_t kDivPerChunk = kMaxRunGas / kDivInstructionGas; // 1250
+  // Exceeding kMaxRunGas splits the run into two chunks with one break carrier.
+  // Check the count; backward-greedy lowering determines the split position.
+  constexpr size_t kDivPerChunk = kMaxRunGas / kDivInstructionGas;
   constexpr size_t kDivCount = kDivPerChunk + 8; // spills over -> 2 chunks
   const std::vector<uint32_t> words(kDivCount,
                                     op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
@@ -585,8 +579,6 @@ TEST(Rv32Threaded, jalLinksAndJumps)
 {
   using test_program::j_type;
   // jal x1,+8 writes link (pc+4=4) to x1 and jumps over the addi at pc=4.
-  // Use x4 for the skipped instruction (x2 was avoided when sp seeded
-  // nonzero at entry; sp now seeds 0 but x4 keeps the test stable).
   const std::vector<uint32_t> words = {j_type(1, 8), addi(4, 0, 7),
                                        addi(3, 0, 9)};
   auto program = threaded_from_words(words);
@@ -869,7 +861,7 @@ TEST(Rv32Threaded, endOverlapLoadTraps)
   EXPECT_EQ(machine.reg(4), 0U); // load never wrote
 }
 
-// --- load + reg-arith fusion (EXPERIMENT(fuse)) -----------------------------
+// --- load + reg-arith fusion -----------------------------
 // A lw immediately followed by a fusible R-type runs through op_load_rr (one
 // dispatch for the pair). The corpus differential test is the broad net; these
 // pin the three behaviors fusion must preserve: fall-through result, a branch
@@ -1969,17 +1961,9 @@ TEST(Rv32ThreadedTrapGas, gasBudgetSweepAcrossMidRunFaultingProgram)
 TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
 {
   using test_program::op;
-  // A single straight-line run of divs (gas 8 each), long enough that its total
-  // body gas (65600) exceeds the ORIGINAL uint16 run bound (65535) -- so this
-  // program was formerly rejected with kRunGasTooLarge and now loads, split
-  // into seven chunks (six of 10000 + a 5600 remainder), terminated by an ecall
-  // that halts via RecordingHost. The threaded engine meters per chunk; the
-  // canonical Machine meters per instruction with no chunks. Their visible
-  // (trap class, gas_remaining) must agree at every budget -- including budgets
-  // that run dry inside the first chunk, exactly at a chunk boundary, inside a
-  // later chunk, and at/after completion. threaded_from_words EXPECT_TRUEs
-  // has_value(), so a reappearance of the reject would fail here too.
-  constexpr size_t kDivCount = 8200; // 65600 body gas (> 65535) -> 7 chunks
+  // Compare chunk metering with canonical per-instruction metering across
+  // budgets that exhaust the first chunk, a later chunk, or complete the run.
+  constexpr size_t kDivCount = 8200;
   std::vector<uint32_t> words(kDivCount, op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   words.push_back(kEcallWord);                                  // halts
 
@@ -1988,7 +1972,7 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
   auto threaded = threaded_from_words(words);
 
   const uint64_t total =
-      (kDivCount * kDivInstructionGas) + 1; // 65601 (+ ecall)
+      (kDivCount * kDivInstructionGas) + 1; // includes ecall
   const uint64_t budgets[] = {
       0,     1,     8,         9999,  10000,     10001,           59999,
       60000, 60001, total - 1, total, total + 1, 1'000'000'000ULL};
@@ -2011,13 +1995,10 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
 TEST(Rv32ThreadedTrapGas, chunkAtCapBeforeBarrierDoesNotExceedCap)
 {
   using test_program::op;
-  // Regression: a maximal non-barrier run of EXACTLY kMaxRunGas (1250 divs =
-  // 10000) immediately followed by a barrier (ecall, +1 gas) is a 10001-gas
-  // run. The lowering must still split it so no slot's gas_to_run exceeds
-  // kMaxRunGas (the chunk cap / max deficit bound); the backward-greedy pass
-  // breaks the first div into its own chunk, leaving the [rest + ecall] chunk
-  // at 9993. Gas must match the canonical Machine at and around completion.
-  constexpr size_t kDivCount = kMaxRunGas / kDivInstructionGas; // 1250 -> 10000
+  // A DIV sequence filling kMaxRunGas still needs a split when followed by
+  // ECALL: the barrier's gas counts toward the cap. Check canonical gas parity
+  // at and around completion.
+  constexpr size_t kDivCount = kMaxRunGas / kDivInstructionGas;
   std::vector<uint32_t> words(kDivCount, op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   words.push_back(kEcallWord); // barrier (halts via RecordingHost)
 
@@ -2432,15 +2413,11 @@ TEST(Rv32ThreadedTrapGas, unimpGasParity)
 // --- Host-consumed ecall gas
 // ----------------------------------------------------
 //
-// The host's gas_consumed on an ecall is debited by BOTH engines and moves the
-// consensus-visible gas_remaining, but every host in the corpus/differential
-// harness (RecordingHost, ThreadedMemoryHost) reports 0 host gas, so the debit
-// -- and the threaded engine's apply_ecall host-gas out-of-gas branch, and the
-// deficit a resumed run can fall into -- is otherwise untested. GasHost debits
-// a fixed cost per ecall so these pin cross-engine parity of that charge.
+// GasHost charges a fixed cost per ECALL to exercise host debits, host-induced
+// out-of-gas, and deficits after resuming guest execution.
 
 // Drive `words` through the canonical Machine and both (untraced/traced)
-// ThreadedMachine instantiations under the SAME gas-consuming host, and require
+// ThreadedMachine instantiations under the same gas-consuming host, and require
 // the consensus-visible outcome (result, trap, gas_remaining) and the host-call
 // count to agree.
 void
@@ -2602,7 +2579,7 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
   words.push_back(
       load(4, 2, 0,
-           2047)); // lw x4, 2047(x0) -> OOB fault (slot 1249 = carrier)
+           2047)); // lw x4, 2047(x0) -> OOB fault at break carrier
   words.insert(words.end(), kTrailDivs,
                op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
@@ -2632,7 +2609,7 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
   words.push_back(
       store(0, 2, 2047,
-            2)); // sw x2, 2047(x0) -> OOB fault (slot 1249 = carrier)
+            2)); // sw x2, 2047(x0) -> OOB fault at break carrier
   words.insert(words.end(), kTrailDivs,
                op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
@@ -2692,13 +2669,8 @@ constexpr uint32_t kMinRunGasCap = static_cast<uint32_t>(kMaxInstructionGas);
 TEST(Rv32ThreadedTrapGas, cappedLoadFaultOnCarrierBudgetSweep)
 {
   using test_program::load;
-  // Chunk cap 8 over [7 addi][LW][7 addi][ecall] (gas 1 each, 16 slots).
-  // Backward-greedy lowering: the trailing [7 addi + ecall] fills an 8-gas
-  // chunk, the lw cannot fold into it (1+8 > 8), so the lw at slot 7 is the
-  // break carrier ending the first chunk. Its Brk fault path must refund
-  // nothing at every budget: below 8 the run enters in deficit (canonical
-  // OOGs inside the prefix), at exactly 8 the fault lands with zero balance,
-  // above 8 the remainder must match canonical's charge-through-the-lw.
+  // At kMinRunGasCap, LW fills a chunk by itself. Its break-carrier fault
+  // refunds no suffix gas. Sweep budgets across the prefix and faulting load.
   std::vector<uint32_t> words(7, addi(1, 0, 1));
   words.push_back(load(5, 2, 0, 300)); // slot 7: OOB lw -> carrier
   words.insert(words.end(), 7, addi(2, 0, 2));
@@ -2713,14 +2685,10 @@ TEST(Rv32ThreadedTrapGas, cappedLoadFaultOnCarrierBudgetSweep)
 TEST(Rv32ThreadedTrapGas, cappedLoadFaultAtChunkHeadAfterCarrierBudgetSweep)
 {
   using test_program::load;
-  // Chunk cap 8 over [8 addi][LW][6 addi][ecall] (16 slots): the trailing
-  // [LW + 6 addi + ecall] fills an 8-gas chunk headed by the faulting lw, and
-  // the addi at slot 7 becomes the break carrier ending the first chunk. The
-  // fault fires at a run head -- straight out of enter_run's charge (budget >=
-  // the 9-gas prefix) or inside a deficit run (budget below it, where
-  // canonical ran dry in the first chunk or exactly at the boundary).
+  // At kMinRunGasCap, LW fills a chunk by itself. The preceding ADDI must
+  // carry a break, so the fault follows enter_run's charge for the load.
   std::vector<uint32_t> words(8, addi(1, 0, 1));
-  words.push_back(load(5, 2, 0, 300)); // slot 8: OOB lw heads chunk 2
+  words.push_back(load(5, 2, 0, 300)); // slot 8: OOB lw at a chunk head
   words.insert(words.end(), 6, addi(2, 0, 2));
   words.push_back(kEcallWord);
   auto threaded = threaded_from_words(words, /*total_memory_size=*/256,

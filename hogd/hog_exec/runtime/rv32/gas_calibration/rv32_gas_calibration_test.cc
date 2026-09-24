@@ -447,30 +447,12 @@ TEST(Rv32GasCalibrationKernel, PlacementPhaseMovesWorkWithoutChangingIt)
       << "phase never changed placement, so it cannot average layout bias";
 }
 
-// The strongest single check in the harness: running a kernel must consume
-// exactly the gas the schedule says its instruction sequence costs. That pins
-// the retired instruction count, the loop trip count, and the absence of any
-// trap or early exit in one assertion -- if a kernel silently ran a different
-// number of instructions than the harness credits it with, every ns-per
-// instruction derived from it would be wrong by that ratio.
-// A saturated body must really be all target, and must run.
-//
-// The saturated measurement divides a kernel's time by its instruction count
-// and calls the result the per-instruction cost of a program made of that
-// opcode. That claim rests on two things the harness controls: every interior
-// slot actually holds the target, and the kernel actually executes all of it.
-// Check both against the production decoder and the engine's own gas
-// accounting, for every opcode that can be saturated.
+// Check saturated bodies against the production decoder and exact gas
+// consumption: every interior slot must contain its target and execute.
 TEST(Rv32GasCalibrationKernel, NoBodySlotEncodesAnImmediateItCannotReach)
 {
-  // Every body-slot encoder masks its immediate to the field width, so an
-  // out-of-range offset does not fail -- it encodes a different instruction
-  // that runs and halts cleanly. That is how the loop back edge truncated
-  // silently; JALR has the same shape, because its base register is fixed at
-  // the body midpoint and the immediate carries the whole per-slot offset.
-  //
-  // Build every target at every body size the harness allows. A kernel must
-  // either come out correct or be refused by name -- never come out wrong.
+  // Encoders mask excess immediate bits. Exercise every allowed size so a
+  // truncated branch/JALR offset cannot silently time a shorter program.
   HaltHost host;
   size_t refused = 0;
   for (const uint32_t body_slots : {8U, 64U, 512U, 1024U, 2048U, 8192U}) {
@@ -508,13 +490,8 @@ TEST(Rv32GasCalibrationKernel, NoBodySlotEncodesAnImmediateItCannotReach)
 
 TEST(Rv32GasCalibrationKernel, SaturatedPairsTileWithoutOverlapping)
 {
-  // A saturated pair body has to be the pair repeated -- sw lw sw lw -- not a
-  // run of stores. Each substitution occupies two slots, so placing a head at
-  // every interior slot makes each pair's first instruction land on the
-  // previous pair's second: the body collapses to all-first-component with a
-  // single tail at the end, and it audits clean because sw;sw is not a fusion
-  // rule. The pair's cost would then be measured on a program that contains
-  // essentially none of the interaction the row exists to measure.
+  // Pairs must tile two slots at a time. A head placed in every slot
+  // overwrites preceding tails and can still pass the fusion audit.
   for (const PairKind pair :
        {PairKind::kStoreLoadForward, PairKind::kStoreLoadDistinct}) {
     KernelSpec spec;
@@ -616,15 +593,8 @@ TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
   EXPECT_LE(fused, 3U);
 }
 
-// A kernel must run all of its body, at every body size the harness allows.
-//
-// This is what a silently-truncated loop breaks. The old backwards branch
-// overflowed its 13-bit immediate past 1024 slots and the encoder truncated
-// rather than refused: at 2048 slots the kernel reported a clean halt having
-// burned 2107 of 16443 credited gas, every opcode priced at the baseline, and
-// the sweep looked reproducible because it had stopped measuring. Comparing
-// consumed against credited gas catches that in one assertion, so size the
-// bodies past the old cliff.
+// Exercise bodies beyond a B-type branch's reach. A truncated back edge can
+// still halt cleanly; exact gas consumption detects the shortened execution.
 TEST(Rv32GasCalibrationKernel, RunsTheWholeBodyAtEveryBodySize)
 {
   HaltHost host;
@@ -689,9 +659,7 @@ TEST(Rv32GasCalibrationKernel, RunsExactlyTheWorkItIsCreditedWith)
   }
 }
 
-// The measurement assumes each body slot is one dispatch of one instruction.
-// The threaded lowering fuses nine patterns, so that assumption is a property
-// of the generated code, not a given.
+// Check that substitution kernels do not trigger production fusion rules.
 TEST(Rv32GasCalibrationKernel, SweepBodiesLowerWithoutFusion)
 {
   for (const KernelSpec &spec : representative_specs()) {
@@ -853,13 +821,8 @@ TEST(Rv32GasCalibrationProvenance, CalibrationOperandsDoNotFuse)
          "any of them fire, its slope is not a per-instruction cost";
 }
 
-// A pair substitution has to keep every property a single-opcode one has:
-// its two slots land inside the interior, pairs never touch each other (the
-// trailing load of one beside the leading store of the next would fuse), and
-// the lowering leaves all of it alone. The cap and the placement span are
-// computed in two different files, and when they disagreed by one the densest
-// kernel did exactly that and the audit caught it -- so the cap is asserted
-// here rather than trusted.
+// Check pair placement and the shared capacity calculation. Adjacent
+// substitutions can fuse across their boundary and invalidate the timing.
 TEST(Rv32GasCalibrationKernel, PairsStayApartAndUnfused)
 {
   for (const PairKind kind :
@@ -902,16 +865,8 @@ TEST(Rv32GasCalibrationKernel, PairsStayApartAndUnfused)
   }
 }
 
-// pair_components must name the opcodes the kernel actually places.
-//
-// Every consumer that reasons about a pair in terms of its parts trusts this:
-// the gas it is credited with, and the worst-case ceiling its interaction is
-// checked against. Both of those used to be written as a literal SW + LW,
-// which was correct until auipc;jalr arrived and silently inherited a bound
-// belonging to two opcodes it does not contain. The four opcodes involved all
-// cost the same gas today, so the accounting test could not see the error --
-// only decoding the body can. Assert it against the same decoder the engine
-// uses, so a new PairKind cannot be added without this being right.
+// Decode pair components independently of gas accounting. Equal gas costs
+// could otherwise hide a bound attributed to the wrong opcode pair.
 TEST(Rv32GasCalibrationKernel, PairComponentsMatchTheEmittedBody)
 {
   for (const PairKind kind :
@@ -994,15 +949,8 @@ TEST(Rv32GasCalibrationKernel, PairKernelsRunTheWorkTheyAreCreditedWith)
   }
 }
 
-// ---------------------------------------------------------------------------
-// Syscall seam kernels.
-//
-// The seam measurement's denominator is a count of host calls, and nothing
-// about a wrong count looks wrong: a body that placed fewer ecalls than it was
-// asked for still runs, still halts, and still produces a confident ns/call --
-// for a call rate it never achieved. So the properties the estimator rests on
-// are asserted here: the calls are placed, they are all reached, the lowering
-// leaves them alone, and each one really is its own straight-line run.
+// Check seam call placement, executed count, and lowered run boundaries;
+// timing alone cannot detect an incorrect per-call denominator.
 
 constexpr uint32_t kSyscallTestBodySlots = 64;
 constexpr uint32_t kSyscallTestTripCount = 4;

@@ -10,51 +10,16 @@
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 
-// What the engine pays to leave the guest, run a host call, and come back.
-//
-// This is the *seam*, not a syscall. `gas_cost_table.h` prices one syscall
-// family (SHA256) and charges zero direct host gas for the rest, so the cost of
-// a stateless syscall today is whatever the crossing itself costs plus whatever
-// the handler does -- and nothing has ever measured the first half. That half
-// is the same for every syscall, which is what makes it worth measuring on its
-// own: it is the constant floor under all of them.
-//
-// WHAT IS AND IS NOT IN THESE NUMBERS
-//
-// In: op_ecall's suspend (spill gas, stash a0-a7, yield kEcall), the unwind to
-// the drive() frame, the virtual dispatch through Host::ecall, apply_ecall's
-// gas debit and register commit, and the fresh enter_run the resumed guest
-// re-enters through. Every one of those is paid by every syscall the node
-// makes, and no other harness in the tree measures them.
-//
-// Out, and this is the part to state loudly: the production syscall path
-// itself. `syscall_entry` parses the register-native ABI through
-// SyscallArgParams, bounds-checks guest pointers, allocates a coroutine frame
-// (runtime_exports.h: "Always the Async arm today: wrap_after_parse_async() is
-// a coroutine unconditionally, so every syscall allocates a frame"), and calls
-// into SystemCallHandler. None of that is here, because none of it can be:
-// `syscall_entry` needs the protocol XDR, the DB proxy and the snapshot cache,
-// and this harness links only rv32_isa_core -- deliberately, so a calibration
-// can be run on a candidate validator without configuring the node build.
-//
-// So read these as a LOWER BOUND on any syscall's fixed cost, and read the
-// difference between the shapes below as the shape of what the guest ABI costs
-// on top. A number that claims to be "the syscall base cost" is not in this
-// file; producing one needs a second, runtime-linked harness, and the point of
-// measuring the seam first is that its cost is then already accounted for.
+// Synthetic ECALL kernels measure suspend, Host dispatch, and resume, with
+// optional output writes. They exclude production syscall_entry parsing,
+// pointer checks, coroutine allocation, and handler work. The separate
+// rv32_syscall_entry_bench measures that path; see README.md.
 namespace hogd::rv32::gas_calibration {
 
-// The ecall instruction word. kernel.cc spells this literal inline for the
-// single terminal ecall it emits; a body made of them wants it named.
 inline constexpr uint32_t kEcallWord = 0x00000073U;
 
-// Register plan. Deliberately NOT the opcode kernel's plan, and the reason is
-// a hazard rather than tidiness: the syscall ABI is a0-a7 = x10-x17, and
-// kFillerDstBase..+kFillerDstSize in kernel.h is x14-x17. An opcode-kernel
-// filler placed between two ecalls would rewrite a4-a7 between one call and
-// the next, so the arguments the host sees would depend on how many filler
-// slots preceded it. Every register this harness uses is therefore chosen to
-// miss x10-x17.
+// Keep fillers outside a0-a7. The opcode kernel's x14-x17 destinations would
+// overwrite syscall arguments between calls.
 inline constexpr uint8_t kSyscallArgBase = 10; // a0..a7 = x10..x17
 inline constexpr uint8_t kSyscallArgCount = 8;
 inline constexpr uint8_t kSyscallLoopCounterReg = 2;
@@ -75,12 +40,7 @@ inline constexpr uint32_t kSyscallContinueSelector = 0x21;
 // selector in a0 is how a real guest already distinguishes calls.
 inline constexpr uint32_t kSyscallHaltSelector = 0x7FF;
 
-// Both selectors are materialized with a single `addi rd, x0, imm`, whose
-// immediate is 12 bits SIGNED. The encoder masks rather than refuses, so a
-// selector above 2047 encodes as a negative number, the host never matches it,
-// and the kernel runs off the end of its code instead of halting -- with the
-// call count still looking exactly right, because the terminal call was made.
-// Cost one debugging session before this assert existed.
+// Selectors must fit ADDI's signed immediate; the encoder masks excess bits.
 static_assert(kSyscallContinueSelector <= 0x7FF,
               "continue selector must fit addi's signed 12-bit immediate");
 static_assert(kSyscallHaltSelector <= 0x7FF,
@@ -88,28 +48,14 @@ static_assert(kSyscallHaltSelector <= 0x7FF,
 static_assert(kSyscallContinueSelector != kSyscallHaltSelector,
               "the terminal call must be distinguishable from a body call");
 
-// Guest addresses the out-pointer shapes write through. A real stateless read
-// syscall writes its result into a caller stack slot, so the same address every
-// call is the realistic arrangement, not a cache-friendly cheat.
+// Reuse fixed output addresses, modelling repeated writes to a guest stack slot.
 inline constexpr uint32_t kSyscallOutPointerA = 0x0400;
 inline constexpr uint32_t kSyscallOutPointerB = 0x0800;
 
-// What the host does per call, chosen to span the host-side shapes the
-// genuinely stateless syscalls actually have. The guest side is identical for
-// every shape but kSeam, so the differences between the other four are host
-// work and nothing else.
+// Shapes other than kSeam share the guest instruction sequence.
 enum class SyscallShape : uint8_t {
-  // ecall alone, and the host echoes a0 back so the selector survives its own
-  // return value. Nothing else: no argument reload, no memory touched. This is
-  // the isolated seam and the floor under every row below it.
-  //
-  // It is also the one shape that is not a legal guest sequence. The bridge ABI
-  // returns the syscall's status in a0 (apply_ecall: `regs_[10] =
-  // result.continue_value()`), so a real guest must re-materialize the selector
-  // before each call. kSeam suppresses that by having the host hand the
-  // selector back, which isolates the crossing at the cost of describing a
-  // caller that cannot exist. Compare it against kSelectorReload to see what
-  // the ABI's own overhead is; quote it on its own only as a bound.
+  // Echo a0 to preserve the selector across calls and isolate the crossing.
+  // Production calls return status in a0; use kSelectorReload for that ABI.
   kSeam,
   // addi a0, x0, selector ; ecall -- the real ABI's minimum. The host returns
   // status 0, clobbering a0, and the guest reloads it. This is the cheapest
@@ -146,22 +92,14 @@ inline constexpr std::array<SyscallShape, 5> kAllSyscallShapes = {
 // Bytes the host writes into guest memory per call.
 [[nodiscard]] uint32_t syscall_shape_output_bytes(SyscallShape shape);
 
-// The host under measurement: performs the shape's host-side work, counts the
-// calls it served, and halts on the terminal selector.
-//
-// It is a Host subclass reached through a virtual call, exactly as
-// SyscallBridgeHost is in production, so the dispatch this measures is the
-// dispatch the node pays.
+// Counts body/terminal calls and performs each shape's synthetic host work.
 class SyscallDispatchHost final : public Host {
 public:
   explicit SyscallDispatchHost(SyscallShape shape) : shape_(shape) {}
 
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override;
 
-  // Host calls served since construction, the terminal halt included. The
-  // harness checks this against what the kernel says it should be: a body that
-  // executed a different number of calls than it was built to would be timed
-  // against the wrong denominator, and nothing else would notice.
+  // Includes the terminal halt; checked against the kernel's expected count.
   [[nodiscard]] uint64_t calls() const { return calls_; }
   void reset_calls() { calls_ = 0; }
 
@@ -182,10 +120,7 @@ struct SyscallKernelSpec {
   uint32_t body_slots = 512;
   // How many call groups the body holds. The rest of the body is filler.
   uint32_t call_groups = 0;
-  // Fill the body with call groups back to back. The saturated body is the
-  // primary estimator here for the same reason it is for opcodes: its time
-  // over its call count is directly what a loop of syscalls costs per call,
-  // with no filler cost to subtract and no way to come out negative.
+  // Fill the body with calls for the absolute per-call timing estimate.
   bool saturated = false;
   uint32_t trip_count = 64;
 };
@@ -201,18 +136,13 @@ struct SyscallKernel {
   uint64_t dynamic_instructions = 0;
   // Host calls the whole run should make: the body's, plus the terminal halt.
   uint64_t expected_host_calls = 0;
-  // Gas the current schedule charges for the whole run. Instruction gas only:
-  // these shapes model syscalls that charge no direct host gas today, which is
-  // itself the finding the numbers speak to.
+  // Instruction gas only: this synthetic host returns zero host gas.
   uint64_t scheduled_gas = 0;
   uint32_t body_start_pc = 0;
 };
 
-// The most call groups a body of `body_slots` can hold. Unlike an opcode
-// sweep there is no non-adjacency cap: ecall is a run barrier and fuses with
-// nothing, so adjacent call groups cannot create or destroy a fusion the way
-// adjacent ALU ops can. The bound is just how many groups fit between the two
-// fixed filler boundaries.
+// Capacity between fixed filler boundaries. ECALL groups may be adjacent:
+// ECALL is a barrier and cannot fuse.
 [[nodiscard]] uint32_t max_call_groups(uint32_t body_slots, SyscallShape shape);
 
 [[nodiscard]] std::expected<SyscallKernel, KernelError>

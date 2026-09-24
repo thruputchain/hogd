@@ -1548,15 +1548,9 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
   ASSERT_EQ(get_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// Smoke test for SDK-lowered RV32 artifacts.
-//
-// By default this uses the generated artifact produced from the ITC
-// rv32_smoke_counter fixture. Set RV32_SMOKE_ARTIFACT to override it with any
-// `.rv32a` path produced by scripts/rv32_make_smoke_artifact.sh, which wraps
-// the published rv32-lower binary. The test parses, validates, invokes the
-// selected dispatch entry, and prints the observed outcome. It's intentionally
-// informational — EXPECT, not ASSERT — so a failure here surfaces the actual
-// VM/SDK gap rather than just printing a green/red ctest line.
+// Run the generated ITC rv32_smoke_counter artifact through the canonical test
+// runtime. RV32_SMOKE_ARTIFACT overrides the path; RV32_SMOKE_METHOD_ID selects
+// the guest-dispatched method (default: get). Success requires a clean return.
 TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
 {
   const auto artifact_path = get_lowered_sdk_smoke_artifact_path();
@@ -1636,10 +1630,6 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
               << handler.get_transaction_stats()->invalid_syscall_count << "\n";
   }
 
-  // The interesting signal: did the macro-emitted entry point actually
-  // execute as a VM entry point? Success means the lowerer + macro +
-  // runtime composition works end-to-end. A non-success outcome is
-  // expected to be informative (which kind of failure?), not green.
   EXPECT_TRUE(result.is_root_success())
       << "lowered artifact did not return cleanly — check trace status above";
 }

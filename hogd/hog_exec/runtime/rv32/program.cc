@@ -253,8 +253,8 @@ decode_instruction(uint32_t word)
 ProgramResult
 Program::validate(std::span<const uint8_t> code)
 {
-  // Validation is the consensus boundary for the RV32 profile. A Machine only
-  // receives already-decoded instructions from Program::create.
+  // Canonical decoder validation. Production preparation validates through
+  // ThreadedProgram; Machine receives decoded instructions from Program::create.
   if ((code.size() % kInstructionBytes) != 0) {
     return ProgramResult{.ok = false,
                          .error = ProgramError::kCodeSizeNotAligned};

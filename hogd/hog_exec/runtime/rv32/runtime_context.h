@@ -15,11 +15,8 @@
 
 namespace hogd::rv32 {
 
-// Test-runtime image after artifact parsing/lowering. Production activation
-// still needs a deployed-artifact store and selector; this is not that layer.
-//
-// v4 enters every call at PC 0 (_start) with the invoked method id seeded into
-// a0/a1; the guest dispatches. There is no host-side method -> PC table.
+// Canonical test-machine image. Entry is PC 0 with the method ID in a0/a1;
+// the guest dispatches. Production preparation is owned by Rv32Contract.
 struct RuntimeContractImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;
@@ -27,8 +24,8 @@ struct RuntimeContractImage {
   SyscallFunction entry = nullptr;
 };
 
-// Experimental test-only RuntimeContext for the RV32 VM. It deliberately uses
-// kMockTest contracts so RV32 remains outside protocol/runtime selection.
+// Canonical test runtime using kMockTest contracts. Production RV32 contracts
+// use Rv32Context in rv32_contract.h.
 class RuntimeContext final : public hogd::RuntimeContext {
 public:
   explicit RuntimeContext(

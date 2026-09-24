@@ -54,38 +54,11 @@
 #include "types.hh"
 #include "x23/sockio.h"
 
-// What a syscall actually costs on the production entry path.
-//
-// The gas calibration harness next door measures the *seam* -- the ecall
-// suspend, the host dispatch, the resume -- and stops at the guest boundary,
-// because it links only rv32_isa_core so it can run on a candidate validator
-// without configuring the node build. This benchmark measures the other half,
-// and it has to be a separate binary for exactly that reason: `syscall_entry`
-// pulls in the protocol XDR, the DB proxy and the snapshot cache, which is most
-// of the node.
-//
-// Three levels, so the two halves can be checked against the whole rather than
-// assumed to compose:
-//
-//   entry/   syscall_entry() called directly, production-style, against live
-//            guest memory. The ABI parse, the coroutine frame every call
-//            allocates, and the handler. No VM.
-//   vm/      the same syscall driven through ThreadedMachine exactly as
-//            rv32_contract.cc drives it: ecall, suspend, syscall_entry,
-//            resume. entry + seam.
-//
-// The difference between the two is the seam, measured here through the real
-// syscall rather than a modelled host -- which is the number the calibration
-// harness reports, arrived at independently.
-//
-// Stateless syscalls first, and now the first stateful family: the NNInt
-// storage calls, in the `frame/` and `cold/` rows. A storage syscall's cost is
-// not a function of its arguments alone -- it depends on whether this
-// transaction has touched the key before, how deep the invocation stack is,
-// and whether the block's snapshot cache holds the key -- so those rows set
-// that state up deliberately, one regime per row, rather than measuring
-// whatever a warm handler happens to be in. See "Storage: the NNInt rows"
-// below for what each regime is and how it is isolated.
+// Production syscall measurements. entry/ calls syscall_entry directly;
+// vm/ includes guest argument setup, ECALL, and resume. Their difference
+// cross-checks the synthetic seam in gas_calibration/, with per-call setup
+// included. frame/, buffers/, and cold/ cover stateful paths hidden by warm
+// repetition. See gas_calibration/README.md for method and limitations.
 namespace hogd {
 namespace {
 
@@ -97,21 +70,12 @@ constexpr uint32_t kOutputAddressA = 0x0400;
 constexpr uint32_t kOutputAddressB = 0x0800;
 // Input buffer for the hashing syscalls, past both output pointers.
 constexpr uint32_t kInputAddress = 0x1000;
-// Signature, public key and message for VerifySignature, below the hashing
-// input so the two never overlap.
-// Three 64-byte signature slots need 192 bytes, so the public key sits above
-// them with room to spare. The first bench-pool run put the key at 0x0980,
-// exactly where the third signature lands, and the 1024-byte row verified a
-// clobbered signature -- caught only because an erroring syscall fails its row
-// rather than being timed. Sized from the constants rather than spelled out, so
-// adding a swept length cannot silently overrun again.
+// Place each signature and its public key/message below the hashing input.
+// Derive addresses from the swept lengths to prevent overlap.
 constexpr uint32_t kSignatureAddress = 0x0900;
 constexpr uint32_t kSignatureStride = 64;
-// Message lengths VerifySignature is measured over. Each needs its OWN
-// signature: a signature is over one exact byte string, so verifying a prefix
-// of the signed message fails -- correctly, and on a rejection path far cheaper
-// than the one being priced. Signing only the longest and sweeping lengths
-// against it is what the first bench-pool run died on.
+// Each message length needs its own valid signature; a mismatched length
+// measures rejection instead of successful verification.
 inline constexpr std::array<uint32_t, 3> kVerifyMessageBytes = {0, 64, 1024};
 constexpr uint32_t kMaxMessageBytes = 1024;
 // The length the ecall-crossing row uses. Mid-sweep: long enough that the
@@ -180,13 +144,9 @@ static_assert(kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength) <=
 // input's address: no row issues a hash and a bytestring call, and the region
 // is already seeded with a nonzero pattern.
 constexpr uint32_t kBytestringPayloadAddress = kInputAddress;
-// Lengths the bytestring rows are measured over. The same sweep as SHA256, so
-// a Set can be read directly against the cost of hashing the bytes it copies.
-//
-// The top is not kBytestringCeilingLen: guest memory is 64 KiB total and the
-// payload has to fit in what is left above the argument blocks. Half the
-// ceiling is far enough that the per-byte term is what a fit sees, and what
-// is left is one doubling of extrapolation rather than six.
+// Use the hashing length sweep for copy/hash comparisons. The payload and
+// argument blocks must fit within this fixture's default-size guest memory;
+// the sweep does not reach the bytestring protocol ceiling.
 inline constexpr std::array<uint32_t, 7> kBytestringBytes = {0,    32,   256,
                                                              1024, 4096, 16384,
                                                              32768};
@@ -203,16 +163,8 @@ static_assert(kBytestringPayloadAddress + kMaxBytestringBytes <=
 static_assert(kMaxBytestringBytes <= kBytestringCeilingLen,
               "the sweep must stay inside the wire format's ceiling");
 
-// The chain the fixture executes under: this repository's stock parameters,
-// with the bytestring limit raised to the top of the sweep.
-//
-// Raised, because the stock 1024 is a choice a dev chain makes rather than a
-// bound the syscall carries -- kConfigParamMaxBytestringLen is settable up to
-// kBytestringCeilingLen, and a per-byte cost fit over three decades of length
-// is what says whether a price holds for a chain that sets it higher. Above
-// the configured limit the write is refused as invalid input, which is a
-// cheaper path than the one being priced, so a sweep past it would publish
-// rejections as costs.
+// Raise the fixture's bytestring limit to cover the sweep. Otherwise the large
+// write rows would time input rejection instead of copying.
 NetworkConfig
 bench_network_config()
 {
@@ -237,9 +189,8 @@ enum class KeySpace : uint8_t {
   // The one key the warm entry/vm rows repeat on, resident in the fixture's
   // inner frame after the first call.
   kWarm = 1,
-  // Keys the first-touch sweeps read, seeded in the mock db and, after each
-  // row's warm pass, resident in the block's snapshot cache -- but never in a
-  // frame when the timed call arrives.
+  // Seeded first-touch keys become snapshot-cached during warmup. Each timed
+  // iteration uses a fresh frame, so its item-view lookup still misses.
   kFirstTouch = 2,
   // Keys the SetAdd sweeps write. Never seeded: a write consults neither the
   // snapshot cache nor the db.
@@ -267,10 +218,8 @@ make_item_key(KeySpace space, uint64_t index)
   return key;
 }
 
-// Point the NNInt syscalls at `key` by writing it where their argument word
-// says it is. A 32-byte store: in a timed loop it is ~1 ns beside a call of
-// ~100, and it is what a guest does too -- its key lives in memory and it
-// writes the one it wants before calling.
+// Write the selected key into guest memory. This copy remains in the timed
+// first-touch loop along with the syscall.
 void
 write_item_key(std::span<uint8_t> memory, uint32_t key_address, KeySpace space,
                uint64_t index)
@@ -279,22 +228,12 @@ write_item_key(std::span<uint8_t> memory, uint32_t key_address, KeySpace space,
   std::memcpy(memory.data() + key_address, key.data(), key.size());
 }
 
-// The most distinct keys a first-touch sweep reads. Seeded on demand rather
-// than up front: every vm/ row builds its own fixture, and seeding a quarter
-// of a million items per fixture is a cost only the sweeps need.
-//
-// The top of the sweep is not a protocol limit -- nothing caps the keys a
-// transaction may touch except its gas budget -- so it is set where the
-// per-key cost stops moving, which is what makes pricing at the plateau
-// sound. See "How far does the key count scale" in
-// docs/rv32/rv32-gas-calibration.md.
+// First-touch sweep limit, not a protocol cap. Seed on demand to avoid adding
+// the large fixture working set to rows that do not need it. See
+// gas_calibration/MEASUREMENTS.md for the measured occupancy dependence.
 constexpr uint64_t kFirstTouchKeys = 262144;
-// Keys the cold row may consume before it runs out. A cold read needs a key
-// the snapshot cache has never seen, and the cache is never reset within a
-// process, so each one is used exactly once. Sized for the fixed iteration
-// count the row registers with, times the runner's repetitions, with room for
-// the warm-up calls and a few extra repetitions. Exhausting it fails the row
-// with a message rather than recycling keys and quietly measuring hits.
+// Cold keys are single-use across warmup, probing, and repetitions because the
+// snapshot cache persists. Exhaustion fails the row instead of measuring hits.
 constexpr uint64_t kColdPoolKeys = uint64_t{1} << 18;
 // Heap for the bench's hog_db. The cold pool alone is a quarter-million NNInt
 // items, each carrying its key, and ramdb's allocator fails a write rather
@@ -304,14 +243,8 @@ constexpr uint64_t kColdPoolKeys = uint64_t{1} << 18;
 constexpr size_t kHogDbHeapBytes = size_t{1} << 30;
 constexpr int64_t kColdIterations = 20000;
 
-// A RuntimeContext that can build nothing.
-//
-// The handler needs one to hand out child runtimes, and a stateless syscall
-// never asks for a child: it answers from the frame it is already in. So rather
-// than link the precompile registry (which drags in the whole built-contract
-// toolchain to resolve genesis addresses this benchmark never looks up), supply
-// a context whose only contract is that it is never called. If a syscall added
-// here ever does invoke, this aborts rather than quietly measuring a stub.
+// These benchmarks do not invoke child contracts. Abort an unexpected build
+// request so a new benchmark cannot silently measure a stub runtime.
 class NoChildRuntimeContext final : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const & /*contract*/,
@@ -329,13 +262,8 @@ public:
   }
 };
 
-// Everything a SystemCallHandler needs.
-//
-// Set up the way every other test sets one up: NativeContractTestFramework
-// against a real hog_db, which runs genesis and opens the block. The one row
-// that measures a snapshot-cache miss then measures a database rather than a
-// stand-in map; every other row has its key in a frame or in the cache and
-// never reaches it while timed.
+// NativeContractTestFramework starts a real hog_db and opens a block. Warm
+// rows use frame/cache state; the cold row reaches the database while timed.
 class SyscallBenchFixture {
 public:
   SyscallBenchFixture()
@@ -345,16 +273,8 @@ public:
     // initialized, so GetBlockHeight and its kin read a pinned tip with no
     // per-fixture step here.
 
-    // A syscall runs inside an invocation frame; without one the handler has no
-    // current address, no calldata and no gas budget, and every call under
-    // measurement would take an early error path instead of doing its work.
-    //
-    // Two frames, not one. GetMsgSender returns
-    // kSyscallErrorCodeIsRootTransaction in a root frame -- correctly, there is
-    // no sender -- and an erroring syscall takes a different path than the one
-    // being priced. A contract called by another contract is also the ordinary
-    // case, so the inner frame is both the measurable arrangement and the
-    // representative one.
+    // Use a child frame so address, calldata, and gas state exist and
+    // GetMsgSender succeeds; the root frame has no sender.
     auto outer = push_frame(inner_address_parent());
     if (!outer.has_value()) {
       setup_error_ = frame_push_error("outer", outer.error());
@@ -371,10 +291,8 @@ public:
     }
     inner_trace_ = std::move(inner).value();
 
-    // Snapshot state the storage rows read. The mock serves whatever it was
-    // handed at setup; a key it does not hold reads as kStorageKeyNotExist,
-    // which fails the row rather than timing it.
-    // Two warm keys: index 0 is the Get rows', index 1 the SetAdd rows'.
+    // Seed separate keys for warm Get and SetAdd rows. Missing keys would
+    // measure a different result path.
     seed_nnint(inner_address(), KeySpace::kWarm, 0, 2);
     // One item per swept length. ~54 KB in total, so every fixture can carry
     // them rather than seeding them on demand as the key sweeps do.
@@ -447,15 +365,8 @@ public:
   }
   static ContractAddress cold_address() { return make_address(0x50); }
 
-  // Push a frame at `address` on top of whatever is there. The trace handle
-  // is what pop_frame needs back.
-  //
-  // Refused admission is returned, not aborted. Frame admission is a
-  // production check with production reasons to say no -- the depth bound and
-  // the reentrance ban both live there -- so a row that cannot build its stack
-  // is a row to fail by name, exactly like a syscall that will not run. This
-  // used to std::abort(), which took the process down mid-write and cost every
-  // row already measured.
+  // Return admission failures to the benchmark so one invalid depth or
+  // reentrance case fails its row without truncating the whole JSON output.
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   push_frame(ContractAddress address)
   {
@@ -493,8 +404,7 @@ public:
     return {};
   }
 
-  // Put NNInt items under `address` in the mock snapshot, at the keys
-  // make_item_key(space, first..last).
+  // Seed NNInt items under address at keys make_item_key(space, first..last).
   void seed_nnint(ContractAddress const &address, KeySpace space,
                   uint64_t first, uint64_t last)
   {
@@ -537,9 +447,7 @@ public:
     seeded_first_touch_keys_ = count;
   }
 
-  // The cold row's keys, seeded on first use rather than in the constructor:
-  // every vm row builds its own fixture, and a quarter-million inserts per
-  // fixture is a cost nothing but the cold row needs.
+  // Defer the large cold-key population until its row needs it.
   void seed_cold_pool()
   {
     if (cold_pool_seeded_) {
@@ -642,12 +550,7 @@ make_call(std::string name, SyscallNo number,
   return call;
 }
 
-// The stateless syscalls, in the shapes a guest actually issues them.
-//
-// "Stateless" here means the handler answers from the frame it is already in --
-// block height, the addresses in scope, the calldata's length -- or computes
-// the answer outright. No storage read, no snapshot cache lookup, no child
-// invocation. Those are the ones a fixed price can describe.
+// Frame-local reads: no storage lookup or child invocation.
 std::vector<SyscallCall>
 stateless_calls()
 {
@@ -668,10 +571,7 @@ stateless_calls()
   };
 }
 
-// SHA256(buffer) -> hash. The one syscall family gas_cost_table.h actually
-// prices, and the only stateless one whose cost is supposed to depend on an
-// argument: GasCost::sha256_hash is base 500 + 100/byte. A size sweep is what
-// says whether that shape is right and what the two constants should be.
+// Sweep SHA256 input size to check the compression-block cost model.
 SyscallCall
 sha256_call(uint32_t bytes)
 {
@@ -681,11 +581,6 @@ sha256_call(uint32_t bytes)
   return call;
 }
 
-// The incremental hashing family, which hashes the same bytes as SHA256 and is
-// charged nothing at all: syscall_crypto.cc returns WrappedGasAmount{0} from
-// Update, Copy and Finalize alike. Whatever the one-shot's constants end up
-// being, a guest can reach the same work through these for free, so measuring
-// them is the point rather than a completeness exercise.
 
 // Update with reset=true: creates or resets slot `index` and hashes `bytes`.
 // Self-contained, so it repeats cleanly in a timing loop -- reset=false would
@@ -727,33 +622,17 @@ sha256_copy_call()
                    {kHashSlot, kHashSlotCopy});
 }
 
-// The other half of Copy, and the dearer one. HashBuffers::copy takes two
-// paths: a destination that already exists is an assignment over its stream,
-// and one that does not is an insert into the frame's stream map -- an
-// allocation. Repeating sha256_copy_call() measures only the first, because
-// the warm pass creates the destination and every timed iteration after it
-// finds the slot there. Finalizing the destination erases it, so pairing the
-// two puts the insert back in the loop. Subtract the Finalize row to read
-// Copy's allocating path alone.
-//
-// Which path a guest takes is its own choice, so the schedule has to hold for
-// the dearer one. It charges Copy nothing beyond the crossing; this row is
-// what would catch that going wrong.
+// Finalizing the destination erases it after each Copy, forcing allocation
+// on the next iteration. Subtract Finalize to estimate Copy's allocating path;
+// the warm Copy row reuses its destination.
 std::vector<SyscallCall>
 sha256_copy_new_slot_pair()
 {
   return {sha256_copy_call(), sha256_finalize_call(kHashSlotCopy)};
 }
 
-// VerifySignature(scheme, signature, public_key, message). Seven argument
-// words -- the register-native ABI's maximum -- because three spans cost two
-// slots each.
-//
-// Indexed by row rather than by length: each swept length has its own
-// signature, over exactly that prefix, at its own address. Passing the length
-// here instead would have to search for the matching signature, and getting
-// that wrong verifies a signature against the wrong message -- which fails on
-// ed25519's cheap reject path and prices the wrong thing.
+// Index selects a message length and its matching valid signature. The three
+// spans plus scheme consume all seven syscall argument words.
 SyscallCall
 verify_signature_call(size_t index)
 {
@@ -767,14 +646,8 @@ verify_signature_call(size_t index)
   return call;
 }
 
-// NonnegativeIntGet(key, force_load_from_snapshot) -> (set, set_opt, add).
-//
-// force_load_from_snapshot decides whether the handler consults the snapshot
-// at all. With it set, a key this frame has not written is loaded from the
-// snapshot cache (SystemCallHandler::get_nnint, the UnmodifiedItem branch);
-// without it the same call answers (nullopt, 0) from the frame alone. The two
-// are different code paths with different costs, and both are real: the SDK
-// exposes them as get_values_force and get_values.
+// force_load distinguishes a snapshot-backed read from a frame-only read.
+// These match the SDK's get_values_force and get_values paths.
 SyscallCall
 nnint_get_call(bool force_load_from_snapshot)
 {
@@ -804,14 +677,9 @@ nnint_set_add_call()
   return call;
 }
 
-// BytestringSet(key, {payload, bytes}, flags). Staged in the frame's item view
-// like an NNInt write, so the syscall's own cost is the bounds check, the copy
-// out of guest memory, and the item-view store -- everything downstream of that
-// is paid at commit.
-//
-// The key is not swept: repeating on one key is the warm regime the other write
-// rows measure, and holding it fixed is what leaves length as the only thing
-// changing across these rows.
+// Repeat writes to one key so frame state is warm and only payload size varies.
+// The timed work includes bounds checks, copies, and staging in the item view;
+// child-frame commit is measured separately.
 SyscallCall
 bytestring_set_call(uint32_t bytes)
 {
@@ -856,13 +724,8 @@ bytestring_get_len_call(uint32_t bytes)
   return call;
 }
 
-// Guest memory with the hashing input seeded, and a real ed25519 signature
-// laid out where VerifySignature's arguments point.
-//
-// A real one, not a plausible-looking one: verification rejects a bad signature
-// early, on a path far cheaper than the one being priced, and the benchmark
-// would report that cheap path as the cost of verifying. The keypair is derived
-// from a fixed seed so the measurement is reproducible.
+// Use a fixed keypair and valid signatures so timings cover verification,
+// without an early invalid-signature rejection.
 std::vector<uint8_t>
 make_guest_memory()
 {
@@ -911,21 +774,8 @@ make_guest_memory()
   return memory;
 }
 
-// One production syscall, called exactly as rv32_contract.cc calls it: live
-// guest memory, blocking on the coroutine, nothing staged or copied.
-//
-// Returns the gas the syscall declared, so the benchmark can report the price
-// beside the cost rather than leaving the reader to look it up.
-// A syscall's result: the gas it declared, or why it did not run.
-//
-// Errors are reported rather than aborted. An erroring syscall took a different
-// path than the one being priced -- a rejected argument, a frame that was never
-// started -- so its timing must not be published either way. But aborting takes
-// the whole process with it, and on the first bench-pool run one bad row
-// (a VerifySignature call whose message length did not match its signature)
-// killed the binary mid-write, truncated the JSON, and cost every other row in
-// the run. Google Benchmark can fail one row and keep the rest, which is
-// strictly better: the failure is visible, named, and contained.
+// A failed syscall took a different path from the one under measurement.
+// Fail its benchmark row while allowing the remaining JSON results to finish.
 struct SyscallOutcome {
   bool ok = false;
   uint64_t gas = 0;
@@ -962,14 +812,8 @@ invoke_syscall_entry(SystemCallHandler &handler, std::span<uint8_t> memory,
   return {.ok = true, .gas = gas_consumed};
 }
 
-// One fixture for the whole process.
-//
-// Constructing it starts two in-process RPC servers and opens a block, which
-// is slow, chatty, and -- more to the point -- irrelevant to what is being
-// measured. A per-benchmark fixture also meant a fresh snapshot cache each
-// time, so every run paid the cold db-tip fetch that the first GetBlockHeight
-// in a block pays and the rest do not. Sharing one fixture measures the steady
-// state, which is what a contract making more than one syscall actually sees.
+// Share servers and snapshot cache across rows. Setup and the first block-tip
+// fetch stay outside warm measurements; cold rows manage their own fresh keys.
 SyscallBenchFixture &
 shared_fixture()
 {
@@ -1041,23 +885,13 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   if (call.payload_bytes > 0) {
     state.SetBytesProcessed(calls * static_cast<int64_t>(call.payload_bytes));
   }
-  // The price beside the cost. A syscall charging zero direct host gas is the
-  // finding rather than an omission, so the counter is emitted either way --
-  // but ns/gas is only meaningful when gas is nonzero, and reporting `inf` for
-  // every free syscall buries the rows where it is a real number.
+  // Report declared host gas beside timing; omit ns/gas when the charge is zero.
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
 }
 
-// Several syscalls per timed iteration, with an optional setup sequence issued
-// once before timing starts.
-//
-// Two of the new families cannot be measured as a single repeated call.
-// Finalize erases the stream it finalizes, so a second call in a loop finds
-// nothing and takes an error path; the Update+Finalize pair is what a guest
-// issues anyway, and subtracting the measured Update/0 row recovers Finalize
-// alone. Copy is the mirror image: it needs a source stream that already
-// exists, which is setup rather than per-iteration work, so seeding it inside
-// the timed region would price a Copy that no guest performs.
+// Sequences keep state valid across iterations: Update precedes Finalize,
+// which erases its stream. Optional one-time setup seeds Copy's source without
+// including that work in every timed iteration.
 void
 bm_syscall_entry_sequence(benchmark::State &state,
                           std::vector<SyscallCall> setup,
@@ -1118,14 +952,9 @@ bm_syscall_entry_sequence(benchmark::State &state,
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
 }
 
-// A guest program that issues one syscall and halts, so the same call can be
-// driven end to end through the engine the node runs.
-//
-// The argument setup is hoisted out of the measured loop the only way a guest
-// can hoist it: the registers are materialized once before the loop body, and
-// the body is the ecall alone. What is timed per iteration is therefore one
-// ecall plus one syscall, which is what the seam and the entry have to add up
-// to.
+// Run a loop of real syscalls through ThreadedMachine. Arguments are set once;
+// only a0 is reloaded after each status return. Timings include that reload,
+// loop control, and amortized initial argument setup.
 std::vector<uint8_t>
 make_ecall_program(const SyscallCall &call, uint32_t iterations)
 {
@@ -1249,27 +1078,11 @@ bm_syscall_vm(benchmark::State &state, SyscallCall call)
                              benchmark::Counter::kInvert);
 }
 
-// What Copy costs as the frame's stream table fills, driven against
-// HashBuffers directly rather than through the syscall path. Two reasons for
-// going under the syscall: the table's size limit is max_sha256_buffers, which
-// is network config -- "a choice, not a protocol default", per
-// stock_network_config() -- so a chain can set it far above this repo's 8 and
-// the schedule has to hold at whatever it is; and the mock snapshot server this
-// fixture talks to serves the stock value, so the syscall path cannot sweep it.
-// The syscall adds only the crossing on top, which is priced already.
-//
-// Each iteration fills a fresh table: one seeded stream, then `occupancy`
-// copies into slots that do not exist yet, which is the allocating path and the
-// one a contract chooses by picking fresh destination indices. Reported per
-// copy, so a per-copy cost that grows with occupancy shows up as a rising
-// number rather than a bigger total.
-//
-// Read the plateau, not the small rows. The denominator counts copies, but the
-// numerator also carries the per-iteration setup this harness cannot hoist out:
-// constructing the table, the seed update -- itself a slot creation -- and
-// destroying every node at the end. The /0 row is exactly that setup and
-// nothing else, so it is what to subtract; at occupancy 1 it is most of the
-// number, and by 64 it has vanished into the noise.
+// Measure allocating Copy across stream-table occupancies, independently of
+// the fixture's configured stream limit. Each iteration creates and destroys
+// a table, seeds one stream, then copies into fresh slots. Setup and teardown
+// remain timed; the /0 control isolates that overhead. Compare per-copy costs
+// where setup is amortized.
 void
 bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
 {
@@ -1289,14 +1102,8 @@ bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
   state.SetItemsProcessed(copies);
 }
 
-// The same question on the other path that creates a slot. A reset update to an
-// index with no stream emplaces exactly as copy does, and
-// GasCost::sha256_update charges whole blocks only -- so a zero-byte reset
-// update creates a stream for no body gas at all. If slot creation needs
-// pricing, it needs it here too.
-//
-// No seed here, so its /0 row is the bare table construct and destroy, and its
-// small rows are correspondingly less distorted than the copy sweep's.
+// Measure stream creation by reset Update at fresh indices. The /0 control
+// contains only table construction/destruction; no seed stream is needed.
 void
 bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
 {
@@ -1314,69 +1121,17 @@ bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
   state.SetItemsProcessed(creations);
 }
 
-// ---------------------------------------------------------------------------
-// Storage: the NNInt rows
-//
-// The stateless rows above price a call from its arguments. A storage syscall
-// cannot be priced that way, because what it does depends on state the
-// arguments do not name:
-//
-//   - whether this transaction has already touched the key (the item view is
-//     in the active frame, or in a parent frame, or nowhere yet);
-//   - how deep the invocation stack is, because a key not in the active frame
-//     is looked for in every parent frame before a fresh view is created
-//     (InvocationFrameStack::get_item_view walks the stack on every miss);
-//   - whether the block's snapshot cache holds the key, and if not, a db read.
-//
-// So each of those is its own regime, and each regime gets rows that put the
-// handler in exactly that state before every timed call:
-//
-//   entry/NNIntGet            warm: the key's view is in the active frame,
-//                             loaded from the snapshot. One map lookup and a
-//                             variant read. entry/NNIntSetAdd is the write
-//                             analogue, overwriting a view already there.
-//   frame/Push/D              the baseline under every sweep: D frames
-//                             pushed and popped, no syscalls. What one frame
-//                             costs to open and discard.
-//   frame/NNIntGetFirstTouch/D/K
-//                             first touch, snapshot-cached: K distinct keys
-//                             read once each in a fresh frame at depth D, so
-//                             every read misses the active frame, walks D+1
-//                             parents, creates a view, and loads it from the
-//                             snapshot cache -- which holds every key after
-//                             the row's warm pass. The frame is discarded, so
-//                             the next iteration starts from the same state.
-//   frame/NNIntGetFirstTouchNoLoad/1/K
-//                             the same without force_load: the view is
-//                             created and nothing is loaded.
-//   frame/NNIntSetAddFirstTouch/1/K
-//                             first-touch writes: create the view, stage the
-//                             item. No snapshot, no db.
-//   frame/NNIntSetAddMerge/K, frame/NNIntSetAddDiscard/K
-//                             the same K writes in a child frame that then
-//                             commits into a fresh parent (Merge) or is
-//                             thrown away (Discard). The difference is what
-//                             a successful child costs its parent per item,
-//                             which is where a write's in-executor cost
-//                             actually lands.
-//   cold/NNIntGet             snapshot-cache miss: every call reads a key the
-//                             cache has never seen, so it goes through the
-//                             DatabaseProxy to the mock snapshot server. See
-//                             the row for what that number is and is not.
-//
-// The sweeps are read the way the opcode sweeps are: a line in K, whose slope
-// is the per-key cost and whose intercept must agree with frame/Push/D. A
-// slope that changes with D is the parent walk; a slope that changes with K
-// would be the frame's map not being O(1), which is the thing to look for
-// rather than assume.
-//
-// What is deliberately absent: any regime that depends on the *block's*
-// state rather than the transaction's. Whether a key is in the snapshot cache
-// depends on which transactions ran before this one in the block, which
-// validators schedule differently, so it cannot be a term in a deterministic
-// price; the cold row measures it anyway, so the size of what is being
-// declined is on the record.
-// ---------------------------------------------------------------------------
+// Storage rows vary prior touches, frame depth, and snapshot-cache residency:
+//   entry/NNInt*          warm item view in the active frame
+//   frame/Push/D          D frames opened and discarded, no syscalls
+//   frame/*FirstTouch/D/K K distinct keys touched in a fresh leaf at depth D
+//   frame/*NoLoad/1/K     first touch without consulting the snapshot
+//   frame/*Merge/K        staged writes committed into a fresh parent
+//   frame/*Discard/K      same writes discarded; control for merge cost
+//   cold/NNIntGet         fresh keys loaded through the database proxy
+// Frame sweeps include setup/teardown. Read per-key cost at each K; cache effects
+// can make one fitted line misleading. Snapshot-cache residency depends on
+// validator scheduling, so billing cannot use cache hits as a deterministic term.
 
 using FrameTraces = std::vector<std::unique_ptr<InvocationFrameTrace>>;
 
@@ -1456,14 +1211,9 @@ bm_frame_push(benchmark::State &state, uint32_t depth)
   state.counters["depth"] = benchmark::Counter(static_cast<double>(depth));
 }
 
-// One iteration: open `depth` frames, issue `call` once per key on `keys`
-// distinct keys in the innermost, close them all. Reported per iteration, so
-// the report can fit the line; items_processed counts the keys.
-//
-// Every call is checked, not just the warm pass. A stateful row can start
-// failing partway -- a key the mock was not seeded with, a frame that would
-// not open -- and a row that timed the error path from then on would look
-// like a fast syscall.
+// Time frame setup, one call per distinct key, and frame teardown. Report per
+// iteration and count keys in items_processed. Check every call so failures
+// cannot turn a row into an error-path timing.
 void
 bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
                SyscallCall call, KeySpace space, bool commit_innermost,
@@ -1474,13 +1224,8 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
     return;
   }
   SyscallBenchFixture &fixture = *fixture_ptr;
-  // Only the rows that actually read the snapshot seed it. Seeding is not
-  // free to the measurement: every seeded key is a StorageItemWrapper in the
-  // mock's map, and at the top of the sweep that is ~90 MB resident competing
-  // for cache with the frame map being measured. A row that never consults
-  // the snapshot -- the no-load reads, the writes -- would be paying for
-  // scaffolding it does not use. Measured: seeding first made an unrelated
-  // K=16 no-load row 2.4x dearer.
+  // Seed only rows that load. The large fixture working set competes for
+  // cache even when the measured path never accesses it.
   if (needs_seeded_keys) {
     fixture.ensure_first_touch_keys(keys);
   }
@@ -1548,37 +1293,13 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
 }
 
-// A read that misses the snapshot cache, once per call.
+// Every call misses the frame and snapshot cache, loads from real hog_db over
+// a local socket, and inserts the result into the cache. This excludes any
+// remote database hop.
 //
-// What this measures: get_item_view's miss, the UnmodifiedItem load,
-// StorageSnapshotCache::try_get_snapshot_item missing under its shared lock,
-// DatabaseProxy::get_snapshot_item -- an x23 RPC, serialized, over a local
-// socket -- the lookup a real hog_db does over a real ramdb, the
-// SnapshotStorageItem built from the reply, and the cache insert. A cold read
-// end to end.
-//
-// It answers from hog_db rather than the light server every other row uses,
-// because what a miss costs is mostly what the database does; against the
-// light server's map find this row reported the cost of *going* to a database
-// and not the cost of one.
-//
-// What it still does not measure: the shard topology. hog_db is in-process and
-// the socket is local, so a chain whose executor and database sit on different
-// hosts pays a network hop this does not. Read it as a floor in that one
-// respect.
-//
-// Keys come from a pool used strictly once: the cache is never reset within
-// the process, so a key read by any earlier call -- an earlier repetition,
-// the warm-up, the benchmark's own iteration-count probing -- is warm for
-// every later one. Hence the fixed iteration count at registration, sized
-// against kColdPoolKeys, and the loud failure when the pool runs out rather
-// than a quiet slide into measuring hits.
-//
-// Runs in its own frame, pushed for the row and discarded after it, so the
-// quarter-million item views it creates do not stay behind in the fixture's
-// inner frame for every later row's lookups to walk past. Register it last:
-// the snapshot cache it fills is shared, and a lookup into a cache of 250k
-// entries is not the same lookup as one into a cache of 4k.
+// Consume keys once across warmup and repetitions; exhaustion fails the row.
+// Use a separate discarded frame so item views do not affect subsequent rows.
+// Register this row last because its snapshot-cache entries remain shared.
 void
 bm_nnint_cold(benchmark::State &state)
 {
@@ -1652,8 +1373,8 @@ register_benchmarks()
     benchmark::RegisterBenchmark(("vm/" + call.name).c_str(), bm_syscall_vm,
                                  call);
   }
-  // SHA256 over a size sweep. 0 bytes isolates the per-call base from the
-  // per-byte term, which is exactly the split GasCost::sha256_hash claims.
+  // Zero-byte SHA256 still compresses a padding block. Include it to check
+  // the fixed crossing plus minimum hash work against larger inputs.
   for (const uint32_t bytes : {0U, 32U, 256U, 1024U, 4096U, 16384U, 32768U}) {
     const SyscallCall call = sha256_call(bytes);
     benchmark::RegisterBenchmark(
@@ -1724,13 +1445,8 @@ register_benchmarks()
   benchmark::RegisterBenchmark("vm/NNIntSetAdd", bm_syscall_vm,
                                nnint_set_add_call());
 
-  // Bytestrings over a length sweep, all three warm. None of them is priced --
-  // syscall_bytestring.cc returns WrappedGasAmount{0} from Get, GetLen and Set
-  // alike -- so what the sweep is for is the shape a price would have to take:
-  // a per-call base, from the zero-length row, and a per-byte term, from the
-  // slope across the rest. GetLen is swept beside them because it reads the
-  // same items without copying them, so the gap says how much of a Get is the
-  // copy and whether GetLen is length-independent as its signature implies.
+  // Warm length sweeps expose copy cost. GetLen reads the same items without
+  // copying, providing a control for length dependence.
   for (const uint32_t bytes : kBytestringBytes) {
     benchmark::RegisterBenchmark(std::format("entry/BytestringSet/{}", bytes),
                                  bm_syscall_entry, bytestring_set_call(bytes));
@@ -1753,12 +1469,8 @@ register_benchmarks()
                                bm_syscall_vm,
                                bytestring_get_len_call(vm_bytes));
 
-  // The sweeps. Depth is frames on top of the fixture's two. 8 and 16 are
-  // where a chain is expected to set max_cross_invoke_depth; the repo's stock
-  // config admits far more, and its maximum is swept too, as the far point
-  // that shows the parent walk is linear in depth rather than as a depth any
-  // chain runs at. The parent walk on a first touch is linear in the stack,
-  // and the schedule has to hold at whatever depth the chain allows.
+  // Depth counts frames above the fixture's two. Include the configured
+  // maximum to measure the full admitted parent walk.
   const uint32_t stock_max_depth =
       NetworkConfigParams(stock_network_config().v0()).max_cross_invoke_depth -
       2;
@@ -1766,13 +1478,8 @@ register_benchmarks()
   if (std::ranges::find(depths, stock_max_depth) == depths.end()) {
     depths.push_back(stock_max_depth);
   }
-  // Two key sweeps. The short one runs at every depth, where the question is
-  // the parent walk. The long one runs at depth 1 only, where the question is
-  // how the frame's own map scales: nothing bounds the keys a transaction may
-  // touch except its gas budget, so a price taken at 4096 is only sound if the
-  // cost has stopped moving by then. Registered in increasing K so the shared
-  // snapshot cache grows monotonically rather than a small row inheriting a
-  // large one.
+  // Sweep the short key range at every depth, then the long range at depth 1.
+  // Register increasing K so smaller rows do not inherit a larger cache.
   const std::array<uint64_t, 4> key_counts = {1, 16, 256, 4096};
   const std::array<uint64_t, 7> deep_key_counts = {
       1, 16, 256, 4096, 16384, 65536, kFirstTouchKeys};
@@ -1783,9 +1490,8 @@ register_benchmarks()
     benchmark::RegisterBenchmark(std::format("frame/Push/{}", depth),
                                  bm_frame_push, depth);
   }
-  // The rows that need no seeded snapshot go first, so they measure the frame
-  // map in a process the sweep has not yet grown. Registration order is run
-  // order, and the seeded rows below leave ~90 MB of mock items resident.
+  // Run unseeded rows first so the large database/cache working set does not
+  // affect their frame-map measurements.
   for (const uint64_t keys : deep_key_counts) {
     benchmark::RegisterBenchmark(
         std::format("frame/NNIntGetFirstTouchNoLoad/1/{}", keys),
@@ -1798,11 +1504,8 @@ register_benchmarks()
                                  /*commit_innermost=*/false,
                                  /*needs_seeded_keys=*/false);
   }
-  // The commit rows run before the seeded sweep below, not after: they
-  // measure a difference of two whole-iteration timings, so a process
-  // carrying the sweep's quarter-million resident items inflates both
-  // sides and the per-item figure with them. Ordering them first cost
-  // nothing and is what keeps that number about the merge.
+  // Measure merge/discard before seeding the large read sweep, whose
+  // resident items would change the cache environment of both timings.
   for (const uint64_t keys : key_counts) {
     // Two frames: a fresh parent for the child to commit into, so the merge
     // takes the insert path every iteration rather than the assignment path a
@@ -1820,19 +1523,9 @@ register_benchmarks()
                                  /*needs_seeded_keys=*/false);
   }
 
-  // The depth axis first, every depth over the same short key sweep, and only
-  // then the long sweep at depth 1.
-  //
-  // Order matters here and getting it wrong is not visible in the numbers as a
-  // failure -- it reads as a depth term that is not there. The loaded rows are
-  // the only ones that fault keys into the block's snapshot cache, which is
-  // shared by every row and never reset. Running depth 1 over the long sweep
-  // first left a quarter-million entries in that cache for depths 8, 16 and
-  // 254 to probe, and those rows then measured a cache two orders of magnitude
-  // larger than the one depth 1 saw. It looked like a ~280 ns step in the
-  // parent walk between depth 1 and depth 8, holding flat after; it was the
-  // cache. With the depth axis run first, every depth in it sees the same
-  // cache and the walk measures about 1 ns per frame at every depth.
+  // Run all depths over the short key range before the long depth-1 sweep.
+  // Otherwise later depths inherit the large shared snapshot cache and its
+  // lookup cost is misattributed to parent walking.
   auto register_loaded = [](uint32_t depth, uint64_t keys) {
     benchmark::RegisterBenchmark(std::format("frame/NNIntGetFirstTouch/{}/{}",
                                              depth, keys),
@@ -1858,15 +1551,8 @@ register_benchmarks()
       ->Iterations(kColdIterations);
 }
 
-// Everything needed to know whether this run is comparable with another one,
-// and with an opcode calibration.
-//
-// The last part is the point. A syscall's price has to be expressed in the same
-// gas unit as an instruction's, so rv32_syscall_report.py converts these
-// nanoseconds through an opcode calibration's baseline -- and that is only
-// legitimate if the two runs measured the same engine on the same host. Both
-// binaries record the same engine fingerprint and the same build identity, so
-// the report can refuse rather than silently mixing two machines' nanoseconds.
+// Record the same host/build/engine provenance as the opcode calibration.
+// The reporter requires a matching host and engine when converting ns to gas.
 void
 add_provenance_context()
 {
@@ -1893,14 +1579,7 @@ add_provenance_context()
                                                                : "false");
 }
 
-// Refuse a non-Release build rather than warn about it.
-//
-// The same rule the gas calibration enforces, for the same reason: what is
-// being measured is the compiled syscall path, and a Debug or ad-hoc -O2 build
-// is a different one whose numbers look entirely reasonable and are silently
-// about the wrong thing. A warning at the top of a benchmark run gets scrolled
-// past; an exit does not. --allow-nonproduction overrides, for working on the
-// benchmark itself and nothing else.
+// Require Release timings; --allow-nonproduction is for harness development.
 bool
 refuse_nonproduction_build(bool allow)
 {

@@ -18,13 +18,9 @@
 #include "hogd/hog_exec/runtime/rv32/oracle.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 
-// SpikeOracle: drives the external Spike (riscv-isa-sim) reference simulator as
-// an Oracle, so our Machine can be differentially compared against an
-// independent RISC-V implementation -- the check on the checker that the
-// in-tree spec model cannot provide. This is Rung 1 of the acquisition ladder:
-// Spike is a subprocess located via the RV32_ORACLE_BIN environment variable,
-// so nothing about Spike enters the build graph or default CI;
-// spike_oracle_available() lets the test skip cleanly when it is absent.
+// Compare the canonical Machine against the external Spike (riscv-isa-sim)
+// decoder and interpreter. RV32_ORACLE_BIN selects the subprocess; tests skip
+// when it is unavailable. Spike is not a build dependency or part of default CI.
 //
 // Supported subset: ecall-terminated, zero-initial-register/memory programs
 // with register AND memory ops (loads/stores), but no jalr, auipc, or linking

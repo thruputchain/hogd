@@ -27,18 +27,9 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     return HostResult::trap();
   }
 
-  // Register-native bridge ABI: syscall_entry(arg0..arg7) is fed directly from
-  // a0..a7 (a0 is the syscall number). The shared syscall ABI consumes 32-bit
-  // slots, so no widening or sign-extension shim is needed here. The syscall
-  // ABI version is checked at artifact load time, so no per-call version
-  // register is needed.
-  //
-  // syscall_entry mutates ExecutionContext.memory in place. This
-  // canonical-test
-  // bridge runs it against scratch memory so faults/OOG can be observed without
-  // committing partial writes to Machine memory. The production threaded
-  // runtime intentionally skips this copy and exposes live guest memory to
-  // syscall_entry.
+  // The canonical test bridge stages outputs, discarding writes on syscall
+  // faults, OOG, and fatal host errors. Production Rv32Runtime passes live
+  // guest memory to syscall_entry; this rollback is specific to the test bridge.
   const std::span<const uint8_t> view_memory = view.memory();
   std::vector<uint8_t> scratch;
   try {
@@ -64,9 +55,8 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   last_result_ = result;
 
   if (result.first.has_value()) {
-    // TODO(geoff): why does this bridge handle things differently from the
-    // threaded implementation? Stems from legacy choices on the initial
-    // implementation, which we can probably remove.
+    // TODO(geoff): reconcile fault-output rollback with the production runtime,
+    // where syscall output writes directly to guest memory.
     if (*result.first == SyscallErrorCode::kSyscallErrorCodeFault) {
       return HostResult::continue_with(std::to_underlying(*result.first),
                                        result.second);
@@ -84,8 +74,7 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   case HostFnErrorCode::NoneOrRecoverable:
     std::terminate();
   case HostFnErrorCode::OutOfGas:
-    // The bridge returns out_of_gas before writing any guest memory, so there
-    // is nothing to roll back; complete_ecall no longer snapshots memory.
+    // Discard staged output on OOG.
     return HostResult::out_of_gas(result.second);
   case HostFnErrorCode::Return:
     // Return terminates the VM invocation cleanly after committing the same
