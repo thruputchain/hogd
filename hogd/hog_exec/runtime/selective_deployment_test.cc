@@ -1638,10 +1638,8 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // The size gate reads the chain's configuration: a chain stating a larger
-// max_contract_size_bytes admits contracts the stock 256 KiB would refuse.
-constexpr uint32_t kRaisedContractSizeBytes =
-    2 * static_cast<uint32_t>(kDefaultMaxContractSizeBytes);
-static_assert(kRaisedContractSizeBytes == 512_KiB);
+// max_contract_size_bytes admits contracts the stock 512 KiB would refuse.
+constexpr uint32_t kRaisedContractSizeBytes = 1_MiB;
 static_assert(kRaisedContractSizeBytes < kContractSizeCeilingBytes);
 
 class RaisedContractSizeLimitTest : public ::testing::TestWithParam<TestDB>,

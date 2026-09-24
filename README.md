@@ -136,15 +136,17 @@ If you do want to build `hog-devnode` from source, configure as above and build
 just that target:
 
 ~~~~ .sh
-make -C build -j$(nproc) hog_devnode
-export GROUNDHOG_DEVNODE_BINARY="$PWD/build/hogd/devnode/hog_devnode"
+make devnode
+export GROUNDHOG_DEVNODE_BINARY="$PWD/build/hogd/devnode/hog-devnode"
 groundhog node
 ~~~~
 
 `hog-devnode` itself serves only hogd's internal x23 RPC on loopback and prints
 one readiness line on stdout. The public JSON-RPC endpoint that clients and the
 CLI talk to (port 9545 by default) is served by `groundhog node`, which
-supervises the devnode process. Run `hog_devnode --help` for its options.
+supervises the devnode process. Run `hog-devnode --help` for its options.
+Fresh local chains allow up to 256 KiB of RV32 code and 512 KiB per complete
+contract artifact by default; no network-config overrides are needed.
 
 ## Update instructions
 

@@ -16,7 +16,7 @@ constexpr uint32_t kRegisterCount = 32;
 // defaults, restated so the VM does not depend on the XDR headers
 // (rv32_contract.cc pins them equal).
 constexpr uint32_t kDefaultMaxMemoryBytes = 64 * 1024;
-constexpr uint32_t kDefaultMaxCodeBytes = 64 * 1024;
+constexpr uint32_t kDefaultMaxCodeBytes = 256 * 1024;
 
 // The most this VM provisions and translates: the ceilings on the configured
 // bounds, checked at genesis load. Memory is copied in per invocation and a

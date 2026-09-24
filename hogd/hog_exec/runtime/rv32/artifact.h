@@ -276,12 +276,11 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
   digest =
       format_fingerprint_u64(digest, u8"instruction_bytes", kInstructionBytes);
   // Older lowerers folded the then-fixed bounds; they are chain configuration
-  // now, not part of the format.
+  // now, not part of the format. Reproduce those historical values rather
+  // than this build's configurable defaults.
   if (folds_fixed_bounds) {
-    digest = format_fingerprint_u64(digest, u8"max_code_bytes",
-                                    kDefaultMaxCodeBytes);
-    digest = format_fingerprint_u64(digest, u8"max_memory_bytes",
-                                    kDefaultMaxMemoryBytes);
+    digest = format_fingerprint_u64(digest, u8"max_code_bytes", 64 * 1024);
+    digest = format_fingerprint_u64(digest, u8"max_memory_bytes", 64 * 1024);
   }
 
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);

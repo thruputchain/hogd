@@ -850,7 +850,8 @@ TEST(Rv32ThreadedHostileInput,
      retainsMultipleRaisedLimitTranslationsIndependently)
 {
   // Retain several translations to catch aliasing and lifetime bugs, using
-  // above-default sizes to limit CI memory use compared with ceiling programs.
+  // default-sized code and above-default memory to limit CI memory use
+  // compared with ceiling programs.
   constexpr size_t kRetainedPrograms = 4;
   constexpr uint32_t kLargeCodeBytes = 256 * 1024;
   constexpr uint32_t kLargeMemoryBytes = 256 * 1024;
