@@ -6,6 +6,7 @@
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "rpc_types.hh"
@@ -23,11 +24,12 @@ namespace hogd {
 class EventServerProxy {
 public:
   // max_message_size caps the client-side RPC streams only (tests lower it to
-  // provoke oversized-send failures without mutating the process-wide
-  // x23::default_max_message_size, which racing server threads also read).
+  // provoke oversized-send failures). It defaults to the bulk cap: emit_event
+  // forwards the whole ProposedTransaction, which the executor accepted under
+  // its own bulk-sized cap (#2902).
   EventServerProxy(x23::HostPort const &host_port,
                    x23::CpuMap const &map = *x23::llc_map,
-                   size_t max_message_size = x23::default_max_message_size);
+                   size_t max_message_size = kBulkRpcMaxMessageSize);
 
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {

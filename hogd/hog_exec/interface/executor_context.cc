@@ -226,7 +226,9 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
     // proposal produced (already captured into [out] above). Move signed_tx
     // in — it is not used again — so the event coroutine, which owns the body
     // by value, never has to deep-copy the attacker-influenced signed_tx; only
-    // proposal_data is copied, and it is bounded and also needed in [out].
+    // proposal_data is copied, and it is bounded (kMaxConcurrentRcqReadsPerTx
+    // observations, kConfigParamMaxNondeterministicBits bits) and also needed
+    // in [out].
     // Building this before the pending-counter increment keeps any allocation
     // failure here from leaving the counter unbalanced.
     ProposedTransaction proposed_tx{

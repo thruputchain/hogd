@@ -7,6 +7,7 @@
 #include <variant>
 #include <vector>
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "retrocausal_queue.hh"
@@ -52,7 +53,11 @@ struct ViewingModeCtor {
 // choices made during transaction execution
 class ProposalModeData {
 public:
-  ProposalModeData() = default;
+  // [max_bits] is the chain's kConfigParamMaxNondeterministicBits.
+  explicit ProposalModeData(uint32_t max_bits = static_cast<uint32_t>(
+                                kDefaultMaxNondeterministicBits))
+    : max_bits_(max_bits)
+  {}
 
   // delete move and copy
   ProposalModeData(const ProposalModeData &) = delete;
@@ -61,8 +66,18 @@ public:
   ProposalModeData &operator=(ProposalModeData &&) = delete;
 
   // Records a nondeterministic boolean choice (e.g., does a try_invoke frame
-  // succeed?) made during try_invoke
+  // succeed?) made during try_invoke. Callers check
+  // nondeterministic_budget_exhausted() first: past the budget a decision
+  // takes its fixed outcome and records nothing.
   void log_nondeterministic_bit(Nondeterministic<bool> bit);
+
+  // True once max_bits bits are recorded. Every later decision takes a fixed
+  // outcome (TryInvoke refused, concurrent RCQ read empty) without a bit, so
+  // the sidecar stays bounded and replay reaches the same point.
+  bool nondeterministic_budget_exhausted() const
+  {
+    return proposal_data_.nondeterministic_bit_count >= max_bits_;
+  }
 
   // Records a concurrent queue-entry observation and RETURNS a
   // (nondeterministic) pointer to the recorded entry, so a caller can only
@@ -100,6 +115,7 @@ public:
 private:
   // Proposal data containing nondeterministic choices made during execution
   NondeterministicProposalData proposal_data_{};
+  uint32_t max_bits_;
   std::map<AddressAndKey, std::vector<QueueEntry>> queue_entry_observations_;
   bool observation_cap_exceeded_ = false;
 };
@@ -112,16 +128,27 @@ public:
   ValidationModeData &operator=(const ValidationModeData &) = delete;
   ValidationModeData(ValidationModeData &&) noexcept = delete;
   ValidationModeData &operator=(ValidationModeData &&) noexcept = delete;
-  // Constructs validation data with proposal to validate against
-  ValidationModeData(NondeterministicProposalData proposal_data)
-    : proposal_data_(std::move(proposal_data))
+  // Constructs validation data with proposal to validate against. [max_bits]
+  // is the chain's kConfigParamMaxNondeterministicBits.
+  ValidationModeData(NondeterministicProposalData proposal_data,
+                     uint32_t max_bits =
+                         static_cast<uint32_t>(kDefaultMaxNondeterministicBits))
+    : proposal_data_(std::move(proposal_data)), max_bits_(max_bits)
   {}
 
   // Check whether the input NondeterministicProposalData is well-formed.
   // E.g. checks that the number of bits supplied in
   // nondeterministic_bits matches the expected number in
-  // nondeterministic_bit_count.
+  // nondeterministic_bit_count, and that the count is within max_bits.
   bool validate() const;
+
+  // True once replay has reached max_bits decisions: the point past which the
+  // proposer recorded nothing, so the next decision takes its fixed outcome
+  // without consuming a bit.
+  bool nondeterministic_budget_exhausted() const
+  {
+    return next_nondeterministic_bit_index_ >= max_bits_;
+  }
 
   // Consumes and returns the next nondeterministic bit from the proposal
   // Returns nullopt if no more bits are available (which is a validation
@@ -169,6 +196,7 @@ public:
 private:
   // Proposal data containing expected nondeterministic choices
   const NondeterministicProposalData proposal_data_;
+  const uint32_t max_bits_;
 
   // Index of next nondeterministic bit to consume from proposal
   uint32_t next_nondeterministic_bit_index_ = 0;
@@ -180,8 +208,12 @@ private:
 
 class ViewingModeData {
 public:
-  ViewingModeData(ViewingModeCtor &ctor)
-    : partial_validation_data_(std::move(ctor.proposal_data_segment_))
+  // [max_bits] is the chain's kConfigParamMaxNondeterministicBits, so a view
+  // takes the same fixed outcomes past it that execution would.
+  ViewingModeData(ViewingModeCtor &ctor,
+                  uint32_t max_bits =
+                      static_cast<uint32_t>(kDefaultMaxNondeterministicBits))
+    : partial_validation_data_(std::move(ctor.proposal_data_segment_), max_bits)
   {}
 
   ViewingModeData(const ViewingModeData &) = delete;
@@ -244,6 +276,11 @@ public:
     return partial_validation_data_.observation_cap_exceeded();
   }
 
+  bool nondeterministic_budget_exhausted() const
+  {
+    return partial_validation_data_.nondeterministic_budget_exhausted();
+  }
+
 private:
   ValidationModeData partial_validation_data_;
 };
@@ -259,6 +296,17 @@ observation_cap_exceeded(ExecutionModeData const &mode)
 {
   return std::visit(
       [](auto const &data) { return data.observation_cap_exceeded(); }, mode);
+}
+
+// True once the transaction has reached kConfigParamMaxNondeterministicBits
+// decisions in the current mode. Every later nondeterministic decision takes a
+// fixed outcome and records or consumes no bit (#2902).
+inline bool
+nondeterministic_budget_exhausted(ExecutionModeData const &mode)
+{
+  return std::visit(
+      [](auto const &data) { return data.nondeterministic_budget_exhausted(); },
+      mode);
 }
 
 using ExecutionModeCtor =

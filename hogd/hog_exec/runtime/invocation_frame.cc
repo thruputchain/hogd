@@ -324,10 +324,12 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     if (frame_result.is_frame_success() && !manually_reverted) {
       bool acq_success = false;
 
-      if (frame_stack_.back().depth_cap_reached(config_params_)) {
-        // Deterministic failure across both proposal and validation modes.
-        // No nondeterministic bit is logged or consumed here, so the bit
-        // stream represents only lock-acquisition outcomes.
+      if (frame_stack_.back().depth_cap_reached(config_params_) ||
+          nondeterministic_budget_exhausted(execution_mode_data)) {
+        // Deterministic failure across all modes: the depth cap, or past
+        // kConfigParamMaxNondeterministicBits (#2902). No nondeterministic
+        // bit is logged or consumed here, so the bit stream represents only
+        // lock-acquisition outcomes and stays within the budget.
         acq_success = false;
       }
       else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {

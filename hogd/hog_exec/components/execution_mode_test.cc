@@ -86,6 +86,50 @@ TEST(ExecutionModeTest, BadValidationCheck)
   ASSERT_FALSE(ValidationModeData(bad_proposal).validate());
 }
 
+// A proposal stating more bits than the chain's budget is malformed before a
+// single one is consumed; one at the budget is not (#2902).
+TEST(ExecutionModeTest, ValidateRejectsBitsPastBudget)
+{
+  NondeterministicProposalData proposal{};
+  proposal.nondeterministic_bits = {0x00, 0x00};
+  proposal.nondeterministic_bit_count = 9;
+
+  EXPECT_TRUE(ValidationModeData(proposal, /*max_bits=*/9).validate());
+  EXPECT_FALSE(ValidationModeData(proposal, /*max_bits=*/8).validate());
+}
+
+// Proposal and validation reach the budget at the same decision: the
+// proposer stops recording there and replay stops consuming there (#2902).
+TEST(ExecutionModeTest, BudgetExhaustsAtTheSameDecisionInEveryMode)
+{
+  constexpr uint32_t kBudget = 3;
+  ProposalModeData proposal(kBudget);
+  for (uint32_t i = 0; i < kBudget; ++i) {
+    ASSERT_FALSE(proposal.nondeterministic_budget_exhausted());
+    proposal.log_nondeterministic_bit(i % 2 == 0);
+  }
+  EXPECT_TRUE(proposal.nondeterministic_budget_exhausted());
+  EXPECT_EQ(proposal.proposal_data().nondeterministic_bit_count, kBudget);
+
+  ValidationModeData validation(proposal.proposal_data(), kBudget);
+  ASSERT_TRUE(validation.validate());
+  for (uint32_t i = 0; i < kBudget; ++i) {
+    ASSERT_FALSE(validation.nondeterministic_budget_exhausted());
+    ASSERT_TRUE(validation.consume_nondeterministic_bit().has_value());
+  }
+  EXPECT_TRUE(validation.nondeterministic_budget_exhausted());
+  EXPECT_TRUE(validation.check_all_consumed());
+
+  NondeterministicProposalData segment = proposal.proposal_data();
+  ViewingModeCtor view_ctor{.proposal_data_segment_ = std::move(segment)};
+  ViewingModeData viewing(view_ctor, kBudget);
+  for (uint32_t i = 0; i < kBudget; ++i) {
+    ASSERT_FALSE(viewing.nondeterministic_budget_exhausted());
+    (void)viewing.view_try_invoke_bit();
+  }
+  EXPECT_TRUE(viewing.nondeterministic_budget_exhausted());
+}
+
 namespace {
 auto
 make_storage_key(uint8_t value)

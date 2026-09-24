@@ -56,6 +56,9 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   EventExecServer exec_server(ctx);
   EventIndexerServer indexer_server(ctx);
   EventMempoolServer mempool_server(ctx);
+  // Matches EventServerProxy's client cap: emit_event carries the whole
+  // ProposedTransaction (#2902).
+  exec_server.max_message_size_ = kBulkRpcMaxMessageSize;
   mempool_server.max_message_size_ = kEventSchedulerRpcMaxMessageSize;
 
   uint16_t actual_exec_port =
