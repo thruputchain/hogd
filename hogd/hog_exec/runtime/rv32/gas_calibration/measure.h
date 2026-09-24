@@ -11,15 +11,8 @@
 
 namespace hogd::rv32::gas_calibration {
 
-// The host the opcode kernels run under: an ecall halts. Those kernels never
-// make a real host call, so no host work enters their measurement -- their
-// single ecall is the terminal one that ends the run.
-//
-// The syscall-seam kernels run under SyscallDispatchHost instead, which
-// returns rather than halting so a body can be made of calls. That is why the
-// functions below take a Host& rather than a HaltHost&: the sweep machinery
-// above them is the same for both, which is the whole reason the seam
-// measurement did not need a second harness.
+// Opcode kernels halt at their terminal ECALL. The timing helpers also accept
+// SyscallDispatchHost, which returns from body ECALLs in the seam kernels.
 class HaltHost : public Host {
 public:
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
@@ -83,11 +76,8 @@ struct MeasureConfig {
   uint32_t warmup_runs = 2;
 };
 
-// Runs every point `repeats` times in round-robin order rather than finishing
-// one point before starting the next. Interleaving matters: the dominant error
-// on a shared or thermally-throttled machine is slow drift, and measuring
-// points sequentially aliases that drift straight into the slope. Round-robin
-// spreads any drift across all points, where the per-point median removes it.
+// Interleave points so slow host drift is spread across the sweep. Each point
+// is reduced by median; interleaving does not remove systematic layout bias.
 void measure_interleaved(std::span<MeasurementPoint> points, Host &host,
                          const MeasureConfig &config);
 
@@ -103,12 +93,8 @@ struct LinearFit {
   // Median of pairwise slopes. Insensitive to a single outlying point, so a
   // large gap between this and `slope` flags an outlier the OLS fit absorbed.
   double theil_sen_slope = 0.0;
-  // Standard error of the slope, from the fit's own residuals. This is the
-  // uncertainty that matters: unlike a separately measured timer noise floor,
-  // it includes the per-kernel systematic offsets (code layout, predictor
-  // state) that repeating a measurement cannot average away. A slope smaller
-  // than about twice this is not distinguishable from zero, and an opcode
-  // whose slope is not distinguishable from zero costs what the filler costs.
+  // Fit residuals include between-kernel layout bias as well as timer noise.
+  // The reporter uses this to judge the substitution slope, not saturation.
   double slope_stderr = 0.0;
   size_t points = 0;
 };

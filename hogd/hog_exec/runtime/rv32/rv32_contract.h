@@ -33,11 +33,10 @@ private:
   rv32::ThreadedMachinePreInstantiation pre_instantiation_;
 };
 
-// One invocation of an RV32 contract. Borrows a const Rv32Contract* that
-// outlives it: either owned by the block-scoped StorageSnapshotCache (snapshot
-// deployments) or by the per-transaction SystemCallHandler's translation cache
-// (transaction-local deployments). Both are node-stable and outlive the
-// runtimes they hand out, so the pointer stays valid with no refcounting.
+// Production invocation. Borrows its prepared contract from
+// StorageSnapshotCache or the transaction's SystemCallHandler translation
+// cache. Both keep entries at stable addresses and outlive the runtimes
+// borrowing them.
 class Rv32Runtime final : public Runtime {
 public:
   Rv32Runtime(Rv32Contract const *contract, SystemCallHandler *syscall_handler)
@@ -49,12 +48,9 @@ public:
 private:
   Rv32Contract const *contract_;
 
-  // Stays noexcept and is deliberately not itself a coroutine: creating one
-  // allocates its frame in the ramp function, which can throw before the body
-  // runs, and x23's promises define no
-  // get_return_object_on_allocation_failure -- a noexcept coroutine would
-  // std::terminate() where this returns a structured Unrecoverable. The ecall
-  // loop lives in run_ecall_loop() and its frame allocation is caught here.
+  // This noexcept wrapper is not a coroutine: creating run_ecall_loop() can
+  // throw before its body starts. The wrapper catches frame-allocation failure
+  // and returns Unrecoverable.
   x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
 
@@ -62,11 +58,10 @@ private:
   run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit);
 };
 
-// RuntimeContext for RV32 contracts. Snapshot deployments arrive with their
-// translation already built in the StorageSnapshotCache, reached via
-// DeployedContract's back-pointer; transaction-local deployments are translated
-// into (and borrowed from) the SystemCallHandler's per-transaction translation
-// cache. The context itself holds no per-contract state.
+// RuntimeContext for RV32 contracts. Snapshot deployments borrow preparation
+// through DeployedContract's cache back-pointer. Transaction-local deployments
+// resolve preparation from attachment validation or the snapshot cache. The
+// context itself holds no per-contract state.
 class Rv32Context final : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const &contract,

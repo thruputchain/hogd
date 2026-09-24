@@ -1,5 +1,6 @@
 add_library(
   hog_devnode
+  block_driver.cc
   bootstrap_accounts.cc
   bootstrap_manifest.cc
   dev_wallet_profile.cc

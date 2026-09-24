@@ -12,20 +12,11 @@
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 
-// Independent, test-only reference model of the RV32IM core. This is a second
-// implementation of the ISA semantics, written by hand from the spec and kept
-// deliberately separate from Machine, so the two can be cross-checked
-// (rv32_spec_model_crosscheck_test) and so the model can stand in as the first
-// Oracle (oracle.h) before an external reference model (Spike/sail-riscv) is
-// wired in. There is no production code here; it is harness infrastructure.
-//
-// The model executes a pre-decoded instruction stream (SpecInstruction). The
-// crosscheck builds those instructions by hand -- independent of
-// decode_instruction -- so it keeps exercising our decoder. The Oracle path
-// feeds it decode_instruction output via decoded_to_spec, matching how an
-// external oracle consumes raw words; that path shares our decoder, which is
-// acceptable precisely because decode independence is what the external oracle
-// adds on top.
+// Test-only RV32IM semantics, implemented separately from both interpreters.
+// The model executes SpecInstructions. The crosscheck constructs them by hand
+// independently of decode_instruction; SpecModelOracle instead converts the
+// canonical decoder's output via decoded_to_spec. SpikeOracle compares raw
+// words against an external decoder and interpreter.
 
 namespace hogd::rv32::spec {
 

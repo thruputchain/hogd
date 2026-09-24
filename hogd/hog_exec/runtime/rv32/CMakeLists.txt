@@ -1,12 +1,7 @@
 find_package(OpenSSL REQUIRED)
 
-# Portable RV32IM ISA core: instruction decode + execute, the register/memory
-# model, and the Host boundary. This target intentionally has NO hogd link
-# dependencies (no OpenSSL, no artifact/consensus layer, no runtime symbols) so
-# it can be driven standalone by an external differential oracle (Sail/Spike).
-# Keep it that way: anything needing OpenSSL, the artifact format, or hogd
-# runtime symbols belongs in rv32_vm below, not here. rv32_isa_core_test
-# mechanically enforces the boundary by linking only this target.
+# Standalone decode and canonical execution, without artifact or runtime link
+# dependencies. rv32_isa_core_test checks this boundary by linking only the core.
 add_library(
   rv32_isa_core
   machine.cc
@@ -19,9 +14,7 @@ target_include_directories(
   ${CMAKE_SOURCE_DIR}
 )
 
-# Artifact container plus consensus digest/validation layered on top of the
-# portable core. v4 moves method dispatch into the guest, so there is no
-# host-side dispatch table.
+# Artifact parsing and validation over the portable core.
 add_library(
   rv32_vm
   artifact.cc
@@ -33,9 +26,7 @@ target_include_directories(
   ${CMAKE_SOURCE_DIR}
 )
 
-# x23 is for CHECK() in artifact.cc (hogd/base/log.h -> x23::panic): a digest
-# that cannot be computed must stop the node, not become an artifact-level
-# error. The dependency-narrow rule above binds rv32_isa_core, not this target.
+# x23 supplies CHECK(): a failed digest computation must stop the node.
 target_link_libraries(
   rv32_vm
   PUBLIC
@@ -75,10 +66,7 @@ add_dependencies(
   rv32_syscall_xdr_hh
 )
 
-# Links ONLY the portable core (no rv32_vm, no OpenSSL, no hogd runtime). Doubles
-# as a smoke test for standalone decode/execute and as the mechanical guardrail
-# for the core's hogd-free boundary: if the ISA core starts referencing a hogd
-# symbol, this executable fails to link.
+# Standalone execution and link-dependency check.
 add_executable(
   rv32_isa_core_test
   rv32_isa_core_test.cc
@@ -203,12 +191,9 @@ hogd_discover_tests(
   NO_PRETTY_VALUES
 )
 
-# Direct-threaded experimental interpreter (header-only threaded_*.h, requires a
-# musttail attribute: clang, or GCC >= 15). Core-only: links rv32_isa_core ONLY
-# because the differential test constructs the canonical Machine to diff
-# against. Built unconditionally -- a toolchain without musttail hits the
-# #error in musttail.h and fails the build, which is intended: the supported
-# compilers all provide it, and a silent skip would hide a broken toolchain.
+# Differential tests for the production threaded interpreter. Links the
+# canonical Machine through rv32_isa_core. Requires musttail (Clang or GCC 15+);
+# musttail.h rejects unsupported compilers.
 add_executable(
   rv32_threaded_test
   rv32_threaded_test.cc
@@ -280,19 +265,10 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}/hogd/xdr
 )
 
-# Compile the production rv32 objects with LTO so the final node link (the
-# exec/bench targets already set INTERPROCEDURAL_OPTIMIZATION on themselves)
-# can optimize across the interpreter/translation/syscall-bridge boundary.
-# Without this, only rv32_vm_bench measured the interpreter under LTO while the
-# node ran it without -- benchmark numbers didn't reflect production codegen.
-#
-# Gate on every optimized single-config build type, not the exact string
-# "Release": RelWithDebInfo and MinSizeRel are optimized too, so the old
-# exact-match silently dropped LTO for them (the very "production codegen" the
-# comment above promises). check_ipo_supported() at the top level already
-# guarantees IPO is available. Multi-config generators (Xcode/VS) leave
-# CMAKE_BUILD_TYPE empty and are not covered here -- the benchmarks use
-# single-config Make/Ninja.
+# LTO lets the final node link optimize across the interpreter, translation,
+# and syscall bridge, matching benchmark code generation. Top-level IPO checks
+# establish compiler support. This covers optimized single-config builds;
+# multi-config generators leave CMAKE_BUILD_TYPE empty and are not covered.
 if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
   set(HOGD_RV32_ENABLE_LTO TRUE)
 endif()

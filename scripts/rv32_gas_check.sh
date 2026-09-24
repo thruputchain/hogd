@@ -1,47 +1,15 @@
 #!/bin/bash
-# Periodic check that the RV32 gas calibration still describes the engine.
-#
-# The way a gas calibration goes wrong is not that it fails -- it is that the
-# interpreter moves underneath it and the numbers keep looking reasonable.
-# Nothing about a stale calibration looks wrong, so it has to be checked
-# mechanically rather than remembered.
-#
-# Meant for a periodic job -- nightly, weekly, whatever cadence suits -- on a
-# reasonably quiet machine. It runs a full calibration through the project's
-# Release build (a few minutes; the harness refuses to measure any other build)
-# and checks two things against the committed reference:
-#
-#   1. The engine fingerprint: fusion rules, gas schedule, run limits. Pure
-#      equality, no timing, cannot flake. This catches the likeliest failure --
-#      someone edits the lowering or a gas cost and the calibration silently
-#      keeps describing the old interpreter.
-#
-#   2. The guarded costs: how expensive the worst cases are *relative to the
-#      baseline instruction measured in the same run*. Ratios rather than
-#      nanoseconds, so the check survives moving to different hardware, and
-#      only cells that reproduce tightly are guarded at all.
-#
-# The timed tolerance is deliberately loose -- a guarded cost has to double
-# before it fires. This is an alarm for things being wildly out of whack, not a
-# performance budget; a job that cries wolf gets muted and then catches nothing.
-#
-# Exit status is 0 when the calibration still holds and 1 when it does not, so
-# it drops straight into cron.
-#
-# The build directory is a required argument, forwarded to
-# scripts/rv32_gas_calibrate.sh. It is not searched for and there is no default:
-# which tree the binary comes from decides what is measured.
+# Check engine identity, relative costs, workload coverage, and interaction
+# bounds against the committed reference. Ratios are specific to a host class;
+# a passing check is not an absolute execution-time budget. See
+# hogd/hog_exec/runtime/rv32/gas_calibration/README.md.
 #
 # Usage:
-#   scripts/rv32_gas_check.sh BUILD_DIR                    # the periodic check
-#   scripts/rv32_gas_check.sh BUILD_DIR --out /tmp/gas.json
-#   scripts/rv32_gas_check.sh BUILD_DIR --fingerprint-only # "did the engine change?", instant
+#   scripts/rv32_gas_check.sh BUILD_DIR [--out PATH] [--reference PATH]
+#   scripts/rv32_gas_check.sh BUILD_DIR --fingerprint-only
 #
-# When it fails, the fix is to understand what moved -- not to regenerate the
-# reference. Regenerating is correct only once the new costs have been reviewed
-# and, if the schedule needs to follow them, changed:
-#
-#   scripts/rv32_gas_calibrate.sh --out /tmp/gas.json
+# Review changed costs before regenerating a reference:
+#   scripts/rv32_gas_calibrate.sh BUILD_DIR --out /tmp/gas.json
 #   scripts/rv32_gas_report.py /tmp/gas.json --emit-reference \
 #     > hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt
 

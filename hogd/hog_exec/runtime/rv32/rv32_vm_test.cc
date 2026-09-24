@@ -850,7 +850,8 @@ TEST(Rv32ThreadedHostileInput,
      retainsMultipleRaisedLimitTranslationsIndependently)
 {
   // Retain several translations to catch aliasing and lifetime bugs, using
-  // above-default sizes to limit CI memory use compared with ceiling programs.
+  // default-sized code and above-default memory to limit CI memory use
+  // compared with ceiling programs.
   constexpr size_t kRetainedPrograms = 4;
   constexpr uint32_t kLargeCodeBytes = 256 * 1024;
   constexpr uint32_t kLargeMemoryBytes = 256 * 1024;
@@ -1191,7 +1192,7 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
       {u_type(0x17, 6, 0xfffff000U), InstructionKind::kAuipc, Op::kAuipc, 6, -1,
        -1, -4096, kBaseInstructionGas},
       {j_type(7, -2048), InstructionKind::kJal, Op::kJal, 7, -1, -1, -2048,
-       kBaseInstructionGas},
+       kDirectJumpGas},
       {jalr(8, 9, 12), InstructionKind::kJalr, Op::kJalr, 8, 9, 12, 12,
        kIndirectJumpGas},
       {b_type(0, 1, 2, -16), InstructionKind::kBranch, Op::kBeq, -1, 1, 2, -16,
@@ -1251,7 +1252,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
 
   const std::array<ExpectedGasEntry, kOpCount> expected = {{
       {Op::kLui, u8"LUI", 1},     {Op::kAuipc, u8"AUIPC", 1},
-      {Op::kJal, u8"JAL", 1},     {Op::kJalr, u8"JALR", 3},
+      {Op::kJal, u8"JAL", 3},     {Op::kJalr, u8"JALR", 3},
       {Op::kBeq, u8"BEQ", 2},     {Op::kBne, u8"BNE", 2},
       {Op::kBlt, u8"BLT", 2},     {Op::kBge, u8"BGE", 2},
       {Op::kBltu, u8"BLTU", 2},   {Op::kBgeu, u8"BGEU", 2},
@@ -1293,7 +1294,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
 
   EXPECT_EQ(kOpCount, 49U);
   EXPECT_EQ(kGasTableVersion, 4U);
-  EXPECT_EQ(kGasScheduleDigest, 0x9019deb606f5759bULL);
+  EXPECT_EQ(kGasScheduleDigest, 0x3dd1fbedf37a5719ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
@@ -1604,7 +1605,7 @@ TEST(Rv32ExecutionTest, bad_jump_targets_trap_before_state_mutation)
     EXPECT_EQ(machine.trap(), Trap::kBadPc);
     EXPECT_EQ(machine.pc(), 0U);
     EXPECT_EQ(machine.reg(1), 0U);
-    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_EQ(machine.gas_remaining(), 100 - kDirectJumpGas);
   }
   {
     const auto program = make_program({jalr(1, 2, 0), addi(3, 0, 1)});
@@ -1958,7 +1959,7 @@ TEST(Rv32GasTest, repeatedEcallsStopBeforeAnUnfundedHostCall)
   constexpr uint64_t kCompletedCalls = 2;
   constexpr uint64_t kGasLimit =
       kCompletedCalls *
-      (kBaseInstructionGas + kHostGasPerCall + kBaseInstructionGas);
+      (kBaseInstructionGas + kHostGasPerCall + kDirectJumpGas);
   const auto words = std::array{0x00000073U, j_type(0, -4)};
 
   const auto program = make_program(words);

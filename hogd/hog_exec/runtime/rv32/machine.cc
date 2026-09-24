@@ -56,9 +56,7 @@ Machine::reset(uint64_t gas)
     halted_ = true;
     return;
   }
-  // Entry ABI v3: sp (x2) is seeded to 0. The guest owns stack placement and
-  // must set sp itself; a stack touch before that computes 0 - frame, wraps,
-  // and traps OOB instead of silently running the stack somewhere valid.
+  // Entry ABI v3 initializes sp to zero; the guest must establish its stack.
   registers_[2] = 0;
 }
 

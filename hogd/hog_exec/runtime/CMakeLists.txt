@@ -415,9 +415,8 @@ add_dependencies(
   all_contract_headers # for built_contracts/fibonacci.h
 )
 
-# Offline analysis tool (not part of the main build): dynamic instruction-pair
-# histogram for the rv32 interpreter. Traces real contracts to find fusion
-# candidates. Same dependency set as rv32_contract_test.
+# Trace contracts on the canonical interpreter to report instruction-pair
+# histograms for fusion analysis. Shares rv32_contract_test's dependencies.
 add_executable(
   rv32_pair_histogram_test
   rv32/rv32_pair_histogram_test.cc

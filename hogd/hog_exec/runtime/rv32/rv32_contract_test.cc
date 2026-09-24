@@ -26,7 +26,6 @@
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
-#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
@@ -706,19 +705,12 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
   // by the lowering into <= kMaxRunGas chunks, so the contract loads and
   // verifies.
   //
-  // This case used to be written against the legacy uint16 run bound (65535),
-  // which a run over that bound was formerly rejected for. That is no longer
-  // constructible: the priciest instruction costs kMaxInstructionGas and
-  // kDefaultMaxCodeBytes caps a program's length, so the most gas any
-  // straight-line run can hold now falls short of the legacy bound. The
-  // reachable case is kMaxRunGas, which is where the lowering actually splits.
-  static_assert((rv32::kDefaultMaxCodeBytes / rv32::kInstructionBytes) *
-                        rv32::kMaxInstructionGas <
-                    0xFFFFU,
-                "a straight-line run can reach the legacy uint16 bound again; "
-                "restore that case here rather than only testing kMaxRunGas");
+  // The 256 KiB code default also admits runs exceeding the legacy uint16
+  // bound (65535). Verify that this formerly rejected case is split too.
   constexpr size_t kOverBoundDivCount =
-      (rv32::kMaxRunGas / rv32::kDivInstructionGas) + 1;
+      (0xFFFFU / rv32::kDivInstructionGas) + 1;
+  static_assert(kOverBoundDivCount * rv32::kInstructionBytes <=
+                rv32::kDefaultMaxCodeBytes);
   const std::vector<uint32_t> words(
       kOverBoundDivCount,
       rv32::test_program::op(3, 1, 2, 4, 0x01)); // div x3,x1,x2

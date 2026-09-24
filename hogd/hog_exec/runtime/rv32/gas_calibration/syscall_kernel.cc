@@ -38,16 +38,8 @@ append_u32(std::vector<uint8_t> &out, uint32_t word)
   out.push_back(static_cast<uint8_t>((word >> 24) & 0xFFU));
 }
 
-// Filler for the slots a sweep leaves without a call group: an R-type ADD whose
-// destination rotates over x18..x21 and whose sources the body never writes.
-// Rotating rather than chaining, for the reason kernel.h gives at length -- a
-// filler that chains through one register makes the all-filler point
-// latency-bound and the sweep's low end stops describing dispatch throughput.
-//
-// Fusion is not a concern the way it is for opcode kernels: ecall is a run
-// barrier and matches no fusion rule in either position, so a call group's
-// neighbours cannot change what it lowers to. add;add is not fused either, so
-// the filler runs do not collapse.
+// Use rotating ADD destinations outside a0-a7, with read-only sources, so
+// fillers neither overwrite arguments nor create a dependency chain.
 uint32_t
 syscall_filler_word(uint32_t index)
 {
@@ -236,17 +228,8 @@ build_syscall_kernel(const SyscallKernelSpec &spec)
     body[slot] = syscall_filler_word(slot);
   }
 
-  // Even placement across the interior, the same spread build_kernel uses:
-  // clustering the groups at one end would give the body a call-dense half and
-  // a filler-dense half, which run at different rates, and the point would
-  // report their average as though it were one rate.
-  //
-  // Placed by ideal start position with a monotone clamp rather than by
-  // build_kernel's per-slot Bresenham, because a group is per_group slots wide
-  // and the per-slot form has no way to say that. Left as-is it packs the
-  // saturated body one slot short and rejects it: at the cap the ideal
-  // positions are exactly per_group apart, so every one of them has to land
-  // where it was asked to.
+  // Spread multi-slot call groups across the interior, clamping starts so they
+  // do not overlap. At saturation, starts must be exactly per_group apart.
   const uint32_t interior = spec.body_slots - 2;
   const std::vector<uint32_t> group_words = call_group_words(spec.shape);
   uint32_t next_free = 1;

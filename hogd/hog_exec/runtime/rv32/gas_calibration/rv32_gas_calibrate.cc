@@ -1,21 +1,6 @@
-// RV32 gas calibration harness.
-//
-// Measures what the production engine (ThreadedMachine, tracing off) actually
-// costs per instruction, so the gas schedule in program.h can be set from
-// measurement instead of guessed. See README.md for the method and for how to
-// read the output.
-//
-// The estimator is a controlled contrast, not a regression over workloads.
-// Every kernel in a sweep has the same body slot count, the same code size, the
-// same trip count, the same register plan, and the same body boundaries; the
-// only difference is how many body slots hold the target instruction instead of
-// the filler. Fitting time against that count gives ns-per-instruction directly
-// as a slope, with all fixed overhead in the intercept. There is no design
-// matrix to condition and nothing for the opcodes to be collinear with, which
-// is the failure mode of fitting a cost table to a corpus of mixed programs:
-// in real code opcode counts move together, so the fit is free to trade one
-// opcode's cost against another's and lands on coefficients that fit the
-// corpus without meaning anything per-opcode.
+// Time the untraced ThreadedMachine using saturated instruction bodies,
+// substitution diagnostics, synthetic ECALLs, and mixed validation workloads.
+// See README.md for estimators, gas units, and measurement limits.
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +15,7 @@
 #include <memory>
 #include <print>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -49,11 +35,8 @@ namespace hogd::rv32::gas_calibration {
 namespace {
 
 struct Options {
-  // A wide body is the cheapest precision there is. The slope's standard error
-  // falls with the spread of the target count, so doubling the body halves the
-  // uncertainty at the same wall time -- far better value than more repeats,
-  // which only average timer jitter and leave the per-kernel layout bias that
-  // actually dominates the residual.
+  // A wider target-count range improves the substitution fit's ability to
+  // resolve costs above between-kernel layout bias.
   uint32_t body_slots = 512;
   uint32_t repeats = 9;
   uint32_t warmup_runs = 2;
@@ -64,20 +47,16 @@ struct Options {
   // Escape hatch for working on the harness itself, never for a calibration
   // whose numbers anyone will act on.
   bool allow_nonproduction = false;
-  // Distinct target placements measured at each target count. Two phases do
-  // identical work, so spreading each point over several of them averages out
-  // per-kernel layout bias instead of baking one kernel's luck into the slope.
+  // Vary layout at each target count to sample systematic placement bias.
   uint32_t placements = 5;
-  // The syscall-seam shapes. On by default: the crossing is a cost every
-  // syscall pays and nothing else in the tree measures it, so a calibration
-  // that skips it is missing a term rather than saving time (the whole seam
-  // section is five sweeps, next to a hundred opcode ones).
+  // Include synthetic ECALL crossings alongside the opcode measurements.
   bool syscalls = true;
   bool syscalls_only = false;
 };
 
 // One measured (op, context) cell.
 struct SweepResult {
+  bool jump_kernel = false;
   std::string op;
   std::string context;
   std::string working_set;
@@ -258,15 +237,8 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     return result;
   }
 
-  // Audit every kernel in the sweep, not just the densest. A fit is a
-  // statement about the difference between these specific programs, so a
-  // fusion or run split in any one of them corrupts the slope -- and the
-  // handler lookups are cached, so checking all of them costs little.
-  //
-  // After the rebuild, and at the trip count the measured kernels were built
-  // with. This used to run before the sweep was rebuilt at the tuned trip
-  // count, so the verdict described programs that were then discarded and the
-  // ones actually timed went unchecked.
+  // Audit the rebuilt kernels at their measured trip count. Fusion or run
+  // splits in any point would invalidate the substitution fit.
   KernelSpec audited = base;
   audited.trip_count = trip_count;
   for (size_t i = 0; i < sweep->kernels.size(); ++i) {
@@ -333,17 +305,9 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
       (static_cast<double>(slots_per_target(base)) * filler_ns) +
       result.fit.slope;
 
-  // An absolute upper bound, the fallback for a cell that cannot be saturated.
-  //
-  // The densest kernel runs `target_slots` targets and some fillers per
-  // iteration, so
-  //
-  //     T = n_target * c_target + n_filler * c_filler + loop overhead
-  //
-  // and every term is non-negative, so T / n_target bounds c_target from above
-  // -- no subtraction, no fit, no way to come out negative. It reads up to ~2x
-  // high with the body half targets, and tightens as the target gets more
-  // expensive, which is the right way round.
+  // Fallback: divide the densest kernel's time by its target count. Filler and
+  // loop overhead remain attributed to targets, so this is a loose bound on
+  // their cost in this kernel, without subtracting noisy timings.
   const uint32_t densest = sweep->target_counts.back();
   if (densest > 0) {
     std::vector<double> dense_samples;
@@ -371,14 +335,8 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   {
     KernelSpec sat = base;
     sat.saturated = true;
-    // A body of one repeated instruction is precisely the shape a fusion rule
-    // matches, so for a single target lower it with fusion off and measure the
-    // unfused cost directly. That is also the cost the schedule charges:
-    // fusion is a saving the engine may or may not get, and worst-case pricing
-    // cannot assume it.
-    //
-    // A pair row is the opposite -- auipc;jalr exists to measure the fused
-    // form -- so those keep it on.
+    // Disable fusion for single targets so the estimate does not depend on
+    // fusion savings. Pair rows retain fusion where it is part of the workload.
     const bool sat_fuse = base.pair != PairKind::kNone;
     sat.body_slots = options.body_slots;
     sat.target_slots = max_target_slots(options.body_slots, sat);
@@ -453,14 +411,9 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
                 result.saturated_note = "saturated kernel did not halt cleanly";
               }
               else {
-                // Substitutions placed, not instructions retired. Units: a
-                // pair's cost is quoted per pair, matching the ceiling it is
-                // compared against. Direction: the iteration also runs two
-                // boundary fillers and three loop instructions, and spreading
-                // their time across those averages the target down, which is
-                // the one direction worst-case pricing cannot tolerate.
-                // Attributing all of it to the targets makes this an upper
-                // bound, loose by about 1% at these body sizes.
+                // Divide by target units: instructions for singles, pairs for
+                // pairs. Attribute boundary and loop overhead to targets
+                // rather than diluting the estimate with filler counts.
                 result.ns_saturated =
                     one[0].median() / static_cast<double>(kernel->target_units);
               }
@@ -587,10 +540,8 @@ run_baseline(const Options &options)
   return baseline;
 }
 
-// Two identical all-filler kernels measured under different labels inside one
-// interleaved schedule. Their medians should agree; whatever they differ by is
-// the floor below which this host cannot resolve a cost difference at all.
-// Every slope smaller than this is noise wearing a number.
+// Compare identical kernels under different labels as a timing-noise
+// diagnostic. The reporter uses fit residuals to assess substitution slopes.
 double
 measure_noise_floor(const Options &options)
 {
@@ -664,9 +615,8 @@ struct SyscallSweepResult {
   uint32_t output_bytes = 0;
   // Calls in the saturated body, the denominator its timing divides by.
   uint32_t calls_per_iteration = 0;
-  // Instruction gas the current schedule charges for one call group. Host gas
-  // is charged separately and is zero for every syscall these shapes model, so
-  // this is the whole of what a guest is billed for the crossing today.
+  // Instruction gas per call group. The synthetic host charges no host gas;
+  // production syscalls pay additional costs from gas_cost_table.h.
   uint64_t scheduled_gas_per_call = 0;
   // Primary: absolute ns per call of a body made entirely of call groups. A
   // level, not a contrast, for the reason the README gives at length.
@@ -913,6 +863,10 @@ plan_sweeps(const Options &options)
     base.target = op;
     base.body_slots = options.body_slots;
 
+    if (op == Op::kJal || op == Op::kJalr) {
+      // These use dedicated control-flow kernels, not body-slot substitutions.
+      continue;
+    }
     if (is_branch_target(op)) {
       // Not-taken and taken are different amounts of engine work: both end the
       // run, but the taken path also resolves a target and re-enters there.
@@ -925,8 +879,8 @@ plan_sweeps(const Options &options)
       continue;
     }
     if (is_memory_target(op)) {
-      // Guest memory is capped at 64 KiB, so these two working sets bracket
-      // every cache state a guest can put the engine in.
+      // Compare localized and spread accesses within default-size memory.
+      // Larger configured memories need separate coverage.
       KernelSpec hot = base;
       hot.working_set = WorkingSet::kL1Region;
       plans.push_back({hot, ""});
@@ -998,6 +952,127 @@ plan_sweeps(const Options &options)
   return plans;
 }
 
+std::vector<JumpSpec>
+plan_jumps(const Options &options)
+{
+  std::vector<JumpSpec> plans;
+  for (const Op op : {Op::kJal, Op::kJalr}) {
+    if (!options.only_op.empty() && options.only_op != op_name(op)) {
+      continue;
+    }
+    for (const auto layout : {JumpLayout::kSequential, JumpLayout::kReverse,
+                              JumpLayout::kShuffled}) {
+      for (const uint32_t seed : {1U, 42U, 12345U}) {
+        if (layout != JumpLayout::kShuffled && seed != 1) {
+          continue;
+        }
+        const auto add = [&](OperandContext context, uint32_t nodes,
+                             uint32_t stride) {
+          plans.push_back({.target = op,
+                           .context = context,
+                           .layout = layout,
+                           .nodes = nodes,
+                           .stride_words = stride,
+                           .seed = seed});
+        };
+        // Equal layouts and footprints for the direct/fixed-base/link-chain
+        // comparison. The chain's 12-bit immediate limits its footprint.
+        for (const auto context :
+             {OperandContext::kIndependent, OperandContext::kNoLink,
+              OperandContext::kChain}) {
+          if (op == Op::kJal && context == OperandContext::kChain) {
+            continue;
+          }
+          add(context, 64, 1);
+          add(context, 480, 1);
+          add(context, 64, 7);
+        }
+        if (op == Op::kJalr) {
+          add(OperandContext::kTargetChase, 64, 1);
+        }
+        if (!options.quick) {
+          if (op == Op::kJal) {
+            add(OperandContext::kIndependent, 4096, 1);
+            add(OperandContext::kNoLink, 512, 16);
+          }
+          else {
+            // Same jalr PC, changing target at every visit. Includes dependent
+            // loads and pad-return jumps; report the entire cost per dispatch
+            // as an upper bound rather than subtracting a guessed load cost.
+            add(OperandContext::kTargetChase, 4096, 1);
+            add(OperandContext::kTargetChase, 512, 16);
+          }
+        }
+      }
+    }
+  }
+  return plans;
+}
+
+SweepResult
+run_jump_sweep(JumpSpec spec, const Options &options)
+{
+  SweepResult result;
+  result.jump_kernel = true;
+  result.op = op_name(spec.target);
+  result.context = jump_context_name(spec);
+  result.working_set = "none";
+  result.magnitude = "default";
+  result.scheduled_gas = scheduled_gas_for(spec.target);
+  result.saturated_note =
+      spec.context == OperandContext::kTargetChase
+          ? "sequence validation: 2 LW + JALR + JAL per dispatch, including "
+            "loop/setup overhead; excluded from individual opcode pricing"
+          : "absolute jump-chain bound, including loop setup/control; "
+            "excluded from normalization";
+  HaltHost host;
+  auto kernel = build_jump_kernel(spec);
+  if (!kernel) {
+    throw std::runtime_error("jump kernel: " +
+                             kernel_error_name(kernel.error()));
+  }
+  const auto lower = [](const Kernel &k) {
+    return ThreadedMachinePreInstantiation::create(k.code, k.initial_memory, 0,
+                                                   k.memory_bytes, false,
+                                                   kMaxRunGas, false);
+  };
+  auto seed = lower(kernel->kernel);
+  if (!seed) {
+    throw std::runtime_error("jump probe did not lower");
+  }
+  spec.trip_count =
+      tune_trip_count(*seed, host, spec.trip_count, options.target_ns);
+  kernel = build_jump_kernel(spec);
+  if (!kernel) {
+    throw std::runtime_error("tuned jump kernel did not build");
+  }
+  auto program = lower(kernel->kernel);
+  if (!program) {
+    throw std::runtime_error("tuned jump kernel did not lower");
+  }
+  std::vector<MeasurementPoint> points{
+      {.label = result.op + "/" + result.context,
+       .x = 0.0,
+       .program = &*program,
+       .trip_count = spec.trip_count,
+       .expected_gas = kernel->kernel.scheduled_gas}};
+  measure_interleaved(points, host,
+                      {.repeats = options.repeats,
+                       .warmup_runs = options.warmup_runs});
+  const auto &point = points.front();
+  if (!point.ran_clean || point.samples.size() != options.repeats ||
+      point.samples.size() < 3 || !std::isfinite(point.median()) ||
+      point.median() <= 0) {
+    throw std::runtime_error("invalid jump measurement: " + result.context);
+  }
+  result.ns_upper_bound = point.median() / kernel->kernel.target_units;
+  result.ns_per_instruction = result.ns_upper_bound;
+  result.worst_relative_mad = point.relative_mad();
+  result.measured_points = point.samples.size();
+  result.usable = true;
+  return result;
+}
+
 void
 emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
           const BaselineResult &baseline, double noise_floor,
@@ -1048,7 +1123,8 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
     const SweepResult &sweep = sweeps[i];
     std::println(
         out,
-        "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
+        "    {{\"jump_kernel\": {}, \"op\": \"{}\", \"context\": \"{}\", "
+        "\"working_set\": \"{}\", "
         "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"pair\": {}, "
         "\"pair_ops\": {}, \"ns_upper_bound\": {:.6f}, "
         "\"ns_saturated\": {:.6f}, \"saturated_note\": \"{}\", "
@@ -1058,15 +1134,15 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         "\"slope_stderr_ns\": {:.6f}, \"points\": {}, \"ns_per_instruction\": "
         "{:.6f}, \"worst_relative_mad\": {:.6f}, \"body_runs\": {}, "
         "\"max_run_gas_seen\": {}}}{}",
-        escape_json(sweep.op), escape_json(sweep.context),
-        escape_json(sweep.working_set), escape_json(sweep.magnitude),
-        escape_json(sweep.branch_mode), sweep.is_pair ? "true" : "false",
-        json_string_array(sweep.pair_ops), sweep.ns_upper_bound,
-        sweep.ns_saturated, escape_json(sweep.saturated_note),
-        sweep.scheduled_gas, sweep.usable ? "true" : "false",
-        escape_json(sweep.rejected_because), sweep.fit.slope,
-        sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
-        sweep.measured_points, sweep.ns_per_instruction,
+        sweep.jump_kernel ? "true" : "false", escape_json(sweep.op),
+        escape_json(sweep.context), escape_json(sweep.working_set),
+        escape_json(sweep.magnitude), escape_json(sweep.branch_mode),
+        sweep.is_pair ? "true" : "false", json_string_array(sweep.pair_ops),
+        sweep.ns_upper_bound, sweep.ns_saturated,
+        escape_json(sweep.saturated_note), sweep.scheduled_gas,
+        sweep.usable ? "true" : "false", escape_json(sweep.rejected_because),
+        sweep.fit.slope, sweep.fit.theil_sen_slope, sweep.fit.r_squared,
+        sweep.fit.slope_stderr, sweep.measured_points, sweep.ns_per_instruction,
         sweep.worst_relative_mad, sweep.audit.body_runs,
         sweep.audit.max_run_gas_seen, i + 1 == sweeps.size() ? "" : ",");
   }
@@ -1261,6 +1337,23 @@ main_impl(int argc, char **argv)
     }
     else {
       std::println(stderr, "        rejected: {}", result.rejected_because);
+    }
+  }
+
+  if (!options.syscalls_only) {
+    for (const JumpSpec &spec : plan_jumps(options)) {
+      std::println(stderr, "jump {} {}", op_name(spec.target),
+                   jump_context_name(spec));
+      sweeps.push_back(run_jump_sweep(spec, options));
+      if (spec.context == OperandContext::kTargetChase) {
+        std::println(stderr, "  {:.4f} ns/sequence (2 LW + JALR + JAL)",
+                     sweeps.back().ns_upper_bound);
+        std::println(stderr, "  includes loop/setup overhead");
+      }
+      else {
+        std::println(stderr, "  {:.4f} ns/jump (absolute upper bound)",
+                     sweeps.back().ns_upper_bound);
+      }
     }
   }
 

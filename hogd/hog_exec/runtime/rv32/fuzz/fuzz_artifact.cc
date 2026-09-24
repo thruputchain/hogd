@@ -137,7 +137,6 @@ public:
 private:
   static constexpr size_t kStrategyCount = 26;
 
-  // Expand libFuzzer's seed with SplitMix64 so every helper is deterministic.
   uint64_t next_random()
   {
     random_state_ += 0x9e3779b97f4a7c15ULL;
@@ -147,7 +146,6 @@ private:
     return value ^ (value >> 31);
   }
 
-  // Choose an index in [0, exclusive_upper). Callers establish non-emptiness.
   size_t random_inrange(size_t exclusive_upper)
   {
     return static_cast<size_t>(next_random() % exclusive_upper);
@@ -314,7 +312,6 @@ private:
         load_u32(rv32::kArtifactInitialMemorySizeOffset));
   }
 
-  // Recompute one section digest after a content-preserving structural edit.
   void repair_digest(std::span<const uint8_t> section, size_t offset)
   {
     const rv32::ArtifactDigest digest = rv32::artifact_digest(section);
@@ -490,7 +487,6 @@ private:
     }
   }
 
-  // Corrupt one stored digest byte without changing either section.
   void mutate_digest()
   {
     const size_t base = random_flip()
@@ -500,7 +496,6 @@ private:
         random_bit<uint8_t>();
   }
 
-  // Produce the parser's canonical degenerate zero-memory representation.
   void make_zero_memory_artifact()
   {
     const std::vector<uint8_t> code_copy = copy_bytes(code());
@@ -514,7 +509,6 @@ private:
     return LLVMFuzzerMutate(output, size, max_size_);
   }
 
-  // Copy the working artifact back into libFuzzer's bounded mutation buffer.
   size_t write_output(uint8_t *output) const
   {
     const size_t size = std::min(artifact_.size(), max_size_);

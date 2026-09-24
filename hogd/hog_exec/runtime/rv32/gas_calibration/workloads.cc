@@ -332,14 +332,8 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
   // workload makes a host call of its own.
   HaltHost halt_host;
 
-  // Tune each workload's trip count on its own, then measure them together in
-  // one interleaved schedule so they share whatever drift the host has.
-  //
-  // Keyed by name rather than by position: a workload that fails to build has
-  // to drop itself and nothing else. Indexing a compacted vector by the table's
-  // position silently handed every workload after a failed one its neighbour's
-  // trip count and then dropped the tail, which is a hard failure to notice
-  // from output that still looks well-formed.
+  // Tune each workload separately, keyed by name, then interleave measurements
+  // to spread host drift across workloads. Build failures abort the run.
   std::map<std::string, uint32_t> trip_counts;
   for (const Workload &workload : workload_table()) {
     const std::optional<BuiltWorkload> seed = build_workload(workload, 64);
