@@ -2660,24 +2660,18 @@ protected:
     MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
     SchedulerGetTipResult tip = co_await coord.schedcoord_get_tip();
     EXPECT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    if (tip.outcome() != SchedulerGetTipOutcome::SchedulerGetTipOK) {
-      co_return;
-    }
+
     SchedulerProposalResult proposed =
         co_await coord.schedulercoord_propose_block(tip.db_tip().id, {});
     EXPECT_EQ(proposed.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
-    if (proposed.outcome() != SchedulerProposalOutcome::SchedulerProposalOK) {
-      co_return;
-    }
+
     SchedulerCommitOutcome committed =
         co_await coord.schedulercoord_commit_block(
             proposed.proposed_block().block_id,
             consensus_value(tip.db_tip(), proposed.proposed_block().proposal));
     EXPECT_EQ(committed, SchedulerCommitOutcome::SchedulerCommitOK);
-    if (committed != SchedulerCommitOutcome::SchedulerCommitOK) {
-      co_return;
-    }
+
     co_await coord.wait_for_block_commit(
         tip.db_tip().value.proposal_header.block_height + 1);
   }
