@@ -43,19 +43,10 @@ struct Rv32Limits {
                       .max_memory_bytes = kMemoryCeilingBytes};
   }
 };
-// Gas tiers, in units of one dispatch. Measured by the calibration harness on
-// hog10 (see gas_calibration/README.md); the ratios each tier is rounded up
-// from are in the comments below. An opcode costs what the engine spends on its
-// worst reachable context, since the guest author picks the context.
-//
-// One gas is one baseline instruction -- the resolution the harness calls 1.
-// A finer unit was measured and rejected: it narrows the ns-per-gas spread
-// across real workloads from 4.59x only to 4.03x, and buys that by scaling
-// every number in the protocol. See DEFAULT_RESOLUTION in rv32_gas_report.py.
+// Gas tiers measured on hog10, normalized to baseline dispatch cost. Pricing
+// uses the worst reachable measured context; see gas_calibration/README.md.
 constexpr uint64_t kBaseInstructionGas = 1;
-// Taken branches (1.38-1.42x) and integer divide (1.65-1.98x). Divide is not
-// the outlier it was priced as: the divider overlaps with dispatch, so a chain
-// of them costs about twice a dispatch, not eight times.
+// Taken branches (1.38-1.42x) and integer divide (1.65-1.98x).
 constexpr uint64_t kBranchInstructionGas = 2;
 constexpr uint64_t kDivInstructionGas = 2;
 // Direct jump: 4.8832 ns / 1.6213 ns = 3.012 units on hog10's largest
@@ -285,8 +276,8 @@ struct ProgramResult {
   ProgramError error = ProgramError::kNone;
 };
 
-// Immutable, already-decoded RV32IM code. Program is the validation boundary:
-// Machine never executes raw bytes and never lets guest memory alias code.
+// Immutable, decoded RV32IM code for the canonical Machine. Guest memory cannot
+// alias code. Production preparation uses ThreadedProgram.
 class Program {
 public:
   static ProgramResult validate(std::span<const uint8_t> code);

@@ -40,11 +40,9 @@
 #include "types.hh"
 #include "x23/async.h"
 
-// Offline analysis tool (NOT part of the main build): traces a real rv32
-// contract invocation on the canonical step-at-a-time Machine and builds a
-// histogram of adjacent *fall-through* instruction pairs -- the candidates an
-// interpreter could fuse into a single super-instruction. Each contract gets
-// its own histogram. Run the binary and read the dumped tables on stdout.
+// Trace contract invocations on the canonical Machine and print a histogram of
+// adjacent fall-through instruction pairs for each contract. The histograms
+// identify candidates for interpreter fusion.
 //
 // A pair (A, B) is counted only when B executes by falling through from A
 // (B's pc == A's pc + 4) and A is straight-line code (not a branch/jump/system

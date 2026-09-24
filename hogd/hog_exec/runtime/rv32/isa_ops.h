@@ -7,11 +7,8 @@
 
 #include "hogd/hog_exec/runtime/rv32/program.h"
 
-// Pure, constexpr ISA helpers shared across the RV32 machine lineage (the
-// canonical Machine and future experimental machines). Decode-field extraction
-// and execution arithmetic only -- no machine/VM state. The independent spec
-// model (spec_model.h) deliberately does NOT use this header; it keeps its own
-// copies so Machine-vs-spec differential tests stay meaningful.
+// Decode and arithmetic helpers shared by the canonical and threaded engines.
+// spec_model.h keeps independent arithmetic for differential testing.
 namespace hogd::rv32 {
 
 // --- Reinterpret -----------------------------------------------------------

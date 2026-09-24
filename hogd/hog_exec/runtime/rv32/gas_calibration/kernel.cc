@@ -197,15 +197,8 @@ struct BranchOperands {
   int32_t offset = 0;
 };
 
-// A body-slot branch must not change how many instructions the iteration
-// retires, or the sweep's fixed-work invariant breaks.
-//
-// not-taken: the condition is false against (large, small) operands, so the
-// branch falls through.
-// taken: the condition is true and the target is the *next* instruction
-// (offset +4), so control lands exactly where a fall-through would. That
-// isolates the cost of the taken path (target resolution plus a fresh
-// enter_run at the target) with the retired-instruction count held fixed.
+// Taken branches target the next instruction (+4), preserving the retired
+// instruction sequence while exercising target resolution and run entry.
 BranchOperands
 branch_operands(Op op, bool taken)
 {
@@ -246,17 +239,9 @@ branch_operands(Op op, bool taken)
   }
 }
 
-// Address base for memory slot `index`, and the offset that reaches the byte
-// this slot touches.
-//
-// kL1Region: one base at 2048, offsets sweeping [-2048, 2047] -- exactly the
-// low 4 KiB, 64 cache lines, comfortably L1d-resident.
-// kFullRange: eight bases 8 KiB apart, each covering [base-2048, base+2047] --
-// 32 KiB in eight disjoint chunks spread across the whole 64 KiB guest space,
-// which is L1d-sized and so guarantees L1 pressure while staying inside L2.
-// Guest memory is capped at kDefaultMaxMemoryBytes (64 KiB), so those two
-// contexts bracket the entire cache behaviour a guest can reach; there is no
-// DRAM-resident case to price.
+// kL1Region sweeps the low 4 KiB. kFullRange visits eight disjoint 4 KiB
+// regions, spread over the default 64 KiB memory. Cache residency depends on
+// the host; these shapes do not cover all configured guest memory sizes.
 struct MemoryOperand {
   uint8_t base_reg = 0;
   int32_t offset = 0;
@@ -289,16 +274,9 @@ memory_operand(WorkingSet working_set, uint32_t index, uint32_t width)
   return {.base_reg = base_reg, .offset = offset};
 }
 
-// The address range a pointer chase can cover with `width`-byte loads, and the
-// node stride inside it.
-//
-// A chase node has to hold the address of the next node, so a narrow load can
-// only chase as far as its loaded value reaches -- and for the sign-extending
-// loads (LB, LH) only half of that, since a negative value is not an address.
-// LW reaches all of guest memory; LHU reaches all of it too; LH half; LBU and
-// LB only the first 256 and 128 bytes. The narrow ones therefore measure
-// load-use *latency* without cache pressure, which is still the thing a
-// single-opcode throughput sweep cannot see.
+// Each chase node stores its successor address. Load width and sign extension
+// limit the reachable range: negative loaded values are not valid addresses.
+// Narrow byte-load cycles expose dependency latency with little cache pressure.
 struct ChaseGeometry {
   uint32_t range = 0;  // addresses live in [0, range)
   uint32_t stride = 0; // bytes between nodes
@@ -422,19 +400,10 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
     return test_program::j_type(rd, kInstructionBytes);
   }
   if (spec.target == Op::kJalr) {
-    // A JALR that lands on the instruction after itself: a real indirect
-    // control transfer that leaves the retired instruction sequence unchanged,
-    // which is what lets it sit in a body slot at all. Same idea as the
-    // taken-branch form.
-    //
-    // The target is rs1 + imm with the low bit cleared. rs1 holds a fixed base
-    // (the body's midpoint, staged by the prologue), so the immediate carries
-    // the whole per-slot offset: imm = (this slot's pc + 4) - base. A 12-bit
-    // signed immediate reaches +/-2048 bytes, and anchoring at the midpoint
-    // puts every slot of a 512-instruction body inside that -- which is why
-    // the base is the midpoint and not the start.
-    //
-    // rd rotates over the data bank so the link writes do not serialize.
+    // Jump to PC+4 so this slot preserves the retired instruction sequence.
+    // The fixed base is the body midpoint to maximize 12-bit immediate reach;
+    // rotating link destinations avoid a dependency between link writes.
+    // This encoding is for kernel tests; timing uses dedicated jump graphs.
     const uint8_t rd =
         chain ? kChainReg
               : static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
@@ -459,36 +428,11 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
   const uint8_t rs1 = chain ? kChainReg : kSrcLargeReg;
 
   if (chain && is_divide_target(spec.target)) {
-    // Chain through the dividend: `op x13, x13, one`. Every slot waits on the
-    // previous result, which is the arrangement that forces divider latency
-    // rather than throughput, and so the one gas has to price.
-    //
-    // The operands degenerate, and that is worth stating plainly because it
-    // looks like a bug. DIV keeps its dividend (x / 1 == x), but REM and REMU
-    // go to zero on their first instruction and every later one computes
-    // 0 % 1. A reviewer flagged that as understating the worst remainder
-    // input, which is the natural reading. It is not what happens.
-    //
-    // Measured, both ways, on the same host: this shape puts chained REM at
-    // 9.8x the baseline instruction -- about 14 cycles, a plausible divider
-    // latency. Chaining the divisor instead (`op x13, x28, x13`, which does
-    // keep a full-width dividend) drops it to 2.4x, about 3 cycles, which is
-    // too fast to be a division at all: `large % large` has quotient 1 and
-    // `large % 0` returns the dividend by definition, so that arrangement
-    // early-outs and breaks the very dependency it was built to expose.
-    //
-    // So the degenerate operands cost nothing here: the divider pays its
-    // latency regardless, and this is the more conservative of the two
-    // measurable shapes. Worst-case pricing wants that. What no single
-    // remainder instruction can do is feed itself hard operands indefinitely --
-    // `a % x` contracts -- so a sustained hard-operand dependent remainder
-    // needs a second instruction to refresh the divisor, making it a pair
-    // rather than a substitution. The independent context (`large % 3`, a
-    // genuine full-width remainder every time) is measured alongside this one
-    // and the schedule prices whichever is worse.
-    //
-    // Nothing here can trap: RISC-V defines division by zero as -1, remainder
-    // by zero as the dividend, and signed overflow as INT_MIN.
+    // Chain the dividend through division by one. DIV preserves its operand;
+    // REM converges to zero after the first instruction. This measures that
+    // sustained dependency, not a sequence of full-width remainder operands.
+    // The independent large-dividend context is measured separately.
+    // RISC-V defines zero-divisor and signed-overflow results without traps.
     return test_program::op(kChainReg, kChainReg, kOneReg, encoding.funct3,
                             encoding.funct7);
   }
@@ -515,18 +459,9 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
                           encoding.funct7);
 }
 
-// The two words of one pair substitution.
-//
-// Both kinds chain through kChainReg -- pair k+1's store consumes pair k's
-// load -- so the register dependence is identical and the only difference is
-// whether the load's address is the one the store just wrote. That is what
-// makes the difference between them attributable to store-to-load forwarding
-// and to nothing else.
-//
-// Addresses: the base register holds kL1RegionBase (2048) and a 12-bit signed
-// offset reaches [0, 4095]. Forwarding uses one address for both halves;
-// distinct sends stores to the upper 2 KiB and loads to the lower, which never
-// overlap, so no load can read a line a store recently touched.
+// Store/load pairs share a register chain. Forwarding uses the same address;
+// the control stores in the upper 2 KiB and loads from the lower 2 KiB.
+// This holds the instruction mix and register dependency constant.
 std::array<uint32_t, 2>
 pair_words(const KernelSpec &spec, uint32_t index)
 {
@@ -577,14 +512,8 @@ max_target_slots(uint32_t body_slots, const KernelSpec &spec)
   // that interior, so the head can sit one slot lower than a single target's.
   const uint32_t placeable = (body_slots - 2) - (per_target - 1);
   if (spec.saturated) {
-    // Every interior slot a substitution can start at without landing on the
-    // previous one. Adjacency is the point, so unlike the sweep below there is
-    // no filler gap to keep -- but a pair still occupies two slots, and a head
-    // at every slot would make each pair's first instruction overwrite the
-    // previous pair's second. The body would come out as a run of stores with
-    // one trailing load, audit clean (sw;sw is not a fusion rule), and be
-    // reported as the cost of a pair. Dividing by per_target tiles them
-    // instead: sw lw sw lw, which is what "a program made of this pair" means.
+    // Tile by substitution width. Advancing one slot for a pair would
+    // overwrite the preceding tail and measure the wrong instruction mix.
     return placeable / per_target;
   }
   // One filler between substitutions, so the period is per_target + 1. Deriving
@@ -973,14 +902,9 @@ build_kernel(const KernelSpec &spec)
         test_program::addi(kJalrBaseReg, kJalrBaseReg, lo);
   }
   words.insert(words.end(), body.begin(), body.end());
-  // Loop control: decrement, then a forward branch that skips a JAL back to
-  // the body head.
-  //
-  // Not a backwards branch: a B-type immediate is 13 bits signed, reaching
-  // only 1024 instructions, and the encoder truncates rather than refuses --
-  // the kernel jumps into the middle of itself and still halts cleanly. JAL's
-  // 21 bits cover anything kDefaultMaxCodeBytes allows, and the branch skipping
-  // it only ever jumps two instructions.
+  // Use a short forward branch over JAL for loop control. A backwards
+  // B-type branch cannot reach across the largest supported kernel body;
+  // JAL's 21-bit immediate covers the default code limit.
   words.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
   // beq counter, x0, +8 -- when the counter hits zero, skip the JAL and fall
   // into the ecall.

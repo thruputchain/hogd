@@ -26,16 +26,9 @@ word_at(std::span<const uint8_t> code, size_t index)
          (uint32_t{code[offset + 3]} << 24);
 }
 
-// The handler the lowering installs for `word` when nothing around it can
-// fuse. The probe program brackets the word with the same R-type filler the
-// kernel body uses, so the word sits mid-run with a non-fusible neighbour on
-// each side -- structurally identical to how the kernel body places it. A
-// branch's slot offsets (+4 or +8) stay inside the four-instruction probe.
-//
-// The probe's memory size is deliberately tiny: handler selection depends on
-// the decoded instruction, not on how much guest memory exists (the size is a
-// run-time argument to the load/store handlers), and sizing every probe at
-// kDefaultMaxMemoryBytes would zero 64 KiB per lookup.
+// Probe a word between register-disjoint fillers. Branch offsets stay within
+// this four-instruction program. Handler selection does not depend on memory
+// size, so a small image avoids zeroing default-size memory per lookup.
 std::optional<Handler>
 isolated_handler(uint32_t word)
 {
