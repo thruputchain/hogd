@@ -373,10 +373,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     }
     ClientRef(const ClientRef &s) : super(s)
     {
-      // A ClientRef is never null: it has no default constructor and no move
-      // constructor. RefPtr's copy constructor null-checks, which lets GCC
-      // -O3 thread a null path here and warn -Wstringop-overflow on
-      // fetch_add; the assume removes that path.
+      // Never null; silences a GCC -Wstringop-overflow false positive.
       auto *p = get();
       assert(p != nullptr);
       [[assume(p != nullptr)]];
