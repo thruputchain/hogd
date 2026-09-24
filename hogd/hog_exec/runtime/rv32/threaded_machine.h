@@ -165,10 +165,10 @@ release_memory_slot(std::vector<uint8_t> &&slot) noexcept
   }
 }
 
-// Owns a guest-memory buffer across invocation suspension and moves. Acquisition
-// uses the current thread's pool; destruction returns the buffer to the pool
-// of the thread running the destructor. No reference to the acquiring pool is
-// retained.
+// Owns a guest-memory buffer across invocation suspension and moves.
+// Acquisition uses the current thread's pool; destruction returns the buffer to
+// the pool of the thread running the destructor. No reference to the acquiring
+// pool is retained.
 //
 // capacity() != 0 denotes ownership. Moves explicitly empty the source rather
 // than relying on std::vector's unspecified moved-from state. Keeping only the
@@ -186,8 +186,7 @@ public:
   }
   MemorySlot(MemorySlot &&other) noexcept
     : buf_(std::exchange(other.buf_, std::vector<uint8_t>{}))
-  {
-  }
+  {}
   MemorySlot &operator=(MemorySlot &&) = delete;
   MemorySlot(const MemorySlot &) = delete;
   MemorySlot &operator=(const MemorySlot &) = delete;
@@ -1699,7 +1698,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
 
     // Accumulate suffix gas backward. If adding this instruction would exceed
     // max_run_gas, make it a break carrier: its handler enters a new chunk at
-    // i+1. The successor's sum is already available, so no break array is needed.
+    // i+1. The successor's sum is already available, so no break array is
+    // needed.
     const auto self_gas = static_cast<uint32_t>(d.gas);
     assert(self_gas <= max_run_gas &&
            "a single instruction's gas must fit within one run chunk");

@@ -29,7 +29,8 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
 
   // The canonical test bridge stages outputs, discarding writes on syscall
   // faults, OOG, and fatal host errors. Production Rv32Runtime passes live
-  // guest memory to syscall_entry; this rollback is specific to the test bridge.
+  // guest memory to syscall_entry; this rollback is specific to the test
+  // bridge.
   const std::span<const uint8_t> view_memory = view.memory();
   std::vector<uint8_t> scratch;
   try {

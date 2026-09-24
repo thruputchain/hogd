@@ -1971,8 +1971,7 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
   ASSERT_NE(canonical, nullptr);
   auto threaded = threaded_from_words(words);
 
-  const uint64_t total =
-      (kDivCount * kDivInstructionGas) + 1; // includes ecall
+  const uint64_t total = (kDivCount * kDivInstructionGas) + 1; // includes ecall
   const uint64_t budgets[] = {
       0,     1,     8,         9999,  10000,     10001,           59999,
       60000, 60001, total - 1, total, total + 1, 1'000'000'000ULL};
@@ -2577,9 +2576,8 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
   constexpr size_t kLeadDivs = (kMaxRunGas - kWideLoadGas) / kDivInstructionGas;
   constexpr size_t kTrailDivs = kMaxRunGas / kDivInstructionGas;
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
-  words.push_back(
-      load(4, 2, 0,
-           2047)); // lw x4, 2047(x0) -> OOB fault at break carrier
+  words.push_back(load(4, 2, 0,
+                       2047)); // lw x4, 2047(x0) -> OOB fault at break carrier
   words.insert(words.end(), kTrailDivs,
                op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
@@ -2607,9 +2605,8 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
       (kMaxRunGas - kBaseInstructionGas) / kDivInstructionGas;
   constexpr size_t kTrailDivs = kMaxRunGas / kDivInstructionGas;
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
-  words.push_back(
-      store(0, 2, 2047,
-            2)); // sw x2, 2047(x0) -> OOB fault at break carrier
+  words.push_back(store(0, 2, 2047,
+                        2)); // sw x2, 2047(x0) -> OOB fault at break carrier
   words.insert(words.end(), kTrailDivs,
                op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 

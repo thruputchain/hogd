@@ -20,7 +20,8 @@
 
 // Compare the canonical Machine against the external Spike (riscv-isa-sim)
 // decoder and interpreter. RV32_ORACLE_BIN selects the subprocess; tests skip
-// when it is unavailable. Spike is not a build dependency or part of default CI.
+// when it is unavailable. Spike is not a build dependency or part of default
+// CI.
 //
 // Supported subset: ecall-terminated, zero-initial-register/memory programs
 // with register AND memory ops (loads/stores), but no jalr, auipc, or linking

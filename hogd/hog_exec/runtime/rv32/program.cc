@@ -254,7 +254,8 @@ ProgramResult
 Program::validate(std::span<const uint8_t> code)
 {
   // Canonical decoder validation. Production preparation validates through
-  // ThreadedProgram; Machine receives decoded instructions from Program::create.
+  // ThreadedProgram; Machine receives decoded instructions from
+  // Program::create.
   if ((code.size() % kInstructionBytes) != 0) {
     return ProgramResult{.ok = false,
                          .error = ProgramError::kCodeSizeNotAligned};

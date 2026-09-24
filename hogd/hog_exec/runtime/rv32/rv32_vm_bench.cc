@@ -721,9 +721,9 @@ bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
   state.SetItemsProcessed(state.iterations() * instructions);
 }
 
-// Startup cost at kDefaultMaxMemoryBytes: memory setup, register initialization,
-// and method-id seeding, with no guest execution. Exercises the thread-local
-// memory pool using an empty initial image.
+// Startup cost at kDefaultMaxMemoryBytes: memory setup, register
+// initialization, and method-id seeding, with no guest execution. Exercises the
+// thread-local memory pool using an empty initial image.
 void
 bm_rv32_threaded_instantiate(benchmark::State &state)
 {

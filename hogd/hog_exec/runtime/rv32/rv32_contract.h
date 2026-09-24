@@ -33,9 +33,10 @@ private:
   rv32::ThreadedMachinePreInstantiation pre_instantiation_;
 };
 
-// Production invocation. Borrows its prepared contract from StorageSnapshotCache
-// or the transaction's SystemCallHandler translation cache. Both keep entries
-// at stable addresses and outlive the runtimes borrowing them.
+// Production invocation. Borrows its prepared contract from
+// StorageSnapshotCache or the transaction's SystemCallHandler translation
+// cache. Both keep entries at stable addresses and outlive the runtimes
+// borrowing them.
 class Rv32Runtime final : public Runtime {
 public:
   Rv32Runtime(Rv32Contract const *contract, SystemCallHandler *syscall_handler)

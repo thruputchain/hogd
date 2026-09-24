@@ -48,7 +48,8 @@ static_assert(kSyscallHaltSelector <= 0x7FF,
 static_assert(kSyscallContinueSelector != kSyscallHaltSelector,
               "the terminal call must be distinguishable from a body call");
 
-// Reuse fixed output addresses, modelling repeated writes to a guest stack slot.
+// Reuse fixed output addresses, modelling repeated writes to a guest stack
+// slot.
 inline constexpr uint32_t kSyscallOutPointerA = 0x0400;
 inline constexpr uint32_t kSyscallOutPointerB = 0x0800;
 

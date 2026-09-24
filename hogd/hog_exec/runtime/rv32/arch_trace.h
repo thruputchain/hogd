@@ -176,8 +176,9 @@ struct ExecTrace {
 };
 
 // TraceObserver records instruction observations in ExecTrace. Threaded
-// preparation selects handlers templated on a Trace boolean; untraced production
-// handlers omit observation. NullObserver is not used by the threaded engine.
+// preparation selects handlers templated on a Trace boolean; untraced
+// production handlers omit observation. NullObserver is not used by the
+// threaded engine.
 struct NullObserver {
   static constexpr bool kEnabled = false;
   void on_initial(const ArchState & /*state*/) {}

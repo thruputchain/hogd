@@ -581,7 +581,6 @@ sha256_call(uint32_t bytes)
   return call;
 }
 
-
 // Update with reset=true: creates or resets slot `index` and hashes `bytes`.
 // Self-contained, so it repeats cleanly in a timing loop -- reset=false would
 // append to a stream that grows without bound across iterations and stop
@@ -885,7 +884,8 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   if (call.payload_bytes > 0) {
     state.SetBytesProcessed(calls * static_cast<int64_t>(call.payload_bytes));
   }
-  // Report declared host gas beside timing; omit ns/gas when the charge is zero.
+  // Report declared host gas beside timing; omit ns/gas when the charge is
+  // zero.
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
 }
 
@@ -1129,9 +1129,10 @@ bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
 //   frame/*Merge/K        staged writes committed into a fresh parent
 //   frame/*Discard/K      same writes discarded; control for merge cost
 //   cold/NNIntGet         fresh keys loaded through the database proxy
-// Frame sweeps include setup/teardown. Read per-key cost at each K; cache effects
-// can make one fitted line misleading. Snapshot-cache residency depends on
-// validator scheduling, so billing cannot use cache hits as a deterministic term.
+// Frame sweeps include setup/teardown. Read per-key cost at each K; cache
+// effects can make one fitted line misleading. Snapshot-cache residency depends
+// on validator scheduling, so billing cannot use cache hits as a deterministic
+// term.
 
 using FrameTraces = std::vector<std::unique_ptr<InvocationFrameTrace>>;
 
