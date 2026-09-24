@@ -373,7 +373,14 @@ struct RpcStream : public detail::RpcStreamImpl {
     }
     ClientRef(const ClientRef &s) : super(s)
     {
-      get()->nclients_.fetch_add(1, std::memory_order_relaxed);
+      // A ClientRef is never null: it has no default constructor and no move
+      // constructor. RefPtr's copy constructor null-checks, which lets GCC
+      // -O3 thread a null path here and warn -Wstringop-overflow on
+      // fetch_add; the assume removes that path.
+      auto *p = get();
+      assert(p != nullptr);
+      [[assume(p != nullptr)]];
+      p->nclients_.fetch_add(1, std::memory_order_relaxed);
     }
     ~ClientRef()
     {
