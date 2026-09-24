@@ -288,6 +288,84 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
                                      /*malformed_is_protocol_error=*/true);
 }
 
+x23::Async<AuthErrorCodeBatch>
+MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
+                                         x23::CoroGuard &commit_guard)
+{
+  auto pending = std::make_shared<SubmissionAuth>();
+  for (size_t i = 0; i < txs.size(); i++) {
+    const ContractAddress &account = txs[i].tx.invocation.invoked_address;
+    pending->accounts[account].push_back(i);
+    pending->dirty.insert(account);
+  }
+
+  AuthErrorCodeBatch results;
+  results.resize(txs.size());
+
+  co_await commit_guard(commit_lock_);
+
+  std::erase_if(submission_auth_,
+                [](const std::weak_ptr<SubmissionAuth> &entry) {
+                  return entry.expired();
+                });
+  submission_auth_.push_back(pending);
+  BlockHeight verify_height = scheduler_->current_block();
+  while (true) {
+    const BlockHeight height = scheduler_->current_block();
+    // Wait for the [auth_data_changed()] callback to complete for [height].
+    if (auth_data_height_.load() < height) {
+      commit_guard.reset();
+      co_await wait_for_block_commit(height);
+      co_await commit_guard(commit_lock_);
+      continue;
+    }
+
+    // The authentication server cannot authenticate txs against an older block
+    // height--it returns [AuthErrorCode::kAuthStaleBlockHeight] in this case.
+    if (verify_height != height) {
+      for (size_t i = 0; i < results.size(); i++) {
+        if (results[i] == AuthErrorCode::kAuthStaleBlockHeight) {
+          pending->dirty.insert(txs[i].tx.invocation.invoked_address);
+        }
+      }
+    }
+    if (pending->dirty.empty()) {
+      co_return results;
+    }
+
+    std::unordered_set<ContractAddress, SipHash24Hasher> dirty =
+        std::exchange(pending->dirty, {});
+    verify_height = height;
+    commit_guard.reset();
+
+    SignedTransactionBatch retry_txs;
+    x23::Vec<size_t> indices;
+    for (const ContractAddress &account : dirty) {
+      for (size_t i : pending->accounts.at(account)) {
+        retry_txs.push_back(txs[i]);
+        indices.push_back(i);
+      }
+    }
+    if (submission_auth_test_hook_) {
+      co_await submission_auth_test_hook_(verify_height, retry_txs,
+                                          /*after_auth=*/false);
+    }
+    const AuthErrorCodeBatch verified =
+        co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                               retry_txs);
+    if (submission_auth_test_hook_) {
+      co_await submission_auth_test_hook_(verify_height, retry_txs,
+                                          /*after_auth=*/true);
+    }
+    CHECK_EQ(verified.size(), indices.size());
+    for (size_t i = 0; i < indices.size(); i++) {
+      results[indices[i]] = verified[i];
+    }
+    // Changes during this RPC remain in [pending->dirty] for the next pass.
+    co_await commit_guard(commit_lock_);
+  }
+}
+
 x23::Async<SchedGatewaySubmitOutcomeBatch>
 MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                                        bool malformed_is_protocol_error)
@@ -341,20 +419,10 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                                co_await hash_transactions(*txs, *tx_hashes);
                              });
 
-  auto lock_commit_node =
-      submit_dag.async<void>("lock commit",
-                             submit_dag.after(ready_node, hash_node),
-                             [&, commit_guard]() -> x23::Async<void> {
-                               co_await (*commit_guard)(commit_lock_);
-                               co_return;
-                             });
-
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(lock_commit_node),
+      "verify transactions", submit_dag.after(ready_node, hash_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
-        const BlockHeight verify_height = scheduler_->current_block();
-        co_return co_await auth_client_->authmempool_verify_transactions(
-            verify_height, *txs);
+        co_return co_await verify_submission(*txs, *commit_guard);
       });
 
   auto prune_node = submit_dag.async<void>(
@@ -596,20 +664,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
                                co_await hash_transactions(*txs, *tx_hashes);
                              });
 
-  auto lock_commit_node =
-      submit_dag.async<void>("lock commit",
-                             submit_dag.after(decode_node, hash_node),
-                             [&, commit_guard]() -> x23::Async<void> {
-                               co_await (*commit_guard)(commit_lock_);
-                               co_return;
-                             });
-
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(lock_commit_node),
+      "verify transactions", submit_dag.after(hash_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
-        const BlockHeight verify_height = scheduler_->current_block();
-        co_return co_await auth_client_->authmempool_verify_transactions(
-            verify_height, *txs);
+        co_return co_await verify_submission(*txs, *commit_guard);
       });
 
   auto prune_node = submit_dag.async<void>(
@@ -3224,6 +3282,20 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
+
+  std::erase_if(submission_auth_,
+                [](const std::weak_ptr<SubmissionAuth> &entry) {
+                  return entry.expired();
+                });
+  for (const std::weak_ptr<SubmissionAuth> &entry : submission_auth_) {
+    if (std::shared_ptr<SubmissionAuth> pending = entry.lock()) {
+      for (const KeyChange &change : key_changes) {
+        if (pending->accounts.contains(change.address)) {
+          pending->dirty.insert(change.address);
+        }
+      }
+    }
+  }
 
   static TransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;
