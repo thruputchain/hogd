@@ -344,10 +344,10 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentCommitsTransferAndCode)
   ASSERT_EQ(rec[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
   EXPECT_TRUE(std::equal(target.begin(), target.end(), rec.begin() + 2));
   auto deployed = lookup_deployment_from_db(target);
-  ASSERT_TRUE(deployed);
+  ASSERT_TRUE(deployed.has_value());
   EXPECT_EQ(deployed->hash, hash);
   auto events = get_tx_event_log(last_tx_id_)();
-  ASSERT_TRUE(events);
+  ASSERT_TRUE(events.has_value());
   ASSERT_EQ(events->events.size(), 1U);
   EXPECT_EQ(events->events[0].contract_address, kNativeTokenContractAddress);
   auto expected_event =
@@ -407,7 +407,7 @@ TEST_F(DefaultWalletFallbackTest,
   EXPECT_EQ(deltas.at(wallet_),
             -(replay_cache_cost_charged(2) - replay_cache_cost_charged(1)));
   auto events = get_tx_event_log(last_tx_id_)();
-  ASSERT_TRUE(events);
+  ASSERT_TRUE(events.has_value());
   EXPECT_TRUE(events->events.empty());
 }
 
@@ -456,7 +456,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentInsufficientSenderRollsBack)
   ASSERT_EQ(deltas.size(), 1U);
   EXPECT_EQ(deltas.at(wallet_), -(replay_cache_cost_charged(1)));
   auto events = get_tx_event_log(last_tx_id_)();
-  ASSERT_TRUE(events);
+  ASSERT_TRUE(events.has_value());
   EXPECT_TRUE(events->events.empty());
 }
 
@@ -487,7 +487,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentUnknownCodeRollsBackTransfer)
   ASSERT_EQ(deltas.size(), 1U);
   EXPECT_EQ(deltas.at(wallet_), -(replay_cache_cost_charged(1)));
   auto events = get_tx_event_log(last_tx_id_)();
-  ASSERT_TRUE(events);
+  ASSERT_TRUE(events.has_value());
   EXPECT_TRUE(events->events.empty());
 }
 
