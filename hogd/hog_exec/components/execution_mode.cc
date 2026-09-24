@@ -24,6 +24,7 @@ offset_bit(uint32_t idx)
 void
 ProposalModeData::log_nondeterministic_bit(Nondeterministic<bool> bit)
 {
+  assert(!nondeterministic_budget_exhausted());
   size_t byte_count = (proposal_data_.nondeterministic_bit_count / 8) + 1;
   if (byte_count != proposal_data_.nondeterministic_bits.size()) {
     assert(proposal_data_.nondeterministic_bits.size() + 1 == byte_count);
@@ -151,6 +152,11 @@ ValidationModeData::get_observed_queue_entries(AddressAndKey const &addrkey,
 bool
 ValidationModeData::validate() const
 {
+  // The proposer records nothing past the chain's budget, so a longer stream
+  // is malformed. Checked before execution (#2902).
+  if (proposal_data_.nondeterministic_bit_count > max_bits_)
+    return false;
+
   // assert the number of actual nondeterministic bits supplied
   // is at least the number that is claimed to be supplied
   if (proposal_data_.nondeterministic_bits.size() !=

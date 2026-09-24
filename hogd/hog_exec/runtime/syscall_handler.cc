@@ -83,17 +83,21 @@ contract_blob_size(Contract const &contract)
 constexpr NewContractBatch kEmptyVec = {};
 
 ExecutionModeData
-make_execution_mode_data(ExecutionModeCtor execution_mode_ctor)
+make_execution_mode_data(ExecutionModeCtor execution_mode_ctor,
+                         NetworkConfigParams const &params)
 {
+  const uint32_t max_bits = params.max_nondeterministic_bits;
   if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
-    return ProposalModeData{};
+    return ProposalModeData{max_bits};
   }
   if (std::holds_alternative<ViewingModeCtor>(execution_mode_ctor)) {
     return ExecutionModeData{std::in_place_type<ViewingModeData>,
-                             std::get<ViewingModeCtor>(execution_mode_ctor)};
+                             std::get<ViewingModeCtor>(execution_mode_ctor),
+                             max_bits};
   }
   return ExecutionModeData{std::in_place_type<ValidationModeData>,
-                           std::get<ValidationModeCtor>(execution_mode_ctor)};
+                           std::get<ValidationModeCtor>(execution_mode_ctor),
+                           max_bits};
 }
 
 // Run a logging statement that may itself throw (allocation or sink failure)
@@ -204,7 +208,8 @@ SystemCallHandler::SystemCallHandler(
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
     execution_mode_data_(
-        make_execution_mode_data(std::move(execution_mode_ctor))),
+        make_execution_mode_data(std::move(execution_mode_ctor),
+                                 snapshot_cache.get_network_config_params())),
     contracts_to_deploy_(tx.contracts_to_deploy),
     snapshot_cache_(snapshot_cache)
 {
@@ -229,7 +234,8 @@ SystemCallHandler::SystemCallHandler(
         db_proxy_, snapshot_cache.get_network_config_params()),
     source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
     execution_mode_data_(
-        make_execution_mode_data(std::move(execution_mode_ctor))),
+        make_execution_mode_data(std::move(execution_mode_ctor),
+                                 snapshot_cache.get_network_config_params())),
     contracts_to_deploy_(kEmptyVec), snapshot_cache_(snapshot_cache)
 {}
 

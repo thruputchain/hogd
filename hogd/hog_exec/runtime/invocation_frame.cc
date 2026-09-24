@@ -330,6 +330,13 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         // stream represents only lock-acquisition outcomes.
         acq_success = false;
       }
+      else if (nondeterministic_budget_exhausted(execution_mode_data)) {
+        // Past kConfigParamMaxNondeterministicBits the child is refused as if
+        // its locks were not acquired, in every mode and with no bit logged or
+        // consumed, so the sidecar stays bounded without failing the
+        // transaction (#2902).
+        acq_success = false;
+      }
       else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         static const std::map<AddressAndKey, std::vector<QueueEntry>> no_obs;
         auto acq_res =

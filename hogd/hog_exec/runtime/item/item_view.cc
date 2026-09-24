@@ -437,6 +437,12 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   assert(base_item_);
   auto const &addrkey = base_item_->addrkey();
 
+  // Past kConfigParamMaxNondeterministicBits the read finds no entry, in every
+  // mode and with no bit logged or consumed (#2902).
+  if (nondeterministic_budget_exhausted(execution_mode_data)) {
+    return SystemStatus<const QueueEntry *>{nullptr};
+  }
+
   if (auto *proposal_data =
           std::get_if<ProposalModeData>(&execution_mode_data)) {
     // Once the cap is hit, record nothing further and stop probing the queue
