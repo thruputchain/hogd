@@ -780,8 +780,8 @@ private:
   x23::CoroLock validated_block_cache_lock_;
   // Serializes commits, auth-data updates, and final submission admission.
   x23::CoroLock commit_lock_;
-  // Protected by [commit_lock_]. Weak references also handle failed or
-  // cancelled authentication without requiring asynchronous cleanup.
+  // Protected by [commit_lock_]. Weak pointers also handle failed or canceled
+  // authentication without requiring asynchronous cleanup.
   std::vector<std::weak_ptr<SubmissionAuth>> submission_auth_;
   // [num_validations_in_progress_] is a gate: values > 0 are active
   // validations, 0 means validation is open, and -1 means commit has closed
