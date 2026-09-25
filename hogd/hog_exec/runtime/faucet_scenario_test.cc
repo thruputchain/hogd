@@ -47,6 +47,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 //
 // End-to-end faucet scenarios on a chain whose genesis ROOT contract is a
@@ -596,8 +597,9 @@ TEST_F(FaucetScenarioTest, AirdropFundsWalletDeployedContractCaller)
   ContractTraitClient<default_wallet::DefaultWallet> wallet_client(
       account_address(alice));
   auto deploy_out = run_account_invocation_no_advance(
-      alice, wallet_client.make_invocation<u8"deploy">(UINT64_MAX, nonce,
-                                                       sha256(*caller_obj)));
+      alice, wallet_client.make_invocation<u8"deploy">(
+                 UINT64_MAX, nonce, sha256(*caller_obj), make_amount(0),
+                 x23::Ptr<default_wallet::WalletInitCall>{}));
   advance_block();
   ASSERT_EQ(deploy_out.status, InvocationFrameStatusCode::Return);
   ASSERT_EQ(deploy_out.commit, ExecResult::ExecResultOK);

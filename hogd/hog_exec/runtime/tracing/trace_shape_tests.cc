@@ -692,21 +692,22 @@ TEST_F(TraceShapeTest, ManualRevertAbortTraceIsExact)
   const std::string_view value_str = "state_before_revert";
   const std::vector<uint8_t> value(value_str.begin(), value_str.end());
 
+  // The fixture's initializer entrypoint adds 16 gas to dispatcher execution.
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
-      99'848, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'757, tx.tx.invocation.calldata));
+      99'832, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'741, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
     body.bytestring_set().inputs.flags = 0;
-    expected.push_back(make_entry(99'535,
-                                  99'535 - kSyscallBaseCost -
+    expected.push_back(make_entry(99'519,
+                                  99'519 - kSyscallBaseCost -
                                       GasCost::bytestring_set(value.size()),
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'163, abort_buffer, /*revert_frame=*/true));
+  expected.push_back(return_entry(99'147, abort_buffer, /*revert_frame=*/true));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
