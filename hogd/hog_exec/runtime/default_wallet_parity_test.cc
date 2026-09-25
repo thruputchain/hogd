@@ -225,7 +225,8 @@ protected:
   // Root-invokes `wallet` with the given invocation + auth claim and
   // captures [root_success, commit, buffer bytes | 0xFF]. Invocations are
   // built with ContractTraitClient<...>::make_invocation.
-  CapturedRecord run_wallet_root_tx(Invocation invocation, AuthClaim claim)
+  CapturedRecord run_wallet_root_tx(Invocation invocation, AuthClaim claim,
+                                    bool finish_block = true)
   {
     SignedTransaction stx;
     stx.tx.invocation = std::move(invocation);
@@ -263,7 +264,9 @@ protected:
       rec.push_back(0xFF);
       break;
     }
-    advance_block();
+    if (finish_block) {
+      advance_block();
+    }
     return rec;
   }
 
@@ -789,7 +792,7 @@ TEST_F(DefaultWalletParityTest, DeployHappyPath)
                                                            target_hash));
 }
 
-TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicate)
+TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicateAcrossBlocks)
 {
   setup_wallets_and_targets();
   make_ctx();
@@ -858,8 +861,9 @@ TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicate)
     EXPECT_TRUE(std::ranges::equal(events->events[0].serialized_event,
                                    *expected_event));
 
-    // Both reject duplicates with the same exception and roll back the second
-    // transfer. Only the ordinary replay-cache collateral charge remains.
+    // Once committed in an earlier block, both wallets reject the deployment
+    // with the same exception and roll back the second transfer. Only the
+    // ordinary replay-cache collateral charge remains.
     sender_before = stored_balance(wallet);
     block = get_block_number();
     auto duplicate = run_wallet_raw_tx(wallet, preimage, id, raw);
@@ -886,6 +890,96 @@ TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicate)
       return;
     }
     EXPECT_TRUE(duplicate_events->events.empty());
+  }
+}
+
+TEST_F(DefaultWalletParityTest, SameBlockDuplicateDeployFundsTwice)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  auto code = echo_meta::load_rv32();
+  ASSERT_TRUE(code);
+  auto hash = sha256(*code);
+  SHA256Hash nonce{};
+  nonce.fill(43);
+  constexpr uint64_t kAmount = 10'000'000;
+  auto stored_balance = [this](ContractAddress const &address) -> int128_t {
+    auto item = lookup_storage_item_from_db(
+        make_free_native_token_balance_addrkey(address));
+    return item ? from_xdr(item->nnint()) : 0;
+  };
+  for (auto const &[wallet, preimage] : {
+           std::pair{native_wallet_, native_preimage_},
+           std::pair{rv32_wallet_, rv32_preimage_},
+       }) {
+    SCOPED_TRACE(wallet == native_wallet_ ? "native" : "rv32");
+    auto target =
+        SystemCallHandler::static_get_deploy_address(wallet, nonce, hash);
+    EXPECT_FALSE(lookup_deployment_from_db(target));
+    auto sender_before = stored_balance(wallet);
+    auto block = get_block_number();
+    ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
+    std::vector<EphemeralTxIdentifier> tx_ids;
+    for (int i = 0; i < 2; ++i) {
+      // Each call gets a fresh transaction replay nonce, but both deployment
+      // nonces and hashes match. The block snapshot still has no deployment.
+      auto record =
+          run_wallet_root_tx(client.make_invocation<u8"deploy">(
+                                 UINT64_MAX, nonce, hash,
+                                 std::tuple<uint64_t, uint64_t>{0, kAmount},
+                                 x23::Ptr<default_wallet::WalletInitCall>{}),
+                             make_pubkey_claim(preimage),
+                             /*finish_block=*/false);
+      ASSERT_EQ(record.size(), 34U);
+      EXPECT_EQ(record[0], 1);
+      ASSERT_EQ(record[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+      EXPECT_TRUE(std::equal(target.begin(), target.end(), record.begin() + 2));
+      EXPECT_EQ(get_block_number(), block);
+      tx_ids.push_back(last_tx_id_);
+    }
+    EXPECT_EQ(tx_ids[0].block_id, tx_ids[1].block_id);
+    ASSERT_NE(tx_ids[0].tx_id, tx_ids[1].tx_id);
+    advance_block();
+
+    auto deployed = lookup_deployment_from_db(target);
+    if (!deployed.has_value()) {
+      ADD_FAILURE() << "expected the deployment to be committed";
+      return;
+    }
+    EXPECT_EQ(deployed->hash, hash);
+    // The two transfers accumulate, while the single deployment and balance
+    // entry incur collateral only once.
+    auto target_balance =
+        2 * int128_t{kAmount} - get_default_cost_model()->get_balance_cost() -
+        get_default_cost_model()->get_deployment_cost(*deployed);
+    auto sender_delta = -2 * int128_t{kAmount} - replay_cache_cost_charged(2);
+    EXPECT_EQ(stored_balance(wallet), sender_before + sender_delta);
+    EXPECT_EQ(stored_balance(target), target_balance);
+    auto deltas = get_hogs_transferred(block);
+    ASSERT_EQ(deltas.size(), 2U);
+    EXPECT_EQ(deltas.at(wallet), sender_delta);
+    EXPECT_EQ(deltas.at(target), target_balance);
+
+    auto expected_event =
+        make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                   TransferEvent{
+                                       .from_address = wallet,
+                                       .to_address = target,
+                                       .amount = to_xdr(int128_t{kAmount}),
+                                   });
+    ASSERT_TRUE(expected_event);
+    for (auto const &tx_id : tx_ids) {
+      auto events = get_tx_event_log(tx_id)();
+      if (!events.has_value()) {
+        ADD_FAILURE() << "expected a transaction event log";
+        return;
+      }
+      ASSERT_EQ(events->events.size(), 1U);
+      EXPECT_EQ(events->events[0].contract_address,
+                kNativeTokenContractAddress);
+      EXPECT_TRUE(std::ranges::equal(events->events[0].serialized_event,
+                                     *expected_event));
+    }
   }
 }
 

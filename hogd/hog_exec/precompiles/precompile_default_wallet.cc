@@ -165,10 +165,8 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
         WalletException{WalletError::CallFaulted});
   }
 
-  // Fetch the child's payload — return or abort bytes — as the
-  // sdk's fetch_frame_payload does for both outcomes. The wallet
-  // forwards no auth tokens and drops any returned ids, so pass an
-  // empty auth span (the host accepts zero-length spans).
+  // Fetch the child's return or abort payload as the SDK does.
+  // No auth tokens are forwarded; returned token IDs are discarded.
   std::vector<uint8_t> return_buf(outputs.return_buffer_len);
   RuntimeMemoryLength return_written = 0;
   RuntimeMemoryLength auth_written = 0;
@@ -178,10 +176,7 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   if (!get.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(get.error());
   }
-  // Unreachable with a correct host (after a Return/Abort frame the
-  // payload exists and the syscall succeeds), but the sdk maps a
-  // fetch failure — error code or short write (checked_returned_len)
-  // — to CallFaulted; mirror it exactly.
+  // A fetch error or short write maps to CallFaulted, matching the SDK.
   if (*get != SyscallErrorCode::kSyscallErrorCodeNone ||
       return_written != return_buf.size()) {
     co_return child_result_t::make_err(
@@ -198,15 +193,15 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   co_return child_result_t::make_ok(std::move(return_buf));
 }
 
-deploy_result_t
-deployment_syscall_error(SyscallNo call, SyscallErrorCode error)
+LibraryException
+syscall_exception(SyscallNo call, SyscallErrorCode error)
 {
   LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
   exn.syscall_exn() = SyscallExn{
       .call_number = call,
       .err_number = static_cast<SysErr>(error),
   };
-  return deploy_result_t::make_err(LibraryException{std::move(exn)});
+  return LibraryException{std::move(exn)};
 }
 
 x23::Async<InvokeStatus<deploy_result_t>>
@@ -221,7 +216,8 @@ deploy_contract(NativeSyscallContext &ctx, SHA256Hash const &nonce,
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    co_return deployment_syscall_error(SyscallNo::kDeployContract, *r);
+    co_return deploy_result_t::make_err(
+        syscall_exception(SyscallNo::kDeployContract, *r));
   }
   co_return deploy_result_t::make_ok(deployed);
 }
@@ -308,7 +304,9 @@ make_native_default_wallet_contract()
           co_return deploy_result_t::make_err(WalletException{**auth_err});
         }
 
-        if (std::get<0>(amount) != 0 || std::get<1>(amount) != 0) {
+        const uint128_t funding_amount =
+            uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
+        if (funding_amount != 0) {
           ContractAddress target{};
           auto r = co_await ctx.syscall<SyscallNo::kGetDeployAddress>(
               static_cast<ContractAddress const *>(nullptr), nonce,
@@ -318,8 +316,8 @@ make_native_default_wallet_contract()
                 r.error());
           }
           if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-            co_return deployment_syscall_error(SyscallNo::kGetDeployAddress,
-                                               *r);
+            co_return deploy_result_t::make_err(
+                syscall_exception(SyscallNo::kGetDeployAddress, *r));
           }
           // Invoke the ordinary token contract to preserve validation, caller
           // identity and events. Both effects remain inside the wallet root
