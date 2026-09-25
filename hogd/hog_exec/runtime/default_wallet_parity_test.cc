@@ -950,9 +950,9 @@ TEST_F(DefaultWalletParityTest, SameBlockDuplicateDeployFundsTwice)
     // The two transfers accumulate, while the single deployment and balance
     // entry incur collateral only once.
     auto target_balance =
-        2 * int128_t{kAmount} - get_default_cost_model()->get_balance_cost() -
+        (2 * int128_t{kAmount}) - get_default_cost_model()->get_balance_cost() -
         get_default_cost_model()->get_deployment_cost(*deployed);
-    auto sender_delta = -2 * int128_t{kAmount} - replay_cache_cost_charged(2);
+    auto sender_delta = (-2 * int128_t{kAmount}) - replay_cache_cost_charged(2);
     EXPECT_EQ(stored_balance(wallet), sender_before + sender_delta);
     EXPECT_EQ(stored_balance(target), target_balance);
     auto deltas = get_hogs_transferred(block);
