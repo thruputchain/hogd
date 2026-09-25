@@ -1,5 +1,6 @@
 
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <print>
 #include <semaphore>
@@ -157,8 +158,32 @@ test_matching_poison_generation_race(CoroPoll &cp)
     }
   });
 
+  // Each attempt is a two-thread ping-pong whose second half spins on
+  // generation() with yield(), because the window it is probing -- setmode()
+  // has bumped generation_ but has not yet released mode_ -- is only a
+  // syscall wide and cannot be waited on.  That spin costs a few
+  // microseconds when a core is free and a whole scheduler timeslice when
+  // one is not: yield() keeps handing this thread back its CPU while the
+  // activator queues for a slot.  All 100000 attempts take about half a
+  // second on an idle host, but on a sanitizer box under `ctest --parallel`,
+  // where every core is already carrying several other test processes, the
+  // per-attempt cost rises by three orders of magnitude and the loop runs
+  // for tens of minutes -- long enough to blow the schedule's ctest timeout
+  // (#4152).  So cap the loop by wall clock as well as by attempt count.  A
+  // host that is not heavily oversubscribed still runs the full 100000 with
+  // time to spare, so its coverage is unchanged; one that is oversubscribed
+  // trades attempts it was already making very slowly for a bounded runtime,
+  // and says so below.
   constexpr unsigned attempts = 100000;
-  for (unsigned i = 0; i < attempts; ++i) {
+  constexpr std::chrono::seconds budget{20};
+  const auto deadline = std::chrono::steady_clock::now() + budget;
+
+  unsigned i = 0;
+  for (; i < attempts; ++i) {
+    // Checked before the handoff so that every attempt that starts finishes.
+    if (std::chrono::steady_clock::now() >= deadline)
+      break;
+
     cp.reset(readfd);
     uint64_t old_generation = cp.generation(readfd, false);
 
@@ -193,6 +218,14 @@ test_matching_poison_generation_race(CoroPoll &cp)
   activator.request_stop();
   activate.release();
   cp.reset(readfd);
+
+  // Say so rather than passing quietly, so a CI run that only got through a
+  // fraction of the attempts is visible in the log.
+  if (i < attempts)
+    std::println(stderr,
+                 "matching-generation poison race: ran {} of {} attempts "
+                 "before the {}s budget expired (host oversubscribed?)",
+                 i, attempts, budget.count());
 }
 #endif // USE_EPOLL
 

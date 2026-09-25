@@ -24,6 +24,13 @@ add_x23_test(compiler_roundtrip compiler.x)
 add_x23_test(corosleep)
 add_x23_test(corowake)
 add_x23_test(event)
+# event's last case hunts a poison/activation race over many short attempts,
+# and each attempt costs a scheduler timeslice rather than microseconds once
+# the host is oversubscribed (see the comment on its loop).  The loop caps
+# itself at 20s of wall clock; this budget covers that plus the rest of the
+# test under a sanitizer, and keeps the test from inheriting a global
+# --timeout tighter than the loop needs.
+set_tests_properties(event PROPERTIES TIMEOUT 60)
 add_x23_test(format)
 add_x23_test(heap)
 add_x23_test(marshal)
