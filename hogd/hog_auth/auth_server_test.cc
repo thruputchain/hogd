@@ -200,7 +200,8 @@ TEST_F(AuthServerTest, StaleHeightUsesUnchangedCachedAuthData)
                                            mock_db().get_key_changes_at_height(
                                                2))();
 
-  auto result = auth_server().lookup_auth_data(1, address)();
+  AuthStatus<AuthCacheEntry> result =
+      auth_server().lookup_auth_data(1, address)();
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, 1);
