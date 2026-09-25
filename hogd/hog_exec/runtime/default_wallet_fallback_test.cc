@@ -47,6 +47,7 @@
 #include "types.hh"
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -201,11 +202,10 @@ protected:
                                              : make_pubkey_claim(preimage_));
   }
 
-  CapturedRecord
-  run_deploy_tx(SHA256Hash const &nonce, SHA256Hash const &hash,
-                uint128_t amount = 0,
-                std::optional<AuthClaim> claim = std::nullopt,
-                x23::Ptr<default_wallet::WalletInitCall> initializer = {})
+  CapturedRecord run_deploy_tx(
+      SHA256Hash const &nonce, SHA256Hash const &hash, uint128_t amount = 0,
+      std::optional<AuthClaim> claim = std::nullopt,
+      x23::Ptr<default_wallet::WalletInitCall> const &initializer = {})
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
     return run_wallet_root_tx(

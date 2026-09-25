@@ -47,6 +47,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 //
 // End-to-end faucet scenarios on a chain whose genesis ROOT contract is a

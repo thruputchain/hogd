@@ -57,6 +57,7 @@
 #include "x23/serialize_cxs.h"
 #include "x23/tests/death_test.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)

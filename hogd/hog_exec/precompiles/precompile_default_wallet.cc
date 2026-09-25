@@ -37,6 +37,7 @@
 #include "x23/async.h"
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
