@@ -46,6 +46,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
     }
     break;
   }
+  CHECK_GE(current_height, height);
   CHECK_NE(current_height, kUninitializedHeight);
   CHECK_NE(current_height, kInitializing);
 
@@ -60,6 +61,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
   }
 
   if (current_height > height) {
+    // [height] is too old for us to look up this particular wallet's auth data.
     co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
   }
   CHECK_EQ(current_height, height);
