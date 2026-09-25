@@ -26,6 +26,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_auth/status.h"
 #include "integration.hh"
 #include "rpc_types.hh"
 #include "x23/serialize.h"
@@ -207,6 +208,50 @@ TEST_F(AuthServerTest, StaleHeightUsesUnchangedCachedAuthData)
   EXPECT_EQ(result.value()->first, 1);
   ASSERT_TRUE(result.value()->second.has_value());
   EXPECT_EQ(result.value()->second.value(), auth_data);
+}
+
+TEST_F(AuthServerTest, StaleHeightRejectsDeletedCachedAuthData)
+{
+  ContractAddress address = make_test_address(1);
+
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().increment_height(); // height 2
+  mock_db().delete_address(address);
+  mock_db().compute_key_changes_for_current_height();
+
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+
+  auto result = auth_server().lookup_auth_data(1, address)();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), AuthErrorCode::kAuthStaleBlockHeight);
+}
+
+TEST_F(AuthServerTest, StaleHeightRejectsChangedCachedAuthData)
+{
+  ContractAddress address = make_test_address(1);
+
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().increment_height(); // height 2
+  mock_db().set(address, make_test_auth_data(2));
+  mock_db().compute_key_changes_for_current_height();
+
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+
+  auto result = auth_server().lookup_auth_data(1, address)();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), AuthErrorCode::kAuthStaleBlockHeight);
 }
 
 TEST_F(AuthServerTest, QueriesDelayed)
