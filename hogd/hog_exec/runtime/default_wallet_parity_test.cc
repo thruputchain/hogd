@@ -62,6 +62,7 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 namespace {
+using default_wallet::WalletError;
 using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
 using echo_meta = ContractTraitMeta<calldata_wrapper::CalldataWrapper>;
 using mrt_meta = ContractTraitMeta<manual_revert_test::ManualRevertTest>;
@@ -77,7 +78,6 @@ TEST(DefaultWalletPrecompile, ConstructsAndCoversAllEntrypoints)
   ASSERT_NE(contract, nullptr);
   EXPECT_EQ(wallet_meta::method_id<u8"execute">(), 0xc3edb11fdd6d5d58ULL);
   EXPECT_EQ(wallet_meta::method_id<u8"deploy">(), 0x6be0cb0f6de0917aULL);
-  EXPECT_EQ(wallet_meta::method_id<u8"deploy_funded">(), 0x1f843596f5b57b18ULL);
 }
 
 // Differential test: the native default_wallet precompile vs the rv32
@@ -456,8 +456,10 @@ protected:
                                       SHA256Hash const &hash)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
-    return run_wallet_root_tx(client.make_invocation<u8"deploy">(UINT64_MAX,
-                                                                 nonce, hash),
+    return run_wallet_root_tx(client.make_invocation<u8"deploy">(
+                                  UINT64_MAX, nonce, hash,
+                                  std::tuple<uint64_t, uint64_t>{0, 0},
+                                  x23::Ptr<default_wallet::WalletInitCall>{}),
                               make_pubkey_claim(preimage));
   }
 
@@ -796,10 +798,11 @@ TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicate)
   SHA256Hash nonce{};
   nonce.fill(42);
   constexpr uint64_t kAmount = 10'000'000;
-  auto calldata = wallet_meta::make_calldata<u8"deploy_funded">(
-      nonce, hash, std::tuple<uint64_t, uint64_t>{0, kAmount});
+  auto calldata = wallet_meta::make_calldata<u8"deploy">(
+      nonce, hash, std::tuple<uint64_t, uint64_t>{0, kAmount},
+      x23::Ptr<default_wallet::WalletInitCall>{});
   std::vector<uint8_t> raw(calldata.begin(), calldata.end());
-  auto id = wallet_meta::method_id<u8"deploy_funded">();
+  auto id = wallet_meta::method_id<u8"deploy">();
   auto stored_balance = [this](ContractAddress const &address) -> int128_t {
     auto item = lookup_storage_item_from_db(
         make_free_native_token_balance_addrkey(address));
@@ -885,6 +888,163 @@ TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicate)
   }
 }
 
+// Drive both wallet implementations through an initializer that records its
+// caller and calldata, then returns, aborts or faults after writing state.
+TEST_F(DefaultWalletParityTest, DeploymentInitializationCommitsOrRollsBack)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  auto key = make_storage_key_matching_static_key_sdk_macro("initialized");
+  auto code = mrt_meta::load_rv32();
+  ASSERT_TRUE(code);
+  auto hash = sha256(*code);
+  auto stored_balance = [this](ContractAddress const &address) -> int128_t {
+    auto item = lookup_storage_item_from_db(
+        make_free_native_token_balance_addrkey(address));
+    return item ? from_xdr(item->nnint()) : 0;
+  };
+  for (auto const &[wallet, preimage] : {
+           std::pair{native_wallet_, native_preimage_},
+           std::pair{rv32_wallet_, rv32_preimage_},
+       }) {
+    SCOPED_TRACE(wallet == native_wallet_ ? "native" : "rv32");
+    for (uint8_t mode = 0; mode < 4; ++mode) {
+      SCOPED_TRACE(mode);
+      SHA256Hash nonce{};
+      nonce[0] = mode;
+      auto target =
+          SystemCallHandler::static_get_deploy_address(wallet, nonce, hash);
+      // Last case proves zero funding plus initialization uses existing funds
+      // without emitting even a zero-valued token transfer.
+      uint64_t amount = mode == 3 ? 0 : 10'000'000;
+      if (amount == 0) {
+        setup_grant_storage_token(target, 10'000'000);
+      }
+      default_wallet::WalletInitCall init{};
+      init.entrypoint = mrt_meta::entrypoint<u8"test_initializer">();
+      init.gas_limit = UINT64_MAX;
+      auto args = mrt_meta::make_calldata<u8"test_initializer">(
+          wallet, uint32_t{0x1234}, uint32_t{mode == 3 ? 0U : mode});
+      init.calldata.append_range(args);
+      auto raw = wallet_meta::make_calldata<u8"deploy">(
+          nonce, hash, std::tuple<uint64_t, uint64_t>{0, amount},
+          x23::Ptr<default_wallet::WalletInitCall>{init});
+      auto before = stored_balance(wallet);
+      auto record = run_wallet_raw_tx(wallet, preimage,
+                                      wallet_meta::method_id<u8"deploy">(),
+                                      {raw.begin(), raw.end()});
+      ASSERT_GE(record.size(), 2U);
+      auto replay_delta = replay_cache_cost_charged(mode + 1) -
+                          (mode == 0 ? 0 : replay_cache_cost_charged(mode));
+      auto events = get_tx_event_log(last_tx_id_)();
+      if (!events.has_value()) {
+        ADD_FAILURE() << "expected included transaction event log";
+        return;
+      }
+      if (mode == 0 || mode == 3) {
+        ASSERT_EQ(record[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+        ASSERT_EQ(record.size(), 34U);
+        EXPECT_TRUE(
+            std::equal(target.begin(), target.end(), record.begin() + 2));
+        EXPECT_TRUE(lookup_deployment_from_db(target));
+        auto state = read_record(target, key);
+        std::vector<uint8_t> expected(wallet.begin(), wallet.end());
+        expected.insert(expected.end(), {0, 0, 0x12, 0x34});
+        EXPECT_EQ(state, expected);
+        EXPECT_EQ(stored_balance(wallet), before - amount - replay_delta);
+        EXPECT_EQ(events->events.size(), amount == 0 ? 0U : 1U);
+      }
+      else {
+        EXPECT_EQ(record[1], static_cast<uint8_t>(
+                                 ExecResult::ExecResultTxRootFrameReverted));
+        auto expected = wallet_error_abort_bytes(
+            mode == 1 ? WalletError::CallAborted : WalletError::CallFaulted);
+        ASSERT_EQ(record.size(), 2U + expected.size());
+        EXPECT_TRUE(
+            std::equal(expected.begin(), expected.end(), record.begin() + 2));
+        EXPECT_EQ(stored_balance(wallet), before - replay_delta);
+        EXPECT_FALSE(lookup_deployment_from_db(target));
+        EXPECT_FALSE(lookup_storage_item_from_db(
+            make_free_native_token_balance_addrkey(target)));
+        StorageKey storage_key(StorageKeyType::ContractData);
+        storage_key.contract_data_key() = key;
+        EXPECT_FALSE(lookup_storage_item_from_db(
+            AddressAndKey{.address = target, .key = storage_key}));
+        EXPECT_TRUE(events->events.empty());
+      }
+    }
+  }
+}
+
+TEST_F(DefaultWalletParityTest, DeploymentInitializesRv32CodeWithCallerGasLimit)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  auto code = mrt_meta::load_rv32();
+  ASSERT_TRUE(code);
+  auto hash = sha256(*code);
+  for (auto const &[wallet, preimage] : {
+           std::pair{native_wallet_, native_preimage_},
+           std::pair{rv32_wallet_, rv32_preimage_},
+       }) {
+    SCOPED_TRACE(wallet == native_wallet_ ? "native" : "rv32");
+    for (uint8_t mode = 0; mode < 3; ++mode) {
+      SCOPED_TRACE(mode);
+      SHA256Hash nonce{};
+      nonce[0] = mode;
+      auto target =
+          SystemCallHandler::static_get_deploy_address(wallet, nonce, hash);
+      default_wallet::WalletInitCall init{};
+      init.entrypoint = mrt_meta::entrypoint<u8"test_basic_manual_revert">();
+      init.gas_limit = mode == 2 ? 0 : UINT64_MAX;
+      auto args =
+          mrt_meta::make_calldata<u8"test_basic_manual_revert">(mode == 1);
+      init.calldata.append_range(args);
+      auto raw = wallet_meta::make_calldata<u8"deploy">(
+          nonce, hash, std::tuple<uint64_t, uint64_t>{0, 10'000'000},
+          x23::Ptr<default_wallet::WalletInitCall>{init});
+      auto record = run_wallet_raw_tx(wallet, preimage,
+                                      wallet_meta::method_id<u8"deploy">(),
+                                      {raw.begin(), raw.end()});
+      ASSERT_GE(record.size(), 2U);
+      if (mode == 0) {
+        ASSERT_EQ(record[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+        ASSERT_EQ(record.size(), 34U);
+        EXPECT_TRUE(
+            std::equal(target.begin(), target.end(), record.begin() + 2));
+        WalletCall query{};
+        query.target = target;
+        query.entrypoint = mrt_meta::entrypoint<u8"check_storage_exists">();
+        query.gas_limit = UINT64_MAX;
+        auto returned = run_wallet_execute_tx(wallet, preimage, {query});
+        // One successful child returning CXS true: Vec<Vec<u8>> = [ [1] ].
+        EXPECT_EQ(
+            returned,
+            (CapturedRecord{1, static_cast<uint8_t>(ExecResult::ExecResultOK),
+                            1, 1, 1}));
+      }
+      else {
+        auto expected = wallet_error_abort_bytes(
+            mode == 1 ? WalletError::CallAborted : WalletError::CallFaulted);
+        ASSERT_EQ(record.size(), 2U + expected.size());
+        EXPECT_EQ(record[1], static_cast<uint8_t>(
+                                 ExecResult::ExecResultTxRootFrameReverted));
+        EXPECT_TRUE(
+            std::equal(expected.begin(), expected.end(), record.begin() + 2));
+        EXPECT_FALSE(lookup_deployment_from_db(target));
+        EXPECT_FALSE(lookup_storage_item_from_db(
+            make_free_native_token_balance_addrkey(target)));
+        auto events = get_tx_event_log(last_tx_id_)();
+        if (!events.has_value()) {
+          ADD_FAILURE() << "expected reverted transaction event log";
+          return;
+        }
+        EXPECT_TRUE(events->events.empty());
+      }
+    }
+  }
+}
+
 TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
 {
   setup_wallets_and_targets();
@@ -893,7 +1053,7 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
   ASSERT_TRUE(code);
   auto hash = sha256(*code);
   SHA256Hash nonce{};
-  auto id = wallet_meta::method_id<u8"deploy_funded">();
+  auto id = wallet_meta::method_id<u8"deploy">();
   for (auto amount : {
            uint128_t{0},
            uint128_t{1},
@@ -902,10 +1062,11 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
        }) {
     SCOPED_TRACE(
         std::get<1>(std::tuple<uint64_t, uint64_t>{amount >> 64U, amount}));
-    auto calldata = wallet_meta::make_calldata<u8"deploy_funded">(
+    auto calldata = wallet_meta::make_calldata<u8"deploy">(
         nonce, hash,
         std::tuple<uint64_t, uint64_t>{amount >> 64U,
-                                       static_cast<uint64_t>(amount)});
+                                       static_cast<uint64_t>(amount)},
+        x23::Ptr<default_wallet::WalletInitCall>{});
     if (amount <= 1) {
       // Execution returns the per-wallet address, then collateral validation
       // rejects the commit. Compare each return with its own derived address.
@@ -931,8 +1092,9 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
   }
   SHA256Hash missing{};
   missing.fill(0xEE);
-  auto calldata = wallet_meta::make_calldata<u8"deploy_funded">(
-      nonce, missing, std::tuple<uint64_t, uint64_t>{0, 10'000'000});
+  auto calldata = wallet_meta::make_calldata<u8"deploy">(
+      nonce, missing, std::tuple<uint64_t, uint64_t>{0, 10'000'000},
+      x23::Ptr<default_wallet::WalletInitCall>{});
   expect_raw_parity(id, {calldata.begin(), calldata.end()});
   expect_raw_parity(id, {});
   std::vector<uint8_t> truncated(calldata.begin(), calldata.end() - 1);
@@ -1019,7 +1181,9 @@ TEST_F(DefaultWalletParityTest, MalformedCalldataDeploy)
   nonce.fill(9);
   SHA256Hash hash{};
   hash.fill(1);
-  auto valid = wallet_meta::make_calldata<u8"deploy">(nonce, hash);
+  auto valid = wallet_meta::make_calldata<u8"deploy">(
+      nonce, hash, std::tuple<uint64_t, uint64_t>{0, 0},
+      x23::Ptr<default_wallet::WalletInitCall>{});
   std::vector<uint8_t> valid_bytes(valid.begin(), valid.end());
 
   {

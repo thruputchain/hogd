@@ -14,6 +14,7 @@
 #include "built_contracts/calldata_wrapper.h"
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
+#include "built_contracts/manual_revert_test.h"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "hogd/base/log.h"
@@ -200,25 +201,19 @@ protected:
                                              : make_pubkey_claim(preimage_));
   }
 
-  CapturedRecord run_deploy_tx(SHA256Hash const &nonce, SHA256Hash const &hash)
-  {
-    ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(client.make_invocation<u8"deploy">(UINT64_MAX,
-                                                                 nonce, hash),
-                              make_pubkey_claim(preimage_));
-  }
-
   CapturedRecord
-  run_funded_deploy_tx(SHA256Hash const &nonce, SHA256Hash const &hash,
-                       uint128_t amount,
-                       std::optional<AuthClaim> claim = std::nullopt)
+  run_deploy_tx(SHA256Hash const &nonce, SHA256Hash const &hash,
+                uint128_t amount = 0,
+                std::optional<AuthClaim> claim = std::nullopt,
+                x23::Ptr<default_wallet::WalletInitCall> initializer = {})
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
     return run_wallet_root_tx(
-        client.make_invocation<u8"deploy_funded">(
+        client.make_invocation<u8"deploy">(
             UINT64_MAX, nonce, hash,
             std::tuple<uint64_t, uint64_t>{amount >> 64U,
-                                           static_cast<uint64_t>(amount)}),
+                                           static_cast<uint64_t>(amount)},
+            initializer),
         claim ? *claim : make_pubkey_claim(preimage_));
   }
 
@@ -301,8 +296,8 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackExecutesWallet)
   EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
 }
 
-// The existing unfunded deploy entrypoint still commits when the derived
-// target already has enough storage collateral.
+// Deployment with zero funding commits when the derived target already has
+// enough storage collateral.
 TEST_F(DefaultWalletFallbackTest, RootFallbackDeploysContract)
 {
   setup_wallet_and_echo();
@@ -325,6 +320,40 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackDeploysContract)
       std::equal(expected_addr.begin(), expected_addr.end(), rec.begin() + 2));
 }
 
+TEST_F(DefaultWalletFallbackTest, RootFallbackDeploysAndInitializes)
+{
+  setup_wallet_and_echo();
+  make_ctx();
+  using initializer_meta =
+      ContractTraitMeta<manual_revert_test::ManualRevertTest>;
+  auto code = initializer_meta::load_rv32();
+  ASSERT_TRUE(code);
+  write_contract(code);
+  auto hash = sha256(*code);
+  SHA256Hash nonce{};
+  auto target =
+      SystemCallHandler::static_get_deploy_address(wallet_, nonce, hash);
+  default_wallet::WalletInitCall init{};
+  init.entrypoint =
+      initializer_meta::entrypoint<u8"test_basic_manual_revert">();
+  init.gas_limit = UINT64_MAX;
+  auto args =
+      initializer_meta::make_calldata<u8"test_basic_manual_revert">(false);
+  init.calldata.append_range(args);
+  auto deployed = run_deploy_tx(nonce, hash, 10'000'000, std::nullopt,
+                                x23::Ptr<default_wallet::WalletInitCall>{init});
+  ASSERT_EQ(deployed.size(), 34U);
+  ASSERT_EQ(deployed[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+  EXPECT_TRUE(std::equal(target.begin(), target.end(), deployed.begin() + 2));
+  WalletCall query{};
+  query.target = target;
+  query.entrypoint = initializer_meta::entrypoint<u8"check_storage_exists">();
+  query.gas_limit = UINT64_MAX;
+  EXPECT_EQ(run_execute_tx({query}),
+            (CapturedRecord{1, static_cast<uint8_t>(ExecResult::ExecResultOK),
+                            1, 1, 1}));
+}
+
 TEST_F(DefaultWalletFallbackTest, FundedDeploymentCommitsTransferAndCode)
 {
   setup_wallet_and_echo();
@@ -339,7 +368,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentCommitsTransferAndCode)
   constexpr uint64_t kAmount = 10'000'000;
   auto before = stored_balance(wallet_);
   auto block = get_block_number();
-  auto rec = run_funded_deploy_tx(nonce, hash, kAmount);
+  auto rec = run_deploy_tx(nonce, hash, kAmount);
   ASSERT_EQ(rec.size(), 34U);
   ASSERT_EQ(rec[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
   EXPECT_TRUE(std::equal(target.begin(), target.end(), rec.begin() + 2));
@@ -390,12 +419,12 @@ TEST_F(DefaultWalletFallbackTest,
   SHA256Hash nonce{};
   auto target =
       SystemCallHandler::static_get_deploy_address(wallet_, nonce, hash);
-  auto first = run_funded_deploy_tx(nonce, hash, 10'000'000);
+  auto first = run_deploy_tx(nonce, hash, 10'000'000);
   ASSERT_EQ(first[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
   auto sender_before = stored_balance(wallet_);
   auto target_before = stored_balance(target);
   auto block = get_block_number();
-  auto second = run_funded_deploy_tx(nonce, hash, 10'000'000);
+  auto second = run_deploy_tx(nonce, hash, 10'000'000);
   auto expected = syscall_exn_abort_bytes(
       SyscallNo::kDeployContract,
       SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed);
@@ -433,10 +462,16 @@ TEST_F(DefaultWalletFallbackTest,
       SystemCallHandler::static_get_deploy_address(wallet_, nonce, hash);
   setup_grant_storage_token(target, 10'000'000);
   auto before = stored_balance(wallet_);
-  auto rec = run_funded_deploy_tx(nonce, hash, 0);
+  auto rec = run_deploy_tx(nonce, hash, 0);
   ASSERT_EQ(rec[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
   EXPECT_TRUE(lookup_deployment_from_db(target));
   EXPECT_EQ(stored_balance(wallet_), before - replay_cache_cost_charged(1));
+  auto events = get_tx_event_log(last_tx_id_)();
+  if (!events.has_value()) {
+    ADD_FAILURE() << "expected a transaction event log";
+    return;
+  }
+  EXPECT_TRUE(events->events.empty());
 }
 
 TEST_F(DefaultWalletFallbackTest, FundedDeploymentInsufficientSenderRollsBack)
@@ -451,7 +486,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentInsufficientSenderRollsBack)
       SystemCallHandler::static_get_deploy_address(wallet_, nonce, hash);
   auto before = stored_balance(wallet_);
   auto block = get_block_number();
-  auto rec = run_funded_deploy_tx(nonce, hash, 2'000'000'000);
+  auto rec = run_deploy_tx(nonce, hash, 2'000'000'000);
   auto expected = wallet_error_abort_bytes(WalletError::CallAborted);
   ASSERT_EQ(rec.size(), 2U + expected.size());
   EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
@@ -483,7 +518,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentUnknownCodeRollsBackTransfer)
       SystemCallHandler::static_get_deploy_address(wallet_, nonce, missing);
   auto before = stored_balance(wallet_);
   auto block = get_block_number();
-  auto rec = run_funded_deploy_tx(nonce, missing, 10'000'000);
+  auto rec = run_deploy_tx(nonce, missing, 10'000'000);
   auto expected = syscall_exn_abort_bytes(
       SyscallNo::kDeployContract,
       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
@@ -519,7 +554,7 @@ TEST_F(DefaultWalletFallbackTest,
       SystemCallHandler::static_get_deploy_address(wallet_, nonce, hash);
   auto before = stored_balance(wallet_);
   auto block = get_block_number();
-  auto rec = run_funded_deploy_tx(nonce, hash, 1);
+  auto rec = run_deploy_tx(nonce, hash, 1);
   ASSERT_GE(rec.size(), 2U);
   EXPECT_EQ(rec[1], static_cast<uint8_t>(
                         ExecResult::ExecResultTxNonDeterministicError));
@@ -540,8 +575,8 @@ TEST_F(DefaultWalletFallbackTest,
   auto hash = sha256(*code);
   SHA256Hash nonce{};
   auto before = stored_balance(wallet_);
-  auto rec = run_funded_deploy_tx(nonce, hash, 10'000'000,
-                                  make_pubkey_claim(make_preimage(2)));
+  auto rec = run_deploy_tx(nonce, hash, 10'000'000,
+                           make_pubkey_claim(make_preimage(2)));
   auto expected = wallet_error_abort_bytes(WalletError::InvalidAuthClaim);
   ASSERT_EQ(rec.size(), 2U + expected.size());
   EXPECT_EQ(rec[1],
