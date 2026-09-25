@@ -40,29 +40,29 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
       co_await current_height_futex_.wait(current_height);
       continue;
     }
-    if (current_height > height) {
-      co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
-    }
     if (current_height < height) {
       co_await current_height_futex_.wait(current_height);
       continue;
     }
     break;
   }
-  CHECK_EQ(current_height, height);
   CHECK_NE(current_height, kUninitializedHeight);
   CHECK_NE(current_height, kInitializing);
 
   auto auth_data = auth_data_cache_.get(address);
   if (auth_data != nullptr) {
-    // Auth data cache has processed all updates from some initial height up to
-    // and including current_height. That means that if the data is present
-    // there, and it's not from a block in the future, then it must be valid for
-    // current_height.
-    if (auth_data->first <= current_height) {
+    // Updates replace an account's cache entry before [current_height_futex_]
+    // advances. An entry no newer than the requested height is therefore still
+    // valid even when the auth server has since processed newer blocks.
+    if (auth_data->first <= height) {
       co_return auth_data;
     }
   }
+
+  if (current_height > height) {
+    co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
+  }
+  CHECK_EQ(current_height, height);
 
   auto db_auth_data = co_await dbauth_client_.lookup_auth_data(height, address);
   if (!db_auth_data.has_value()) {
