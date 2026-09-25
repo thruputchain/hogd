@@ -70,7 +70,7 @@ make_test_pk_config(uint8_t id)
 inline AddressAuthData
 make_test_auth_data(uint8_t id)
 {
-  CHECK_LT(id, kMaxSigners);
+  CHECK_LT(id, static_cast<unsigned int>(kMaxSigners));
 
   AddressAuthData auth_data{};
   auth_data.public_keys[id] = make_test_pk_config(id);
