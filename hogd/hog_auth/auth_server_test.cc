@@ -227,7 +227,8 @@ TEST_F(AuthServerTest, StaleHeightRejectsDeletedCachedAuthData)
                                            mock_db().get_key_changes_at_height(
                                                2))();
 
-  auto result = auth_server().lookup_auth_data(1, address)();
+  AuthStatus<AuthCacheEntry> result =
+      auth_server().lookup_auth_data(1, address)();
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), AuthErrorCode::kAuthStaleBlockHeight);
 }
@@ -249,7 +250,8 @@ TEST_F(AuthServerTest, StaleHeightRejectsChangedCachedAuthData)
                                            mock_db().get_key_changes_at_height(
                                                2))();
 
-  auto result = auth_server().lookup_auth_data(1, address)();
+  AuthStatus<AuthCacheEntry> result =
+      auth_server().lookup_auth_data(1, address)();
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), AuthErrorCode::kAuthStaleBlockHeight);
 }
