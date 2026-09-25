@@ -2,6 +2,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <format>
 #include <print>
 #include <semaphore>
 #include <stdexcept>
@@ -158,24 +159,27 @@ test_matching_poison_generation_race(CoroPoll &cp)
     }
   });
 
-  // Each attempt is a two-thread ping-pong whose second half spins on
-  // generation() with yield(), because the window it is probing -- setmode()
-  // has bumped generation_ but has not yet released mode_ -- is only a
-  // syscall wide and cannot be waited on.  That spin costs a few
-  // microseconds when a core is free and a whole scheduler timeslice when
-  // one is not: yield() keeps handing this thread back its CPU while the
-  // activator queues for a slot.  All 100000 attempts take about half a
-  // second on an idle host, but on a sanitizer box under `ctest --parallel`,
-  // where every core is already carrying several other test processes, the
-  // per-attempt cost rises by three orders of magnitude and the loop runs
-  // for tens of minutes -- long enough to blow the schedule's ctest timeout
-  // (#4152).  So cap the loop by wall clock as well as by attempt count.  A
-  // host that is not heavily oversubscribed still runs the full 100000 with
-  // time to spare, so its coverage is unchanged; one that is oversubscribed
-  // trades attempts it was already making very slowly for a bounded runtime,
-  // and says so below.
+  // The spin below cannot block: the window it probes is inside setmode(),
+  // between the generation_ bump and the mode_ release.  yield() keeps
+  // handing the CPU back to it while the activator queues for a slot, so an
+  // attempt costs a scheduler timeslice rather than a few microseconds once
+  // the host is oversubscribed.  Measured on 4 cores: all 100000 attempts
+  // take 0.5s idle, but only ~1500 fit in 20s at 4x.  Bound the loop by wall
+  // clock as well as by attempt count so it cannot run for tens of minutes
+  // and blow the schedule's ctest timeout (#4152).
   constexpr unsigned attempts = 100000;
   constexpr std::chrono::seconds budget{20};
+
+  // A truncated run still has to have proved something.  ctest's
+  // --output-on-failure hides the note below on a passing test, so without
+  // this floor a host wedged enough to manage a handful of attempts would go
+  // green and look identical to a full run.  Measured at 4/8/16x
+  // oversubscription on 4 cores: 1481/1102/611 attempts -- and
+  // `ctest --parallel` runs one test per core, so it does not reach even the
+  // low end of that.  100 is an order of magnitude below the worst of them:
+  // falling under it means >200ms per attempt, which is a wedged host rather
+  // than a busy one.
+  constexpr unsigned min_attempts = 100;
   const auto deadline = std::chrono::steady_clock::now() + budget;
 
   unsigned i = 0;
@@ -219,13 +223,21 @@ test_matching_poison_generation_race(CoroPoll &cp)
   activate.release();
   cp.reset(readfd);
 
-  // Say so rather than passing quietly, so a CI run that only got through a
-  // fraction of the attempts is visible in the log.
+  // Note the shortfall for anyone reading the test's own output, and fail
+  // outright if it went below the floor.  Both run after the activator is
+  // stopped above: it parks in activate.acquire(), so throwing before that
+  // release would hang in ~jthread().
   if (i < attempts)
     std::println(stderr,
                  "matching-generation poison race: ran {} of {} attempts "
-                 "before the {}s budget expired (host oversubscribed?)",
-                 i, attempts, budget.count());
+                 "before the {} budget expired (host oversubscribed?)",
+                 i, attempts, budget);
+  if (i < min_attempts)
+    throw std::runtime_error(std::format(
+        "matching-generation poison race managed only {} of {} attempts in "
+        "{} (floor is {}); the host is too wedged for this test to mean "
+        "anything",
+        i, attempts, budget, min_attempts));
 }
 #endif // USE_EPOLL
 
