@@ -184,6 +184,30 @@ TEST_F(AuthServerTest, StaleBlockHeight)
   ASSERT_FALSE(result.value()->second.has_value());
 }
 
+TEST_F(AuthServerTest, StaleHeightUsesUnchangedCachedAuthData)
+{
+  ContractAddress address = make_test_address(5);
+  AddressAuthData auth_data = make_test_auth_data(1);
+
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, auth_data);
+  mock_db().increment_height(); // height 2
+
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+
+  auto result = auth_server().lookup_auth_data(1, address)();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 1);
+  ASSERT_TRUE(result.value()->second.has_value());
+  EXPECT_EQ(result.value()->second.value(), auth_data);
+}
+
 TEST_F(AuthServerTest, QueriesDelayed)
 {
   ContractAddress address = make_test_address(6);
