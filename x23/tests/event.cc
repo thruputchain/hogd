@@ -159,26 +159,13 @@ test_matching_poison_generation_race(CoroPoll &cp)
     }
   });
 
-  // The spin below cannot block: the window it probes is inside setmode(),
-  // between the generation_ bump and the mode_ release.  yield() keeps
-  // handing the CPU back to it while the activator queues for a slot, so an
-  // attempt costs a scheduler timeslice rather than a few microseconds once
-  // the host is oversubscribed.  Measured on 4 cores: all 100000 attempts
-  // take 0.5s idle, but only ~1500 fit in 20s at 4x.  Bound the loop by wall
-  // clock as well as by attempt count so it cannot run for tens of minutes
-  // and blow the schedule's ctest timeout (#4152).
+  // The spin below can't block, and costs a scheduler timeslice per attempt
+  // on an oversubscribed host, so bound the loop by wall clock too (#4152).
   constexpr unsigned attempts = 100000;
   constexpr std::chrono::seconds budget{20};
 
-  // A truncated run still has to have proved something.  ctest's
-  // --output-on-failure hides the note below on a passing test, so without
-  // this floor a host wedged enough to manage a handful of attempts would go
-  // green and look identical to a full run.  Measured at 4/8/16x
-  // oversubscription on 4 cores: 1481/1102/611 attempts -- and
-  // `ctest --parallel` runs one test per core, so it does not reach even the
-  // low end of that.  100 is an order of magnitude below the worst of them:
-  // falling under it means >200ms per attempt, which is a wedged host rather
-  // than a busy one.
+  // A truncated run must still prove something: under 100 attempts means
+  // >200ms each, i.e. a wedged host.  16x oversubscription still managed 611.
   constexpr unsigned min_attempts = 100;
   const auto deadline = std::chrono::steady_clock::now() + budget;
 
@@ -223,10 +210,8 @@ test_matching_poison_generation_race(CoroPoll &cp)
   activate.release();
   cp.reset(readfd);
 
-  // Note the shortfall for anyone reading the test's own output, and fail
-  // outright if it went below the floor.  Both run after the activator is
-  // stopped above: it parks in activate.acquire(), so throwing before that
-  // release would hang in ~jthread().
+  // After the release above: the activator parks in acquire(), so throwing
+  // any earlier hangs in ~jthread().
   if (i < attempts)
     std::println(stderr,
                  "matching-generation poison race: ran {} of {} attempts "
