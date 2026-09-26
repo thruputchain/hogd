@@ -656,10 +656,9 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         auto bstring = make_bytestring("bad");
         // comment this set_bytestring to verify that the test framework
         // does, in fact, throw errors if you get_bytestring from the snapshot
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kBadKey, std::as_bytes(std::span(bstring)),
-            std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -769,19 +768,17 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           }
 
           // add ops shouldn't query db
-          StorageDeltaFlagSet r_prior_flags = 0;
           auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, nullptr, 100,
-              std::to_underlying(StorageDeltaFlags::None), r_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          StorageDeltaFlagSet r2_prior_flags = 0;
           auto [r2, _gas2] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, nullptr, -200,
-              std::to_underlying(StorageDeltaFlags::None), r2_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -801,10 +798,9 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           int128_t set_value = 100;
-          StorageDeltaFlagSet r_prior_flags = 0;
           auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, &set_value, 200,
-              std::to_underlying(StorageDeltaFlags::None), r_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1009,10 +1005,9 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto data = make_bytestring("child_write");
         constexpr StorageKeyContractData kKey{};
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kKey, std::as_bytes(std::span(data)),
-            std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1075,10 +1070,9 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto value = make_bytestring("12345678"); // 8 bytes
-        StorageDeltaFlagSet set_res_prior_flags = 0;
         auto [set_res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kKey, std::as_bytes(std::span(value)),
-            std::to_underlying(StorageDeltaFlags::None), set_res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!set_res.has_value() ||
             set_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "BytestringSet failed";

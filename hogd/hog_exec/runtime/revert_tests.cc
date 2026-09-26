@@ -71,10 +71,9 @@ TEST_P(RevertTest, RootFrameReverts)
       [str_hello,
        key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Write the bytestring to storage
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key, std::as_bytes(std::span(str_hello)),
-            std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE()
@@ -261,11 +260,9 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   fns_2.emplace(0,
                 [str_hello, key1, addr_3](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
-                  StorageDeltaFlagSet res_prior_flags = 0;
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key1, std::as_bytes(std::span(str_hello)),
-                      std::to_underlying(StorageDeltaFlags::None),
-                      res_prior_flags);
+                      std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -316,11 +313,9 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   fns_3.emplace(0,
                 [str_world, key2](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
-                  StorageDeltaFlagSet res_prior_flags = 0;
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key2, std::as_bytes(std::span(str_world)),
-                      std::to_underlying(StorageDeltaFlags::None),
-                      res_prior_flags);
+                      std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -579,10 +574,9 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
       [abort_payload, kConflictKey](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto child_data = make_bytestring("child_state");
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kConflictKey, std::as_bytes(std::span(child_data)),
-            std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -690,10 +684,9 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
       0,
       [kWriteKey](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto data = make_bytestring("written");
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kWriteKey, std::as_bytes(std::span(data)),
-            std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

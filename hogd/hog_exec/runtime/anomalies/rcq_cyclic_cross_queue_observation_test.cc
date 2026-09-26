@@ -135,11 +135,10 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
         if (!ins.has_value())
           co_return ins.error().to_invoke_error();
 
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_a"),
             std::as_bytes(std::span(std::string_view("a_ok"))),
-            std::to_underlying(StorageDeltaFlags::None), ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -167,11 +166,10 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
         if (!ins.has_value())
           co_return ins.error().to_invoke_error();
 
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_b"),
             std::as_bytes(std::span(std::string_view("b_ok"))),
-            std::to_underlying(StorageDeltaFlags::None), ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};

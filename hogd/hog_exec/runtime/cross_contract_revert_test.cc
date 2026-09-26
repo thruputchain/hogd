@@ -85,10 +85,9 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
       [contract_a_data, contract_a_key, contract_b_addr](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Contract A writes its own state
-        StorageDeltaFlagSet r0_prior_flags = 0;
         auto r0 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             contract_a_key, std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None), r0_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!r0.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -149,12 +148,10 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                  contract_b_key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   // Contract B writes state that should be reverted
-                  StorageDeltaFlagSet res_prior_flags = 0;
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), contract_b_key,
                       std::as_bytes(std::span(contract_b_data)),
-                      std::to_underlying(StorageDeltaFlags::None),
-                      res_prior_flags);
+                      std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "Failed to set bytestring";
@@ -254,11 +251,10 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
       [contract_a_data, contract_a_key, contract_b_addr](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Contract A writes its own state
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), contract_a_key,
             std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring";
@@ -320,11 +316,10 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
        contract_c_addr](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Contract B writes state that should be reverted
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), contract_b_key,
             std::as_bytes(std::span(contract_b_data)),
-            std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring";
@@ -389,12 +384,10 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                  contract_c_key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   // Contract C writes state that should be reverted
-                  StorageDeltaFlagSet res_prior_flags = 0;
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), contract_c_key,
                       std::as_bytes(std::span(contract_c_data)),
-                      std::to_underlying(StorageDeltaFlags::None),
-                      res_prior_flags);
+                      std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "Failed to set bytestring";
@@ -494,11 +487,10 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
       [contract_a_data, contract_a_key, contract_b_addr](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Contract A writes its own state
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), contract_a_key,
             std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring";

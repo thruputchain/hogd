@@ -64,10 +64,9 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           int128_t set_value = 0;
-          StorageDeltaFlagSet r_prior_flags = 0;
           auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-              key, &set_value, 200, std::to_underlying(StorageDeltaFlags::None),
-              r_prior_flags);
+              key, &set_value, 200,
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -77,10 +76,9 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
         1, // add on (-100)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
-          StorageDeltaFlagSet r_prior_flags = 0;
           auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
               key, static_cast<int128_t const *>(nullptr), -100,
-              std::to_underlying(StorageDeltaFlags::None), r_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }

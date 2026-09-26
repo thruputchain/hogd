@@ -373,10 +373,7 @@ public:
   // The returned span is only valid until another storage item is accessed.
   [[nodiscard]] x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
   get_bytestring(StorageKeyContractData const &storage_key);
-  // set_bytestring, set_nnint and delete_object return the flags of the
-  // pending write they replaced (the syscalls' prior_flags output). The new
-  // write carries only its own flags.
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<StorageDeltaFlagSet>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_bytestring(StorageKeyContractData const &storage_key,
                  std::span<const std::byte> input_bytestring,
                  StorageDeltaFlagSet input_flags);
@@ -390,13 +387,13 @@ public:
       SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
   get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
 
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<StorageDeltaFlagSet>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_nnint(StorageKeyContractData const &storage_key,
             std::optional<int128_t> set_value, const int128_t &add_value,
             StorageDeltaFlagSet input_flags);
 
   // === Delete syscall ===
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<StorageDeltaFlagSet>>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   delete_object(StorageKeyContractData const &storage_key,
                 StorageDeltaFlagSet flags);
 

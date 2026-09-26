@@ -425,10 +425,9 @@ protected:
         }
       }
 
-      StorageDeltaFlagSet set_r_prior_flags = 0;
       auto set_r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
           result_key, std::as_bytes(std::span(record.data(), record.size())),
-          std::to_underlying(StorageDeltaFlags::None), set_r_prior_flags);
+          std::to_underlying(StorageDeltaFlags::None));
       if (!set_r.has_value() ||
           set_r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         ADD_FAILURE() << "capture driver failed to persist result";

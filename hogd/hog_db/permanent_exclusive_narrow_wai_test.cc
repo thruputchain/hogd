@@ -54,11 +54,6 @@
 // keeps the flag and the later transaction is rejected with
 // `ExclusiveLockDenied`.
 //
-// A writer that wants an earlier lock to survive says so on its final delta:
-// the flagged write syscalls report the flags of the write they replaced as
-// `prior_flags`, and the caller reissues with them (see
-// NNIntPriorFlagsLockTest).
-//
 // See: https://github.com/groundhogchain/hogd/issues/3006
 
 #include <gtest/gtest.h>

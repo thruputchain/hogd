@@ -424,12 +424,10 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock),
-            ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -528,12 +526,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock),
-            ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -655,12 +651,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock),
-            ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -764,12 +758,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock),
-            ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -798,11 +790,10 @@ TEST_F(RcqDoctoredProposalDataTest,
         }
 
         auto marker_key = make_storage_key("marker");
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), marker_key,
             std::as_bytes(std::span(std::string_view("honest"))),
-            std::to_underlying(StorageDeltaFlags::None), ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1132,12 +1123,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock),
-            ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

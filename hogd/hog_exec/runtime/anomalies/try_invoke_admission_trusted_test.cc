@@ -184,10 +184,9 @@ protected:
     return [p = std::string(payload)](
                NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
-      StorageDeltaFlagSet ws_prior_flags = 0;
       auto [ws, _wg] = co_await syscall_BytestringSet_inner(
           ctx.handler(), key, std::as_bytes(std::span(std::string_view(p))),
-          std::to_underlying(StorageDeltaFlags::None), ws_prior_flags);
+          std::to_underlying(StorageDeltaFlags::None));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -203,10 +202,7 @@ protected:
   {
     return [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
-      StorageDeltaFlagSet del_prior_flags = 0;
-      auto del =
-          co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0,
-                                                         del_prior_flags);
+      auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
       if (!del.has_value() ||
           del.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -429,11 +425,10 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
         std::string_view marker = child_committed ? "success" : "fallback";
 
         auto key = make_storage_key("root-branch");
-        StorageDeltaFlagSet ws_prior_flags = 0;
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view(marker))),
-            std::to_underlying(StorageDeltaFlags::None), ws_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

@@ -194,11 +194,9 @@ protected:
     fns.emplace(6, // Delete rcq0 key
                 [](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
-                  StorageDeltaFlagSet r_prior_flags = 0;
                   auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(
                       make_storage_key("rcq0"),
-                      std::to_underlying(StorageDeltaFlags::None),
-                      r_prior_flags);
+                      std::to_underlying(StorageDeltaFlags::None));
                   if (!r.has_value() ||
                       r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -208,10 +206,9 @@ protected:
     fns.emplace(
         7, // Delete rcq0 key, then consume (expect no entry)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
               make_storage_key("rcq0"),
-              std::to_underlying(StorageDeltaFlags::None), r1_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -229,10 +226,9 @@ protected:
     fns.emplace(
         8, // Delete rcq0 key, consume (expect no entry), set bytestring
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
               make_storage_key("rcq0"),
-              std::to_underlying(StorageDeltaFlags::None), r1_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -246,10 +242,9 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto const &calldata = ctx.handler().get_calldata();
-          StorageDeltaFlagSet r3_prior_flags = 0;
           auto r3 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
               make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None), r3_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -296,11 +291,9 @@ protected:
             // the value this transaction just wrote
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
-          StorageDeltaFlagSet set_status_prior_flags = 0;
           auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
               make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None),
-              set_status_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!set_status.has_value() ||
               set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -342,11 +335,9 @@ protected:
             // transaction; the insert must convert the key, not fail
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
-          StorageDeltaFlagSet set_status_prior_flags = 0;
           auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
               make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None),
-              set_status_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!set_status.has_value() ||
               set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};

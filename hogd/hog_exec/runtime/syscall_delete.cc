@@ -12,8 +12,7 @@ namespace hogd {
 MaybeAsyncSyscallInnerResult
 syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                            const StorageKeyContractData &input_key,
-                           StorageDeltaFlagSet input_flags,
-                           StorageDeltaFlagSet &output_prior_flags)
+                           StorageDeltaFlagSet input_flags)
 {
   auto status = co_await syscall_handler.delete_object(input_key, input_flags);
   if (!status) {
@@ -25,7 +24,6 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{delete_status.error().code(),
                                  WrappedGasAmount{0}};
   }
-  output_prior_flags = *delete_status;
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
                                WrappedGasAmount{0}};

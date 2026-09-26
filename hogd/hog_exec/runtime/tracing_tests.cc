@@ -485,11 +485,9 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
-          StorageDeltaFlagSet res_prior_flags = 0;
           auto [res, _gas] = co_await syscall_BytestringSet_inner(
               ctx.handler(), key, std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::ExclusiveLock),
-              res_prior_flags);
+              std::to_underlying(StorageDeltaFlags::ExclusiveLock));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring";

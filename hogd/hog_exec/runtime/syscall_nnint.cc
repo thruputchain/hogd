@@ -74,8 +74,7 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
                                    const int128_t &input_add_value,
-                                   StorageDeltaFlagSet input_flags,
-                                   StorageDeltaFlagSet &output_prior_flags)
+                                   StorageDeltaFlagSet input_flags)
 {
   std::optional<int128_t> set_value = std::nullopt;
   if (optional_input_set_value) {
@@ -93,7 +92,6 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{(*status).error().code(),
                                  WrappedGasAmount{kStorageAccessCost}};
   }
-  output_prior_flags = **status;
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
                                WrappedGasAmount{kStorageAccessCost}};

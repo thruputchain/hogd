@@ -1,15 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <span>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "db_conflict.hh"
 #include "exec_result.hh"
@@ -26,8 +22,6 @@
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
-#include "invoke_args.hh"
-#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -73,10 +67,9 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
   fns.emplace(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("test");
-        StorageDeltaFlagSet r_prior_flags = 0;
         auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
             key, static_cast<int128_t const *>(nullptr), 200,
-            std::to_underlying(StorageDeltaFlags::None), r_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -98,10 +91,9 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
           co_return err;
         }
 
-        StorageDeltaFlagSet r3_prior_flags = 0;
         auto r3 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
             key, static_cast<int128_t const *>(nullptr), 300,
-            std::to_underlying(StorageDeltaFlags::None), r3_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!r3.has_value() || *r3 != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -180,19 +172,16 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("test");
         int128_t set_value = 200;
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_value, 300, std::to_underlying(StorageDeltaFlags::None),
-            res_prior_flags);
+            key, &set_value, 300, std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             *res != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        StorageDeltaFlagSet res2_prior_flags = 0;
         auto res2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
             key, static_cast<int128_t const *>(nullptr), 100,
-            std::to_underlying(StorageDeltaFlags::None), res2_prior_flags);
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res2.has_value() ||
             *res2 != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -285,10 +274,9 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           int128_t set_value = 0;
-          StorageDeltaFlagSet r_prior_flags = 0;
           auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-              key, &set_value, 200, std::to_underlying(StorageDeltaFlags::None),
-              r_prior_flags);
+              key, &set_value, 200,
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -298,10 +286,9 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
         1, // Second method: add on (-100)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
-          StorageDeltaFlagSet r_prior_flags = 0;
           auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
               key, static_cast<int128_t const *>(nullptr), -100,
-              std::to_underlying(StorageDeltaFlags::None), r_prior_flags);
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -462,12 +449,10 @@ TEST_F(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
               [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 auto key = make_storage_key("neg_base");
                 int128_t set_value = -1;
-                StorageDeltaFlagSet res_prior_flags = 0;
                 auto res =
                     co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
                         key, &set_value, 0,
-                        std::to_underlying(StorageDeltaFlags::None),
-                        res_prior_flags);
+                        std::to_underlying(StorageDeltaFlags::None));
                 if (!res.has_value() ||
                     *res != SyscallErrorCode::kSyscallErrorCodeNone) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -526,12 +511,10 @@ TEST_F(NNIntAddTest, NegativeSetValueWithPositiveAdd)
               [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 auto key = make_storage_key("neg_base_pos_add");
                 int128_t set_value = -5;
-                StorageDeltaFlagSet res_prior_flags = 0;
                 auto res =
                     co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
                         key, &set_value, 10,
-                        std::to_underlying(StorageDeltaFlags::None),
-                        res_prior_flags);
+                        std::to_underlying(StorageDeltaFlags::None));
                 if (!res.has_value() ||
                     *res != SyscallErrorCode::kSyscallErrorCodeNone) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -590,10 +573,8 @@ TEST_F(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("neg_base_neg_add");
         int128_t set_value = -1;
-        StorageDeltaFlagSet res_prior_flags = 0;
         auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_value, -1, std::to_underlying(StorageDeltaFlags::None),
-            res_prior_flags);
+            key, &set_value, -1, std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -632,319 +613,6 @@ TEST_F(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
-
-// Each flagged write reports the flags of the write it replaced; the write
-// itself carries only its own flags.
-TEST_F(NNIntAddTest, WritesReportPriorFlags)
-{
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto const key = make_storage_key("test");
-        auto const none = std::to_underlying(StorageDeltaFlags::None);
-        auto const exclusive =
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock);
-        auto const *no_set = static_cast<int128_t const *>(nullptr);
-        auto ok = [](HostFnStatus<SyscallErrorCode> const &r) {
-          return r.has_value() && *r == SyscallErrorCode::kSyscallErrorCodeNone;
-        };
-
-        // Nothing written yet in this transaction.
-        StorageDeltaFlagSet prior = -1;
-        if (!ok(co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                key, no_set, 1, exclusive, prior)) ||
-            prior != none) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        prior = -1;
-        if (!ok(co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                key, no_set, 2, none, prior)) ||
-            prior != exclusive) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        prior = -1;
-        if (!ok(co_await ctx.syscall<SyscallNo::kDeleteObject>(key, exclusive,
-                                                               prior)) ||
-            prior != none) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        prior = -1;
-        std::vector<std::byte> const bytes{std::byte{1}};
-        if (!ok(co_await ctx.syscall<SyscallNo::kBytestringSet>(
-                key, std::as_bytes(std::span(bytes)), none, prior)) ||
-            prior != exclusive) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-
-        // A rejected write (1 + -2 < 0) leaves the pending write and its
-        // flags in place, so the next write still reports them.
-        int128_t const set_one = 1;
-        auto rejected = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_one, -2, exclusive, prior);
-        if (!rejected.has_value() ||
-            *rejected !=
-                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        prior = -1;
-        if (!ok(co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                key, no_set, 1, none, prior)) ||
-            prior != none) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return InvokeStatus<void>{};
-      });
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts;
-  contracts.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
-  NativeContext context(std::move(contracts));
-
-  auto const contract = make_native_contract(0);
-  auto const address = make_contract_address(0);
-  write_contract(contract);
-  write_deployment(address, contract);
-  setup_grant_storage_token(address, 1'000'000'000);
-
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                Invocation{.invoked_address = address,
-                                           .entrypoint =
-                                               entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                            .uniquifier = make_new_uniquifier()}},
-      context);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
-
-namespace {
-
-enum class LockSequence {
-  kWriteThenWrite,
-  kDeleteThenWrite,
-  kSuccessfulChild,
-  kRevertedChild,
-  kRevertedChildAfterExclusive,
-  kFailedTryInvoke,
-  kFailedTryInvokeAfterExclusive,
-};
-
-enum LockMethod : Runtime::MethodID {
-  kShared,
-  kExclusive,
-  kExclusiveThenShared,
-  kDeleteThenShared,
-  kRevertExclusive,
-  kRevertShared,
-  kFailExclusive,
-};
-
-// Adds 1 to (or deletes) the "test" key with [flags]. With [retain], a write
-// that dropped a flag held by the write it replaced is reissued with the
-// union: the policy a contract, or its SDK, can build on prior_flags.
-x23::Async<bool>
-write_test_key(NativeSyscallContext &ctx, bool is_delete,
-               StorageDeltaFlagSet flags, bool retain)
-{
-  auto const key = NativeContractTestFramework::make_storage_key("test");
-  for (;;) {
-    StorageDeltaFlagSet prior_flags = 0;
-    HostFnStatus<SyscallErrorCode> r = SyscallErrorCode::kSyscallErrorCodeNone;
-    if (is_delete) {
-      r = co_await ctx.syscall<SyscallNo::kDeleteObject>(key, flags,
-                                                         prior_flags);
-    }
-    else {
-      r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-          key, static_cast<int128_t const *>(nullptr), 1, flags, prior_flags);
-    }
-    if (!r || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
-      co_return false;
-    }
-    // NOLINTNEXTLINE(bugprone-signed-bitwise)
-    if (!retain || (prior_flags & ~flags) == 0) {
-      co_return true;
-    }
-    flags |= prior_flags; // NOLINT(bugprone-signed-bitwise)
-  }
-}
-
-class NNIntPriorFlagsLockTest
-  : public NNIntAddTest,
-    public ::testing::WithParamInterface<
-        std::tuple<LockSequence, bool, bool, bool>> {};
-
-// The host keeps last-write-wins (#3006): without retention no sequence below
-// ends on an exclusive write, so a same-block writer is admitted in either
-// commit order. A caller that reissues with prior_flags keeps any exclusive
-// write that stayed visible -- successful children included, reverted and
-// failed TryInvoke children excluded -- which is what hogd#4156 proposed to
-// build into ItemView.
-TEST_P(NNIntPriorFlagsLockTest, CallerRetainsOnlyVisibleExclusiveWrites)
-{
-  auto const [sequence, exclusive_first, initially_zero, retain] = GetParam();
-  auto const storage_address = make_contract_address(0);
-  auto const caller_address = make_contract_address(1);
-  std::vector<LockMethod> calls;
-  switch (sequence) {
-  case LockSequence::kWriteThenWrite:
-    calls = {kExclusiveThenShared};
-    break;
-  case LockSequence::kDeleteThenWrite:
-    calls = {kDeleteThenShared};
-    break;
-  case LockSequence::kSuccessfulChild:
-    calls = {kExclusive, kShared};
-    break;
-  case LockSequence::kRevertedChild:
-    calls = {kRevertExclusive, kShared};
-    break;
-  case LockSequence::kRevertedChildAfterExclusive:
-    calls = {kExclusive, kRevertShared, kShared};
-    break;
-  case LockSequence::kFailedTryInvoke:
-    calls = {kFailExclusive, kShared};
-    break;
-  case LockSequence::kFailedTryInvokeAfterExclusive:
-    calls = {kExclusive, kFailExclusive, kShared};
-    break;
-  }
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> storage_fns;
-  for (auto method :
-       {kShared, kExclusive, kExclusiveThenShared, kDeleteThenShared,
-        kRevertExclusive, kRevertShared, kFailExclusive}) {
-    storage_fns.emplace(
-        method,
-        [method,
-         retain](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          auto const none = std::to_underlying(StorageDeltaFlags::None);
-          auto const exclusive =
-              std::to_underlying(StorageDeltaFlags::ExclusiveLock);
-          auto const shared = method == kShared || method == kRevertShared;
-          if (!co_await write_test_key(ctx, method == kDeleteThenShared,
-                                       shared ? none : exclusive, retain)) {
-            co_return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          if (method == kExclusiveThenShared || method == kDeleteThenShared) {
-            if (!co_await write_test_key(ctx, false, none, retain)) {
-              co_return InvokeError{InvokeErrorCode::Deterministic};
-            }
-          }
-          if (method == kFailExclusive) {
-            // The syscall succeeds; TryInvoke's bounds-lock acquisition fails.
-            StorageDeltaFlagSet prior_flags = 0;
-            auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                make_storage_key("empty"),
-                static_cast<int128_t const *>(nullptr), -1, none, prior_flags);
-            if (!r || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
-              co_return InvokeError{InvokeErrorCode::Deterministic};
-            }
-          }
-          if (method == kRevertExclusive || method == kRevertShared) {
-            ctx.handler().set_return_buffer(ReturnBuffer{}, true, {});
-          }
-          co_return InvokeStatus<void>{};
-        });
-  }
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> caller_fns;
-  caller_fns.emplace(
-      0,
-      [storage_address,
-       calls](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        for (auto method : calls) {
-          CopyableInvokeInputs inputs{
-              .entrypoint_id = method,
-              .gas_limit = UINT64_MAX,
-              .flags = method == kFailExclusive
-                           ? std::to_underlying(InvokeFlag::TryInvoke)
-                           : std::to_underlying(InvokeFlag::None)};
-          CopyableInvokeOutputs outputs{};
-          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
-              storage_address, std::span<const std::byte>{},
-              std::span<uint32_t>{}, inputs, outputs);
-          auto expected = InvocationFrameStatusCode::Return;
-          if (method == kRevertExclusive || method == kRevertShared) {
-            expected = InvocationFrameStatusCode::Abort;
-          }
-          else if (method == kFailExclusive) {
-            expected = InvocationFrameStatusCode::Fault;
-          }
-          if (!r || *r != SyscallErrorCode::kSyscallErrorCodeNone ||
-              outputs.frame_status != expected) {
-            co_return InvokeError{InvokeErrorCode::Deterministic};
-          }
-        }
-        co_return InvokeStatus<void>{};
-      });
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts;
-  contracts.emplace(0,
-                    std::make_unique<NativeContract>(std::move(storage_fns)));
-  contracts.emplace(1, std::make_unique<NativeContract>(std::move(caller_fns)));
-  NativeContext context(std::move(contracts));
-  for (int32_t id : {0, 1}) {
-    auto const contract = make_native_contract(id);
-    auto const address = make_contract_address(id);
-    write_contract(contract);
-    write_deployment(address, contract);
-    setup_grant_storage_token(address, 1'000'000'000);
-  }
-  // A nonzero base could make delete/recreate conflict even without the lock.
-  if (initially_zero) {
-    write_item(make_contract_data_addrkey(storage_address, "test"),
-               std::make_shared<StorageItemWrapper>(0,
-                                                    get_default_cost_model()));
-  }
-  auto make_handler = [&](bool run_sequence) {
-    return make_new_system_call_handler(
-        SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address =
-                                                 run_sequence ? caller_address
-                                                              : storage_address,
-                                             .entrypoint =
-                                                 entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {}},
-                              .uniquifier = make_new_uniquifier()}},
-        context);
-  };
-  auto first = make_handler(exclusive_first);
-  auto second = make_handler(!exclusive_first);
-  ASSERT_TRUE(first.root_invoke()().is_root_success());
-  ASSERT_TRUE(second.root_invoke()().is_root_success());
-  ASSERT_EQ(first.try_commit_transaction()(), ExecResult::ExecResultOK);
-  auto const locked = retain && sequence != LockSequence::kRevertedChild &&
-                      sequence != LockSequence::kFailedTryInvoke;
-  ASSERT_EQ(second.try_commit_transaction()(),
-            locked ? ExecResult::ExecResultTxNonDeterministicError
-                   : ExecResult::ExecResultOK);
-  advance_block();
-  auto item = lookup_storage_item_from_db(
-      make_contract_data_addrkey(storage_address, "test"));
-  ASSERT_TRUE(item.has_value());
-  ASSERT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
-  EXPECT_EQ(from_xdr(item->nnint()), locked ? 1 : 2);
-  EXPECT_FALSE(lookup_storage_item_from_db(
-                   make_contract_data_addrkey(storage_address, "empty"))
-                   .has_value());
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    CommitOrdersInitialValuesAndRetention, NNIntPriorFlagsLockTest,
-    ::testing::Combine(
-        ::testing::Values(LockSequence::kWriteThenWrite,
-                          LockSequence::kDeleteThenWrite,
-                          LockSequence::kSuccessfulChild,
-                          LockSequence::kRevertedChild,
-                          LockSequence::kRevertedChildAfterExclusive,
-                          LockSequence::kFailedTryInvoke,
-                          LockSequence::kFailedTryInvokeAfterExclusive),
-        ::testing::Bool(), ::testing::Bool(), ::testing::Bool()));
-
-} // namespace
-
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
