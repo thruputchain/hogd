@@ -68,8 +68,7 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("test");
         auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, static_cast<int128_t const *>(nullptr), 200,
-            std::to_underlying(StorageDeltaFlags::None));
+            key, static_cast<int128_t const *>(nullptr), 200);
         if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -92,8 +91,7 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
         }
 
         auto r3 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, static_cast<int128_t const *>(nullptr), 300,
-            std::to_underlying(StorageDeltaFlags::None));
+            key, static_cast<int128_t const *>(nullptr), 300);
         if (!r3.has_value() || *r3 != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -168,44 +166,45 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
 TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto key = make_storage_key("test");
-        int128_t set_value = 200;
-        auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_value, 300, std::to_underlying(StorageDeltaFlags::None));
-        if (!res.has_value() ||
-            *res != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto key = make_storage_key("test");
+                int128_t set_value = 200;
+                auto res =
+                    co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                        key, &set_value, 300);
+                if (!res.has_value() ||
+                    *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-        auto res2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, static_cast<int128_t const *>(nullptr), 100,
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!res2.has_value() ||
-            *res2 != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                auto res2 =
+                    co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                        key, static_cast<int128_t const *>(nullptr), 100);
+                if (!res2.has_value() ||
+                    *res2 != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-        int128_t output_set_3{};
-        bool output_set_opt_3{};
-        int128_t output_add_3{};
-        auto res3 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-            key, true, output_set_3, output_set_opt_3, output_add_3);
-        if (!res3.has_value() ||
-            *res3 != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (auto err = check_nnint_get_result(
-                output_set_opt_3 ? std::optional<int128_t>(output_set_3)
-                                 : std::nullopt,
-                output_add_3, 50, 100);
-            !err) {
-          co_return err;
-        }
+                int128_t output_set_3{};
+                bool output_set_opt_3{};
+                int128_t output_add_3{};
+                auto res3 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                    key, true, output_set_3, output_set_opt_3, output_add_3);
+                if (!res3.has_value() ||
+                    *res3 != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                if (auto err = check_nnint_get_result(
+                        output_set_opt_3 ? std::optional<int128_t>(output_set_3)
+                                         : std::nullopt,
+                        output_add_3, 50, 100);
+                    !err) {
+                  co_return err;
+                }
 
-        co_return InvokeStatus<void>{};
-      });
+                co_return InvokeStatus<void>{};
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -274,9 +273,10 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           int128_t set_value = 0;
-          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-              key, &set_value, 200,
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r =
+              co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(key,
+                                                                     &set_value,
+                                                                     200);
           if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -287,8 +287,7 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-              key, static_cast<int128_t const *>(nullptr), -100,
-              std::to_underlying(StorageDeltaFlags::None));
+              key, static_cast<int128_t const *>(nullptr), -100);
           if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -451,8 +450,7 @@ TEST_F(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
                 int128_t set_value = -1;
                 auto res =
                     co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                        key, &set_value, 0,
-                        std::to_underlying(StorageDeltaFlags::None));
+                        key, &set_value, 0);
                 if (!res.has_value() ||
                     *res != SyscallErrorCode::kSyscallErrorCodeNone) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -513,8 +511,7 @@ TEST_F(NNIntAddTest, NegativeSetValueWithPositiveAdd)
                 int128_t set_value = -5;
                 auto res =
                     co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                        key, &set_value, 10,
-                        std::to_underlying(StorageDeltaFlags::None));
+                        key, &set_value, 10);
                 if (!res.has_value() ||
                     *res != SyscallErrorCode::kSyscallErrorCodeNone) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -573,8 +570,10 @@ TEST_F(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("neg_base_neg_add");
         int128_t set_value = -1;
-        auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_value, -1, std::to_underlying(StorageDeltaFlags::None));
+        auto res =
+            co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(key,
+                                                                   &set_value,
+                                                                   -1);
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }

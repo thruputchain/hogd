@@ -73,16 +73,14 @@ MaybeAsyncSyscallInnerResult
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
-                                   const int128_t &input_add_value,
-                                   StorageDeltaFlagSet input_flags)
+                                   const int128_t &input_add_value)
 {
   std::optional<int128_t> set_value = std::nullopt;
   if (optional_input_set_value) {
     set_value = *optional_input_set_value;
   }
   auto status =
-      co_await syscall_handler.set_nnint(input_key, set_value, input_add_value,
-                                         input_flags);
+      co_await syscall_handler.set_nnint(input_key, set_value, input_add_value);
   if (!status.has_value()) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};

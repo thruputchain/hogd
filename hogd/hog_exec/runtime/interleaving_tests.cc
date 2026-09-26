@@ -57,9 +57,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
         [](NativeSyscallContext &ctx, int64_t set_amount,
            int64_t add_amount) -> x23::Async<InvokeStatus<void>> {
           auto r =
-              co_await ctx.handler().set_nnint(kKey, set_amount, add_amount,
-                                               std::to_underlying(
-                                                   StorageDeltaFlags::None));
+              co_await ctx.handler().set_nnint(kKey, set_amount, add_amount);
           if (!r.has_value() || !r.value().has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -68,8 +66,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     // reset contract state
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          auto r = co_await ctx.handler().set_nnint(
-              kKey, 35, 0, std::to_underlying(StorageDeltaFlags::None));
+          auto r = co_await ctx.handler().set_nnint(kKey, 35, 0);
           if (!r.has_value() || !r.value().has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }

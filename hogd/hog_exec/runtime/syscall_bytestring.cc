@@ -104,12 +104,10 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
 MaybeAsyncSyscallInnerResult
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
-                            std::span<const std::byte> input_bytestring,
-                            StorageDeltaFlagSet input_flags)
+                            std::span<const std::byte> input_bytestring)
 {
   auto status =
-      co_await syscall_handler.set_bytestring(input_key, input_bytestring,
-                                              input_flags);
+      co_await syscall_handler.set_bytestring(input_key, input_bytestring);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};

@@ -11,6 +11,9 @@ fi
 
 target="riscv32im-unknown-none-elf"
 expected_rustc_release="1.95.0"
+# rv32-lower 0.5.12 stamps syscall ABI v1. The checked-in fixture was re-stamped
+# to v2 by hand: the field is outside both section digests, and the program
+# makes no storage syscalls. --check needs a lowerer that stamps v2.
 expected_lowerer_version="rv32-lower 0.5.12"
 profile="release"
 elf="target/${target}/${profile}/rv32-compiled-sha256-return"

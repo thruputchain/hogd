@@ -28,7 +28,11 @@ inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 // v2 seeded sp to the top of data memory.
 inline constexpr uint32_t kArtifactEntryAbiVersion = 3;
 // v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
-inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
+// v2: BytestringSet, NonnegativeIntSetAdd and DeleteObject take no storage
+// flags; SetStorageFlags, GetStorageFlags and ClearStorageFlags manage them.
+// A v1 guest still passes flags that those writes no longer read, so a v1
+// artifact must not load: its exclusive locks would silently disappear.
+inline constexpr uint32_t kArtifactSyscallAbiVersion = 2;
 inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // Version of the RV32 gas schedule (instruction + host-syscall costs) stamped
 // into the header at kArtifactGasVersionOffset and validated at load.
@@ -274,13 +278,14 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0xa538cd2d169ed390ULL);
+static_assert(kArtifactFormatFingerprint == 0x2acb6b7f70f8b781ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
 // The fingerprints a lowerer may report: one per lowerer generation in the
 // field, pinned to what that lowerer emits. The transitional entries go with
-// kAcceptedGasSchedules' transitional entry.
+// kAcceptedGasSchedules' transitional entry. Every entry folds this build's
+// syscall ABI version, so a lowerer that still stamps v1 matches none.
 inline constexpr std::array<uint64_t, 3> kAcceptedFormatFingerprints = {
     // This build's own.
     kArtifactFormatFingerprint,
@@ -293,8 +298,8 @@ inline constexpr std::array<uint64_t, 3> kAcceptedFormatFingerprints = {
                        kTransitionalGasScheduleDigest,
                        /*folds_fixed_bounds=*/false),
 };
-static_assert(kAcceptedFormatFingerprints[1] == 0x8e5caf3e9cd23b22ULL);
-static_assert(kAcceptedFormatFingerprints[2] == 0xc5f00a7d4451045eULL);
+static_assert(kAcceptedFormatFingerprints[1] == 0x59a1e55b7a501cebULL);
+static_assert(kAcceptedFormatFingerprints[2] == 0xbd2fe60d19c6a827ULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 

@@ -576,12 +576,11 @@ make_storage_event_return_image()
                     initial_memory.begin() + kEffectEventDataAddress);
 
   std::vector<uint32_t> program;
-  // BytestringSet(key, value, value_len, flags).
+  // BytestringSet(key, value, value_len).
   append_syscall(program, {static_cast<int32_t>(SyscallNo::kBytestringSet),
                            static_cast<int32_t>(kEffectStorageKeyAddress),
                            static_cast<int32_t>(kEffectStorageValueAddress),
-                           static_cast<int32_t>(kEffectStorageValue.size()),
-                           static_cast<int32_t>(StorageDeltaFlags::None)});
+                           static_cast<int32_t>(kEffectStorageValue.size())});
   // LogEvent(topic0, topic1=None, topic2=None, data, data_len). The -1 register
   // values produce the UINT32_MAX optional-pointer None sentinel.
   append_syscall(program, {static_cast<int32_t>(SyscallNo::kLogEvent),
@@ -879,7 +878,7 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   const std::vector<uint8_t> data(kEffectEventData.begin(),
                                   kEffectEventData.end());
 
-  // BytestringSet is 5 addi + ecall, LogEvent 6 addi + ecall, and the empty
+  // BytestringSet is 4 addi + ecall, LogEvent 6 addi + ecall, and the empty
   // Return 6 addi + ecall; syscall costs beyond base instruction gas come
   // from the gas cost table.
   //
@@ -893,11 +892,9 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    body.bytestring_set().inputs.flags =
-        static_cast<uint32_t>(StorageDeltaFlags::None);
     expected.push_back(
-        make_trace_entry(kParityGas - 6,
-                         kParityGas - 6 - kSyscallBaseCost - write_cost,
+        make_trace_entry(kParityGas - 5,
+                         kParityGas - 5 - kSyscallBaseCost - write_cost,
                          std::move(body), ok_status()));
   }
   {
@@ -905,12 +902,12 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
     expected.push_back(
-        make_trace_entry(kParityGas - 13 - kSyscallBaseCost - write_cost,
-                         kParityGas - 13 - (2 * kSyscallBaseCost) - write_cost,
+        make_trace_entry(kParityGas - 12 - kSyscallBaseCost - write_cost,
+                         kParityGas - 12 - (2 * kSyscallBaseCost) - write_cost,
                          std::move(body), ok_status()));
   }
   expected.push_back(
-      return_trace_entry(kParityGas - 20 - (2 * kSyscallBaseCost) - write_cost,
+      return_trace_entry(kParityGas - 19 - (2 * kSyscallBaseCost) - write_cost,
                          {}));
 
   EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);

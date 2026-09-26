@@ -87,8 +87,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
                   NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 // Write state that should be reverted
                 auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                    ctx.handler(), key, std::as_bytes(std::span(str_hello)),
-                    std::to_underlying(StorageDeltaFlags::None));
+                    ctx.handler(), key, std::as_bytes(std::span(str_hello)));
                 if (!res.has_value() ||
                     res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                   ADD_FAILURE()
@@ -173,8 +172,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
       [parent_data, parent_key, kAddressChild](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), parent_key, std::as_bytes(std::span(parent_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+            ctx.handler(), parent_key, std::as_bytes(std::span(parent_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
@@ -228,8 +226,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
       [child_data, child_return_data,
        child_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), child_key, std::as_bytes(std::span(child_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+            ctx.handler(), child_key, std::as_bytes(std::span(child_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
@@ -318,8 +315,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                 [test_data, return_data, key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(test_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      ctx.handler(), key, std::as_bytes(std::span(test_data)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -340,8 +336,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                 [test_data, key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(test_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      ctx.handler(), key, std::as_bytes(std::span(test_data)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -444,8 +439,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                   auto temp_key = make_storage_key("temp_" + std::to_string(i));
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), temp_key,
-                      std::as_bytes(std::span(test_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      std::as_bytes(std::span(test_data)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -549,8 +543,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
        return1](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("level1");
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key, std::as_bytes(std::span(data1)),
-            std::to_underlying(StorageDeltaFlags::None));
+            ctx.handler(), key, std::as_bytes(std::span(data1)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
@@ -595,8 +588,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
        return2](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("level2");
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key, std::as_bytes(std::span(data2)),
-            std::to_underlying(StorageDeltaFlags::None));
+            ctx.handler(), key, std::as_bytes(std::span(data2)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
@@ -640,8 +632,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                     -> x23::Async<InvokeStatus<void>> {
                   auto key = make_storage_key("level3");
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(data3)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      ctx.handler(), key, std::as_bytes(std::span(data3)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -732,8 +723,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                     -> x23::Async<InvokeStatus<void>> {
                   // Write state that should be reverted on error
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(test_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      ctx.handler(), key, std::as_bytes(std::span(test_data)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
@@ -756,8 +746,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
          key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Write state that should be reverted on error
           auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(test_data)),
-              std::to_underlying(StorageDeltaFlags::None));
+              ctx.handler(), key, std::as_bytes(std::span(test_data)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
@@ -780,8 +769,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
          key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Write state that should be reverted on error
           auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(test_data)),
-              std::to_underlying(StorageDeltaFlags::None));
+              ctx.handler(), key, std::as_bytes(std::span(test_data)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
@@ -803,8 +791,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                     -> x23::Async<InvokeStatus<void>> {
                   // Write state that should NOT be reverted (no error)
                   auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(test_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      ctx.handler(), key, std::as_bytes(std::span(test_data)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
@@ -931,8 +918,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
       [parent_data, parent_key](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), parent_key, std::as_bytes(std::span(parent_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+            ctx.handler(), parent_key, std::as_bytes(std::span(parent_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring in parent contract";
@@ -988,8 +974,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
       [child_data, child_return_data,
        child_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), child_key, std::as_bytes(std::span(child_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+            ctx.handler(), child_key, std::as_bytes(std::span(child_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring in child contract";
@@ -1031,10 +1016,10 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
       0,
       [grandchild_data, grandchild_key](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), grandchild_key,
-            std::as_bytes(std::span(grandchild_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto [res, _gas] =
+            co_await syscall_BytestringSet_inner(ctx.handler(), grandchild_key,
+                                                 std::as_bytes(std::span(
+                                                     grandchild_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring in grandchild contract";

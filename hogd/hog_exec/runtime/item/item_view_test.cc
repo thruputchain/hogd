@@ -363,6 +363,75 @@ TEST_F(ItemViewTest, CrossTypeOverwriteNNIntToBytestring)
   EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeBytestringSet);
 }
 
+constexpr StorageDeltaFlagSet kNoFlags =
+    std::to_underlying(StorageDeltaFlags::None);
+constexpr StorageDeltaFlagSet kExclusive =
+    std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+TEST_F(ItemViewTest, FlagsNeedAPendingWrite)
+{
+  ItemView proxy;
+  EXPECT_FALSE(proxy.has_pending_write());
+  EXPECT_FALSE(proxy.set_flags(kExclusive));
+  EXPECT_EQ(proxy.flags(), kNoFlags);
+
+  // A deletion is a write, so flags attach to it.
+  EXPECT_TRUE(proxy.set(DeletedItem{}));
+  EXPECT_TRUE(proxy.has_pending_write());
+  EXPECT_TRUE(proxy.set_flags(kExclusive));
+  EXPECT_EQ(proxy.flags(), kExclusive);
+}
+
+TEST_F(ItemViewTest, WritesKeepFlags)
+{
+  ItemView proxy;
+  ASSERT_TRUE(proxy.set(BytestringItem(Bytestring{1, 2})));
+  ASSERT_TRUE(proxy.set_flags(kExclusive));
+
+  // A write of another type and a rejected write both leave the flags alone.
+  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(5)), to_xdr(int128_t(1)))));
+  EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(5)), to_xdr(int128_t(-6)))));
+  EXPECT_EQ(proxy.flags(), kExclusive);
+
+  auto [delta, flags] = proxy.get_delta();
+  ASSERT_TRUE(delta.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+  EXPECT_EQ(flags, kExclusive);
+}
+
+TEST_F(ItemViewTest, SetFlagsAddsAndClearFlagsRemoves)
+{
+  ItemView proxy;
+  ASSERT_TRUE(proxy.set(BytestringItem(Bytestring{1})));
+
+  ASSERT_TRUE(proxy.set_flags(kExclusive));
+  EXPECT_TRUE(proxy.set_flags(kNoFlags));
+  EXPECT_TRUE(proxy.set_flags(kExclusive));
+  EXPECT_EQ(proxy.flags(), kExclusive);
+
+  proxy.clear_flags();
+  EXPECT_EQ(proxy.flags(), kNoFlags);
+  EXPECT_EQ(proxy.get_delta().second, kNoFlags);
+  // Clearing drops the flags, not the write.
+  EXPECT_TRUE(proxy.template get<BytestringItem>());
+}
+
+TEST_F(ItemViewTest, FrameCopiesCarryFlags)
+{
+  // A frame works on a copy of its parent's view and copies it back only on
+  // success, so a flag change must travel with the copy and nowhere else.
+  ItemView parent;
+  ASSERT_TRUE(parent.set(BytestringItem(Bytestring{1})));
+
+  ItemView child = parent;
+  ASSERT_TRUE(child.set_flags(kExclusive));
+  EXPECT_EQ(parent.flags(), kNoFlags);
+
+  parent = child;
+  EXPECT_EQ(parent.flags(), kExclusive);
+}
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(ItemViewTest, RCQInsertOverflow)
 {

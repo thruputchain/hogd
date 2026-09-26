@@ -1668,16 +1668,9 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
-                                  std::span<const std::byte> input_bytestring,
-                                  StorageDeltaFlagSet input_flags)
+                                  std::span<const std::byte> input_bytestring)
 {
   CHECK(!is_read_only());
-
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
-          input_flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
 
   if (input_bytestring.size() > config_params().max_bytestring_len) {
     co_return SyscallError{
@@ -1697,7 +1690,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                 input_bytestring.size());
   }
 
-  co_return item_view->set(BytestringItem(std::move(new_string)), input_flags);
+  co_return item_view->set(BytestringItem(std::move(new_string)));
 }
 
 GasAmount
@@ -1813,16 +1806,9 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
-                             const int128_t &add_value,
-                             StorageDeltaFlagSet input_flags)
+                             const int128_t &add_value)
 {
   CHECK(!is_read_only());
-
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
-          input_flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
@@ -1831,30 +1817,57 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  co_return item_view->set(NNIntItem{.base_value_ =
-                                         set_value.has_value()
-                                             ? std::optional<int128_xdr>(
-                                                   to_xdr(*set_value))
-                                             : std::nullopt,
-                                     .add_value_ = to_xdr(add_value)},
-                           input_flags);
+  co_return item_view->set(
+      NNIntItem{.base_value_ =
+                    set_value.has_value()
+                        ? std::optional<int128_xdr>(to_xdr(*set_value))
+                        : std::nullopt,
+                .add_value_ = to_xdr(add_value)});
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
-SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
-                                 StorageDeltaFlagSet flags)
+SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
+{
+  CHECK(!is_read_only());
+
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  co_return item_view->set(DeletedItem{});
+}
+
+SyscallStatus<void>
+SystemCallHandler::set_storage_flags(StorageKeyContractData const &storage_key,
+                                     StorageDeltaFlagSet flags)
 {
   CHECK(!is_read_only());
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  co_return item_view->set(DeletedItem{}, flags);
+  return item_view->set_flags(flags);
+}
+
+StorageDeltaFlagSet
+SystemCallHandler::get_storage_flags(StorageKeyContractData const &storage_key)
+{
+  auto const *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  return item_view->flags();
+}
+
+void
+SystemCallHandler::clear_storage_flags(
+    StorageKeyContractData const &storage_key)
+{
+  CHECK(!is_read_only());
+
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  item_view->clear_flags();
 }
 
 namespace {

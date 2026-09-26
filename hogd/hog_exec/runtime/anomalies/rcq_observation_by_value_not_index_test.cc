@@ -142,8 +142,7 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
 
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("result"),
-            std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -263,8 +262,7 @@ TEST_F(RCQObservationByValueTest,
 
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("result"),
-            std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -343,37 +341,36 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
 {
   static constexpr uint8_t kEntry = 0xA7;
 
-  auto contract = make_contract(
-      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto key = make_storage_key("rcq0");
+  auto contract = make_contract([](NativeSyscallContext &ctx)
+                                    -> x23::Async<InvokeStatus<void>> {
+    auto key = make_storage_key("rcq0");
 
-        auto peek_res =
-            co_await ctx.handler().retrocausal_queue_consume(key, true);
-        if (!peek_res.has_value())
-          co_return peek_res.error().to_invoke_error();
-        if (!peek_res.value().has_value())
-          co_return InvokeError{InvokeErrorCode::Deterministic};
+    auto peek_res = co_await ctx.handler().retrocausal_queue_consume(key, true);
+    if (!peek_res.has_value())
+      co_return peek_res.error().to_invoke_error();
+    if (!peek_res.value().has_value())
+      co_return InvokeError{InvokeErrorCode::Deterministic};
 
-        auto const &peeked = peek_res.value().value();
-        if (peeked.size() != 1 || peeked[0] != kEntry)
-          co_return InvokeError{InvokeErrorCode::Deterministic};
+    auto const &peeked = peek_res.value().value();
+    if (peeked.size() != 1 || peeked[0] != kEntry)
+      co_return InvokeError{InvokeErrorCode::Deterministic};
 
-        uint8_t entry = kEntry;
-        auto insert_res = co_await ctx.handler().retrocausal_queue_insert(
-            key, std::as_bytes(std::span(&entry, 1)));
-        if (!insert_res.has_value())
-          co_return insert_res.error().to_invoke_error();
+    uint8_t entry = kEntry;
+    auto insert_res = co_await ctx.handler().retrocausal_queue_insert(
+        key, std::as_bytes(std::span(&entry, 1)));
+    if (!insert_res.has_value())
+      co_return insert_res.error().to_invoke_error();
 
-        auto marker = std::string_view("ok");
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("marker"),
-            std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!ws.has_value() ||
-            ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        co_return InvokeStatus<void>{};
-      });
+    auto marker = std::string_view("ok");
+    auto [ws, _wg] =
+        co_await syscall_BytestringSet_inner(ctx.handler(),
+                                             make_storage_key("marker"),
+                                             std::as_bytes(std::span(marker)));
+    if (!ws.has_value() ||
+        ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeStatus<void>{};
+  });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(contract));
@@ -446,8 +443,7 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
         auto const &entry = peek_res.value().value();
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("saw"),
-            std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};

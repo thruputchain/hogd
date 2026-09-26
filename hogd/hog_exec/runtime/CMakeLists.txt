@@ -35,6 +35,7 @@ add_library(runtime_objects OBJECT
   syscall_nnint.cc
   syscall_rcq.cc
   syscall_stats.cc
+  syscall_storage_flags.cc
   transaction_stats.cc
 )
 
@@ -123,6 +124,7 @@ add_library(runtime_test_objects OBJECT
   selective_deployment_test.cc
   serialize_roundtrip_test.cc
   sha2_in_contract_test.cc
+  storage_flags_test.cc
   syscall_auth_config_test.cc
   syscall_auth_token_test.cc
   syscall_block_data_test.cc

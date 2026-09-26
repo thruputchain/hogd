@@ -486,11 +486,18 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
           auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+              ctx.handler(), key, std::as_bytes(std::span(calldata)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto [flags_res, _fgas] = syscall_SetStorageFlags_inner(
+              ctx.handler(), key,
+              std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+          if (!flags_res.has_value() ||
+              flags_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to set storage flags";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};

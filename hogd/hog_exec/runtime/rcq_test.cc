@@ -147,19 +147,19 @@ protected:
           }
           co_return InvokeStatus<void>{};
         });
-    fns.emplace(
-        3, // Write NNInt contract storage address
-        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          auto const &value = ctx.handler().get_calldata().at(0);
-          auto key = make_storage_key("nnint0");
+    fns.emplace(3, // Write NNInt contract storage address
+                [](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
+                  auto const &value = ctx.handler().get_calldata().at(0);
+                  auto key = make_storage_key("nnint0");
 
-          auto r = co_await ctx.handler().set_nnint(key, {value}, 0, {});
-          if (!r.has_value()) {
-            co_return r.error().to_invoke_error();
-          }
+                  auto r = co_await ctx.handler().set_nnint(key, {value}, 0);
+                  if (!r.has_value()) {
+                    co_return r.error().to_invoke_error();
+                  }
 
-          co_return InvokeStatus<void>{};
-        });
+                  co_return InvokeStatus<void>{};
+                });
     fns.emplace(4, // Insert entire calldata as a single RCQ entry
                 [](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
@@ -181,8 +181,7 @@ protected:
                   auto const &calldata = ctx.handler().get_calldata();
                   auto key = make_storage_key("rcq0");
                   auto res = co_await ctx.handler().set_bytestring(
-                      key, std::as_bytes(std::span(calldata)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      key, std::as_bytes(std::span(calldata)));
                   if (!res.has_value()) {
                     co_return res.error().to_invoke_error();
                   }
@@ -195,8 +194,7 @@ protected:
                 [](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-                      make_storage_key("rcq0"),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      make_storage_key("rcq0"));
                   if (!r.has_value() ||
                       r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -207,8 +205,7 @@ protected:
         7, // Delete rcq0 key, then consume (expect no entry)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              make_storage_key("rcq0"),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -227,8 +224,7 @@ protected:
         8, // Delete rcq0 key, consume (expect no entry), set bytestring
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              make_storage_key("rcq0"),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -243,8 +239,7 @@ protected:
           }
           auto const &calldata = ctx.handler().get_calldata();
           auto r3 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -292,8 +287,7 @@ protected:
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
           if (!set_status.has_value() ||
               set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -336,8 +330,7 @@ protected:
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
           if (!set_status.has_value() ||
               set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
