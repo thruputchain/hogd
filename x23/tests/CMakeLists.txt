@@ -24,6 +24,10 @@ add_x23_test(compiler_roundtrip compiler.x)
 add_x23_test(corosleep)
 add_x23_test(corowake)
 add_x23_test(event)
+# event's last case spins on yield(), so a round costs a scheduler timeslice
+# rather than microseconds on a loaded host; it blew the schedule's 100s under
+# `ctest --parallel` in #4152.
+set_tests_properties(event PROPERTIES TIMEOUT 300)
 add_x23_test(format)
 add_x23_test(heap)
 add_x23_test(marshal)
