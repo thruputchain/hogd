@@ -293,9 +293,10 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
       [set_key,
        unset_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const int128_t set_value = 5;
+        StorageDeltaFlagSet w_prior_flags = 0;
         auto w = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
             set_key, &set_value, int128_t{7},
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None), w_prior_flags);
         if (!w.has_value() ||
             w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1147,9 +1148,10 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
   auto context = make_single_contract_context(
       [key,
        value](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        StorageDeltaFlagSet w_prior_flags = 0;
         auto w = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key, std::as_bytes(std::span(value)),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None), w_prior_flags);
         if (!w.has_value() ||
             w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

@@ -150,8 +150,10 @@ protected:
 
   [[nodiscard]] static x23::Async<bool> rcq_delete(NativeSyscallContext &ctx)
   {
+    StorageDeltaFlagSet res_prior_flags = 0;
     auto res = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-        kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+        kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+        res_prior_flags);
     co_return res.has_value() &&
         res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
   }
@@ -228,9 +230,10 @@ protected:
         [](NativeSyscallContext &ctx,
            Bytestring bytestring) -> x23::Async<InvokeStatus<void>> {
           // Write a bytestring
+          StorageDeltaFlagSet res_prior_flags = 0;
           auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
               kStorageKey, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+              std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring";
@@ -319,8 +322,10 @@ protected:
             }
           }
 
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -594,8 +599,10 @@ protected:
           }
 
           // delete
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -661,8 +668,10 @@ protected:
           }
 
           // delete
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (first)";
@@ -672,9 +681,10 @@ protected:
           // create bytestring
           Bytestring bytestring =
               NativeContractTestFramework::make_bytestring("test");
+          StorageDeltaFlagSet r3_prior_flags = 0;
           auto r3 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
               kStorageKey, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+              std::to_underlying(StorageDeltaFlags::None), r3_prior_flags);
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
@@ -682,8 +692,10 @@ protected:
           }
 
           // delete
+          StorageDeltaFlagSet r4_prior_flags = 0;
           auto r4 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r4_prior_flags);
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete bytestring";
@@ -692,9 +704,10 @@ protected:
 
           // create nnint
           int128_t set_value = 42;
+          StorageDeltaFlagSet r5_prior_flags = 0;
           auto r5 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
               kStorageKey, &set_value, 0,
-              std::to_underlying(StorageDeltaFlags::None));
+              std::to_underlying(StorageDeltaFlags::None), r5_prior_flags);
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create nnint";
@@ -702,8 +715,10 @@ protected:
           }
 
           // delete
+          StorageDeltaFlagSet r6_prior_flags = 0;
           auto r6 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r6_prior_flags);
           if (!r6.has_value() ||
               r6.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete nnint";
@@ -745,8 +760,10 @@ protected:
     // Method 25: delete_and_fail — delete then return error to revert
     builder.add<SerializationFormat::kTxs>(
         25, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r1_prior_flags);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -930,8 +947,10 @@ protected:
         30,
         [](NativeSyscallContext &ctx, uint32_t val_a,
            uint32_t val_b) -> x23::Async<InvokeStatus<void>> {
+          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r1_prior_flags);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -952,8 +971,10 @@ protected:
     // Method 31: just_delete — only deletes, no error return
     builder.add<SerializationFormat::kTxs>(
         31, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r1_prior_flags);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1567,8 +1588,10 @@ protected:
         [](NativeSyscallContext &ctx,
            uint32_t concurrent_val) -> x23::Async<InvokeStatus<void>> {
           // delete queue
+          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r1_prior_flags);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1578,9 +1601,10 @@ protected:
           // create bytestring
           Bytestring bytestring =
               NativeContractTestFramework::make_bytestring("test");
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
               kStorageKey, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+              std::to_underlying(StorageDeltaFlags::None), r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
@@ -1588,8 +1612,10 @@ protected:
           }
 
           // delete bytestring
+          StorageDeltaFlagSet r3_prior_flags = 0;
           auto r3 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r3_prior_flags);
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete bytestring";
@@ -1612,8 +1638,10 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         45, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // delete queue
+          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r1_prior_flags);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1623,9 +1651,10 @@ protected:
           // create bytestring
           Bytestring bytestring =
               NativeContractTestFramework::make_bytestring("test");
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
               kStorageKey, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+              std::to_underlying(StorageDeltaFlags::None), r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
@@ -1676,8 +1705,10 @@ protected:
     // nothing)
     builder.add<SerializationFormat::kTxs>(
         51, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r1_prior_flags);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
@@ -1732,8 +1763,10 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
@@ -1775,8 +1808,10 @@ protected:
             }
           }
 
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
@@ -1820,8 +1855,10 @@ protected:
             co_return true;
           };
           auto delete_queue = [&]() -> x23::Async<bool> {
+            StorageDeltaFlagSet r_prior_flags = 0;
             auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-                kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+                kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+                r_prior_flags);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "delete failed";
@@ -1898,8 +1935,10 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
@@ -1947,8 +1986,10 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
@@ -2014,8 +2055,10 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
+          StorageDeltaFlagSet r2_prior_flags = 0;
           auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r2_prior_flags);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
@@ -2223,8 +2266,10 @@ protected:
            uint32_t value) -> x23::Async<InvokeStatus<void>> {
           // delete, then retrocausally consume a concurrent entry: the delete
           // is a write, so the key is no longer a bytestring for this tx
+          StorageDeltaFlagSet r1_prior_flags = 0;
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None),
+              r1_prior_flags);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete";

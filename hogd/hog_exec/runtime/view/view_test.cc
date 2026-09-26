@@ -1813,8 +1813,9 @@ TEST_F(ViewTest, ViewRcqConsumeDeleteInsert)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        StorageDeltaFlagSet r2_prior_flags = 0;
         auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-            key, std::to_underlying(StorageDeltaFlags::None));
+            key, std::to_underlying(StorageDeltaFlags::None), r2_prior_flags);
         if (!r2.has_value() ||
             r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "delete failed";

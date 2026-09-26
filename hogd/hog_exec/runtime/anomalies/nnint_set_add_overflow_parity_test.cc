@@ -92,8 +92,10 @@ public:
           int128_t add = cd[2];
           int128_t const *set =
               mode == Mode::kExplicit ? &explicit_set_ : nullptr;
+          StorageDeltaFlagSet res_prior_flags = 0;
           auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-              key, set, add, std::to_underlying(StorageDeltaFlags::None));
+              key, set, add, std::to_underlying(StorageDeltaFlags::None),
+              res_prior_flags);
           if (!res.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }

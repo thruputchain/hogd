@@ -1666,7 +1666,24 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
                  0};
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+namespace {
+// Writes [item] with exactly [flags] and returns the flags of the pending
+// write it replaced, for the prior_flags output of the flagged storage
+// syscalls. A rejected write leaves the view, flags included, unchanged.
+template<typename ItemType>
+SyscallStatus<StorageDeltaFlagSet>
+set_reporting_prior_flags(ItemView &item_view, ItemType const &item,
+                          StorageDeltaFlagSet flags)
+{
+  const StorageDeltaFlagSet prior_flags = item_view.flags();
+  if (auto status = item_view.set(item, flags); !status.has_value()) {
+    return std::unexpected(status.error());
+  }
+  return prior_flags;
+}
+} // namespace
+
+x23::Async<SystemStatus<SyscallStatus<StorageDeltaFlagSet>>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring,
                                   StorageDeltaFlagSet input_flags)
@@ -1697,7 +1714,9 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                 input_bytestring.size());
   }
 
-  co_return item_view->set(BytestringItem(std::move(new_string)), input_flags);
+  co_return set_reporting_prior_flags(*item_view,
+                                      BytestringItem(std::move(new_string)),
+                                      input_flags);
 }
 
 GasAmount
@@ -1810,7 +1829,7 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
                  0};
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+x23::Async<SystemStatus<SyscallStatus<StorageDeltaFlagSet>>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
                              const int128_t &add_value,
@@ -1831,16 +1850,17 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  co_return item_view->set(NNIntItem{.base_value_ =
-                                         set_value.has_value()
-                                             ? std::optional<int128_xdr>(
-                                                   to_xdr(*set_value))
-                                             : std::nullopt,
-                                     .add_value_ = to_xdr(add_value)},
-                           input_flags);
+  co_return set_reporting_prior_flags(
+      *item_view,
+      NNIntItem{.base_value_ =
+                    set_value.has_value()
+                        ? std::optional<int128_xdr>(to_xdr(*set_value))
+                        : std::nullopt,
+                .add_value_ = to_xdr(add_value)},
+      input_flags);
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+x23::Async<SystemStatus<SyscallStatus<StorageDeltaFlagSet>>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
                                  StorageDeltaFlagSet flags)
 {
@@ -1854,7 +1874,7 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  co_return item_view->set(DeletedItem{}, flags);
+  co_return set_reporting_prior_flags(*item_view, DeletedItem{}, flags);
 }
 
 namespace {

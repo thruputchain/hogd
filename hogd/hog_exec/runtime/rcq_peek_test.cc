@@ -310,9 +310,11 @@ TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       7, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        StorageDeltaFlagSet delete_status_prior_flags = 0;
         auto delete_status = co_await ctx.syscall<SyscallNo::kDeleteObject>(
             SyscallRcqPeekTest::kStorageKey,
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None),
+            delete_status_prior_flags);
         if (!delete_status.has_value() ||
             delete_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -483,9 +485,11 @@ TEST_F(SyscallRcqPeekTest, PeekLenFailsWhenBytestringOccupiesKey)
       2,
       [](NativeSyscallContext &ctx,
          Bytestring data) -> x23::Async<InvokeStatus<void>> {
+        StorageDeltaFlagSet set_status_prior_flags = 0;
         auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             SyscallRcqPeekTest::kStorageKey, std::as_bytes(std::span(data)),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None),
+            set_status_prior_flags);
         if (!set_status.has_value() ||
             set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

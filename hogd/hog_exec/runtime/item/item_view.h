@@ -340,9 +340,16 @@ public:
     // as normal as possible" when running in a try_invoke/queue loop)
 
     delta_args_.emplace<ItemType>(type);
+    // A write carries exactly its own flags: it replaces the pending write's
+    // flags rather than merging with them (#3006). The flagged storage
+    // syscalls report the replaced flags to the contract as prior_flags.
     flags_ = flags;
     return {};
   }
+
+  // Flags of the pending write, i.e. those passed to the most recent
+  // successful set(). None if this view has not been written.
+  StorageDeltaFlagSet flags() const { return flags_; }
 
   std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
   get_delta(std::span<QueueEntry const> observed_entries = {}) const;

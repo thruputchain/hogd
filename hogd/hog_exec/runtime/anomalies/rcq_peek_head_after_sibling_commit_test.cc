@@ -187,10 +187,11 @@ public:
           QueueEntry const &entry = consume.value().value();
           consumed_entry_ = to_bytes(entry);
 
+          StorageDeltaFlagSet ws_prior_flags = 0;
           auto [ws, _wg] = co_await syscall_BytestringSet_inner(
               ctx.handler(), make_storage_key("result"),
               std::as_bytes(std::span(entry.data(), entry.size())),
-              std::to_underlying(StorageDeltaFlags::None));
+              std::to_underlying(StorageDeltaFlags::None), ws_prior_flags);
           if (!ws.has_value() ||
               ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};

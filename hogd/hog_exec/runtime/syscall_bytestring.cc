@@ -105,7 +105,8 @@ MaybeAsyncSyscallInnerResult
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<const std::byte> input_bytestring,
-                            StorageDeltaFlagSet input_flags)
+                            StorageDeltaFlagSet input_flags,
+                            StorageDeltaFlagSet &output_prior_flags)
 {
   auto status =
       co_await syscall_handler.set_bytestring(input_key, input_bytestring,
@@ -119,6 +120,7 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{set_status.error().code(),
                                  WrappedGasAmount{0}};
   }
+  output_prior_flags = *set_status;
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
                                WrappedGasAmount{GasCost::bytestring_set(

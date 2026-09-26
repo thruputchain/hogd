@@ -224,8 +224,12 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   }
 
   const int128_t *set_ptr = output_set_opt ? &output_set : nullptr;
+  // The native token takes no storage locks, so no earlier write can have
+  // left flags on this key for the write to keep.
+  StorageDeltaFlagSet prior_flags = 0;
   auto r2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-      allow_key, set_ptr, new_add, std::to_underlying(StorageDeltaFlags::None));
+      allow_key, set_ptr, new_add, std::to_underlying(StorageDeltaFlags::None),
+      prior_flags);
   if (!r2.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(r2.error());
   }
@@ -270,9 +274,10 @@ add_to_total_supply(NativeSyscallContext &ctx, int128_t diff)
             LibraryExn(LibraryExnKind::kLibraryExnNonNegativeIntOverflow)})}};
   }
   const int128_t *set_ptr = set_value_present ? &set_value : nullptr;
+  StorageDeltaFlagSet prior_flags = 0; // Unused: see adjust_allowance.
   auto set = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
       kNativeTokenTotalSupplyKey, set_ptr, add_value + diff,
-      std::to_underlying(StorageDeltaFlags::None));
+      std::to_underlying(StorageDeltaFlags::None), prior_flags);
   if (!set) {
     co_return MintBurnStatus{
         NativeContractBuilder::host_fn_error_conversion(set.error())};

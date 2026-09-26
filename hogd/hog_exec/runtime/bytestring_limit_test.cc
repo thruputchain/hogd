@@ -127,9 +127,10 @@ TEST_F(BytestringLimitTest, WriteAtConfiguredLimitIsAccepted)
 {
   run_probe([](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
     auto value = make_bytestring(std::string(kMaxBytestringLen, 'a'));
+    StorageDeltaFlagSet res_prior_flags = 0;
     auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
         kKey, std::as_bytes(std::span(value)),
-        std::to_underlying(StorageDeltaFlags::None));
+        std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
     if (!res.has_value() ||
         res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
       ADD_FAILURE() << "a write at the configured limit must be accepted";
@@ -145,9 +146,10 @@ TEST_F(BytestringLimitTest, WriteOverConfiguredLimitIsRejected)
 {
   run_probe([](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
     auto value = make_bytestring(std::string(kMaxBytestringLen + 1, 'b'));
+    StorageDeltaFlagSet res_prior_flags = 0;
     auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
         kKey, std::as_bytes(std::span(value)),
-        std::to_underlying(StorageDeltaFlags::None));
+        std::to_underlying(StorageDeltaFlags::None), res_prior_flags);
     if (!res.has_value()) {
       ADD_FAILURE() << "an over-limit write must be a syscall error, not a "
                        "system error";

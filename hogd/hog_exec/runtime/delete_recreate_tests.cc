@@ -88,9 +88,11 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 
           // Write a bytestring to the storage key
           Bytestring bytestring = make_bytestring("hello");
+          StorageDeltaFlagSet write_status_prior_flags = 0;
           auto [write_status, _g2] = co_await syscall_BytestringSet_inner(
               ctx.handler(), key, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+              std::to_underlying(StorageDeltaFlags::None),
+              write_status_prior_flags);
           if (!write_status.has_value()) {
             ADD_FAILURE() << "Failed to write bytestring: "
                           << write_status.error();
@@ -108,8 +110,9 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
-          auto delete_status =
-              co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          StorageDeltaFlagSet delete_status_prior_flags = 0;
+          auto delete_status = co_await ctx.syscall<SyscallNo::kDeleteObject>(
+              key, 0, delete_status_prior_flags);
           if (!delete_status.has_value()) {
             ADD_FAILURE() << "Failed to delete object: "
                           << delete_status.error();
@@ -268,10 +271,12 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
           // Write a nonnegative integer to the storage key
           int128_t set_value = 42;
+          StorageDeltaFlagSet write_status_prior_flags = 0;
           auto [write_status, _g2] =
               co_await syscall_NonnegativeIntSetAdd_inner(
                   ctx.handler(), key, &set_value, 0,
-                  std::to_underlying(StorageDeltaFlags::None));
+                  std::to_underlying(StorageDeltaFlags::None),
+                  write_status_prior_flags);
           if (!write_status.has_value()) {
             ADD_FAILURE() << "Failed to write nnint: " << write_status.error();
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -288,8 +293,9 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
-          auto delete_status =
-              co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          StorageDeltaFlagSet delete_status_prior_flags = 0;
+          auto delete_status = co_await ctx.syscall<SyscallNo::kDeleteObject>(
+              key, 0, delete_status_prior_flags);
           if (!delete_status.has_value()) {
             ADD_FAILURE() << "Failed to delete object: "
                           << delete_status.error();
@@ -470,8 +476,9 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
-          auto delete_status =
-              co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          StorageDeltaFlagSet delete_status_prior_flags = 0;
+          auto delete_status = co_await ctx.syscall<SyscallNo::kDeleteObject>(
+              key, 0, delete_status_prior_flags);
           if (!delete_status.has_value()) {
             ADD_FAILURE() << "Failed to delete object: "
                           << delete_status.error();

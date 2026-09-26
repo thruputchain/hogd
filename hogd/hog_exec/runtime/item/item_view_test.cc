@@ -181,6 +181,38 @@ TEST_F(ItemViewTest, NNIntSetAddValidation)
   EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(-1)))));
 }
 
+// Flags follow the latest successful write: a later write replaces them, and a
+// rejected write leaves them alone. The flagged syscalls report flags() from
+// before their write as prior_flags.
+TEST_F(ItemViewTest, FlagsFollowLatestSuccessfulWrite)
+{
+  auto const none = std::to_underlying(StorageDeltaFlags::None);
+  auto const exclusive = std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+  ItemView proxy;
+  EXPECT_EQ(proxy.flags(), none);
+
+  ASSERT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(10))),
+                        exclusive));
+  EXPECT_EQ(proxy.flags(), exclusive);
+
+  // Rejected: 0 + -1 is negative. The earlier write, flags included, stands.
+  EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(-1)))));
+  EXPECT_EQ(proxy.flags(), exclusive);
+  ASSERT_TRUE(proxy.get<NNIntItem>());
+  EXPECT_EQ(proxy.get<NNIntItem>()->add_value_, to_xdr(int128_t(10)));
+
+  ASSERT_TRUE(proxy.set(NNIntItem(std::nullopt, to_xdr(int128_t(2)))));
+  EXPECT_EQ(proxy.flags(), none);
+  EXPECT_EQ(proxy.get_delta().second, none);
+
+  ASSERT_TRUE(proxy.set(DeletedItem{}, exclusive));
+  EXPECT_EQ(proxy.flags(), exclusive);
+  ASSERT_TRUE(proxy.set(BytestringItem(Bytestring{1})));
+  EXPECT_EQ(proxy.flags(), none);
+  EXPECT_EQ(proxy.get_delta().second, none);
+}
+
 TEST_F(ItemViewTest, RCQRead)
 {
   auto item = make_rcq_item();
