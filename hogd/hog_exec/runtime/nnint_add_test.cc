@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -24,6 +26,8 @@
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "invoke_args.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
