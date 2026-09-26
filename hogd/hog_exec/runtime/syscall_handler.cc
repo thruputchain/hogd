@@ -1706,6 +1706,13 @@ SystemCallHandler::note_item_load(FrameItemKey const &key)
   return loaded_keys_.insert(key) ? kDBRPCCost : 0;
 }
 
+StorageDeltaFlagSet
+SystemCallHandler::get_storage_write_flags(
+    StorageKeyContractData const &storage_key)
+{
+  return invocation_frame_stack_.get_item_view(storage_key)->flags();
+}
+
 x23::Async<
     SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,

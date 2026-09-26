@@ -283,6 +283,8 @@ public:
   ItemView(ItemView const &other) = default;
   ItemView &operator=(ItemView const &other) = default;
 
+  StorageDeltaFlagSet flags() const { return flags_; }
+
   // Returns a pointer to the item view if it is of the given type,
   // otherwise returns nullptr.
   //

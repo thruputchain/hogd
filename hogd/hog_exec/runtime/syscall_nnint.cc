@@ -18,6 +18,22 @@
 
 namespace hogd {
 
+SyscallInnerResult
+syscall_GetStorageWriteFlags_inner(SystemCallHandler &syscall_handler,
+                                   const StorageKeyContractData &input_key,
+                                   StorageDeltaFlagSet &output_flags)
+{
+  output_flags = syscall_handler.get_storage_write_flags(input_key);
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetStorageWriteFlags>()) {
+    trace_data->outputs.emplace(
+        SyscallGetStorageWriteFlagsOutputs{.flags = output_flags});
+  }
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{kStorageAccessCost}};
+}
+
 MaybeAsyncSyscallInnerResult
 syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 const StorageKeyContractData &input_key,

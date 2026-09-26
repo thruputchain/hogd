@@ -378,6 +378,9 @@ public:
                  std::span<const std::byte> input_bytestring,
                  StorageDeltaFlagSet input_flags);
 
+  StorageDeltaFlagSet
+  get_storage_write_flags(StorageKeyContractData const &storage_key);
+
   // === Nonnegative Integer syscalls ===
   // get_nnint returns the base value and the add value.
   // Returns the base value from the snapshot if load_from_snapshot is true.

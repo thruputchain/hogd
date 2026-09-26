@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "db_conflict.hh"
 #include "exec_result.hh"
@@ -613,6 +615,246 @@ TEST_F(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
+namespace {
+
+enum class FlagSequence {
+  kWriteThenWrite,
+  kDeleteThenWrite,
+  kInvalidThenWrite,
+  kSuccessfulChild,
+  kRevertedChild,
+  kRevertedChildAfterExclusive,
+  kFailedTryInvoke,
+  kFailedTryInvokeAfterExclusive,
+};
+
+enum FlagMethod : Runtime::MethodID {
+  kShared,
+  kExclusive,
+  kExclusiveThenShared,
+  kDeleteThenShared,
+  kInvalidThenShared,
+  kRevertExclusive,
+  kRevertShared,
+  kFailExclusive,
+};
+
+class NNIntWriteFlagReadbackTest
+  : public NNIntAddTest,
+    public ::testing::WithParamInterface<
+        std::tuple<FlagSequence, bool, bool, bool>> {};
+
+TEST_P(NNIntWriteFlagReadbackTest, CallerChoosesWhetherToPreserveExclusivity)
+{
+  auto const [sequence, exclusive_first, initially_zero, preserve_exclusive] =
+      GetParam();
+  auto const storage_address = make_contract_address(0);
+  auto const caller_address = make_contract_address(1);
+  std::vector<FlagMethod> calls;
+  switch (sequence) {
+  case FlagSequence::kWriteThenWrite:
+    calls = {kExclusiveThenShared};
+    break;
+  case FlagSequence::kDeleteThenWrite:
+    calls = {kDeleteThenShared};
+    break;
+  case FlagSequence::kInvalidThenWrite:
+    calls = {kInvalidThenShared};
+    break;
+  case FlagSequence::kSuccessfulChild:
+    calls = {kExclusive, kShared};
+    break;
+  case FlagSequence::kRevertedChild:
+    calls = {kRevertExclusive, kShared};
+    break;
+  case FlagSequence::kRevertedChildAfterExclusive:
+    calls = {kExclusive, kRevertShared, kShared};
+    break;
+  case FlagSequence::kFailedTryInvoke:
+    calls = {kFailExclusive, kShared};
+    break;
+  case FlagSequence::kFailedTryInvokeAfterExclusive:
+    calls = {kExclusive, kFailExclusive, kShared};
+    break;
+  }
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> storage_fns;
+  for (auto method :
+       {kShared, kExclusive, kExclusiveThenShared, kDeleteThenShared,
+        kInvalidThenShared, kRevertExclusive, kRevertShared, kFailExclusive}) {
+    storage_fns.emplace(
+        method,
+        [method, preserve_exclusive](
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const key = make_storage_key("test");
+          auto const exclusive =
+              std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+          StorageDeltaFlagSet prior_flags{};
+          auto read = co_await ctx.syscall<SyscallNo::kGetStorageWriteFlags>(
+              key, prior_flags);
+          if (!read || *read != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto flags = (method == kShared || method == kRevertShared)
+                           ? std::to_underlying(StorageDeltaFlags::None)
+                           : exclusive;
+          if (preserve_exclusive && method == kShared) {
+            flags = prior_flags & exclusive; // NOLINT(bugprone-signed-bitwise)
+          }
+          auto r =
+              method == kDeleteThenShared
+                  ? co_await ctx.syscall<SyscallNo::kDeleteObject>(key, flags)
+                  : co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                        key, static_cast<int128_t const *>(nullptr), 1, flags);
+          if (!r || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (method == kInvalidThenShared) {
+            int128_t invalid_base = -1;
+            r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                key, &invalid_base, -1,
+                std::to_underlying(StorageDeltaFlags::None));
+            if (!r ||
+                *r != SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          StorageDeltaFlagSet visible_flags{};
+          read = co_await ctx.syscall<SyscallNo::kGetStorageWriteFlags>(
+              key, visible_flags);
+          if (!read || *read != SyscallErrorCode::kSyscallErrorCodeNone ||
+              visible_flags != flags) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (method == kExclusiveThenShared || method == kDeleteThenShared ||
+              method == kInvalidThenShared) {
+            flags = std::to_underlying(StorageDeltaFlags::None);
+            if (preserve_exclusive) {
+              flags =
+                  visible_flags & exclusive; // NOLINT(bugprone-signed-bitwise)
+            }
+            r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                key, static_cast<int128_t const *>(nullptr), 1, flags);
+            if (!r || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          if (method == kFailExclusive) {
+            // The syscall succeeds; TryInvoke's bounds-lock acquisition fails.
+            r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                make_storage_key("empty"),
+                static_cast<int128_t const *>(nullptr), -1,
+                std::to_underlying(StorageDeltaFlags::None));
+            if (!r || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          if (method == kRevertExclusive || method == kRevertShared) {
+            ctx.handler().set_return_buffer(ReturnBuffer{}, true, {});
+          }
+          co_return InvokeStatus<void>{};
+        });
+  }
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> caller_fns;
+  caller_fns.emplace(
+      0,
+      [storage_address,
+       calls](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        for (auto method : calls) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = method,
+              .gas_limit = UINT64_MAX,
+              .flags = method == kFailExclusive
+                           ? std::to_underlying(InvokeFlag::TryInvoke)
+                           : std::to_underlying(InvokeFlag::None)};
+          CopyableInvokeOutputs outputs{};
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              storage_address, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, outputs);
+          auto expected = InvocationFrameStatusCode::Return;
+          if (method == kRevertExclusive || method == kRevertShared) {
+            expected = InvocationFrameStatusCode::Abort;
+          }
+          else if (method == kFailExclusive) {
+            expected = InvocationFrameStatusCode::Fault;
+          }
+          if (!r || *r != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != expected) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts;
+  contracts.emplace(0,
+                    std::make_unique<NativeContract>(std::move(storage_fns)));
+  contracts.emplace(1, std::make_unique<NativeContract>(std::move(caller_fns)));
+  NativeContext context(std::move(contracts));
+  for (int32_t id : {0, 1}) {
+    auto const contract = make_native_contract(id);
+    auto const address = make_contract_address(id);
+    write_contract(contract);
+    write_deployment(address, contract);
+    setup_grant_storage_token(address, 1'000'000'000);
+  }
+  // A nonzero base could make delete/recreate conflict even without the lock.
+  if (initially_zero) {
+    write_item(make_contract_data_addrkey(storage_address, "test"),
+               std::make_shared<StorageItemWrapper>(0,
+                                                    get_default_cost_model()));
+  }
+  auto make_handler = [&](bool run_sequence) {
+    return make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address =
+                                                 run_sequence ? caller_address
+                                                              : storage_address,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(0),
+                                             .gas_limit = UINT64_MAX,
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
+        context);
+  };
+  auto first = make_handler(exclusive_first);
+  auto second = make_handler(!exclusive_first);
+  ASSERT_TRUE(first.root_invoke()().is_root_success());
+  ASSERT_TRUE(second.root_invoke()().is_root_success());
+  ASSERT_EQ(first.try_commit_transaction()(), ExecResult::ExecResultOK);
+  auto const shared_only = !preserve_exclusive ||
+                           sequence == FlagSequence::kRevertedChild ||
+                           sequence == FlagSequence::kFailedTryInvoke;
+  ASSERT_EQ(second.try_commit_transaction()(),
+            shared_only ? ExecResult::ExecResultOK
+                        : ExecResult::ExecResultTxNonDeterministicError);
+  advance_block();
+  auto item = lookup_storage_item_from_db(
+      make_contract_data_addrkey(storage_address, "test"));
+  ASSERT_TRUE(item.has_value());
+  ASSERT_EQ(item->type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(item->nnint()), shared_only ? 2 : 1);
+  EXPECT_FALSE(lookup_storage_item_from_db(
+                   make_contract_data_addrkey(storage_address, "empty"))
+                   .has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PoliciesCommitOrdersAndInitialValues, NNIntWriteFlagReadbackTest,
+    ::testing::Combine(
+        ::testing::Values(FlagSequence::kWriteThenWrite,
+                          FlagSequence::kDeleteThenWrite,
+                          FlagSequence::kInvalidThenWrite,
+                          FlagSequence::kSuccessfulChild,
+                          FlagSequence::kRevertedChild,
+                          FlagSequence::kRevertedChildAfterExclusive,
+                          FlagSequence::kFailedTryInvoke,
+                          FlagSequence::kFailedTryInvokeAfterExclusive),
+        ::testing::Bool(), ::testing::Bool(), ::testing::Bool()));
+
+} // namespace
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

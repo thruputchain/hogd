@@ -110,6 +110,31 @@ protected:
   }
 };
 
+TEST_F(ItemViewTest, WriteFlagsFollowTheLastValidWriteAcrossItemTypes)
+{
+  ItemView view;
+  auto const none = std::to_underlying(StorageDeltaFlags::None);
+  auto const exclusive = std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+  EXPECT_EQ(view.flags(), none);
+  EXPECT_FALSE(view.get_delta().first.has_value());
+  ASSERT_NE(view.get<UnmodifiedItem>(), nullptr);
+  EXPECT_FALSE(view.get<UnmodifiedItem>()->is_loaded());
+
+  ASSERT_TRUE(
+      view.set(NNIntItem(std::nullopt, to_xdr(int128_t(1))), exclusive));
+  EXPECT_EQ(view.flags(), exclusive);
+  ASSERT_FALSE(
+      view.set(NNIntItem(to_xdr(int128_t(-1)), to_xdr(int128_t(-1))), none));
+  EXPECT_EQ(view.flags(), exclusive);
+
+  ASSERT_TRUE(view.set(BytestringItem(Bytestring{1, 2}), none));
+  EXPECT_EQ(view.flags(), none);
+  ASSERT_TRUE(view.set(DeletedItem{}, exclusive));
+  EXPECT_EQ(view.flags(), exclusive);
+  ASSERT_TRUE(view.set(NNIntItem(std::nullopt, to_xdr(int128_t(1))), none));
+  EXPECT_EQ(view.flags(), none);
+}
+
 TEST_F(ItemViewTest, Exists)
 {
   ItemView proxy;
