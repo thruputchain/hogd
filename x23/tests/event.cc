@@ -1,8 +1,6 @@
 
 #include <cerrno>
-#include <chrono>
 #include <cstdint>
-#include <format>
 #include <print>
 #include <semaphore>
 #include <stdexcept>
@@ -159,22 +157,8 @@ test_matching_poison_generation_race(CoroPoll &cp)
     }
   });
 
-  // The spin below can't block, and costs a scheduler timeslice per attempt
-  // on an oversubscribed host, so bound the loop by wall clock too (#4152).
   constexpr unsigned attempts = 100000;
-  constexpr std::chrono::seconds budget{20};
-
-  // A truncated run must still prove something: under 100 attempts means
-  // >200ms each, i.e. a wedged host.  16x oversubscription still managed 611.
-  constexpr unsigned min_attempts = 100;
-  const auto deadline = std::chrono::steady_clock::now() + budget;
-
-  unsigned i = 0;
-  for (; i < attempts; ++i) {
-    // Checked before the handoff so that every attempt that starts finishes.
-    if (std::chrono::steady_clock::now() >= deadline)
-      break;
-
+  for (unsigned i = 0; i < attempts; ++i) {
     cp.reset(readfd);
     uint64_t old_generation = cp.generation(readfd, false);
 
@@ -209,20 +193,6 @@ test_matching_poison_generation_race(CoroPoll &cp)
   activator.request_stop();
   activate.release();
   cp.reset(readfd);
-
-  // After the release above: the activator parks in acquire(), so throwing
-  // any earlier hangs in ~jthread().
-  if (i < attempts)
-    std::println(stderr,
-                 "matching-generation poison race: ran {} of {} attempts "
-                 "before the {} budget expired (host oversubscribed?)",
-                 i, attempts, budget);
-  if (i < min_attempts)
-    throw std::runtime_error(std::format(
-        "matching-generation poison race managed only {} of {} attempts in "
-        "{} (floor is {}); the host is too wedged for this test to mean "
-        "anything",
-        i, attempts, budget, min_attempts));
 }
 #endif // USE_EPOLL
 

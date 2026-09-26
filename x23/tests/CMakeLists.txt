@@ -24,9 +24,10 @@ add_x23_test(compiler_roundtrip compiler.x)
 add_x23_test(corosleep)
 add_x23_test(corowake)
 add_x23_test(event)
-# event's race loop self-caps at 20s; this leaves headroom for the rest of the
-# test under a sanitizer without inheriting a tighter global --timeout.
-set_tests_properties(event PROPERTIES TIMEOUT 60)
+# event's last case spins on yield(), so a round costs a scheduler timeslice
+# rather than microseconds on a loaded host; it blew the schedule's 100s under
+# `ctest --parallel` in #4152.
+set_tests_properties(event PROPERTIES TIMEOUT 300)
 add_x23_test(format)
 add_x23_test(heap)
 add_x23_test(marshal)
