@@ -1,59 +1,13 @@
-// Tolerated behavior (WAI): the permanent-exclusive bit is a property of the
-// change a transaction actually commits, not a sticky property of the key.
+// The database finalizes the flags supplied on the latest delta. Narrowing
+// retains ordinary exclusivity for rollback, but does not inherit the earlier
+// permanent-exclusive request or its storage refund.
 //
-// `StorageDeltaFlags::ExclusiveLock` is defined by the protocol as a flag on a
-// *delta*: "forces the delta to acquire an exclusive lock on the item at the
-// storage key" (protocol/storage_item.x).  A transaction that writes a key
-// twice -- once with the flag, then again without it -- is not asking for the
-// key to stay frozen; its second write superseded the first, flag included.
-// Both layers implement that same last-write-wins rule:
+// These tests submit replacement deltas directly to the database. Contract
+// execution instead retains successful writes' flags in ItemView, so a later
+// unflagged syscall cannot remove an earlier ExclusiveLock request.
 //
-//   - executor: `ItemView::set()` overwrites `flags_` on every write, so only
-//     the final write's flags reach the database at all.
-//   - hog_db:   `ItemChange::narrow()` merges the earlier reservation into the
-//     later change, promoting it to ordinary `exclusive_`, but it does not
-//     carry `permanent_exclusive_` forward.  `InvokeTX::request_change()` then
-//     retains the narrowed change as the transaction's final version, and
-//     `ItemLock::commit_change()` publishes `kFinalizedPermamentExclusiveLock`
-//     only when that final version still carries the bit.
-//
-// Consequence, exercised below: an `ExclusiveLock` write followed by an
-// unflagged write to the same key in the same `InvokeTX` finalizes as an
-// ordinary `kFinalized` lock, so a later transaction in the same block can
-// still modify the key.
-//
-// Why this is tolerated:
-//   - No isolation the transaction could rely on is lost.  `narrow()` still
-//     forces the merged reservation to ordinary-exclusive, so no *other*
-//     transaction can interleave while the flagged write is pending, and a
-//     rollback to the flagged version always succeeds (see
-//     RollbackToSavepointRestoresPermanentExclusiveReservation).  The only
-//     thing dropped is the post-commit freeze, and the only party that can
-//     drop it is the writer itself, by superseding its own delta.
-//   - Propagating the bit would be the actual defect: it would let a
-//     transaction freeze a key against every other transaction for the rest of
-//     the block from a delta that never requested it, purely as a side effect
-//     of a superseded earlier write.
-//   - Storage cost stays coupled to the request.  Only a permanent-exclusive
-//     change may reserve a negative marginal cost (`snapshot_cost_transform()`
-//     refunds the item's snapshot cost, since nothing else may re-grow the
-//     item in this block).  Narrowing down rescinds that refund in the same
-//     step that drops the freeze -- see
-//     PermanentExclusiveRefundRescindedWhenTxNarrowsDown.  Flag, freeze and
-//     refund travel together.
-//   - This is not a source of consensus divergence.  `permanent_exclusive_`
-//     never participates in an admission decision while a change is pending --
-//     `ItemLock` branches on `is_exclusive()` alone -- so it only selects the
-//     terminal lock state.  Whether a later transaction is admitted is a
-//     deterministic function of the block's transaction sequence, which every
-//     validator replays identically, and the incremental `DbHash` still
-//     matches the hash recomputed from scratch.
-//
-// The flag does exactly what it says when it is on the delta that commits:
-// each admission test below is paired with a control in which the final write
-// keeps the flag and the later transaction is rejected with
-// `ExclusiveLockDenied`.
-//
+// The prior executor behavior was also accepted in #3006. Retaining flags in
+// ItemView changes that contract-facing behavior; DB narrowing is unchanged.
 // See: https://github.com/groundhogchain/hogd/issues/3006
 
 #include <gtest/gtest.h>

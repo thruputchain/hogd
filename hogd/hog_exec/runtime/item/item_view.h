@@ -340,7 +340,8 @@ public:
     // as normal as possible" when running in a try_invoke/queue loop)
 
     delta_args_.emplace<ItemType>(type);
-    flags_ = flags;
+    // Later writes must not relax a lock already requested for this item.
+    flags_ |= flags; // NOLINT(bugprone-signed-bitwise)
     return {};
   }
 

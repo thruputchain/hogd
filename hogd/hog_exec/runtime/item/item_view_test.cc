@@ -181,6 +181,47 @@ TEST_F(ItemViewTest, NNIntSetAddValidation)
   EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(-1)))));
 }
 
+TEST_F(ItemViewTest, ExclusiveLockSurvivesOverwriteAndDelete)
+{
+  ItemView proxy;
+  auto exclusive = std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+  ASSERT_TRUE(
+      proxy.set(NNIntItem(std::nullopt, to_xdr(int128_t(1))), exclusive));
+  ASSERT_TRUE(proxy.set(NNIntItem(std::nullopt, to_xdr(int128_t(2)))));
+  EXPECT_EQ(proxy.get_delta().second, exclusive);
+
+  ASSERT_TRUE(proxy.set(BytestringItem(Bytestring{1})));
+  EXPECT_EQ(proxy.get_delta().second, exclusive);
+  ASSERT_TRUE(proxy.set(DeletedItem{}));
+  EXPECT_EQ(proxy.get_delta().second, exclusive);
+}
+
+TEST_F(ItemViewTest, ExclusiveDeleteSurvivesRecreation)
+{
+  ItemView proxy;
+  auto exclusive = std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+  ASSERT_TRUE(proxy.set(DeletedItem{}, exclusive));
+  ASSERT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(10)))));
+  EXPECT_EQ(proxy.get_delta().second, exclusive);
+}
+
+TEST_F(ItemViewTest, InvalidWriteLeavesLockUnchanged)
+{
+  auto exclusive = std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+  for (auto flags : {std::to_underlying(StorageDeltaFlags::None), exclusive}) {
+    ItemView proxy;
+    ASSERT_TRUE(
+        proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(10))), flags));
+    EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(0)), to_xdr(int128_t(-1))),
+                           flags == exclusive
+                               ? std::to_underlying(StorageDeltaFlags::None)
+                               : exclusive));
+    EXPECT_EQ(proxy.get_delta().second, flags);
+    ASSERT_TRUE(proxy.get<NNIntItem>());
+    EXPECT_EQ(proxy.get<NNIntItem>()->add_value_, to_xdr(int128_t(10)));
+  }
+}
+
 TEST_F(ItemViewTest, RCQRead)
 {
   auto item = make_rcq_item();
