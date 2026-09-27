@@ -1549,7 +1549,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
           auto key = make_storage_key("test");
           // Interpret calldata bytes as int8_t for set_value and
           // add_value
-          const int128_t set_value = static_cast<int8_t>(calldata[0]);
+          const int128_t set_value{static_cast<int8_t>(calldata[0])};
           auto add_value = static_cast<int8_t>(calldata[1]);
 
           auto system_res =
