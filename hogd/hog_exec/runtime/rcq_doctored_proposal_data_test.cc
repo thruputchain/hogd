@@ -14,6 +14,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -113,10 +114,11 @@ protected:
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
-            auto res = co_await ctx.handler().retrocausal_queue_insert(
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
                 key, std::as_bytes(std::span(&val, 1)));
             if (!res.has_value())
-              co_return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
           }
           co_return InvokeStatus<void>{};
         });
@@ -186,31 +188,44 @@ TEST_F(RcqDoctoredProposalDataTest,
         QueueEntry expected_entry;
         expected_entry.push_back(10);
 
+        QueueEntry consumed;
+        consumed.resize(kQueueEntryMaxLen);
+        RuntimeMemoryLength consumed_len = 0;
         auto consume_res =
-            co_await ctx.handler().retrocausal_queue_consume(key, false);
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, false, std::as_writable_bytes(std::span(consumed)),
+                consumed_len);
         if (!consume_res.has_value())
-          co_return consume_res.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              consume_res.error());
+        consumed.resize(consumed_len);
 
+        QueueEntry peeked;
+        peeked.resize(kQueueEntryMaxLen);
+        RuntimeMemoryLength peeked_len = 0;
         auto peek_res =
-            co_await ctx.handler().retrocausal_queue_consume(key, true);
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::as_writable_bytes(std::span(peeked)),
+                peeked_len);
         if (!peek_res.has_value())
-          co_return peek_res.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
+        peeked.resize(peeked_len);
 
-        if (!consume_res.value().has_value() || !peek_res.value().has_value() ||
-            consume_res.value().value() != expected_entry ||
-            peek_res.value().value() != expected_entry) {
+        if (consume_res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            peek_res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            consumed != expected_entry || peeked != expected_entry) {
           co_return InvokeStatus<void>{};
         }
 
         marker_branch_taken = true;
         auto marker_key = make_storage_key("marker");
         uint8_t marker[] = {0xEE};
-        auto ws = co_await ctx.handler().set_bytestring(marker_key,
-                                                        std::as_bytes(
-                                                            std::span(marker)));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            marker_key, std::as_bytes(std::span(marker)));
         if (!ws.has_value())
-          co_return ws.error().to_invoke_error();
-        if (!ws.value().has_value())
+          co_return NativeContractBuilder::host_fn_error_conversion(ws.error());
+        if (ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         co_return InvokeStatus<void>{};
       });
@@ -297,12 +312,15 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_double_consume_fault = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto r1 = co_await ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto r1 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!r1.has_value())
-          co_return r1.error().to_invoke_error();
-        auto r2 = co_await ctx.handler().retrocausal_queue_consume(key, false);
+          co_return NativeContractBuilder::host_fn_error_conversion(r1.error());
+        auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!r2.has_value())
-          co_return r2.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(r2.error());
         co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
@@ -336,12 +354,15 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_consume_peek = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto r1 = co_await ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto r1 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!r1.has_value())
-          co_return r1.error().to_invoke_error();
-        auto r2 = co_await ctx.handler().retrocausal_queue_consume(key, true);
+          co_return NativeContractBuilder::host_fn_error_conversion(r1.error());
+        auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, entry_len);
         if (!r2.has_value())
-          co_return r2.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(r2.error());
         co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cp_cmap;
@@ -452,14 +473,18 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   auto b_peek_and_insert = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength peek_len = 0;
+        auto peek = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, peek_len);
         if (!peek.has_value())
-          co_return peek.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek.error());
         uint8_t val = 10;
-        auto ins = co_await ctx.handler().retrocausal_queue_insert(
+        auto ins = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
-          co_return ins.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              ins.error());
         co_return InvokeStatus<void>{};
       });
 
@@ -558,9 +583,12 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_peek_only = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength peek_len = 0;
+        auto peek = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, peek_len);
         if (!peek.has_value())
-          co_return peek.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek.error());
         co_return InvokeStatus<void>{};
       });
 
@@ -690,9 +718,12 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_peek = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength peek_len = 0;
+        auto peek = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, peek_len);
         if (!peek.has_value())
-          co_return peek.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek.error());
         co_return InvokeStatus<void>{};
       });
 
@@ -803,12 +834,17 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_peek_and_maybe_revert = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
+        uint8_t peeked = 0;
+        RuntimeMemoryLength peeked_len = 0;
+        auto peek = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::as_writable_bytes(std::span(&peeked, 1)),
+            peeked_len);
         if (!peek.has_value())
-          co_return peek.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek.error());
 
-        if (peek.value().has_value() && peek.value().value().size() == 1 &&
-            peek.value().value()[0] == kForgedVal) {
+        if (peek.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+            peeked_len == 1 && peeked == kForgedVal) {
           ctx.handler().set_return_buffer(ReturnBuffer{}, true);
           co_return InvokeStatus<void>{};
         }
@@ -1171,9 +1207,12 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_consume = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto res = co_await ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          co_return res.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
         co_return InvokeStatus<void>{};
       });
 
@@ -1368,11 +1407,13 @@ TEST_F(RcqDoctoredProposalDataTest,
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         for (uint32_t i = 0; i < kOverCap; ++i) {
-          auto res =
-              co_await ctx.handler().retrocausal_queue_consume(key, false);
+          RuntimeMemoryLength entry_len = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              key, false, std::span<std::byte>{}, entry_len);
           if (!res.has_value())
-            co_return res.error().to_invoke_error();
-          if (!res.value().has_value())
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
+          if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone)
             co_return InvokeError{InvokeErrorCode::Deterministic};
           ++consumes_succeeded;
         }

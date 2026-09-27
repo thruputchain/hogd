@@ -101,19 +101,24 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
     fns_storage.emplace(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
-          auto res = co_await ctx.handler().get_bytestring(key);
+          Bytestring bs;
+          bs.resize(kBytestringCeilingLen);
+          RuntimeMemoryLength written_len = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+              key, std::as_writable_bytes(std::span(bs)), written_len);
           if (!res.has_value()) {
-            co_return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
           }
-          if (!res.value().result.has_value()) {
+          if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto const *bs = res.value().result.value();
+          bs.resize(written_len);
 
           ReturnBuffer out;
-          out.resize(bs->size());
+          out.resize(bs.size());
           if (!out.empty()) {
-            std::memcpy(out.data(), bs->data(), bs->size());
+            std::memcpy(out.data(), bs.data(), bs.size());
           }
 
           ctx.handler().set_return_buffer(std::move(out), false);
@@ -683,16 +688,18 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
           auto add_value = static_cast<int8_t>(calldata[0]);
 
           auto system_res =
-              co_await ctx.handler().set_nnint(key, std::nullopt, add_value);
+              co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                  key, static_cast<int128_t const *>(nullptr),
+                  int128_t{add_value});
 
           if (!system_res.has_value()) {
             ADD_FAILURE() << "set_nnint should have succeeded";
             // System-level error during async operation
-            co_return system_res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                system_res.error());
           }
 
-          auto const &syscall_res = system_res.value();
-          if (!syscall_res.has_value()) {
+          if (system_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "set_nnint should have succeeded";
             // Syscall itself reported an error (e.g., invalid arguments
             // for set_nnint)
@@ -1242,15 +1249,17 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
           auto add_value = static_cast<int8_t>(calldata[0]);
 
           auto system_res =
-              co_await ctx.handler().set_nnint(key, std::nullopt, add_value);
+              co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                  key, static_cast<int128_t const *>(nullptr),
+                  int128_t{add_value});
 
           if (!system_res.has_value()) {
             // System-level error during async operation
-            co_return system_res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                system_res.error());
           }
 
-          auto const &syscall_res = system_res.value();
-          if (!syscall_res.has_value()) {
+          if (system_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             // Syscall itself reported an error (e.g., invalid
             // arguments for set_nnint)
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1540,19 +1549,20 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
           auto key = make_storage_key("test");
           // Interpret calldata bytes as int8_t for set_value and
           // add_value
-          auto set_value = static_cast<int8_t>(calldata[0]);
+          const int128_t set_value = static_cast<int8_t>(calldata[0]);
           auto add_value = static_cast<int8_t>(calldata[1]);
 
           auto system_res =
-              co_await ctx.handler().set_nnint(key, set_value, add_value);
+              co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                  key, &set_value, int128_t{add_value});
 
           if (!system_res.has_value()) {
             // System-level error during async operation
-            co_return system_res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                system_res.error());
           }
 
-          auto const &syscall_res = system_res.value();
-          if (!syscall_res.has_value()) {
+          if (system_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             // Syscall itself reported an error (e.g., invalid
             // arguments for set_nnint)
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -3387,11 +3397,13 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                 });
   fns_w.emplace(
       1, [key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto res = co_await ctx.handler().get_bytestring(key);
+        RuntimeMemoryLength written_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+            key, std::span<std::byte>{}, written_len);
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().result.has_value()) {
+        if (res.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};
@@ -3552,12 +3564,13 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq-self-consume");
           uint8_t entry = 0xA5;
-          auto res = co_await ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               key, std::as_bytes(std::span(&entry, 1)));
           if (!res.has_value()) {
-            co_return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
           }
-          if (!res.value().has_value()) {
+          if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
@@ -3565,17 +3578,20 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
     fns_t.emplace(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq-self-consume");
-          auto res =
-              co_await ctx.handler().retrocausal_queue_consume(key, false);
+          uint8_t entry = 0;
+          RuntimeMemoryLength entry_len = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              key, false, std::as_writable_bytes(std::span(&entry, 1)),
+              entry_len);
           if (!res.has_value()) {
-            co_return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
           }
-          if (!res.value().has_value()) {
+          if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto const &entry = res.value().value();
-          if (entry.size() != 1 || entry[0] != 0xA5) {
+          if (entry_len != 1 || entry != 0xA5) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
@@ -3667,12 +3683,13 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq-multi");
           uint8_t entry = 0xBB;
-          auto res = co_await ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               key, std::as_bytes(std::span(&entry, 1)));
           if (!res.has_value()) {
-            co_return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
           }
-          if (!res.value().has_value()) {
+          if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
@@ -3680,12 +3697,14 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
     fns_t.emplace(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq-multi");
-          auto res =
-              co_await ctx.handler().retrocausal_queue_consume(key, false);
+          RuntimeMemoryLength entry_len = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              key, false, std::span<std::byte>{}, entry_len);
           if (!res.has_value()) {
-            co_return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
           }
-          if (!res.value().has_value()) {
+          if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};

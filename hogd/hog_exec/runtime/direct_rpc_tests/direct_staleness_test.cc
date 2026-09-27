@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -30,6 +31,8 @@
 #include "hogd/ramdb/db.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -537,16 +540,18 @@ TEST_F(DirectStalenessTest,
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
               [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto observed =
-                    co_await ctx.handler().retrocausal_queue_consume(
+                uint8_t observed = 0;
+                RuntimeMemoryLength observed_len = 0;
+                auto res =
+                    co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
                         NativeContractTestFramework::make_storage_key("rcq0"),
-                        true);
-                if (!observed.has_value()) {
-                  co_return observed.error().to_invoke_error();
+                        true, std::as_writable_bytes(std::span(&observed, 1)),
+                        observed_len);
+                if (!res.has_value()) {
+                  co_return InvokeError{InvokeErrorCode::Unrecoverable};
                 }
-                if (!observed.value().has_value() ||
-                    observed.value().value().size() != 1 ||
-                    observed.value().value()[0] != kForgedEntry) {
+                if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                    observed_len != 1 || observed != kForgedEntry) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
 
