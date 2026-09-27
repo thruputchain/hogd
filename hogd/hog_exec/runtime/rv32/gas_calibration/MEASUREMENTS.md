@@ -32,10 +32,18 @@ changing-target dependency and is superseded by dedicated jump graphs. It must
 not be used to validate current jump coverage. The current direct-jump price
 has a separate measurement recorded beside `kDirectJumpGas` in `program.h`.
 
-The committed `reference.txt` records engine fingerprint `d4697729c27d6dbd` and
-source digest `3c6ab60f6e5b9800`. Its guards include old JALR shapes; the file is
-historical input to the drift check, not evidence that the current engine was
-calibrated. Review fresh jump measurements before regenerating those guards.
+The committed `reference.txt` and `syscall_reference.txt` were regenerated from
+run `36165785461`, the nightly at `e2cc27c` (engine `df7566033138ebd2`, source
+digest `5222e3822b4ccec7`; JSON in `metrics_history`). The previous references,
+engine `d4697729c27d6dbd`, predate two changes: JAL from 1 to 3 gas (#4117) and
+the default code limit from 64 to 256 KiB (#4136). Reverting both reproduces the
+old fingerprint, so the fusion probe did not change. The old JALR shapes are
+replaced by guards on the dedicated jump graphs. Across that run and runs
+`35812028325`, `35894280482`, and `36032933141`, the dearest JAL context
+measured 3.00–3.01x the baseline against its 3 gas, which `--schedule` would
+round up to 4; `kDirectJumpGas` records why 3 was kept. The dearest JALR context
+measured 2.69–2.76x against 3, and every changing-target sequence stayed within
+budget.
 
 The full-range memory pattern was subsequently corrected: the offset advances
 after all eight banks, visiting 512 distinct cache lines over a complete cycle
