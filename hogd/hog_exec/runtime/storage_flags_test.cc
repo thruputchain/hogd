@@ -54,9 +54,10 @@ constexpr ContractAddress kToken =
     NativeContractTestFramework::make_contract_address(1);
 
 constexpr std::string_view kKey = "k";
+constexpr std::string_view kOtherKey = "c";
 
-// Token methods. Each takes one calldata byte: the value to write, the flags
-// to expect, or the error code to expect.
+// Token methods. Each takes one calldata byte: the value to write, the entry
+// to insert or expect, the flags to expect, or the error code to expect.
 enum TokenMethod : Runtime::MethodID {
   kWrite = 0,             // BytestringSet(k, [arg])
   kWriteLocked = 1,       // BytestringSet(k, [arg]), SetStorageFlags(k, Excl)
@@ -69,6 +70,10 @@ enum TokenMethod : Runtime::MethodID {
   kFailedWrite = 8,       // NNIntSetAdd(k, 0, -1), which must fail
   kSetFlagsExpecting = 9, // SetStorageFlags(k, arg) must return InvalidInput
   kAddNoFlags = 10,       // SetStorageFlags(k, None) must succeed
+  kInsert = 11,           // RetrocausalQueueInsert(k, [arg])
+  kConsumeExpecting = 12, // RetrocausalQueueConsume(k) must return [arg]
+  kWriteOther = 13,       // BytestringSet(c, [arg])
+  kClearWriteOther = 14,  // ClearStorageFlags(k), BytestringSet(c, [arg])
 };
 
 uint8_t
@@ -83,14 +88,48 @@ calldata_arg(NativeSyscallContext &ctx)
 }
 
 x23::Async<bool>
-write(NativeSyscallContext &ctx, uint8_t value)
+write(NativeSyscallContext &ctx, uint8_t value,
+      std::string_view key_name = kKey)
 {
-  auto key = NativeContractTestFramework::make_storage_key(kKey);
+  auto key = NativeContractTestFramework::make_storage_key(key_name);
   auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
       key, std::as_bytes(std::span(&value, 1)));
   if (!res.has_value() ||
       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
     ADD_FAILURE() << "BytestringSet failed";
+    co_return false;
+  }
+  co_return true;
+}
+
+x23::Async<bool>
+insert(NativeSyscallContext &ctx, uint8_t entry)
+{
+  auto key = NativeContractTestFramework::make_storage_key(kKey);
+  auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+      key, std::as_bytes(std::span(&entry, 1)));
+  if (!res.has_value() ||
+      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+    ADD_FAILURE() << "RetrocausalQueueInsert failed";
+    co_return false;
+  }
+  co_return true;
+}
+
+x23::Async<bool>
+consume_expecting(NativeSyscallContext &ctx, uint8_t expected)
+{
+  auto key = NativeContractTestFramework::make_storage_key(kKey);
+  uint8_t entry = 0;
+  RuntimeMemoryLength written_len = 0;
+  auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+      key, false, std::as_writable_bytes(std::span(&entry, 1)), written_len);
+  if (!res.has_value() ||
+      res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+      written_len != 1 || entry != expected) {
+    ADD_FAILURE() << "RetrocausalQueueConsume returned "
+                  << static_cast<int>(entry) << ", expected "
+                  << static_cast<int>(expected);
     co_return false;
   }
   co_return true;
@@ -240,6 +279,26 @@ make_token()
                     res.has_value() &&
                     res.value() == SyscallErrorCode::kSyscallErrorCodeNone);
               });
+  fns.emplace(kInsert,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                co_return ok_or_fail(co_await insert(ctx, calldata_arg(ctx)));
+              });
+  fns.emplace(kConsumeExpecting,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                co_return ok_or_fail(
+                    co_await consume_expecting(ctx, calldata_arg(ctx)));
+              });
+  fns.emplace(kWriteOther,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                co_return ok_or_fail(
+                    co_await write(ctx, calldata_arg(ctx), kOtherKey));
+              });
+  fns.emplace(kClearWriteOther,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                co_return ok_or_fail(
+                    co_await clear(ctx) &&
+                    co_await write(ctx, calldata_arg(ctx), kOtherKey));
+              });
   return std::make_unique<NativeContract>(std::move(fns));
 }
 
@@ -368,30 +427,50 @@ protected:
     return std::nullopt;
   }
 
-  // A second transaction in the same block writes the key directly. HogDb
-  // turns away a same-block bytestring write of a different value on its own
-  // (ValueMismatch), so a test that probes a lock writes the value the key
-  // already holds: then only the lock can refuse it.
-  ExecResult write_from_another_transaction(uint8_t value)
+  // Runs one token method as a transaction of its own, in the current block,
+  // and returns the commit result.
+  ExecResult token_transaction(TokenMethod method, uint8_t arg)
   {
     auto handler =
-        make_new_system_call_handler(make_tx(kToken, kWrite, Calldata{value}),
+        make_new_system_call_handler(make_tx(kToken, method, Calldata{arg}),
                                      *context_);
     auto res = handler.root_invoke()();
     EXPECT_TRUE(res.is_root_success());
     return handler.try_commit_transaction()();
   }
 
-  std::optional<uint8_t> stored_value()
+  // A second transaction in the same block writes the key directly. HogDb
+  // turns away a same-block bytestring write of a different value on its own
+  // (ValueMismatch), so a test that probes a lock writes the value the key
+  // already holds: then only the lock can refuse it.
+  ExecResult write_from_another_transaction(uint8_t value)
   {
-    auto item =
-        lookup_storage_item_from_db(make_contract_data_addrkey(kToken, kKey));
+    return token_transaction(kWrite, value);
+  }
+
+  std::optional<uint8_t> stored_value(std::string_view key_name = kKey)
+  {
+    auto item = lookup_storage_item_from_db(
+        make_contract_data_addrkey(kToken, key_name));
     if (!item.has_value() ||
         item->type() != StorageItemType::kItemTypeBytestring ||
         item->bytestring().size() != 1) {
       return std::nullopt;
     }
     return item->bytestring()[0];
+  }
+
+  // The number of live entries in the queue at k, or nullopt if k does not
+  // hold a queue.
+  std::optional<uint64_t> queue_length()
+  {
+    auto item =
+        lookup_storage_item_from_db(make_contract_data_addrkey(kToken, kKey));
+    if (!item.has_value() ||
+        item->type() != StorageItemType::kItemTypeRetrocausalQueue) {
+      return std::nullopt;
+    }
+    return item->metadata().live_entries;
   }
 
   std::unique_ptr<RuntimeContext> context_;
@@ -491,6 +570,56 @@ TEST_F(StorageFlagsTest, RevertedFramesDiscardFlagChanges)
   EXPECT_EQ(stored_value(), 3);
 }
 
+// A TryInvoke frame that returns must still acquire its locks, and when HogDb
+// refuses them the frame fails as a reverted one does, flag changes included.
+// Here the refusal is the lock itself: another transaction wrote k earlier in
+// the block, so an exclusive lock on k is denied, while the same write without
+// it is admitted (the root commit shows it).
+TEST_F(StorageFlagsTest, RefusedTryInvokeDiscardsItsLock)
+{
+  ASSERT_EQ(write_from_another_transaction(1), ExecResult::ExecResultOK);
+
+  EXPECT_EQ(run_script({
+                {.method = kWrite, .arg = 1},
+                {.method = kWriteLocked,
+                 .arg = 1,
+                 .try_invoke = true,
+                 .returns = false},
+                {.method = kExpectFlags, .arg = kNoFlags},
+            }),
+            kNoFlags);
+
+  // Nor did the lock reach HogDb.
+  EXPECT_EQ(write_from_another_transaction(1), ExecResult::ExecResultOK);
+  advance_block();
+  EXPECT_EQ(stored_value(), 1);
+}
+
+// The same for a clear, refused over another key: the TryInvoke clears k's
+// lock and writes c, which another transaction wrote with a different value
+// earlier in the block (ValueMismatch). The whole push is refused, so k keeps
+// its lock and c its value.
+TEST_F(StorageFlagsTest, RefusedTryInvokeDiscardsItsClear)
+{
+  ASSERT_EQ(token_transaction(kWriteOther, 5), ExecResult::ExecResultOK);
+
+  EXPECT_EQ(run_script({
+                {.method = kWriteLocked, .arg = 1},
+                {.method = kClearWriteOther,
+                 .arg = 6,
+                 .try_invoke = true,
+                 .returns = false},
+                {.method = kExpectFlags, .arg = kExclusive},
+            }),
+            kExclusive);
+
+  EXPECT_EQ(write_from_another_transaction(1),
+            ExecResult::ExecResultTxNonDeterministicError);
+  advance_block();
+  EXPECT_EQ(stored_value(), 1);
+  EXPECT_EQ(stored_value(kOtherKey), 5);
+}
+
 TEST_F(StorageFlagsTest, CommittedLockKeepsOtherWritersOutForTheBlock)
 {
   // The lock set before a later plain write still freezes the key.
@@ -545,6 +674,46 @@ TEST_P(StorageFlagsClearAfterPushTest, ClearWithdrawsAPushedLock)
 }
 
 INSTANTIATE_TEST_SUITE_P(StorageFlags, StorageFlagsClearAfterPushTest,
+                         ::testing::Bool());
+
+// An insert into a key holding a bytestring replaces it with a queue (#1673).
+// The handler swaps the view's item for a new queue item, later inserts and
+// consumes change that item in place, and none of it touches the key's flags:
+// a lock set on the bytestring holds the queue, and the competing insert from
+// another transaction is refused. k holds a committed bytestring, so HogDb sees
+// the type change too. Unlocked, the competing insert joins the queue.
+class StorageFlagsQueueConversionTest
+  : public StorageFlagsTest,
+    public ::testing::WithParamInterface<bool> {};
+
+TEST_P(StorageFlagsQueueConversionTest, LockSurvivesConversionToAQueue)
+{
+  const bool locked = GetParam();
+  EXPECT_EQ(run_script({{.method = kWrite, .arg = 1}}), kNoFlags);
+  advance_block();
+  ASSERT_EQ(stored_value(), 1);
+
+  const StorageDeltaFlagSet flags = locked ? kExclusive : kNoFlags;
+  const auto flags_arg = static_cast<uint8_t>(flags);
+  EXPECT_EQ(run_script({
+                {.method = locked ? kWriteLocked : kWrite, .arg = 2},
+                {.method = kInsert, .arg = 5},
+                {.method = kExpectFlags, .arg = flags_arg},
+                {.method = kInsert, .arg = 6},
+                {.method = kConsumeExpecting, .arg = 5},
+                {.method = kExpectFlags, .arg = flags_arg},
+            }),
+            flags);
+
+  EXPECT_EQ(token_transaction(kInsert, 7),
+            locked ? ExecResult::ExecResultTxNonDeterministicError
+                   : ExecResult::ExecResultOK);
+  advance_block();
+  // Entry 5 was consumed; 7 is there only if the competing insert committed.
+  EXPECT_EQ(queue_length(), locked ? 1U : 2U);
+}
+
+INSTANTIATE_TEST_SUITE_P(StorageFlags, StorageFlagsQueueConversionTest,
                          ::testing::Bool());
 
 // NOLINTEND(bugprone-exception-escape)
