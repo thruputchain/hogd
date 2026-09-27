@@ -73,7 +73,7 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
 
   auto invocation = test_invocation();
 
-  constexpr std::array<int32_t, 6> kRejectedFlags = {
+  constexpr std::array<InvokeFlagSet, 6> kRejectedFlags = {
       // The bit from the issue report: not any defined InvokeFlag.
       0x40,
       // Defined in invoke_flag.x but explicitly not implemented, so production
@@ -83,12 +83,13 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
       std::to_underlying(InvokeFlag::TryInvoke) |
           std::to_underlying(InvokeFlag::DelegateCall),
       std::to_underlying(InvokeFlag::ReadOnly) | 0x40,
-      // InvokeFlagSet is a signed int over the FFI boundary.
-      -1,
-      std::numeric_limits<int32_t>::min(),
+      // Every bit, and the top bit alone: the values that read as -1 and
+      // INT32_MIN while InvokeFlagSet was signed.
+      std::numeric_limits<InvokeFlagSet>::max(),
+      InvokeFlagSet{1} << 31,
   };
 
-  for (int32_t flags : kRejectedFlags) {
+  for (InvokeFlagSet flags : kRejectedFlags) {
     SCOPED_TRACE(flags);
     auto res = expect_frame_refused(
         handler.syscall_handler, invocation,
@@ -142,7 +143,7 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
 // mock pathway to production's set, it does not narrow it further.
 TEST(TestBindingsTest, MockFrameOpenAcceptsProductionValidInvokeFlags)
 {
-  constexpr std::array<int32_t, 4> kAcceptedFlags = {
+  constexpr std::array<InvokeFlagSet, 4> kAcceptedFlags = {
       std::to_underlying(InvokeFlag::None),
       std::to_underlying(InvokeFlag::TryInvoke),
       std::to_underlying(InvokeFlag::ReadOnly),
@@ -150,7 +151,7 @@ TEST(TestBindingsTest, MockFrameOpenAcceptsProductionValidInvokeFlags)
           std::to_underlying(InvokeFlag::ReadOnly),
   };
 
-  for (int32_t flags : kAcceptedFlags) {
+  for (InvokeFlagSet flags : kAcceptedFlags) {
     // A fresh handler per flag value: finishing the root frame makes the
     // handler terminal, so these cannot share one.
     auto *db = make_db();
