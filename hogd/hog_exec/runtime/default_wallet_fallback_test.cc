@@ -17,6 +17,7 @@
 #include "built_contracts/manual_revert_test.h"
 #include "contract.hh"
 #include "exec_result.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -928,6 +929,48 @@ TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
             InvocationFrameStatusCode::Fault);
   EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultUnrecoverable);
+}
+
+// Wallet code record present but not translatable: make_new_runtime's tx-local
+// arm returns a null runtime, so the tx fails deterministically (#4024).
+TEST_F(CustomDefaultWalletTest, UntranslatableRv32WalletIsDeterministic)
+{
+  auto wallet = std::make_shared<Contract>(ContractType::kRv32);
+  wallet->rv32_contract().data.append_range(
+      std::vector<uint8_t>{0xde, 0xad, 0xbe, 0xef});
+
+  GenesisConfigurationBuilder builder;
+  builder.set_default_wallet(
+      NativeContractTestFramework::make_deployed_contract_hash(wallet));
+  run_genesis_initialization(builder.build(NetworkHash{},
+                                           *get_default_cost_model(),
+                                           *load_stock_genesis_root_contract(),
+                                           stock_network_config()),
+                             BlockExecutionMode::kBlockExecutionModeProposal);
+  write_contract(wallet);
+
+  auto rv32_ctx = std::make_unique<Rv32Context>();
+  MultiplexedContext ctx(
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
+          {ContractType::kRv32, {rv32_ctx.release(), true}},
+      });
+
+  ContractAddress undeployed = make_contract_address(77);
+  ContractTraitClient<calldata_wrapper::CalldataWrapper> client(undeployed);
+  x23::Vec<uint8_t, 4294967295> payload;
+  payload.resize(8, 0xAB);
+  SignedTransaction stx;
+  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.uniquifier = make_new_uniquifier();
+
+  auto handler = make_new_system_call_handler(stx, ctx);
+  auto res = handler.root_invoke()();
+  ASSERT_FALSE(res.is_root_success());
+  // Deterministic is a contract fault the block can carry, Unrecoverable is
+  // not. (Not via try_commit_transaction: its nonce reservation needs funding.)
+  EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
+            InvocationFrameStatusCode::Fault);
 }
 
 // NOLINTEND(bugprone-exception-escape)

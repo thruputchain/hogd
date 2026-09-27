@@ -637,7 +637,9 @@ TEST_F(Rv32ProductionMappingTest,
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
 }
 
-TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
+// Untranslatable deployed rows predate admission, so invoking one is a
+// deterministic contract failure, not Unrecoverable (#4024).
+TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsDeterministic)
 {
   auto contract = std::make_shared<Contract>(ContractType::kRv32);
   contract->rv32_contract().data.append_range(
@@ -655,7 +657,7 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
 
   auto result = invoke_deployed(addr, 10'000);
   ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
 }
 
 // Regression test for #4038: a missing-key BytestringGetLen must still pay the
