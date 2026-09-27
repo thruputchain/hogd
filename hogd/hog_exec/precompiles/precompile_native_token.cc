@@ -10,9 +10,13 @@
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <variant>
 
+#include "auth_token.hh"
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/itc_erc20.hh"
+#include "built_contracts/itc_erc20_permit.h"
+#include "built_contracts/itc_erc20_permit.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
@@ -414,6 +418,71 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   co_return Result<void, ERC20Exception>::make_ok();
 }
 
+// The owner-to-receiver leg every spending path shares -- transfer,
+// transfer_from and transfer_from_signed -- mirroring the reference's
+// add_to_balance(owner, -diff), add_to_balance(receiver, diff), then the
+// Transfer event. `amount` is already range-checked to [0, INT128_MAX], and
+// any authorization (caller, allowance, grant) has already been checked.
+// `entry_point` names the caller in log lines.
+//
+// Generic over the caller's result type, since the ERC20Permit methods reject
+// with the same ERC20Error through their own interface's Result:
+// `Erc20ExceptionT` is the ERC20Error exception within `ResultT`.
+template<typename ResultT, typename Erc20ExceptionT>
+x23::Async<InvokeStatus<ResultT>>
+move_balance(NativeSyscallContext &ctx, ContractAddress const &owner,
+             ContractAddress const &receiver, int128_t amount,
+             std::string_view entry_point)
+{
+  using erc20_error_t = decltype(Erc20ExceptionT::exn);
+
+  // Strict per-debit check mirroring itc_erc20's add_to_balance /
+  // non_negative_int_try_strict_inc: the running balance (committed base +
+  // net in-tx delta) may not go below zero. A debit landing exactly at
+  // zero is accepted -- the reference's only rejection is `total < 0`.
+  auto owner_avail = co_await ctx.native_token_balance(owner);
+  if (!owner_avail.has_value()) {
+    co_return owner_avail.error().to_invoke_error();
+  }
+  if (!owner_avail.value().has_value()) {
+    // Staged-negative balance (system-path state the RV32 reference can never
+    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
+    // carve-out from byte parity.
+    co_return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (amount > owner_avail.value().value()) {
+    co_return ResultT::make_err(Erc20ExceptionT{erc20_error_t::TooLarge});
+  }
+
+  // No credit-side overflow check: total supply (~2^59) keeps any reachable
+  // receiver balance + amount far below INT128_MAX, so the reference's
+  // checked add on the credit leg cannot fire. HogDb's commit-time
+  // add-capacity bound remains the backstop for hand-crafted states.
+
+  if (auto moved = co_await native_token_unchecked_transfer(ctx, owner,
+                                                            receiver, amount);
+      !moved.has_value()) {
+    co_return moved.error();
+  }
+
+  auto event_buf =
+      make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                 TransferEvent{
+                                     .from_address = owner,
+                                     .to_address = receiver,
+                                     .amount = to_xdr(amount),
+                                 });
+  if (!event_buf)
+    co_return InvokeError{InvokeErrorCode::Deterministic};
+
+  if (auto err = co_await emit_event<3>(ctx, *event_buf, entry_point);
+      !err.has_value()) {
+    co_return err.error();
+  }
+
+  co_return ResultT::make_ok();
+}
+
 // implementation functions
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
@@ -442,52 +511,8 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
-  // Strict per-debit check mirroring itc_erc20's add_to_balance /
-  // non_negative_int_try_strict_inc: the running balance (committed base +
-  // net in-tx delta) may not go below zero. A debit landing exactly at
-  // zero is accepted -- the reference's only rejection is `total < 0`.
-  auto owner_avail = co_await ctx.native_token_balance(*owner);
-  if (!owner_avail.has_value()) {
-    co_return owner_avail.error().to_invoke_error();
-  }
-  if (!owner_avail.value().has_value()) {
-    // Staged-negative balance (system-path state the RV32 reference can never
-    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
-    // carve-out from byte parity.
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  if (amount_signed_int > owner_avail.value().value()) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
-  }
-
-  // No credit-side overflow check: total supply (~2^59) keeps any reachable
-  // receiver balance + amount far below INT128_MAX, so the reference's
-  // checked add on the credit leg cannot fire. HogDb's commit-time
-  // add-capacity bound remains the backstop for hand-crafted states.
-
-  if (auto moved =
-          co_await native_token_unchecked_transfer(ctx, *owner, receiver,
-                                                   amount_signed_int);
-      !moved.has_value()) {
-    co_return moved.error();
-  }
-
-  auto event_buf =
-      make_event_from_cxs_struct(native_token_transfer_event_signature(),
-                                 TransferEvent{
-                                     .from_address = *owner,
-                                     .to_address = receiver,
-                                     .amount = to_xdr(amount_signed_int),
-                                 });
-  if (!event_buf)
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-
-  if (auto err = co_await emit_event<3>(ctx, *event_buf, "transfer");
-      !err.has_value()) {
-    co_return err.error();
-  }
-
-  co_return Result<void, ERC20Exception>::make_ok();
+  co_return co_await move_balance<Result<void, ERC20Exception>, ERC20Exception>(
+      ctx, *owner, receiver, amount_signed_int, "transfer");
 }
 
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
@@ -531,51 +556,28 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     }
   }
 
-  // Strict per-debit balance check; see transfer_impl for the semantics
-  // (fail iff amount > committed base + net in-tx delta; exact-zero
-  // landings succeed).
-  auto owner_avail = co_await ctx.native_token_balance(owner);
-  if (!owner_avail.has_value()) {
-    co_return owner_avail.error().to_invoke_error();
-  }
-  if (!owner_avail.value().has_value()) {
-    // Staged-negative balance (system-path state the RV32 reference can never
-    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
-    // carve-out from byte parity.
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  if (amount_signed_int > owner_avail.value().value()) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
-  }
+  co_return co_await move_balance<Result<void, ERC20Exception>, ERC20Exception>(
+      ctx, owner, receiver, amount_signed_int, "transfer_from");
+}
 
-  // No credit-side overflow check: total supply (~2^59) keeps any reachable
-  // receiver balance + amount far below INT128_MAX, so the reference's
-  // checked add on the credit leg cannot fire. HogDb's commit-time
-  // add-capacity bound remains the backstop for hand-crafted states.
-
-  if (auto moved =
-          co_await native_token_unchecked_transfer(ctx, owner, receiver,
-                                                   amount_signed_int);
-      !moved.has_value()) {
-    co_return moved.error();
-  }
-
+// Emit the Approval event for an allowance of `owner`'s changed by `diff` for
+// `spender`, as the reference's log_approval_event does.
+x23::Async<InvokeStatus<void>>
+emit_approval_event(NativeSyscallContext &ctx, ContractAddress const &owner,
+                    ContractAddress const &spender, int128_t diff,
+                    std::string_view entry_point)
+{
   auto event_buf =
-      make_event_from_cxs_struct(native_token_transfer_event_signature(),
-                                 TransferEvent{
-                                     .from_address = owner,
-                                     .to_address = receiver,
-                                     .amount = to_xdr(amount_signed_int),
+      make_event_from_cxs_struct(native_token_approval_event_signature(),
+                                 ApprovalEvent{
+                                     .owner_address = owner,
+                                     .spender_address = spender,
+                                     .amount = to_xdr(diff),
                                  });
   if (!event_buf)
     co_return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = co_await emit_event<3>(ctx, *event_buf, "transfer_from");
-      !err.has_value()) {
-    co_return err.error();
-  }
-
-  co_return Result<void, ERC20Exception>::make_ok();
+  co_return co_await emit_event<3>(ctx, *event_buf, entry_point);
 }
 
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
@@ -610,17 +612,9 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
     co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
-  auto event_buf =
-      make_event_from_cxs_struct(native_token_approval_event_signature(),
-                                 ApprovalEvent{
-                                     .owner_address = *owner,
-                                     .spender_address = spender,
-                                     .amount = to_xdr(amount_signed_int),
-                                 });
-  if (!event_buf)
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-
-  if (auto err = co_await emit_event<3>(ctx, *event_buf, "adjust_allowance");
+  if (auto err =
+          co_await emit_approval_event(ctx, *owner, spender, amount_signed_int,
+                                       "adjust_allowance");
       !err.has_value()) {
     co_return err.error();
   }
@@ -670,6 +664,187 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   uint128_t utotal = std::max<int128_t>(total, 0);
   co_return Result<amount_t, ERC20Exception>::make_ok(
       std::make_tuple(utotal >> 64, utotal & 0xffffffffffffffffULL));
+}
+
+// ERC20Permit (groundhog-erc20-permit-if): approvals that arrive as auth
+// tokens rather than as a transaction from the owner. The RV32 reference is
+// itc_erc20_permit, which is itc_erc20 with this interface on top.
+
+using PermitErc20Exception =
+    ContractException<itc_erc20_permit::ERC20Error, 0xb19947acb2fa14ffULL>;
+using PermitException = ContractException<itc_erc20_permit::ERC20PermitError,
+                                          0xe8abb072f5171148ULL>;
+using PermitResult = Result<void, PermitErc20Exception, PermitException>;
+
+static_assert(ERC20Exception::kSelector == PermitErc20Exception::kSelector,
+              "ERC20Error must reject identically through either interface");
+
+// A consumed PermitGrant and the address that minted it -- the owner whose
+// tokens it authorizes spending.
+struct ConsumedGrant {
+  itc_erc20_permit::PermitGrant grant;
+  ContractAddress owner;
+};
+
+using ConsumeGrantResult = std::variant<ConsumedGrant, LibraryException>;
+
+// Consume `token` as the SDK's `Signed<PermitGrant>::consume` does, returning
+// the grant or the library exception the SDK would throw:
+//
+//  - the ConsumeAuthToken syscall rejecting the handle (not this contract's
+//    to consume, expired, already spent) throws LibraryExn::Syscall;
+//  - a payload that is not exactly one CXS PermitGrant throws
+//    AuthTokenError::ConsumeDecodeFailure;
+//  - child tokens, which a PermitGrant has no Signed field to receive, throw
+//    AuthTokenError::ReceiveAuthHandlesFailure. They are unwrapped into this
+//    frame by the syscall either way, as they are for the reference.
+x23::Async<InvokeStatus<ConsumeGrantResult>>
+consume_permit_grant(NativeSyscallContext &ctx, SignedToken const &token)
+{
+  auto auth_token_exception = [](AuthTokenErrorKind kind) {
+    LibraryExn exn(LibraryExnKind::kLibraryExnAuthToken);
+    exn.auth_token() = AuthTokenError(kind);
+    return LibraryException{std::move(exn)};
+  };
+
+  std::array<std::byte, kAuthTokenMaxLen> payload{};
+  ContractAddress minter{};
+  RuntimeMemoryLength payload_len = 0;
+  uint32_t child_start = 0;
+  uint32_t child_count = 0;
+  auto r = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
+      token.handle, std::span<std::byte>(payload), minter, payload_len,
+      child_start, child_count);
+  if (!r.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return ConsumeGrantResult{
+        NativeContractBuilder::syscall_exception(SyscallNo::kConsumeAuthToken,
+                                                 *r)};
+  }
+  if (payload_len > payload.size()) {
+    // The host copies at most the buffer it was given; a longer length is a
+    // host fault, not something the grant's minter can cause.
+    error("Unrecoverable: kConsumeAuthToken reported {} payload bytes into a "
+          "{}-byte buffer",
+          payload_len, payload.size());
+    co_return InvokeError{InvokeErrorCode::Unrecoverable};
+  }
+
+  itc_erc20_permit::PermitGrant grant{};
+  auto const *payload_bytes = reinterpret_cast<uint8_t const *>(payload.data());
+  if (!x23::deserialize_cxs(&grant, std::span<uint8_t const>(payload_bytes,
+                                                             payload_len))) {
+    co_return ConsumeGrantResult{auth_token_exception(
+        AuthTokenErrorKind::kAuthTokenConsumeDecodeFailure)};
+  }
+  if (child_count != 0) {
+    co_return ConsumeGrantResult{auth_token_exception(
+        AuthTokenErrorKind::kAuthTokenReceiveAuthHandlesFailure)};
+  }
+  co_return ConsumeGrantResult{ConsumedGrant{.grant = grant, .owner = minter}};
+}
+
+// The grant's amount as a signed delta, or nullopt when it exceeds INT128_MAX
+// -- the reference's amount_to_diff, which throws ERC20Error::TooLarge.
+std::optional<int128_t>
+grant_amount(itc_erc20_permit::PermitGrant const &grant)
+{
+  const uint128_t amount = from_xdr(grant.amount);
+  if (amount > kMaxInt128) {
+    return std::nullopt;
+  }
+  return static_cast<int128_t>(amount);
+}
+
+x23::Async<InvokeStatus<PermitResult>>
+permit_impl(NativeSyscallContext &ctx, SignedToken grant_token)
+{
+  trace("native token permit: handle {}", grant_token.handle);
+  if (!ctx.consume_gas(1)) {
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+
+  auto consumed = co_await consume_permit_grant(ctx, grant_token);
+  if (!consumed.has_value()) {
+    co_return consumed.error();
+  }
+  if (auto *exn = std::get_if<LibraryException>(&*consumed)) {
+    co_return PermitResult::make_err(std::move(*exn));
+  }
+  auto const &[grant, owner] = std::get<ConsumedGrant>(*consumed);
+
+  auto diff = grant_amount(grant);
+  if (!diff) {
+    co_return PermitResult::make_err(
+        PermitErc20Exception{itc_erc20_permit::ERC20Error::TooLarge});
+  }
+  // An owner granting itself an allowance: the reference's get_allowance_key
+  // rejects it with Internal, as adjust_allowance_impl does.
+  if (owner == grant.spender) {
+    co_return PermitResult::make_err(
+        PermitErc20Exception{itc_erc20_permit::ERC20Error::Internal});
+  }
+
+  // The allowance grows by the grant rather than being set to it, as
+  // adjust_allowance does: a grant is single-use, so there is no second grant
+  // for a set-to-value to defend against.
+  auto adjusted = co_await adjust_allowance(ctx, owner, grant.spender, *diff);
+  if (!adjusted.has_value()) {
+    co_return adjusted.error();
+  }
+  if (!adjusted.value()) {
+    co_return PermitResult::make_err(
+        PermitErc20Exception{itc_erc20_permit::ERC20Error::TooLarge});
+  }
+
+  if (auto err = co_await emit_approval_event(ctx, owner, grant.spender, *diff,
+                                              "permit");
+      !err.has_value()) {
+    co_return err.error();
+  }
+  co_return PermitResult::make_ok();
+}
+
+x23::Async<InvokeStatus<PermitResult>>
+transfer_from_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token,
+                          ContractAddress receiver)
+{
+  trace("native token transfer_from_signed: handle {} receiver {}",
+        grant_token.handle, x23::show(receiver));
+  if (!ctx.consume_gas(1)) {
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+
+  auto consumed = co_await consume_permit_grant(ctx, grant_token);
+  if (!consumed.has_value()) {
+    co_return consumed.error();
+  }
+  if (auto *exn = std::get_if<LibraryException>(&*consumed)) {
+    co_return PermitResult::make_err(std::move(*exn));
+  }
+  auto const &[grant, owner] = std::get<ConsumedGrant>(*consumed);
+
+  // The grant names who may spend it; no allowance is written or read, so the
+  // caller being that spender is the whole authorization check.
+  auto caller = co_await get_msg_sender(ctx);
+  if (!caller.has_value()) {
+    co_return caller.error();
+  }
+  if (*caller != grant.spender) {
+    co_return PermitResult::make_err(
+        PermitException{itc_erc20_permit::ERC20PermitError::NotSpender});
+  }
+
+  auto amount = grant_amount(grant);
+  if (!amount) {
+    co_return PermitResult::make_err(
+        PermitErc20Exception{itc_erc20_permit::ERC20Error::TooLarge});
+  }
+
+  co_return co_await move_balance<PermitResult, PermitErc20Exception>(
+      ctx, owner, receiver, *amount, "transfer_from_signed");
 }
 
 } // namespace
@@ -844,7 +1019,13 @@ make_native_token_contract()
                             total_supply & 0xffffffffffffffffULL));
       });
 
+  // ERC20Permit
+  builder.add<itc_erc20_permit::ERC20Permit, u8"permit">(permit_impl);
+  builder.add<itc_erc20_permit::ERC20Permit, u8"transfer_from_signed">(
+      transfer_from_signed_impl);
+
   assert(builder.check_methods<itc_erc20::ERC20>());
+  assert(builder.check_methods<itc_erc20_permit::ERC20Permit>());
 
   return builder.build();
 }
