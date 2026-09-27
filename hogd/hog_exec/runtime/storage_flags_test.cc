@@ -368,7 +368,10 @@ protected:
     return std::nullopt;
   }
 
-  // A second transaction in the same block writes the key directly.
+  // A second transaction in the same block writes the key directly. HogDb
+  // turns away a same-block bytestring write of a different value on its own
+  // (ValueMismatch), so a test that probes a lock writes the value the key
+  // already holds: then only the lock can refuse it.
   ExecResult write_from_another_transaction(uint8_t value)
   {
     auto handler =
@@ -496,7 +499,7 @@ TEST_F(StorageFlagsTest, CommittedLockKeepsOtherWritersOutForTheBlock)
                 {.method = kWrite, .arg = 2},
             }),
             kExclusive);
-  EXPECT_EQ(write_from_another_transaction(9),
+  EXPECT_EQ(write_from_another_transaction(2),
             ExecResult::ExecResultTxNonDeterministicError);
   advance_block();
   EXPECT_EQ(stored_value(), 2);
@@ -510,9 +513,9 @@ TEST_F(StorageFlagsTest, CommittedLockKeepsOtherWritersOutForTheBlock)
 TEST_F(StorageFlagsTest, UnlockedWriteLeavesOtherWritersIn)
 {
   EXPECT_EQ(run_script({{.method = kWrite, .arg = 1}}), kNoFlags);
-  EXPECT_EQ(write_from_another_transaction(9), ExecResult::ExecResultOK);
+  EXPECT_EQ(write_from_another_transaction(1), ExecResult::ExecResultOK);
   advance_block();
-  EXPECT_EQ(stored_value(), 9);
+  EXPECT_EQ(stored_value(), 1);
 }
 
 // A TryInvoke that returns pushes its frame's changes, flags included, before
@@ -534,11 +537,11 @@ TEST_P(StorageFlagsClearAfterPushTest, ClearWithdrawsAPushedLock)
   EXPECT_EQ(run_script(std::move(script)),
             clear_after_push ? kNoFlags : kExclusive);
 
-  EXPECT_EQ(write_from_another_transaction(9),
+  EXPECT_EQ(write_from_another_transaction(1),
             clear_after_push ? ExecResult::ExecResultOK
                              : ExecResult::ExecResultTxNonDeterministicError);
   advance_block();
-  EXPECT_EQ(stored_value(), clear_after_push ? 9 : 1);
+  EXPECT_EQ(stored_value(), 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(StorageFlags, StorageFlagsClearAfterPushTest,

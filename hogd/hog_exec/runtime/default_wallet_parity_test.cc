@@ -47,7 +47,6 @@
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "standard_asset_events.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"

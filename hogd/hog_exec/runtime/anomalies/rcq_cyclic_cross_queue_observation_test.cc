@@ -46,7 +46,6 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"

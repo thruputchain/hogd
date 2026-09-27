@@ -27,7 +27,6 @@
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
