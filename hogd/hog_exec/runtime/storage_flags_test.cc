@@ -1,4 +1,4 @@
-// SetStorageFlags, GetStorageFlags and ClearStorageFlags (syscall ABI v2).
+// SetStorageFlags, GetStorageFlags and ClearStorageFlags.
 //
 // A transaction keeps one flags value per storage key. Writes never change it:
 // SetStorageFlags ORs flags in, ClearStorageFlags removes them, and every push

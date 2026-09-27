@@ -380,18 +380,10 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
   {
     // The pre-register-native syscall ABI (version 0) must be rejected, not
     // just unknown future versions: loading a v0 (memory-frame) artifact under
-    // the register-native bridge would silently mis-marshal syscall arguments.
+    // the v1 register-native bridge would silently mis-marshal syscall
+    // arguments.
     auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactSyscallAbiOffset, 0);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kUnsupportedSyscallAbi);
-  }
-  {
-    // A v1 guest passes storage flags to BytestringSet, NonnegativeIntSetAdd
-    // and DeleteObject, which v2 no longer reads (SetStorageFlags sets them).
-    // Loading it would silently drop its exclusive locks.
-    auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactSyscallAbiOffset, 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedSyscallAbi);
   }
