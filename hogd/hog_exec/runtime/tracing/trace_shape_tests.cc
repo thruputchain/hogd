@@ -402,14 +402,14 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
-      99'833, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'742, tx.tx.invocation.calldata));
+      99'832, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'741, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    expected.push_back(make_entry(99'580,
-                                  99'580 - kSyscallBaseCost -
+    expected.push_back(make_entry(99'579,
+                                  99'579 - kSyscallBaseCost -
                                       GasCost::bytestring_set(value.size()),
                                   std::move(body), ok_status()));
   }
@@ -417,10 +417,10 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
     SyscallTraceBody body(SyscallNo::kLogEvent);
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
-    expected.push_back(make_entry(99'356, 99'356 - kSyscallBaseCost,
+    expected.push_back(make_entry(99'355, 99'355 - kSyscallBaseCost,
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'222, {}));
+  expected.push_back(return_entry(99'218, {}));
 
   ASSERT_EQ(trace.system_calls, expected) << x23::show(trace.system_calls);
 
@@ -694,18 +694,18 @@ TEST_F(TraceShapeTest, ManualRevertAbortTraceIsExact)
   // The fixture's initializer entrypoint adds 16 gas to dispatcher execution.
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
-      99'832, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'741, tx.tx.invocation.calldata));
+      99'831, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'740, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    expected.push_back(make_entry(99'519,
-                                  99'519 - kSyscallBaseCost -
+    expected.push_back(make_entry(99'518,
+                                  99'518 - kSyscallBaseCost -
                                       GasCost::bytestring_set(value.size()),
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'147, abort_buffer, /*revert_frame=*/true));
+  expected.push_back(return_entry(99'145, abort_buffer, /*revert_frame=*/true));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
