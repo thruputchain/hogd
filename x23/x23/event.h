@@ -187,6 +187,10 @@ struct WriteBuffer : RefCount {
   }
   inline Errno flush(CoroPoll &cp, BorrowedFd fd);
 
+  // Block the calling thread until everything queued has been handed
+  // to the kernel.  See CoroPoll::wdrain.
+  inline void drain(CoroPoll &cp, BorrowedFd fd);
+
 private:
   std::atomic_bool want_write_{false};
   TestLock service_lock_;
@@ -520,6 +524,15 @@ public:
   // call this function simultaneously.
   Errno dwrite(BorrowedFd fd, Buf data);
 
+  // Block until everything already queued by awrite or dwrite on fd
+  // has been handed to the kernel (or the write has failed, which
+  // discards the queue).  This blocks the calling thread, so never
+  // call it from a coroutine running in the thread pool.  It waits
+  // only for writes queued before it was called, so if another thread
+  // keeps writing to fd it may not return.  Poisoning or closing fd
+  // throws queued writes away, so drain before you do either.
+  void wdrain(BorrowedFd fd);
+
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
   template<typename Addr = std::nullptr_t>
@@ -634,6 +647,21 @@ inline Errno
 WriteBuffer::flush(CoroPoll &cp, BorrowedFd fd)
 {
   return Service{*this, cp, fd}.go();
+}
+
+inline void
+WriteBuffer::drain(CoroPoll &cp, BorrowedFd fd)
+{
+  for (;;) {
+    // flush either writes everything itself or leaves a Service
+    // holding service_lock_ until it has, so once the lock is free
+    // and nothing is queued we are done.
+    if (flush(cp, fd))
+      return; // The write failed and took the queue with it
+    service_lock_.block_until_free();
+    if (!want_write_ && writer_.with([](BufVec &bv) { return bv.empty(); }))
+      return;
+  }
 }
 
 } // namespace detail
