@@ -7,6 +7,16 @@ import sys
 from typing import Any
 
 
+def declared_name(spec_id: dict[str, Any]) -> str:
+    """The declared name of a spec id: what the generated XDR calls a type.
+
+    The spec names a user-defined type by an id object (`crate`, `major`,
+    `module_path`, `declared`). XDR has no modules, so only the declared name
+    is used.
+    """
+    return spec_id["declared"]
+
+
 def map_xdr_type(ty: dict[str, Any]) -> tuple[str, str]:
     """Map a spec type to an XDR (type, declarator suffix) pair.
 
@@ -32,7 +42,7 @@ def map_xdr_type(ty: dict[str, Any]) -> tuple[str, str]:
     elif kind == "address":
         return "ContractAddress", ""
     elif kind == "named":
-        return ty["name"], ""
+        return declared_name(ty["name"]), ""
     elif kind == "vec":
         inner: dict[str, Any] = ty["element"]
         max_len: int = ty["max_len"]
@@ -77,9 +87,9 @@ def emit_struct(name: str, fields: list[dict[str, Any]]) -> str:
 def emit_type_def(td: dict[str, Any]) -> str | None:
     kind: str = td["kind"]
     if kind == "enum":
-        return emit_enum(td["name"], td["variants"])
+        return emit_enum(declared_name(td["name"]), td["variants"])
     elif kind == "struct":
-        return emit_struct(td["name"], td["fields"])
+        return emit_struct(declared_name(td["name"]), td["fields"])
     else:
         print(f"warning: unsupported type_def kind '{kind}', skipping", file=sys.stderr)
         return None
