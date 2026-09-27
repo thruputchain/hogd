@@ -3,13 +3,16 @@
 //
 // `StorageDeltaFlags::ExclusiveLock` is defined by the protocol as a flag on a
 // *delta*: "forces the delta to acquire an exclusive lock on the item at the
-// storage key" (protocol/storage_item.x).  A transaction that writes a key
+// storage key" (protocol/storage_item.x).  A transaction that pushes a key
 // twice -- once with the flag, then again without it -- is not asking for the
-// key to stay frozen; its second write superseded the first, flag included.
-// Both layers implement that same last-write-wins rule:
+// key to stay frozen; it withdrew the request before committing.  Both layers
+// implement that same rule, that the last push's flags decide:
 //
-//   - executor: `ItemView::set()` overwrites `flags_` on every write, so only
-//     the final write's flags reach the database at all.
+//   - executor: an `ItemView` keeps one `flags_` value for its key.  Writes
+//     leave it alone; SetStorageFlags adds to it and ClearStorageFlags empties
+//     it, so each push carries the flags the transaction requests at that
+//     point.  An unflagged push after a flagged one means a TryInvoke pushed
+//     the flag and the transaction cleared it afterwards.
 //   - hog_db:   `ItemChange::narrow()` merges the earlier reservation into the
 //     later change, promoting it to ordinary `exclusive_`, but it does not
 //     carry `permanent_exclusive_` forward.  `InvokeTX::request_change()` then
@@ -17,8 +20,8 @@
 //     `ItemLock::commit_change()` publishes `kFinalizedPermamentExclusiveLock`
 //     only when that final version still carries the bit.
 //
-// Consequence, exercised below: an `ExclusiveLock` write followed by an
-// unflagged write to the same key in the same `InvokeTX` finalizes as an
+// Consequence, exercised below: an `ExclusiveLock` push followed by an
+// unflagged push to the same key in the same `InvokeTX` finalizes as an
 // ordinary `kFinalized` lock, so a later transaction in the same block can
 // still modify the key.
 //
@@ -29,11 +32,10 @@
 //     rollback to the flagged version always succeeds (see
 //     RollbackToSavepointRestoresPermanentExclusiveReservation).  The only
 //     thing dropped is the post-commit freeze, and the only party that can
-//     drop it is the writer itself, by superseding its own delta.
-//   - Propagating the bit would be the actual defect: it would let a
-//     transaction freeze a key against every other transaction for the rest of
-//     the block from a delta that never requested it, purely as a side effect
-//     of a superseded earlier write.
+//     drop it is the writer itself, by clearing its own request.
+//   - Propagating the bit here would be the actual defect: hog_db would freeze
+//     a key against every other transaction for the rest of the block after
+//     the transaction had withdrawn the request.
 //   - Storage cost stays coupled to the request.  Only a permanent-exclusive
 //     change may reserve a negative marginal cost (`snapshot_cost_transform()`
 //     refunds the item's snapshot cost, since nothing else may re-grow the

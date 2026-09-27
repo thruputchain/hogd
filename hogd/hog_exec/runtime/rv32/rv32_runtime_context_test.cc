@@ -83,6 +83,10 @@ constexpr GasAmount kStorageReadGas = 200'000;
 constexpr std::string_view kEffectStorageKey = "rv32_parity_key";
 constexpr std::string_view kEffectStorageValue = "rv32 parity bytes";
 constexpr std::string_view kEffectEventData = "rv32 parity event";
+// The storage flags image writes the GetStorageFlags outputs here, one
+// StorageDeltaFlagSet after the other, and returns them.
+constexpr uint32_t kFlagsOutputAddress = 512;
+constexpr std::string_view kFlagsStorageKey = "rv32_flags_key";
 constexpr std::u8string_view kRv32SmokeCounterInterface = u8"Counter";
 // Keep in sync with built_contracts/integration_test_contracts/
 // rv32_smoke_counter/Cargo.toml; the SDK-lowered round-trip tests below fail
@@ -576,12 +580,11 @@ make_storage_event_return_image()
                     initial_memory.begin() + kEffectEventDataAddress);
 
   std::vector<uint32_t> program;
-  // BytestringSet(key, value, value_len, flags).
+  // BytestringSet(key, value, value_len).
   append_syscall(program, {static_cast<int32_t>(SyscallNo::kBytestringSet),
                            static_cast<int32_t>(kEffectStorageKeyAddress),
                            static_cast<int32_t>(kEffectStorageValueAddress),
-                           static_cast<int32_t>(kEffectStorageValue.size()),
-                           static_cast<int32_t>(StorageDeltaFlags::None)});
+                           static_cast<int32_t>(kEffectStorageValue.size())});
   // LogEvent(topic0, topic1=None, topic2=None, data, data_len). The -1 register
   // values produce the UINT32_MAX optional-pointer None sentinel.
   append_syscall(program, {static_cast<int32_t>(SyscallNo::kLogEvent),
@@ -589,6 +592,81 @@ make_storage_event_return_image()
                            static_cast<int32_t>(kEffectEventDataAddress),
                            static_cast<int32_t>(kEffectEventData.size())});
   // Return with an empty buffer.
+  append_syscall(program,
+                 {static_cast<int32_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0});
+
+  return rv32::RuntimeContractImage{
+      .program = make_program(program),
+      .initial_memory = std::move(initial_memory),
+      .memory_bytes = kEffectMemoryBytes,
+  };
+}
+
+// Method 1 writes a key, then drives the storage flags syscalls on it through
+// the register ABI: set the lock, read it, clear it, read it again, and set it
+// once more so the commit carries it. It returns the two GetStorageFlags
+// outputs. Any other method writes the same value with no flags and returns
+// nothing.
+rv32::RuntimeContractImage
+make_storage_flags_image()
+{
+  std::vector<uint8_t> initial_memory(kEffectMemoryBytes);
+  const StorageKeyContractData key = NativeContractTestFramework::
+      make_storage_key_matching_static_key_sdk_macro(kFlagsStorageKey);
+  std::ranges::copy(key, initial_memory.begin() + kEffectStorageKeyAddress);
+  std::ranges::copy(kEffectStorageValue,
+                    initial_memory.begin() + kEffectStorageValueAddress);
+
+  const auto key_address = static_cast<int32_t>(kEffectStorageKeyAddress);
+  const auto exclusive = static_cast<int32_t>(StorageDeltaFlags::ExclusiveLock);
+  const auto first_output = static_cast<int32_t>(kFlagsOutputAddress);
+  const auto second_output =
+      static_cast<int32_t>(kFlagsOutputAddress + sizeof(StorageDeltaFlagSet));
+  // BytestringSet(key, value, value_len).
+  auto append_write = [&](std::vector<uint32_t> &program) {
+    append_syscall(program, {static_cast<int32_t>(SyscallNo::kBytestringSet),
+                             key_address,
+                             static_cast<int32_t>(kEffectStorageValueAddress),
+                             static_cast<int32_t>(kEffectStorageValue.size())});
+  };
+
+  std::vector<uint32_t> flags_method;
+  append_write(flags_method);
+  // SetStorageFlags(key, flags).
+  append_syscall(flags_method,
+                 {static_cast<int32_t>(SyscallNo::kSetStorageFlags),
+                  key_address, exclusive});
+  // GetStorageFlags(key, flags_out).
+  append_syscall(flags_method,
+                 {static_cast<int32_t>(SyscallNo::kGetStorageFlags),
+                  key_address, first_output});
+  // ClearStorageFlags(key).
+  append_syscall(flags_method,
+                 {static_cast<int32_t>(SyscallNo::kClearStorageFlags),
+                  key_address});
+  append_syscall(flags_method,
+                 {static_cast<int32_t>(SyscallNo::kGetStorageFlags),
+                  key_address, second_output});
+  append_syscall(flags_method,
+                 {static_cast<int32_t>(SyscallNo::kSetStorageFlags),
+                  key_address, exclusive});
+  // Return(buffer, buffer_len, ...) with both outputs. The remaining Return
+  // registers are loaded with zero, since earlier calls left values in them.
+  append_syscall(flags_method,
+                 {static_cast<int32_t>(SyscallNo::kReturn), first_output,
+                  static_cast<int32_t>(2 * sizeof(StorageDeltaFlagSet)), 0, 0,
+                  0});
+
+  // x6 = 1; if a0 (method id low) != 1, branch past the flags method to the
+  // plain write.
+  const auto plain_write_offset =
+      static_cast<int32_t>((flags_method.size() + 1) * rv32::kInstructionBytes);
+  std::vector<uint32_t> program = {
+      addi(6, 0, 1),
+      rv32::test_program::branch(1, 10, 6, plain_write_offset),
+  };
+  program.insert(program.end(), flags_method.begin(), flags_method.end());
+  append_write(program);
   append_syscall(program,
                  {static_cast<int32_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0});
 
@@ -879,7 +957,7 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   const std::vector<uint8_t> data(kEffectEventData.begin(),
                                   kEffectEventData.end());
 
-  // BytestringSet is 5 addi + ecall, LogEvent 6 addi + ecall, and the empty
+  // BytestringSet is 4 addi + ecall, LogEvent 6 addi + ecall, and the empty
   // Return 6 addi + ecall; syscall costs beyond base instruction gas come
   // from the gas cost table.
   //
@@ -893,11 +971,9 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    body.bytestring_set().inputs.flags =
-        static_cast<uint32_t>(StorageDeltaFlags::None);
     expected.push_back(
-        make_trace_entry(kParityGas - 6,
-                         kParityGas - 6 - kSyscallBaseCost - write_cost,
+        make_trace_entry(kParityGas - 5,
+                         kParityGas - 5 - kSyscallBaseCost - write_cost,
                          std::move(body), ok_status()));
   }
   {
@@ -905,12 +981,12 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
     expected.push_back(
-        make_trace_entry(kParityGas - 13 - kSyscallBaseCost - write_cost,
-                         kParityGas - 13 - (2 * kSyscallBaseCost) - write_cost,
+        make_trace_entry(kParityGas - 12 - kSyscallBaseCost - write_cost,
+                         kParityGas - 12 - (2 * kSyscallBaseCost) - write_cost,
                          std::move(body), ok_status()));
   }
   expected.push_back(
-      return_trace_entry(kParityGas - 20 - (2 * kSyscallBaseCost) - write_cost,
+      return_trace_entry(kParityGas - 19 - (2 * kSyscallBaseCost) - write_cost,
                          {}));
 
   EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
@@ -937,6 +1013,115 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
+}
+
+// The storage flags syscalls through the guest register ABI: their arguments
+// as traced, GetStorageFlags' output as written to guest memory, and the lock
+// the commit carries, which keeps a second writer out for the block.
+TEST_F(Rv32RuntimeContextTest, StorageFlagsTraceIsExact)
+{
+  constexpr Runtime::MethodID kFlagsMethod = 1;
+  constexpr Runtime::MethodID kPlainWriteMethod = 0;
+  auto rv32_context =
+      rv32::RuntimeContext({{kRv32ContractId, make_storage_flags_image()}});
+  auto rv32_contract = make_rv32_contract_xdr();
+  install_contract(rv32_contract);
+
+  auto handler = make_new_system_call_handler(
+      make_root_transaction(kParityGas, kFlagsMethod), rv32_context);
+  handler.enable_tracing();
+
+  const auto result = handler.root_invoke()();
+  ASSERT_TRUE(result.is_root_success());
+
+  constexpr StorageDeltaFlagSet kExclusive =
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+  constexpr StorageDeltaFlagSet kNone =
+      std::to_underlying(StorageDeltaFlags::None);
+  // GetStorageFlags stores each StorageDeltaFlagSet little-endian.
+  const std::array<uint8_t, 2 * sizeof(StorageDeltaFlagSet)> flags_out = {
+      static_cast<uint8_t>(kExclusive), 0, 0, 0, 0, 0, 0, 0};
+
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(std::ranges::equal(output.return_buffer(), flags_out));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  auto const &trace = *handler.get_trace();
+
+  const StorageKeyContractData key =
+      make_storage_key_matching_static_key_sdk_macro(kFlagsStorageKey);
+  const std::vector<uint8_t> value(kEffectStorageValue.begin(),
+                                   kEffectStorageValue.end());
+
+  // The dispatch runs an addi and a not-taken branch. Each call then runs one
+  // addi per loaded register and the ecall, and pays the crossing and its own
+  // cost: the flags calls each pay the storage access.
+  SyscallTraceVec expected;
+  GasAmount gas =
+      kParityGas - rv32::kBaseInstructionGas - rv32::kBranchInstructionGas;
+  auto expect_call = [&](uint64_t registers, GasAmount cost,
+                         SyscallTraceBody body) {
+    gas -= (registers + 1) * rv32::kBaseInstructionGas;
+    const GasAmount gas_at_start = gas;
+    gas -= kSyscallBaseCost + cost;
+    expected.push_back(
+        make_trace_entry(gas_at_start, gas, std::move(body), ok_status()));
+  };
+  auto set_flags_body = [&] {
+    SyscallTraceBody body(SyscallNo::kSetStorageFlags);
+    body.set_storage_flags().inputs.key = key;
+    body.set_storage_flags().inputs.flags = kExclusive;
+    return body;
+  };
+  auto get_flags_body = [&](StorageDeltaFlagSet flags) {
+    SyscallTraceBody body(SyscallNo::kGetStorageFlags);
+    body.get_storage_flags().inputs.key = key;
+    body.get_storage_flags().outputs.emplace(
+        SyscallGetStorageFlagsOutputs{.flags = flags});
+    return body;
+  };
+  {
+    SyscallTraceBody body(SyscallNo::kBytestringSet);
+    body.bytestring_set().inputs.key = key;
+    body.bytestring_set().inputs.bytestring.append_range(value);
+    expect_call(4, GasCost::bytestring_set(value.size()), std::move(body));
+  }
+  expect_call(3, kStorageAccessCost, set_flags_body());
+  expect_call(3, kStorageAccessCost, get_flags_body(kExclusive));
+  {
+    SyscallTraceBody body(SyscallNo::kClearStorageFlags);
+    body.clear_storage_flags().inputs.key = key;
+    expect_call(2, kStorageAccessCost, std::move(body));
+  }
+  expect_call(3, kStorageAccessCost, get_flags_body(kNone));
+  expect_call(3, kStorageAccessCost, set_flags_body());
+  gas -= 7 * rv32::kBaseInstructionGas;
+  expected.push_back(return_trace_entry(gas, flags_out));
+
+  EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
+  ASSERT_EQ(trace.system_calls, expected) << x23::show(trace.system_calls);
+
+  ASSERT_EQ(trace.storage_writes.size(), 1U);
+  auto const &write = trace.storage_writes[0];
+  EXPECT_EQ(write.addrkey,
+            make_contract_data_addrkey_matching_static_key_sdk_macro(
+                kRv32ContractAddress, kFlagsStorageKey));
+  EXPECT_EQ(write.flags, kExclusive);
+  ASSERT_EQ(write.delta.type(), StorageDeltaType::kDeltaTypeBytestringSet);
+  EXPECT_TRUE(std::ranges::equal(write.delta.bytestring(), value));
+
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+  // The committed lock holds the key for the rest of the block: a second
+  // transaction writing the same value without a lock, which HogDb would
+  // otherwise admit, is refused.
+  auto second = make_new_system_call_handler(
+      make_root_transaction(kParityGas, kPlainWriteMethod, Calldata{}, 2),
+      rv32_context);
+  ASSERT_TRUE(second.root_invoke()().is_root_success());
+  EXPECT_EQ(second.try_commit_transaction()(),
+            ExecResult::ExecResultTxNonDeterministicError);
 }
 
 TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)

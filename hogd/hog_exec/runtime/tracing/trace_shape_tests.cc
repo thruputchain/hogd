@@ -408,7 +408,6 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    body.bytestring_set().inputs.flags = 0;
     expected.push_back(make_entry(99'580,
                                   99'580 - kSyscallBaseCost -
                                       GasCost::bytestring_set(value.size()),
@@ -701,7 +700,6 @@ TEST_F(TraceShapeTest, ManualRevertAbortTraceIsExact)
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    body.bytestring_set().inputs.flags = 0;
     expected.push_back(make_entry(99'519,
                                   99'519 - kSyscallBaseCost -
                                       GasCost::bytestring_set(value.size()),

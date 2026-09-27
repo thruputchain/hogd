@@ -342,22 +342,6 @@ TEST_F(SyscallMiscTests, TestBsSetTooLong)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// ── #12: BytestringSet (invalid flags) ──────────────────────────────
-
-TEST_F(SyscallMiscTests, TestBsSetInvalidFlags)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<u8"test_bs_set_invalid_flags">(
-                          UINT64_MAX),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
-
 // ── #13: NonnegativeIntGet (key not exist) ──────────────────────────
 
 TEST_F(SyscallMiscTests, TestNnintGetKeyNotExist)
@@ -397,38 +381,6 @@ TEST_F(SyscallMiscTests, TestNnintSetAddNegative)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_nnint_set_add_negative">(
-                          UINT64_MAX),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
-
-// ── #16: NonnegativeIntSetAdd (invalid flags) ───────────────────────
-
-TEST_F(SyscallMiscTests, TestNnintSetAddInvalidFlags)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_nnint_set_add_invalid_flags">(
-                  UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
-
-// ── #17: DeleteObject (invalid flags) ───────────────────────────────
-
-TEST_F(SyscallMiscTests, TestDeleteInvalidFlags)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<u8"test_delete_invalid_flags">(
                           UINT64_MAX),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =

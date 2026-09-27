@@ -32,7 +32,6 @@
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -99,8 +98,7 @@ protected:
                NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key(k);
       auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-          ctx.handler(), key, std::as_bytes(std::span(std::string_view(v))),
-          std::to_underlying(StorageDeltaFlags::None));
+          ctx.handler(), key, std::as_bytes(std::span(std::string_view(v))));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -325,10 +323,10 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 
         // Write something to prove we survived both try_invokes
         auto key = make_storage_key("result");
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key,
-            std::as_bytes(std::span(std::string_view("ok"))),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto [ws, _wg] =
+            co_await syscall_BytestringSet_inner(ctx.handler(), key,
+                                                 std::as_bytes(std::span(
+                                                     std::string_view("ok"))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -933,8 +931,7 @@ TEST_P(ProposeValidateRoundtripTest,
         auto marker = std::string_view("honest");
         auto [write_status, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker"),
-            std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::as_bytes(std::span(marker)));
         if (!write_status.has_value() ||
             write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1069,8 +1066,7 @@ TEST_P(ProposeValidateRoundtripTest,
                          (static_cast<uint32_t>(calldata[1]) << 8);
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_depth_poc_key(index),
-            std::as_bytes(std::span(calldata)),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::as_bytes(std::span(calldata)));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1677,9 +1673,9 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
           co_return res.error().to_invoke_error();
         // Overwrite with a bytestring
         uint8_t data[] = {0xAB};
-        auto ws = co_await ctx.handler().set_bytestring(
-            key, std::as_bytes(std::span(data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws =
+            co_await ctx.handler().set_bytestring(key, std::as_bytes(
+                                                           std::span(data)));
         if (!ws.has_value())
           co_return ws.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -1739,8 +1735,7 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
         auto res = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!res.has_value())
           co_return res.error().to_invoke_error();
-        auto del = co_await ctx.handler().delete_object(
-            key, std::to_underlying(StorageDeltaFlags::None));
+        auto del = co_await ctx.handler().delete_object(key);
         if (!del.has_value())
           co_return del.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -2054,9 +2049,9 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
           co_return peek_res.error().to_invoke_error();
         // Overwrite with a bytestring
         uint8_t data[] = {0xAB};
-        auto ws = co_await ctx.handler().set_bytestring(
-            key, std::as_bytes(std::span(data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws =
+            co_await ctx.handler().set_bytestring(key, std::as_bytes(
+                                                           std::span(data)));
         if (!ws.has_value())
           co_return ws.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -2115,9 +2110,9 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
         if (!peek_res.has_value())
           co_return peek_res.error().to_invoke_error();
         // Overwrite with set_nnint(set_value=0, add_value=42)
-        auto ws = co_await ctx.handler().set_nnint(
-            key, std::optional<int128_t>{0}, int128_t{42},
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws =
+            co_await ctx.handler().set_nnint(key, std::optional<int128_t>{0},
+                                             int128_t{42});
         if (!ws.has_value())
           co_return ws.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -2581,8 +2576,7 @@ TEST_P(ProposeValidateRoundtripTest,
         auto key = make_storage_key("rcq0");
         auto overwrite = std::string_view("overwritten");
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key, std::as_bytes(std::span(overwrite)),
-            std::to_underlying(StorageDeltaFlags::None));
+            ctx.handler(), key, std::as_bytes(std::span(overwrite)));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -3029,40 +3023,38 @@ TEST_P(ProposeValidateRoundtripTest,
 
   static const QueueEntry kFabricatedEntry{1, 2, 3, 4};
 
-  auto contract = make_contract(
-      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto key = make_storage_key("rcq0");
+  auto contract = make_contract([](NativeSyscallContext &ctx)
+                                    -> x23::Async<InvokeStatus<void>> {
+    auto key = make_storage_key("rcq0");
 
-        auto first =
-            co_await ctx.handler().retrocausal_queue_consume(key, true);
-        if (!first.has_value())
-          co_return first.error().to_invoke_error();
-        if (first.value().has_value() ||
-            first.value().error().code() !=
-                SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
+    auto first = co_await ctx.handler().retrocausal_queue_consume(key, true);
+    if (!first.has_value())
+      co_return first.error().to_invoke_error();
+    if (first.value().has_value() ||
+        first.value().error().code() !=
+            SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-        auto second =
-            co_await ctx.handler().retrocausal_queue_consume(key, true);
-        if (!second.has_value())
-          co_return second.error().to_invoke_error();
-        if (!second.value().has_value() ||
-            second.value().value() != kFabricatedEntry) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
+    auto second = co_await ctx.handler().retrocausal_queue_consume(key, true);
+    if (!second.has_value())
+      co_return second.error().to_invoke_error();
+    if (!second.value().has_value() ||
+        second.value().value() != kFabricatedEntry) {
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
 
-        auto marker = std::string_view("seen");
-        auto [ws, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("marker"),
-            std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!ws.has_value() ||
-            ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return InvokeStatus<void>{};
-      });
+    auto marker = std::string_view("seen");
+    auto [ws, _gas] =
+        co_await syscall_BytestringSet_inner(ctx.handler(),
+                                             make_storage_key("marker"),
+                                             std::as_bytes(std::span(marker)));
+    if (!ws.has_value() ||
+        ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    co_return InvokeStatus<void>{};
+  });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract));
   auto ctx = std::make_unique<NativeContext>(std::move(contract_map));

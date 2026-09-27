@@ -189,8 +189,7 @@ public:
 
           auto [ws, _wg] = co_await syscall_BytestringSet_inner(
               ctx.handler(), make_storage_key("result"),
-              std::as_bytes(std::span(entry.data(), entry.size())),
-              std::to_underlying(StorageDeltaFlags::None));
+              std::as_bytes(std::span(entry.data(), entry.size())));
           if (!ws.has_value() ||
               ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};

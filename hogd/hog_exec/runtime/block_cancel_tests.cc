@@ -21,7 +21,6 @@
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -185,8 +184,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-              std::to_underlying(StorageDeltaFlags::None));
+              ctx.handler(), key, std::as_bytes(std::span{"hello"}));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};

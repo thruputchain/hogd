@@ -46,7 +46,6 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -137,8 +136,7 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
 
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_a"),
-            std::as_bytes(std::span(std::string_view("a_ok"))),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::as_bytes(std::span(std::string_view("a_ok"))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -168,8 +166,7 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
 
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_b"),
-            std::as_bytes(std::span(std::string_view("b_ok"))),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::as_bytes(std::span(std::string_view("b_ok"))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};

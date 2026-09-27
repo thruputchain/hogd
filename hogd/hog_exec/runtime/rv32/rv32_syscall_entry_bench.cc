@@ -660,7 +660,7 @@ nnint_get_call(bool force_load_from_snapshot)
   return call;
 }
 
-// NonnegativeIntSetAdd(key, set_value, add_value, flags), with a set value
+// NonnegativeIntSetAdd(key, set_value, add_value), with a set value
 // present: the shape an ERC20 balance update takes after a forced read. Never
 // touches the snapshot or the db -- the write is staged in the frame's item
 // view and only reaches storage at commit, which is why its first-touch rows
@@ -670,8 +670,7 @@ nnint_set_add_call()
 {
   SyscallCall call = make_call("NNIntSetAdd", SyscallNo::kNonnegativeIntSetAdd,
                                {kNNIntSetAddKeyAddress, kNNIntSetValueAddress,
-                                kNNIntAddValueAddress,
-                                std::to_underlying(StorageDeltaFlags::None)});
+                                kNNIntAddValueAddress});
   call.key_address = kNNIntSetAddKeyAddress;
   return call;
 }
@@ -684,8 +683,7 @@ bytestring_set_call(uint32_t bytes)
 {
   SyscallCall call =
       make_call("BytestringSet", SyscallNo::kBytestringSet,
-                {kBytestringSetKeyAddress, kBytestringPayloadAddress, bytes,
-                 std::to_underlying(StorageDeltaFlags::None)});
+                {kBytestringSetKeyAddress, kBytestringPayloadAddress, bytes});
   call.payload_bytes = bytes;
   call.key_address = kBytestringSetKeyAddress;
   call.row_key = {KeySpace::kBytestringSet, bytes};

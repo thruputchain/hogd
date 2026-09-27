@@ -1870,8 +1870,7 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
         Bytestring payload = make_bytestring("release me back to a near-max "
                                              "balance");
         auto r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-            key, std::as_bytes(std::span(payload.data(), payload.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+            key, std::as_bytes(std::span(payload.data(), payload.size())));
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "whale failed to write storage";
@@ -1882,7 +1881,7 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
   whale_fns.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("whale_storage");
-        auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+        auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "whale failed to delete storage";

@@ -80,7 +80,6 @@
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -185,8 +184,7 @@ protected:
                NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
       auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-          ctx.handler(), key, std::as_bytes(std::span(std::string_view(p))),
-          std::to_underlying(StorageDeltaFlags::None));
+          ctx.handler(), key, std::as_bytes(std::span(std::string_view(p))));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -202,7 +200,7 @@ protected:
   {
     return [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
-      auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+      auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
       if (!del.has_value() ||
           del.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -427,8 +425,7 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
         auto key = make_storage_key("root-branch");
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
-            std::as_bytes(std::span(std::string_view(marker))),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::as_bytes(std::span(std::string_view(marker))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

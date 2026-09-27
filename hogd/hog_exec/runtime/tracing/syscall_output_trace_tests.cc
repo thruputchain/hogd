@@ -293,9 +293,10 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
       [set_key,
        unset_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const int128_t set_value = 5;
-        auto w = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            set_key, &set_value, int128_t{7},
-            std::to_underlying(StorageDeltaFlags::None));
+        auto w =
+            co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(set_key,
+                                                                   &set_value,
+                                                                   int128_t{7});
         if (!w.has_value() ||
             w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -333,7 +334,6 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     body.nonnegative_int_set_add().inputs.key = set_key;
     body.nonnegative_int_set_add().inputs.set_value = to_xdr(int128_t{5});
     body.nonnegative_int_set_add().inputs.add_value = to_xdr(int128_t{7});
-    body.nonnegative_int_set_add().inputs.flags = 0;
     expected.push_back(
         step_entry(gas, kStorageAccessCost, std::move(body), ok_status()));
   }
@@ -1148,8 +1148,7 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
       [key,
        value](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto w = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-            key, std::as_bytes(std::span(value)),
-            std::to_underlying(StorageDeltaFlags::None));
+            key, std::as_bytes(std::span(value)));
         if (!w.has_value() ||
             w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1181,7 +1180,6 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    body.bytestring_set().inputs.flags = 0;
     // Named rather than spelled as a literal, the way the SHA256 and storage
     // expectations in this file already are, so the next repricing moves these
     // with the schedule instead of through them.

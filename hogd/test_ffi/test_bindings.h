@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 32
-#define TEST_FFI_VERSION_PATCH 2
+#define TEST_FFI_VERSION_MINOR 33
+#define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
 // ==================

@@ -37,7 +37,6 @@
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -1813,8 +1812,7 @@ TEST_F(ViewTest, ViewRcqConsumeDeleteInsert)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-            key, std::to_underlying(StorageDeltaFlags::None));
+        auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
         if (!r2.has_value() ||
             r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "delete failed";

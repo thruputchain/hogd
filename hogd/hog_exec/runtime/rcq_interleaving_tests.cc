@@ -27,7 +27,6 @@
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -93,8 +92,7 @@ protected:
     fns.emplace(
         2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq0");
-          auto res = co_await ctx.handler().delete_object(
-              key, std::to_underlying(StorageDeltaFlags::None));
+          auto res = co_await ctx.handler().delete_object(key);
           if (!res.has_value())
             co_return res.error().to_invoke_error();
           co_return InvokeStatus<void>{};
@@ -104,9 +102,9 @@ protected:
         3, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
-          auto res = co_await ctx.handler().set_bytestring(
-              key, std::as_bytes(std::span(cd)),
-              std::to_underlying(StorageDeltaFlags::None));
+          auto res =
+              co_await ctx.handler().set_bytestring(key, std::as_bytes(
+                                                             std::span(cd)));
           if (!res.has_value())
             co_return res.error().to_invoke_error();
           co_return InvokeStatus<void>{};
@@ -116,8 +114,7 @@ protected:
         4, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
-          auto del = co_await ctx.handler().delete_object(
-              key, std::to_underlying(StorageDeltaFlags::None));
+          auto del = co_await ctx.handler().delete_object(key);
           if (!del.has_value())
             co_return del.error().to_invoke_error();
           if (!del.value().has_value())

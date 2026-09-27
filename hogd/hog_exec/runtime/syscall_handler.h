@@ -375,8 +375,7 @@ public:
   get_bytestring(StorageKeyContractData const &storage_key);
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_bytestring(StorageKeyContractData const &storage_key,
-                 std::span<const std::byte> input_bytestring,
-                 StorageDeltaFlagSet input_flags);
+                 std::span<const std::byte> input_bytestring);
 
   // === Nonnegative Integer syscalls ===
   // get_nnint returns the base value and the add value.
@@ -389,13 +388,24 @@ public:
 
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_nnint(StorageKeyContractData const &storage_key,
-            std::optional<int128_t> set_value, const int128_t &add_value,
-            StorageDeltaFlagSet input_flags);
+            std::optional<int128_t> set_value, const int128_t &add_value);
 
   // === Delete syscall ===
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
-  delete_object(StorageKeyContractData const &storage_key,
-                StorageDeltaFlagSet flags);
+  delete_object(StorageKeyContractData const &storage_key);
+
+  // === Storage flags syscalls ===
+  // A key's flags belong to the transaction's pending write to it, not to any
+  // single write: writes leave them alone, and every delta pushed for the key
+  // carries them. set_storage_flags ORs flags in and fails if no write to the
+  // key is pending in the active frame's view; clear_storage_flags removes
+  // them all.
+  [[nodiscard]] SyscallStatus<void>
+  set_storage_flags(StorageKeyContractData const &storage_key,
+                    StorageDeltaFlagSet flags);
+  [[nodiscard]] StorageDeltaFlagSet
+  get_storage_flags(StorageKeyContractData const &storage_key);
+  void clear_storage_flags(StorageKeyContractData const &storage_key);
 
   // === Retrocausal Queue syscalls ===
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>

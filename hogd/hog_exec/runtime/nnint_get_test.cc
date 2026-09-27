@@ -125,15 +125,16 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
         auto key = make_storage_key("deleted_key");
         // First, set a value
         int128_t set_value = 100;
-        auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_value, 50, std::to_underlying(StorageDeltaFlags::None));
+        auto r =
+            co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(key,
+                                                                   &set_value,
+                                                                   50);
         if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Then delete it
-        auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-            key, std::to_underlying(StorageDeltaFlags::None));
+        auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
         if (!r2.has_value() || *r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -194,8 +195,10 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("nnint_with_base");
         int128_t set_value = 200;
-        auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_value, 50, std::to_underlying(StorageDeltaFlags::None));
+        auto r =
+            co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(key,
+                                                                   &set_value,
+                                                                   50);
         if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -257,8 +260,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
                 auto key = make_storage_key("nnint_add_only");
                 // Set with nullopt base, just add value
                 auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                    key, static_cast<int128_t const *>(nullptr), 75,
-                    std::to_underlying(StorageDeltaFlags::None));
+                    key, static_cast<int128_t const *>(nullptr), 75);
                 if (!r.has_value() ||
                     *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -325,8 +327,7 @@ TEST_P(NNIntGetTest, GetOnBytestringKey)
                 // First, set a bytestring value
                 Bytestring bytestring_data = make_bytestring("test_data");
                 auto r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-                    key, std::as_bytes(std::span(bytestring_data)),
-                    std::to_underlying(StorageDeltaFlags::None));
+                    key, std::as_bytes(std::span(bytestring_data)));
                 if (!r.has_value() ||
                     *r != SyscallErrorCode::kSyscallErrorCodeNone) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -458,8 +459,10 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
         auto key = make_storage_key("multi_op_key");
         // First set with base value
         int128_t set_value = 100;
-        auto r1 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_value, 10, std::to_underlying(StorageDeltaFlags::None));
+        auto r1 =
+            co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(key,
+                                                                   &set_value,
+                                                                   10);
         if (!r1.has_value() || *r1 != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -484,8 +487,7 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
 
         // Then add without base (overwrites previous write)
         auto r2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, static_cast<int128_t const *>(nullptr), 25,
-            std::to_underlying(StorageDeltaFlags::None));
+            key, static_cast<int128_t const *>(nullptr), 25);
         if (!r2.has_value() || *r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -550,15 +552,16 @@ TEST_P(NNIntGetTest, GetDeletedKeyWithForceLoad)
         auto key = make_storage_key("force_load_deleted");
         // First, set a value
         int128_t set_value = 100;
-        auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, &set_value, 50, std::to_underlying(StorageDeltaFlags::None));
+        auto r =
+            co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(key,
+                                                                   &set_value,
+                                                                   50);
         if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Then delete it
-        auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-            key, std::to_underlying(StorageDeltaFlags::None));
+        auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
         if (!r2.has_value() || *r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -623,8 +626,7 @@ TEST_P(NNIntGetTest, GetBytestringKeyWithForceLoad)
         // First, set a bytestring value
         Bytestring bytestring_data = make_bytestring("test_data");
         auto r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-            key, std::as_bytes(std::span(bytestring_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+            key, std::as_bytes(std::span(bytestring_data)));
         if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }

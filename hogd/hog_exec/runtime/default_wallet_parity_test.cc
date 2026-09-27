@@ -47,7 +47,6 @@
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "standard_asset_events.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -426,8 +425,7 @@ protected:
       }
 
       auto set_r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-          result_key, std::as_bytes(std::span(record.data(), record.size())),
-          std::to_underlying(StorageDeltaFlags::None));
+          result_key, std::as_bytes(std::span(record.data(), record.size())));
       if (!set_r.has_value() ||
           set_r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         ADD_FAILURE() << "capture driver failed to persist result";
