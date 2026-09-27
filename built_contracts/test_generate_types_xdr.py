@@ -6,7 +6,15 @@ Run from built_contracts/:
 """
 
 import unittest
+from typing import Any
+
 from generate_types_xdr import map_xdr_type, emit_enum, emit_struct, generate_xdr
+
+
+def spec_id(declared: str) -> dict[str, Any]:
+    """A spec id object, as the spec JSON names a user-defined type."""
+    return {"crate": "demo", "major": "0.2", "module_path": "demo::types",
+            "declared": declared}
 
 
 class TestMapXdrType(unittest.TestCase):
@@ -25,7 +33,8 @@ class TestMapXdrType(unittest.TestCase):
         self.assertEqual(map_xdr_type({"kind": "address"}), ("ContractAddress", ""))
 
     def test_named(self) -> None:
-        self.assertEqual(map_xdr_type({"kind": "named", "name": "Foo"}), ("Foo", ""))
+        self.assertEqual(map_xdr_type({"kind": "named", "name": spec_id("Foo")}),
+                         ("Foo", ""))
 
     def test_vec_u8_is_opaque(self) -> None:
         ty = {"kind": "vec", "element": {"kind": "u8"}, "max_len": 1000}
@@ -99,8 +108,8 @@ class TestGenerateXdr(unittest.TestCase):
 
     def test_with_type_defs(self) -> None:
         type_defs = [
-            {"kind": "enum", "name": "E", "variants": [{"name": "A", "value": 1}]},
-            {"kind": "struct", "name": "S", "fields": [
+            {"kind": "enum", "name": spec_id("E"), "variants": [{"name": "A", "value": 1}]},
+            {"kind": "struct", "name": spec_id("S"), "fields": [
                 {"name": "x", "type": {"kind": "u32"}}
             ]},
         ]
