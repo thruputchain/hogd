@@ -1451,6 +1451,84 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
+// Same state as [CommitOfExcludedAccountTxSucceeds], but the block that
+// commits is one this node *validated* while its own nomination was still
+// pending, so the commit takes the validated-block path: [reenqueue_txs()],
+// [remove_from_scheduler()], and only then [abandon_pending_nomination()].
+//   1. Submit an affordable tx (txs[0]) and an over-budget tx (txs[1]).
+//   2. Nominate: txs[0] is included and txs[1] excludes the account.
+//   3. The client resubmits txs[0], which returns to the runqueue while the
+//      account stays out of [ready_accounts_].
+//   4. Validate the same proposal and commit the *validated* block id.
+//      [remove_from_scheduler()] empties the excluded account's runqueue
+//      before the nomination is abandoned; this used to fail a CHECK.
+//   5. The next nomination still schedules the account's new tx.
+TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  txs[0].tx.uniquifier.block_expiry_height = 10; // affordable, scheduled first
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  // Over budget: 20x the default tx gas is 2x the account's funded balance.
+  txs[1].tx.invocation.gas_limit = txs[0].tx.invocation.gas_limit * 20;
+  txs[2].tx.uniquifier.block_expiry_height = 12; // submitted after commit
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // 1.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[1]})())();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+
+  // 2.
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const Proposal proposal = res_nominate.proposed_block().proposal;
+
+  // 3.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  // 4.
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
+  ASSERT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  ASSERT_NE(res_validate.block().block_id,
+            res_nominate.proposed_block().block_id);
+  auto res_commit =
+      commit_block(server, res_validate.block().block_id, db_tip, proposal);
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+
+  // 5.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[2]})())();
+  EXPECT_EQ(scheduler->size(), 1UL);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
+  res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  TransactionHashBatch nominated_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(
+      res_nominate.proposed_block().proposal.transactions.hash,
+      nominated_hashes, kNoBatchSizeLimit)());
+  ASSERT_EQ(nominated_hashes.size(), 1UL);
+  EXPECT_EQ(nominated_hashes[0], sha256(txs[2].tx));
+}
+
 TEST(Mempool, BlockHeightsIncrement)
 {
   MempoolTestInfra server;
