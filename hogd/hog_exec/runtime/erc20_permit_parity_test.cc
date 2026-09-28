@@ -18,6 +18,8 @@
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -38,6 +40,7 @@
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
+#include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -130,10 +133,11 @@ struct Step {
 
 template<StringLiteral Name, typename... Args>
 Step
-permit_step(ContractAddress caller, std::vector<GrantSpec> grants, Args... args)
+permit_step(ContractAddress caller, std::vector<GrantSpec> const &grants,
+            Args... args)
 {
   return Step{.caller = caller,
-              .grants = std::move(grants),
+              .grants = grants,
               .method = permit_meta::method_id<Name>(),
               .calldata = permit_meta::make_calldata<Name>(args...)};
 }
