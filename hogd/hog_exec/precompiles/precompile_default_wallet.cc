@@ -21,7 +21,6 @@
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
-#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -193,17 +192,6 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   co_return child_result_t::make_ok(std::move(return_buf));
 }
 
-LibraryException
-syscall_exception(SyscallNo call, SyscallErrorCode error)
-{
-  LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
-  exn.syscall_exn() = SyscallExn{
-      .call_number = call,
-      .err_number = static_cast<SysErr>(error),
-  };
-  return LibraryException{std::move(exn)};
-}
-
 x23::Async<InvokeStatus<deploy_result_t>>
 deploy_contract(NativeSyscallContext &ctx, SHA256Hash const &nonce,
                 SHA256Hash const &contract_hash)
@@ -217,7 +205,8 @@ deploy_contract(NativeSyscallContext &ctx, SHA256Hash const &nonce,
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     co_return deploy_result_t::make_err(
-        syscall_exception(SyscallNo::kDeployContract, *r));
+        NativeContractBuilder::syscall_exception(SyscallNo::kDeployContract,
+                                                 *r));
   }
   co_return deploy_result_t::make_ok(deployed);
 }
@@ -317,7 +306,8 @@ make_native_default_wallet_contract()
           }
           if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return deploy_result_t::make_err(
-                syscall_exception(SyscallNo::kGetDeployAddress, *r));
+                NativeContractBuilder::syscall_exception(
+                    SyscallNo::kGetDeployAddress, *r));
           }
           // Invoke the ordinary token contract to preserve validation, caller
           // identity and events. Both effects remain inside the wallet root

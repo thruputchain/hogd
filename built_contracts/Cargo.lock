@@ -419,6 +419,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "groundhog-erc20-permit-if"
+version = "0.1.40"
+source = "sparse+https://crates.thruput.network/api/v1/crates/"
+checksum = "bf325ebd672e250dedfe64730e910b2bf85fe174449a29b4e5fb1e344bb51794"
+dependencies = [
+ "groundhog-erc20-if",
+ "sdk",
+ "thiserror",
+]
+
+[[package]]
 name = "groundhog-event"
 version = "0.40.0"
 source = "sparse+https://crates.thruput.network/api/v1/crates/"
@@ -673,6 +684,15 @@ dependencies = [
  "erc20-native-test",
  "groundhog-erc20-if",
  "itc_erc20",
+ "sdk",
+]
+
+[[package]]
+name = "itc_erc20_permit"
+version = "0.2.0"
+dependencies = [
+ "groundhog-erc20-if",
+ "groundhog-erc20-permit-if",
  "sdk",
 ]
 

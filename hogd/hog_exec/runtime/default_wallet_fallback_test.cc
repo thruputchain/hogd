@@ -257,7 +257,7 @@ protected:
   {
     LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
     exn.syscall_exn() = SyscallExn{
-        .call_number = call_number,
+        .call_number = static_cast<uint32_t>(std::to_underlying(call_number)),
         .err_number = static_cast<SysErr>(err_code),
     };
     auto buf = x23::serialize_cxs(kLibraryExceptionSelector, exn);

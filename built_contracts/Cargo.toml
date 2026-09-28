@@ -43,6 +43,7 @@ members = [
     "local_test_contracts/drip_faucet",
     "local_test_contracts/faucet_caller",
     "local_test_contracts/invoke_malformed_tokens_test",
+    "local_test_contracts/itc_erc20_permit",
     "local_test_contracts/tx_context_test",
 ]
 
@@ -75,6 +76,9 @@ serde = { version = "1.0.217", default-features = false }
 # ERC20 0.1.24 is the first release where mint and burn are their own events
 # rather than transfers from or to the zero address.
 groundhog-erc20-if = { registry = "groundhog", version = "0.1.40" }
+# The permit interface releases in lockstep with groundhog-erc20-if and pins
+# it exactly, so the two move together.
+groundhog-erc20-permit-if = { registry = "groundhog", version = "0.1.40" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless.
