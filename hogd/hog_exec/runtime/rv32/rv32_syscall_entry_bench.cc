@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"

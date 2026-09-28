@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <span>
@@ -9,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"

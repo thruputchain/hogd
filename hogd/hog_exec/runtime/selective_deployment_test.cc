@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <expected>
 #include <memory>
 #include <span>
 #include <string>
@@ -15,6 +16,7 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"

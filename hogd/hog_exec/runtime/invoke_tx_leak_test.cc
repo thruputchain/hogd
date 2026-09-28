@@ -2,6 +2,7 @@
 #include <span>
 
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <string>
@@ -9,6 +10,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"

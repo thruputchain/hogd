@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <expected>
 #include <map>
 #include <memory>
 #include <optional>
@@ -16,6 +17,7 @@
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/itc_erc20.h"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/network_config_params.h"

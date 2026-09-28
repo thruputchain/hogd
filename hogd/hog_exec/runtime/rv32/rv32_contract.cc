@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/log.h"

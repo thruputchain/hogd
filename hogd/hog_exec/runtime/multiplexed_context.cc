@@ -2,11 +2,13 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
+#include <expected>
 #include <memory>
 #include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"

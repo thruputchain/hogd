@@ -3,11 +3,13 @@
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
+#include <expected>
 #include <memory>
 #include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
