@@ -24,6 +24,7 @@
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
+#include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
 #include "invoke_flag.hh"
@@ -1076,6 +1077,57 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, kSyscallBaseCost);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
+}
+
+// VerifySignature must reserve the message-length-priced Ed25519 cost before
+// running the verifier. Driven through wrap_outer so the wrapper path that
+// forwards the post-crossing gas budget to the body (needs_gas without a
+// handler) is covered too, not just the inner function (issue #4172).
+TEST_F(SyscallErrorHandlingTest, VerifySignatureReservesGasBeforeVerifying)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               ValidatedAuthTokens{})
+                  .has_value());
+
+  // Disjoint public key, signature, and message regions. The contents are
+  // zero, which fails verification -- but only once the verifier runs.
+  constexpr GasAmount kMessageSize = 128;
+  std::array<std::byte, 96 + kMessageSize> memory{};
+  const auto scheme = std::to_underlying(CryptographicScheme::Ed25519);
+  const GasAmount required = GasCost::verify_signature(kMessageSize);
+  const GasAmount cost = kSyscallBaseCost + required;
+
+  // At or below the full cost the frame faults before verifying, charged only
+  // what it had.
+  for (const GasAmount budget :
+       {GasAmount{0}, kSyscallBaseCost, cost - 1, cost}) {
+    SCOPED_TRACE(::testing::Message() << "budget=" << budget);
+    auto [result, charged] =
+        wrap_outer<SyscallMeta<SyscallNo::kVerifySignature>>(
+            handler,
+            ExecutionContext{.memory = memory, .gas_remaining = budget},
+            SyscallNo::kVerifySignature, scheme, /*signature=*/32,
+            sizeof(Ed25519Signature), /*public_key=*/0,
+            sizeof(Ed25519PublicKey), /*message=*/96, kMessageSize)();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);
+    EXPECT_EQ(charged, budget);
+  }
+
+  // One unit more, and the verifier runs and is charged the full cost.
+  auto [result, charged] = wrap_outer<SyscallMeta<SyscallNo::kVerifySignature>>(
+      handler, ExecutionContext{.memory = memory, .gas_remaining = cost + 1},
+      SyscallNo::kVerifySignature, scheme, /*signature=*/32,
+      sizeof(Ed25519Signature), /*public_key=*/0, sizeof(Ed25519PublicKey),
+      /*message=*/96, kMessageSize)();
+  EXPECT_TRUE(result.has_value());
+  EXPECT_EQ(charged, cost);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
