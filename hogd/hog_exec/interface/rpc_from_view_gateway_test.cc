@@ -14,6 +14,7 @@
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
+#include "built_contracts/manual_revert_test.h"
 #include "built_contracts/view_gateway_test.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
@@ -483,4 +484,235 @@ TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
 }
 
 } // namespace
+
+class ViewGatewayBatchTest : public ViewGatewayRefreshTest {
+public:
+  static ViewGatewayBatchQuery batch()
+  {
+    auto first = normalize_public_view_query(make_read_query());
+    first.invocation.gas_limit = 10'000'000;
+    auto second = first;
+    ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
+    second.invocation = client.make_invocation<u8"read_value">(
+        10'000'000, NativeContractTestFramework::make_storage_key("other_key"));
+    return ViewGatewayBatchQuery{.calls = {first, second},
+                                 .min_height = {},
+                                 .budget_millis = 30'000};
+  }
+
+  ViewGatewayBatchResult pinned_attempt(ViewGatewayRpc &gateway,
+                                        ViewGatewayBatchQuery const &query,
+                                        bool commit, bool expired)
+  {
+    auto *state = gateway.get_current_view_state()();
+    CHECK(static_cast<bool>(state));
+    const auto id = state->get().block_id;
+    if (commit) {
+      commit_bytestring("new-value");
+      framework_.advance_block();
+    }
+    auto deadline =
+        std::chrono::steady_clock::now() +
+        (expired ? std::chrono::seconds(-1) : std::chrono::seconds(30));
+    auto result = gateway.run_batch_attempt(query, state->get(), deadline)();
+    if (state->release_reference()) {
+      gateway.gc_view_state(id)();
+    }
+    return result;
+  }
+};
+
+TEST_F(ViewGatewayBatchTest, ReturnsOrderedResultsAtOneHeight)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  auto query = batch();
+  auto first = gateway.viewgateway_view(query.calls[0])();
+  auto second = gateway.viewgateway_view(query.calls[1])();
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  ASSERT_EQ(result.payload().results.size(), 2U);
+  EXPECT_EQ(result.payload().height, first.payload().height);
+  EXPECT_EQ(result.payload().results[0].output, first.payload().output);
+  EXPECT_EQ(result.payload().results[1].output, second.payload().output);
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, IsolatesWritesAndPreservesCallerAndMixedOutcomes)
+{
+  const auto address = NativeContractTestFramework::make_contract_address(42);
+  auto contract =
+      ContractTraitMeta<manual_revert_test::ManualRevertTest>::load_rv32();
+  framework_.write_contract(contract);
+  framework_.write_deployment(address, contract);
+  framework_.setup_grant_storage_token(address, 1'000'000'000);
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  ContractTraitClient<manual_revert_test::ManualRevertTest> client(address);
+  auto read = make_query();
+  read.invocation =
+      client.make_invocation<u8"check_storage_exists">(10'000'000);
+  auto baseline = gateway.viewgateway_view(read)();
+  ASSERT_EQ(baseline.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  ASSERT_EQ(baseline.payload().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  auto write = read;
+  write.invocation =
+      client.make_invocation<u8"test_basic_manual_revert">(10'000'000, false);
+  ViewGatewayBatchQuery query{.calls = {write, read},
+                              .min_height = {},
+                              .budget_millis = 30'000};
+  for (uint32_t mode = 0; mode < 3; ++mode) {
+    auto call = read;
+    call.parent_address =
+        NativeContractTestFramework::make_contract_address(100 + mode);
+    call.invocation =
+        client.make_invocation<u8"test_initializer">(10'000'000,
+                                                     *call.parent_address, mode,
+                                                     mode);
+    query.calls.push_back(std::move(call));
+  }
+  query.calls.push_back(read);
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  auto const &results = result.payload().results;
+  ASSERT_EQ(results.size(), 6U);
+  EXPECT_EQ(results[0].output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_EQ(results[1].output, baseline.payload().output);
+  EXPECT_EQ(results[2].output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_EQ(results[3].output.status_code(), InvocationFrameStatusCode::Abort);
+  EXPECT_EQ(results[4].output.status_code(), InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(results[5].output, baseline.payload().output);
+  EXPECT_EQ(gateway.viewgateway_view(read)().payload().output,
+            baseline.payload().output);
+}
+
+TEST_F(ViewGatewayBatchTest,
+       RefreshesForMinimumHeightAndReportsUnavailableHeight)
+{
+  commit_bytestring("old-value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  auto warm = gateway.viewgateway_view(make_read_query())();
+  const auto height = warm.payload().height;
+  commit_bytestring("new-value");
+  framework_.advance_block();
+  auto query = batch();
+  query.min_height = height + 1;
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_GE(result.payload().height, height + 1);
+  EXPECT_NE(result.payload().results[0].output, warm.payload().output);
+  query.min_height = height + 100;
+  auto unavailable = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(unavailable.outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchHeightUnavailable);
+  EXPECT_EQ(unavailable.height_unavailable().requested, height + 100);
+  EXPECT_LT(unavailable.height_unavailable().observed, height + 100);
+  EXPECT_EQ(gateway.viewgateway_view_batch(batch())().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, RejectsInvalidBatchBeforeExecution)
+{
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  auto invalid = [&](ViewGatewayBatchQuery query) {
+    EXPECT_EQ(gateway.viewgateway_view_batch(std::move(query))().outcome(),
+              ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+  };
+  auto query = batch();
+  query.calls.clear();
+  invalid(query);
+  query = batch();
+  query.budget_millis = 0;
+  invalid(query);
+  query.budget_millis = kMaxViewBatchBudgetMillis + 1;
+  invalid(query);
+  query = batch();
+  query.min_height = -1;
+  invalid(query);
+  query = batch();
+  query.calls[0].invocation.gas_limit = UINT64_MAX;
+  invalid(query);
+  query.calls[0].invocation.gas_limit = kMaxViewBatchGas;
+  invalid(query);
+  query = batch();
+  for (auto &call : query.calls) {
+    call.invocation.calldata.resize(kMaxViewBatchCalldataBytes / 2 + 1);
+  }
+  invalid(query);
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, IncludesEventsInTheAggregateResponseLimit)
+{
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
+  auto call = make_query();
+  call.invocation =
+      client.make_invocation<u8"emit_events">(10'000'000, uint32_t{64});
+  ViewGatewayBatchQuery query{.calls = {call},
+                              .min_height = {},
+                              .budget_millis = 30'000};
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  ASSERT_EQ(result.payload().results[0].output.status_code(),
+            InvocationFrameStatusCode::Return);
+  ASSERT_EQ(result.payload().results[0].events.size(), 64U);
+  EXPECT_EQ(result.payload().results[0].events[0].contract_address, kAddr);
+  query.calls.resize(kMaxViewBatchCalls, call);
+  EXPECT_EQ(gateway.viewgateway_view_batch(query)().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchResponseTooLarge);
+}
+
+TEST_F(ViewGatewayBatchTest, DiscardsPartialResultsFromAnAbandonedSnapshot)
+{
+  commit_bytestring("old-value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  auto warm = gateway.viewgateway_view(make_read_query())();
+  // The cached first read succeeds on the old state; the uncached second
+  // read sees its invalidation. Hold that state across the commit explicitly.
+  auto stale = pinned_attempt(gateway, batch(), true, false);
+  EXPECT_EQ(stale.outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchAbandoned);
+  auto fresh = gateway.viewgateway_view_batch(batch())();
+  ASSERT_EQ(fresh.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_GT(fresh.payload().height, warm.payload().height);
+  EXPECT_NE(fresh.payload().results[0].output, warm.payload().output);
+  EXPECT_EQ(fresh.payload().results.size(), 2U);
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, DeadlineAndShutdownFailTheWholeGroup)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  EXPECT_EQ(pinned_attempt(gateway, batch(), false, true).outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchDeadlineExceeded);
+  gateway.shut_down();
+  EXPECT_EQ(gateway.viewgateway_view_batch(batch())().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchInternalError);
+}
+
 } // namespace hogd

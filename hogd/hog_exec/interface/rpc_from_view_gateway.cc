@@ -34,6 +34,7 @@
 #include "view_gateway.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -107,6 +108,145 @@ ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
   co_await default_threadpool().bg();
   query = normalize_public_view_query(std::move(query));
   co_return co_await run_view_with_retries(query);
+}
+
+x23::Async<ViewGatewayBatchResult>
+ViewGatewayRpc::viewgateway_view_batch(ViewGatewayBatchQuery query)
+{
+  const auto received = std::chrono::steady_clock::now();
+  co_await default_threadpool().bg();
+  if (query.calls.empty() || query.budget_millis == 0 ||
+      query.budget_millis > kMaxViewBatchBudgetMillis ||
+      (query.min_height && *query.min_height < 0)) {
+    co_return ViewGatewayBatchResult(
+        ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+  }
+  uint64_t gas = 0;
+  size_t calldata_bytes = 0;
+  for (auto &call : query.calls) {
+    if (call.invocation.gas_limit > kMaxViewBatchGas - gas ||
+        call.invocation.calldata.size() >
+            kMaxViewBatchCalldataBytes - calldata_bytes) {
+      co_return ViewGatewayBatchResult(
+          ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+    }
+    gas += call.invocation.gas_limit;
+    calldata_bytes += call.invocation.calldata.size();
+    call = normalize_public_view_query(std::move(call));
+  }
+  co_return co_await run_batch_with_retries(
+      query, received + std::chrono::milliseconds(query.budget_millis));
+}
+
+x23::Async<ViewGatewayBatchResult>
+ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
+                                  ViewState &state, ViewDeadline deadline)
+{
+  using Outcome = ViewGatewayBatchOutcome;
+  ViewGatewayBatchResult batch(Outcome::ViewGatewayBatchOk);
+  batch.payload().height = state.tip.value.proposal_header.block_height;
+  for (auto const &call : query.calls) {
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      co_return ViewGatewayBatchResult(
+          Outcome::ViewGatewayBatchDeadlineExceeded);
+    }
+    auto result = co_await run_view_attempt(call, state.tip, state);
+    switch (result.outcome()) {
+    case ViewGatewayOutcome::ViewGatewayAbandoned:
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchAbandoned);
+    case ViewGatewayOutcome::ViewGatewayInternalError:
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    case ViewGatewayOutcome::ViewGatewayOk:
+      break;
+    }
+    auto &payload = result.payload();
+    batch.payload().results.push_back(
+        TransactionViewResult{.output = std::move(payload.output),
+                              .events = std::move(payload.events)});
+    if (x23::xdr_size(batch) > kMaxViewBatchResponseBytes) {
+      co_return ViewGatewayBatchResult(
+          Outcome::ViewGatewayBatchResponseTooLarge);
+    }
+  }
+  if (std::chrono::steady_clock::now() >= deadline) {
+    co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchDeadlineExceeded);
+  }
+  co_return batch;
+}
+
+x23::Async<ViewGatewayBatchResult>
+ViewGatewayRpc::run_batch_with_retries(ViewGatewayBatchQuery const &query,
+                                       ViewDeadline deadline)
+{
+  using Outcome = ViewGatewayBatchOutcome;
+  bool refreshed_for_height = false;
+  for (uint32_t attempt = 0; attempt < kMaxViewAttempts; ++attempt) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      co_return ViewGatewayBatchResult(
+          Outcome::ViewGatewayBatchDeadlineExceeded);
+    }
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    }
+    auto *state = co_await get_current_view_state();
+    if (!state) {
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    }
+    if (query.min_height &&
+        state->get().tip.value.proposal_header.block_height <
+            *query.min_height &&
+        !refreshed_for_height) {
+      const auto id = state->get().block_id;
+      if (state->release_reference()) {
+        co_await gc_view_state(id);
+      }
+      request_refresh();
+      refreshed_for_height = true;
+      state = co_await get_current_view_state();
+      if (!state) {
+        co_return ViewGatewayBatchResult(
+            Outcome::ViewGatewayBatchInternalError);
+      }
+    }
+    const auto id = state->get().block_id;
+    const auto height = state->get().tip.value.proposal_header.block_height;
+    ViewGatewayBatchResult result(Outcome::ViewGatewayBatchInternalError);
+    try {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        result.outcome(Outcome::ViewGatewayBatchDeadlineExceeded);
+      }
+      else if (query.min_height && height < *query.min_height) {
+        result.outcome(Outcome::ViewGatewayBatchHeightUnavailable);
+        result.height_unavailable() = {*query.min_height, height};
+      }
+      else {
+        result = co_await run_batch_attempt(query, state->get(), deadline);
+      }
+      if (result.outcome() == Outcome::ViewGatewayBatchAbandoned &&
+          attempt + 1 < kMaxViewAttempts &&
+          std::chrono::steady_clock::now() < deadline) {
+        if (!co_await rotate_view_state(id)) {
+          result.outcome(Outcome::ViewGatewayBatchInternalError);
+        }
+      }
+    } catch (std::exception const &error) {
+      result.outcome(Outcome::ViewGatewayBatchInternalError);
+      warn("viewgateway: batch failed: {}", error.what());
+    }
+    if (state->release_reference()) {
+      co_await gc_view_state(id);
+    }
+    if (result.outcome() != Outcome::ViewGatewayBatchAbandoned) {
+      co_return result;
+    }
+  }
+  co_return ViewGatewayBatchResult(
+      std::chrono::steady_clock::now() >= deadline
+          ? Outcome::ViewGatewayBatchDeadlineExceeded
+          : Outcome::ViewGatewayBatchAbandoned);
 }
 
 void
