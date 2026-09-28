@@ -237,13 +237,13 @@ TEST_F(InvokeMalformedTokensRv32Test, WellFormedTokensRunChild)
   EXPECT_EQ(child->status.status_code(), InvocationFrameStatusCode::Abort);
 }
 
-// #4174: a rejected Invoke that forwards a well-formed but unowned token span is
-// billed for parsing it. The host copies the span into a vector and SipHashes
-// every id before admission can see the ids are not owned, so that work grows
-// with the span length; pricing it keeps a contract from forcing an arbitrarily
-// long parse for the flat crossing charge. Two unowned spans of different
-// lengths, both refused at admission, therefore differ in gas by exactly the
-// parse charge for the extra bytes.
+// #4174: a rejected Invoke that forwards a well-formed but unowned token span
+// is billed for parsing it. The host copies the span into a vector and
+// SipHashes every id before admission can see the ids are not owned, so that
+// work grows with the span length; pricing it keeps a contract from forcing an
+// arbitrarily long parse for the flat crossing charge. Two unowned spans of
+// different lengths, both refused at admission, therefore differ in gas by
+// exactly the parse charge for the extra bytes.
 TEST_F(InvokeMalformedTokensRv32Test, UnownedTokensAreBilledByLength)
 {
   deploy_target();
@@ -281,9 +281,9 @@ TEST_F(InvokeMalformedTokensRv32Test, UnownedTokensAreBilledByLength)
         record->body.invoke().inputs.owned_auth_token_ids_list.size()};
   };
 
-  auto const one = run(
-      client_.make_invocation<u8"test_one_unowned_token">(kGasLimit,
-                                                          kTargetAddress));
+  auto const one =
+      run(client_.make_invocation<u8"test_one_unowned_token">(kGasLimit,
+                                                              kTargetAddress));
   auto const many = run(
       client_.make_invocation<u8"test_many_unowned_tokens">(kGasLimit,
                                                             kTargetAddress));

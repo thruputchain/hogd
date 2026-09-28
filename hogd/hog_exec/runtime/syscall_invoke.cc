@@ -203,7 +203,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // A SystemError ends execution of the whole block.
   if (!invoke_res.has_value()) {
     co_return SyscallInnerResult{invoke_res.error().to_host_fn_error(),
-                                 WrappedGasAmount{gas_amount + parse_gas.get()}};
+                                 WrappedGasAmount{gas_amount +
+                                                  parse_gas.get()}};
   }
 
   // A SyscallError means the invoke was rejected before a child frame ran: a
@@ -212,7 +213,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   SyscallStatus<InvocationFrameStatusCode> const &frame = *invoke_res;
   if (!frame.has_value()) {
     co_return SyscallInnerResult{frame.error().code(),
-                                 WrappedGasAmount{gas_amount + parse_gas.get()}};
+                                 WrappedGasAmount{gas_amount +
+                                                  parse_gas.get()}};
   }
 
   // A child frame ran. Report its outcome (Return / Abort / Fault) via
@@ -222,7 +224,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   if (!return_buffer_host.has_value()) {
     // Handle the SystemError case
     co_return SyscallInnerResult{return_buffer_host.error().to_host_fn_error(),
-                                 WrappedGasAmount{gas_amount + parse_gas.get()}};
+                                 WrappedGasAmount{gas_amount +
+                                                  parse_gas.get()}};
   }
 
   SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;

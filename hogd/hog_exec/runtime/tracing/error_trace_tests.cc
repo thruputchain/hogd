@@ -181,10 +181,10 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
         .gas_limit = UINT64_MAX,
         .flags = 0,
     };
-    expected.push_back(make_entry(
-        98'773, 98'773 - kSyscallBaseCost - kBytestringReadBlockCost,
-        std::move(body),
-        status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
+    expected.push_back(
+        make_entry(98'773, 98'773 - kSyscallBaseCost - kBytestringReadBlockCost,
+                   std::move(body),
+                   status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
   expected.push_back(empty_return_entry(98'663 - kBytestringReadBlockCost));
 
