@@ -3075,6 +3075,44 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
       "recovered database storage hash does not match DbTip");
 }
 
+// #4176: `<DBTIP` is global metadata excluded from the storage hash, so a
+// noncanonical recovered network config passes the storage/network hash checks.
+// The devnode must reject it at recovery rather than serve with default
+// execution parameters that ignore the stored config.
+TEST(HogDevnode, DataDirRejectsNonCanonicalNetworkConfig)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  {
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value());
+    NetworkConfig noncanonical;
+    noncanonical.v(0);
+    noncanonical.v0().params.push_back(NetworkConfigParams::make_param(
+        ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
+    ASSERT_FALSE(NetworkConfigParams::is_canonical(noncanonical.v0()));
+    tip->network_config = noncanonical;
+    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+    ASSERT_TRUE(db.commit().has_value());
+  }
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--dev-accounts",
+          "1",
+          "--dev-account-seed",
+          "groundhog-dev-accounts",
+          "--dev-account-tokens",
+          "1000000000",
+      },
+      "not a gapless prefix of parameter ids");
+}
+
 TEST(HogDevnode, NetworkOverridesSurviveRestartAndRejectChangedIntent)
 {
   const auto data_dir = make_test_data_dir();
