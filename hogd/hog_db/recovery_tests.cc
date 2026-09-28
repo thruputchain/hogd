@@ -104,6 +104,11 @@ TEST(RecoveryTests, RPCContextRejectsNonNotFoundDbTipError)
 // opaque canonical-form CHECK.
 TEST(RecoveryTests, RPCContextRejectsRecoveredNonCanonicalNetworkConfig)
 {
+  // The child starts a thread (RPCContext's BackgroundCommitWorker) after the
+  // fork-only style forks an already multi-threaded parent, which TSAN kills
+  // before the panic is printed (#4184). "threadsafe" re-execs instead.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   ASSERT_TRUE(dir.has_value());
 
