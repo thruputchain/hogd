@@ -167,11 +167,8 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
-    // Self-invoke forwarding a fabricated token id 0xDEAD: reentrance wins
-    // over the ownership check, and no child frame runs. The losing input is
-    // still traced (#2973), and its one well-formed id is billed one hash block
-    // to parse on top of the crossing, even though the call is rejected
-    // (#4174).
+    // Self-invoke, fabricated token id: reentrance wins, no child frame
+    // (#2973). Its one id is still parsed and billed a hash block (#4174).
     SyscallTraceBody body(SyscallNo::kInvoke);
     body.invoke().inputs.address = addr;
     body.invoke().inputs.owned_auth_token_ids_list.append_range(

@@ -147,10 +147,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
         WrappedGasAmount{0}};
   }
 
-  // Parsing a well-formed span copies and SipHashes one id at a time, so the
-  // cost grows with the id count. Charge one hash block per id (reusing a
-  // schedule constant, so the digest is unchanged) and reject up front, so a
-  // rejected Invoke cannot force that work for only the flat crossing (#4174).
+  // Parsing is per-id work, so charge one hash block per id and reject up
+  // front: a rejected Invoke must not get that work for only the flat crossing
+  // (#4174).
   const WrappedGasAmount parse_gas{
       kSHA256HashBlockCost *
       (input_owned_auth_token_ids.size() / sizeof(uint32_t))};
@@ -160,9 +159,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
   const GasAmount gas_after_parse = remaining_gas.get() - parse_gas.get();
 
-  // Materialized once; the frame stack takes the list over without copying. A
-  // failure here is a duplicate id, found while hashing, which parse_gas
-  // covers.
+  // Materialized once; the frame stack takes the list over without copying.
   auto owned_auth_tokens =
       ValidatedAuthTokens::parse(input_owned_auth_token_ids);
   if (!owned_auth_tokens.has_value()) {
