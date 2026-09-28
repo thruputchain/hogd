@@ -201,10 +201,8 @@ DiskWriter::sync()
 
   std::unique_lock ul(to_disk_lock_);
 
-  // The ++cur_lsn_ below would wrap to zero at the maximum LSN, which a later
-  // recovery reads as an empty database (#4179). Fail the sync before enqueuing
-  // any work, leaving the dirty heads intact and retryable. Only reachable if
-  // recovery seeded the writer from tampered snapshot metadata.
+  // ++cur_lsn_ would wrap to zero at the maximum LSN, recovered as an empty
+  // database (#4179). Fail before enqueuing any work so the sync is retryable.
   if (cur_lsn_ == std::numeric_limits<uint64_t>::max()) {
     error("writer LSN space exhausted; refusing to wrap cur_lsn to zero");
     return DBError(DBCode::kIO);

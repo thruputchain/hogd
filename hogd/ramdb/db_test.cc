@@ -575,9 +575,8 @@ TEST_F(DatabaseTest, IgnoresNonCanonicalSnapshotAlias)
   EXPECT_EQ(count, 0U);
 }
 
-// Recovery and the writer must refuse to let the next LSN wrap to zero;
-// otherwise the wrapped LSN would open as a fresh, empty database and silently
-// drop committed state (#4179).
+// The next LSN must not wrap to zero, which would recover as an empty
+// database (#4179).
 TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
 {
   constexpr uint64_t kMaxLsn = std::numeric_limits<uint64_t>::max();
@@ -648,9 +647,8 @@ TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
   EXPECT_FALSE(db_->sync());
   db_.reset();
 
-  // Because the wrapping commit was refused, a second recovery still finds the
-  // maximum LSN, never zero, and keeps the preserved snapshot row rather than
-  // opening an empty database.
+  // The refused sync wrote nothing, so recovery still finds the max LSN, not
+  // zero, with the preserved row intact.
   auto rechecked = Database::check(dir_.get_path(), heap_size);
   ASSERT_TRUE(rechecked);
   EXPECT_EQ(*rechecked, kMaxLsn);
@@ -661,9 +659,8 @@ TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
             DBCode::kNotFound);
 }
 
-// The reader guard's own case: a CRC-valid snapshot commit at the maximum LSN
-// has no representable successor, so recovery must reject it as corruption
-// rather than accept it and hand a wrapped LSN to the writer (#4179).
+// A max-LSN snapshot commit has no representable successor, so recovery must
+// reject it as corruption (#4179).
 TEST_F(DatabaseTest, MaximumSnapshotCommitLsnRejectedByRecovery)
 {
   constexpr uint64_t kMaxLsn = std::numeric_limits<uint64_t>::max();

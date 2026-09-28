@@ -474,9 +474,8 @@ load_log_file(
         return DBError{DBCode::kCorruption};
       }
 
-      // A commit at the maximum LSN would wrap cur_lsn to zero, which a later
-      // recovery reads as an empty database (#4179). Snapshot commits skip the
-      // sequence check above, so guard both paths here.
+      // A commit at the maximum LSN would wrap cur_lsn to zero, recovered as an
+      // empty database; snapshot commits skip the check above (#4179).
       if (hdr.lsn == std::numeric_limits<uint64_t>::max()) {
         error("commit record lsn {} in {} would overflow cur_lsn", hdr.lsn,
               file.path_);
