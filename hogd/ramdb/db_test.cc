@@ -663,6 +663,66 @@ TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
             DBCode::kNotFound);
 }
 
+// The reader guard's own case: a CRC-valid snapshot commit at the maximum LSN
+// has no representable successor, so recovery must reject it as corruption
+// rather than accept it and hand a wrapped LSN to the writer (#4179).
+TEST_F(DatabaseTest, MaximumSnapshotCommitLsnRejectedByRecovery)
+{
+  constexpr uint64_t kMaxLsn = std::numeric_limits<uint64_t>::max();
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  const std::string preserved_key = "preserved";
+  const std::string preserved_value = "snapshot-value";
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(preserved_key)), 7,
+                       std::as_bytes(std::span(preserved_value))));
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_EQ(snapshot->first, 1U);
+  ASSERT_TRUE(snapshot->second.get());
+  db_.reset();
+
+  // Rewrite the snapshot's trailing commit record to claim the maximum LSN,
+  // refreshing the CRC so only the overflow guard -- not the checksum -- can
+  // reject it.
+  ErrnoStatus<struct stat> snapshot_stat = dir_.stat("0-1.snap");
+  ASSERT_TRUE(snapshot_stat);
+  std::vector<std::byte> bytes(static_cast<size_t>(snapshot_stat->st_size));
+  {
+    ErrnoStatus<File> file = dir_.openat("0-1.snap", O_RDONLY);
+    ASSERT_TRUE(file);
+    ASSERT_TRUE(read_full(*file, std::span(bytes)));
+  }
+
+  const size_t commit_offset =
+      bytes.size() - sizeof(ItemHeader) - sizeof(uint32_t);
+  ItemHeader commit_header{};
+  std::memcpy(&commit_header, bytes.data() + commit_offset,
+              sizeof(commit_header));
+  ASSERT_EQ(commit_header.storage, ItemStorage::kCommit);
+  commit_header.lsn = kMaxLsn;
+  commit_header.clear_next();
+  std::memcpy(bytes.data() + commit_offset, &commit_header,
+              sizeof(commit_header));
+
+  uint32_t crc = crc32c_append(0, std::span(bytes).first(commit_offset));
+  crc = crc32c_append(crc, byte_view(commit_header));
+  uint32_t crc_le = cpu_to_le(crc);
+  std::memcpy(bytes.data() + commit_offset + sizeof(commit_header), &crc_le,
+              sizeof(crc_le));
+  {
+    ErrnoStatus<File> file = dir_.openat("0-1.snap", O_WRONLY);
+    ASSERT_TRUE(file);
+    ASSERT_TRUE(write_full(*file, std::span(bytes)));
+  }
+  ASSERT_TRUE(dir_.unlink("0.log"));
+
+  // Recovery must reject the maximum-LSN commit instead of wrapping cur_lsn.
+  auto checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(checked);
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+}
+
 TEST_F(DatabaseTest, SnapshotRepeatable)
 {
   // check to make sure that if we take multiple full snapshots with
