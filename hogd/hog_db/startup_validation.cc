@@ -39,12 +39,10 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
     critical("no contract stored for the tip's default wallet");
     return false;
   }
-  // Genesis admission enforces this savepoint-depth domain, but the config hash
-  // above only binds the config to consensus; it does not range-check it. A
-  // recovered zero depth is accepted by every gate above yet leaves the first
-  // root push (which must create one savepoint) returning kRPCUnrecoverable,
-  // and a depth past the ceiling exceeds what this build's executor stacks
-  // sustain. Reapply the genesis floor and ceiling here (#4181).
+  // The config hash binds the config to consensus but does not range-check it.
+  // Genesis rejects a zero savepoint depth (every root commit pushes one, so
+  // the first push would return kRPCUnrecoverable) and one past the ceiling, so
+  // reapply that floor and ceiling here (#4181).
   const NetworkConfigParams config_params(tip.network_config.v0());
   if (config_params.max_savepoint_depth == 0) {
     critical("recovered tip max_savepoint_depth must be at least 1 for root "

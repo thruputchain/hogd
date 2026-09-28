@@ -233,13 +233,10 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
   }
 }
 
-// #4181: `<DBTIP` is unhashed, so a savepoint depth outside the domain genesis
-// admits can be persisted with a matching config hash and an untouched state
-// hash. Genesis rejects both a zero depth (every root commit pushes one
-// savepoint, so the first push would return kRPCUnrecoverable) and one past the
-// ceiling this build's executor stacks sustain, so recovery must too. The
-// accepted at-ceiling case is exercised by AcceptsTheTipItsHeaderCommitsTo,
-// whose stock config states exactly kSavepointDepthCeiling.
+// #4181: `<DBTIP` is unhashed, so an out-of-range savepoint depth can persist
+// with a matching config hash and an unchanged state hash; recovery must reject
+// the values genesis does. The accepted at-ceiling case is covered by
+// AcceptsTheTipItsHeaderCommitsTo, whose stock config states the ceiling.
 TEST_F(RecoveredTipTest, RejectsOutOfRangeSavepointDepth)
 {
   for (const uint32_t depth : {uint32_t{0}, kSavepointDepthCeiling + 1}) {
