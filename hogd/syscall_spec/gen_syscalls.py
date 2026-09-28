@@ -81,11 +81,9 @@ ASYNC_SYSCALLS = frozenset({
     "Invoke",
 })
 
-# Syscalls whose inner body needs the frame's remaining gas, on top of any that
-# set `needs_gas` in the spec. Like ASYNC_SYSCALLS this is a hog_exec detail
-# (identical wire ABI) kept out of protocol/syscalls.yaml, so a hog_exec-only
-# fix needs no protocol bump. VerifySignature uses it to reserve the
-# length-priced Ed25519 cost before running the verifier (issue #4172).
+# Syscalls whose inner body needs the frame's remaining gas, beyond those that
+# set `needs_gas` in the spec: a hog_exec detail (same wire ABI) kept here so a
+# hog_exec-only fix needs no protocol bump (VerifySignature, issue #4172).
 HOG_EXEC_NEEDS_GAS_SYSCALLS = frozenset({
     "VerifySignature",
 })

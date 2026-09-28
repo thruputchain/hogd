@@ -1081,10 +1081,9 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
-// VerifySignature must reserve the message-length-priced Ed25519 cost before
-// running the verifier. Driven through wrap_outer so the wrapper path that
-// forwards the post-crossing gas budget to the body (needs_gas without a
-// handler) is covered too, not just the inner function (issue #4172).
+// VerifySignature reserves the length-priced Ed25519 cost before verifying;
+// driven through wrap_outer to cover the needs_gas-without-handler path
+// (#4172).
 TEST_F(SyscallErrorHandlingTest, VerifySignatureReservesGasBeforeVerifying)
 {
   auto context = make_hog_exec_context();
@@ -1095,9 +1094,8 @@ TEST_F(SyscallErrorHandlingTest, VerifySignatureReservesGasBeforeVerifying)
                                ValidatedAuthTokens{})
                   .has_value());
 
-  // Disjoint public key, signature, and message regions in guest memory. The
-  // contents are zero, which fails verification -- but only once it runs. The
-  // wrap_outer arg order is scheme, then each span as (offset, length).
+  // wrap_outer arg order: scheme, then each span as (offset, length). Regions
+  // are disjoint and zero-filled -- verification fails, but only once it runs.
   constexpr GasAmount kPublicKeyAddr = 0;
   constexpr GasAmount kSignatureAddr = 32;
   constexpr GasAmount kMessageAddr = 96;

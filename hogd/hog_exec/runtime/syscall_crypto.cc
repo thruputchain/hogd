@@ -135,9 +135,8 @@ syscall_VerifySignature_inner(WrappedGasAmount remaining_gas,
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
-    // Reserve the length-priced cost before running the verifier: otherwise a
-    // low-gas child frame does the full curve work and faults only after, so a
-    // TryInvoke parent repeats it for the price of the crossing (issue #4172).
+    // Reserve the length-priced cost before running the verifier, so a low-gas
+    // frame cannot get the curve work for the price of the crossing (#4172).
     const WrappedGasAmount gas{GasCost::verify_signature(input_message.size())};
     if (remaining_gas.get() <= gas.get()) {
       return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
