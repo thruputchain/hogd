@@ -9,6 +9,7 @@ extern "C" {
 #include <cassert>
 #include <condition_variable>
 #include <cstddef>
+#include <cstring>
 #include <functional>
 #include <limits> // NOLINT(misc-include-cleaner)
 #include <memory>
@@ -119,6 +120,35 @@ Loglet::clone(ItemHeader *src)
   assert(item_is_within(dst));
   pos_ += len;
   return dst;
+}
+
+DiskItemHeader *
+Loglet::alloc_disk(ItemStorage storage, uint8_t type, size_t key_len,
+                   size_t value_len, uint64_t lsn)
+{
+  assert(is_attached());
+  assert(key_len <=
+         std::numeric_limits<decltype(DiskItemHeader::key_len)>::max());
+  assert(value_len <=
+         std::numeric_limits<decltype(DiskItemHeader::value_len)>::max());
+
+  // check if there is enough space.
+  size_t len = sizeof(DiskItemHeader) + key_len + value_len;
+  len = align_up(len, alignof(DiskItemHeader));
+  if (unlikely(pos_ + len >= len_))
+    return nullptr;
+
+  // zero the last aligned word so the padding after the key and value is
+  // deterministic; the caller's key/value copy overwrites any overlap. A
+  // record with no payload has no padding and the word would be the header.
+  std::byte *rec = start_ + pos_;
+  if (len > sizeof(DiskItemHeader))
+    std::memset(rec + len - alignof(DiskItemHeader), 0,
+                alignof(DiskItemHeader));
+
+  auto *h = new (rec) DiskItemHeader(storage, type, key_len, value_len, lsn);
+  pos_ += len;
+  return h;
 }
 
 void

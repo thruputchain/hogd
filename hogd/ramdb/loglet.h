@@ -7,9 +7,12 @@
 // Loglets are allocated with a free list that carves up a big contiguous
 // mapping. The mapping has the following memory layout:
 // [Loglet: ItemHeader:key:value ItemHeader:key:value ...] ...
+// Loglets that DiskWriter buffers for disk hold DiskItemHeader records
+// instead, so they are written out byte for byte and never iterated.
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -121,14 +124,6 @@ struct ItemHeader {
 // be trivially copyable.
 static_assert(std::is_trivially_destructible_v<ItemHeader>);
 static_assert(std::is_trivially_copyable_v<ItemHeader>);
-// The durable WAL checksums the full object representation of a commit-marker
-// ItemHeader (see DiskWriter::write_worker / DiskReader::crc_valid). The writer
-// and recovery paths construct separate ItemHeader objects and canonicalize
-// only the `next` slot (clear_next), so the format is only stable if the header
-// has no padding: every byte must belong to a named field. Pin that invariant
-// here so a future field reorder/addition can't silently introduce padding and
-// make a logically-identical commit record fail CRC validation on recovery.
-static_assert(std::has_unique_object_representations_v<ItemHeader>);
 // Loglet::free() constructs std::atomic_ref<ItemStorage> over item->storage
 // to write the tombstone marker; the standard requires the referenced object
 // to satisfy atomic_ref::required_alignment.
@@ -137,6 +132,81 @@ static_assert(alignof(ItemHeader) >=
 static_assert(offsetof(ItemHeader, storage) %
                   std::atomic_ref<ItemStorage>::required_alignment ==
               0);
+
+// DiskItemHeader is the header that precedes each record in WAL and snapshot
+// files. It is ItemHeader without the `next` link, which only chains in-memory
+// hash buckets and is rebuilt on recovery. Every field is a primitive so
+// recovery can load untrusted bytes into it and validate storage before
+// converting to ItemStorage.
+struct DiskItemHeader {
+  uint8_t storage;
+  uint8_t type;
+  uint16_t key_len;
+  uint32_t value_len;
+  uint64_t lsn;
+
+  DiskItemHeader() = default;
+  DiskItemHeader(ItemStorage storage, uint8_t type, uint16_t key_len,
+                 uint32_t value_len, uint64_t lsn)
+    : storage(std::to_underlying(storage)), type(type), key_len(key_len),
+      value_len(value_len), lsn(lsn)
+  {}
+  ~DiskItemHeader() = default;
+
+  // kv_bytes returns the size of the record's key and value.
+  size_t kv_bytes() const
+  {
+    return static_cast<size_t>(key_len) + static_cast<size_t>(value_len);
+  }
+
+  // get_key returns a span of the key data.
+  std::span<std::byte> get_key()
+  {
+    auto *buf = reinterpret_cast<std::byte *>(this) + sizeof(*this);
+    return {buf, key_len};
+  }
+
+  // get_key_and_value returns a contiguous span of the key data and the value
+  // data.
+  std::span<std::byte> get_key_and_value()
+  {
+    auto *buf = reinterpret_cast<std::byte *>(this) + sizeof(*this);
+    return {buf, kv_bytes()};
+  }
+};
+
+static_assert(std::is_trivially_destructible_v<DiskItemHeader>);
+static_assert(std::is_trivially_copyable_v<DiskItemHeader>);
+// Commit records checksum the full object representation of a DiskItemHeader
+// (see DiskWriter::write_worker and load_log_file), so every byte must belong
+// to a named field. Pin that here so a future field reorder/addition can't
+// introduce padding and make a logically-identical commit record fail CRC
+// validation on recovery.
+static_assert(std::has_unique_object_representations_v<DiskItemHeader>);
+static_assert(sizeof(DiskItemHeader) == offsetof(ItemHeader, next));
+// Recovery reads a record's payload straight into the ItemHeader it rebuilds
+// (ItemHeader::get_all), so both headers must pad the payload identically.
+static_assert(alignof(DiskItemHeader) == alignof(ItemHeader));
+
+// DiskFileHeader begins every WAL and snapshot file. Files written before the
+// compact DiskItemHeader format have no file header and are rejected.
+struct DiskFileHeader {
+  std::array<char, 8> magic;
+  uint32_t version;
+  uint32_t reserved;
+
+  friend bool operator==(const DiskFileHeader &,
+                         const DiskFileHeader &) = default;
+};
+
+static_assert(std::is_trivially_copyable_v<DiskFileHeader>);
+static_assert(std::has_unique_object_representations_v<DiskFileHeader>);
+
+inline constexpr DiskFileHeader kDiskFileHeader{
+    .magic = {'H', 'O', 'G', 'R', 'A', 'M', 'D', 'B'},
+    .version = 2,
+    .reserved = 0,
+};
 
 // LogletMode specifies how the loglet is currently being used.
 enum class LogletMode : uint8_t {
@@ -240,6 +310,13 @@ public:
   // value and zeroes the copy's next slot (see ItemHeader::clear_next). It
   // returns nullptr if there is insufficient space.
   ItemHeader *clone(ItemHeader *src);
+
+  // alloc_disk allocates a DiskItemHeader record for writing to disk and
+  // zeroes its trailing alignment padding so the written bytes and their
+  // checksum carry no stale memory. It returns nullptr if there is
+  // insufficient space.
+  DiskItemHeader *alloc_disk(ItemStorage storage, uint8_t type, size_t key_len,
+                             size_t value_len, uint64_t lsn);
 
   // free removes an item from this loglet. It doesn't directly reclaim the
   // item. Instead, it marks an the existing item with a tombstone so it can be

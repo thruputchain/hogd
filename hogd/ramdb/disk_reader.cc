@@ -17,7 +17,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -41,7 +40,8 @@ namespace {
 
 // LogletBuffer buffers item changes before transferring to memory. This is
 // required because we must validate the checksum of all changes in each LSN
-// before applying them.
+// before applying them. The checksum covers the on-disk bytes, which differ
+// from the buffered ItemHeaders, so load_log_file computes it as it reads.
 class LogletBuffer {
 public:
   LogletBuffer(LogletAllocator *allocator) : allocator_(allocator) {}
@@ -53,9 +53,6 @@ public:
   // take_buffer returns all pending loglets including the head and resets to
   // an empty buffer.
   std::vector<UniqueLoglet> take_buffer();
-
-  // calculate_crc32c returns the CRC32C of the bytes currently in the buffer.
-  uint32_t calculate_crc32c();
 
   // size returns the number of bytes currently in the buffer.
   size_t size() const
@@ -70,7 +67,6 @@ private:
   LogletAllocator *allocator_;
   std::vector<UniqueLoglet> buf_;
   UniqueLoglet head_;
-  uint32_t crc_{0};
 };
 
 inline ItemHeader *
@@ -78,12 +74,8 @@ LogletBuffer::push_item(ItemHeader *src)
 {
   // allocate a new loglet if needed.
   if (!head_ || head_->bytes_left() < src->total_bytes()) [[unlikely]] {
-    if (head_) {
-      // it's faster to calculate the CRC now because this head loglet is still
-      // hot in the cache.
-      crc_ = crc32c_append(crc_, head_->get_bytes());
+    if (head_)
       buf_.emplace_back(std::move(head_));
-    }
     head_ = make_unique_loglet(*allocator_, LogletMode::kDiskBuffer);
     if (!head_)
       return nullptr;
@@ -96,28 +88,14 @@ LogletBuffer::push_item(ItemHeader *src)
 inline std::vector<UniqueLoglet>
 LogletBuffer::take_buffer()
 {
-  crc_ = 0;
   if (head_)
     buf_.emplace_back(std::move(head_));
   return std::exchange(buf_, std::vector<UniqueLoglet>());
 }
 
-inline uint32_t
-LogletBuffer::calculate_crc32c()
-{
-  if (!head_)
-    return crc_;
-  return crc32c_append(crc_, head_->get_bytes());
-}
-
 inline bool
-crc_valid(uint32_t commit_crc, LogletBuffer &buf, ItemHeader *commit_hdr)
+crc_valid(uint32_t commit_crc, uint32_t crc)
 {
-  // The next slot is persisted as canonical zero bytes (#1530); zero it on the
-  // reconstructed header too so the checksum is independent of the host's
-  // nullptr representation.
-  commit_hdr->clear_next();
-  uint32_t crc = crc32c_append(buf.calculate_crc32c(), byte_view(*commit_hdr));
   if (commit_crc != crc) {
     error("CRC check failed! Expected {:x}, got {:x}.", commit_crc, crc);
     return false;
@@ -149,49 +127,24 @@ rest_is_zero(BufferedReader &r)
   }
 }
 
-// SafeItemHeader is a version of ItemHeader that uses only primitive types.
-// This is necessary because it would be UB to load an out of range value into
-// storage, as it is an enum class in ItemHeader. Since the on-disk log could
-// be corrupted, there's a risk this might happen.
-struct SafeItemHeader {
-  uint8_t storage;
-  uint8_t type;
-  uint16_t key_len;
-  uint32_t value_len;
-  uint64_t lsn;
-  uint64_t _padding_garbage_next_pointer; // Always 0 in stable copies of item.
-
-  // returns an ItemHeader if it is valid.
-  std::optional<ItemHeader> operator()() const
-  {
-    if (storage > std::to_underlying(ItemStorage::kCommit))
-      return std::nullopt;
-    if (key_len == 0)
-      return std::nullopt;
-    if (sizeof(ItemHeader) + key_len + value_len > kBigItemThreshold)
-      return std::nullopt;
-    if (_padding_garbage_next_pointer != 0) {
-      warn("padding in stored item non-zero");
-      return std::nullopt;
-    }
-    ItemHeader hdr(static_cast<ItemStorage>(storage), type, key_len, value_len);
-    hdr.lsn = lsn;
-    return hdr;
-  }
-};
-
-static_assert(sizeof(SafeItemHeader) == sizeof(ItemHeader));
-static_assert(std::is_trivially_copyable_v<SafeItemHeader>);
-static_assert(offsetof(SafeItemHeader, storage) ==
-              offsetof(ItemHeader, storage));
-static_assert(offsetof(SafeItemHeader, type) == offsetof(ItemHeader, type));
-static_assert(offsetof(SafeItemHeader, key_len) ==
-              offsetof(ItemHeader, key_len));
-static_assert(offsetof(SafeItemHeader, value_len) ==
-              offsetof(ItemHeader, value_len));
-static_assert(offsetof(SafeItemHeader, lsn) == offsetof(ItemHeader, lsn));
-static_assert(offsetof(SafeItemHeader, _padding_garbage_next_pointer) ==
-              offsetof(ItemHeader, next));
+// to_item_header validates a record header read from disk and returns the
+// in-memory ItemHeader it describes. The on-disk log could be corrupted, and
+// loading an out of range value into ItemHeader::storage would be UB, so this
+// checks storage before converting it.
+std::optional<ItemHeader>
+to_item_header(const DiskItemHeader &disk)
+{
+  if (disk.storage > std::to_underlying(ItemStorage::kCommit))
+    return std::nullopt;
+  if (disk.key_len == 0)
+    return std::nullopt;
+  if (sizeof(ItemHeader) + disk.kv_bytes() > kBigItemThreshold)
+    return std::nullopt;
+  ItemHeader hdr(static_cast<ItemStorage>(disk.storage), disk.type,
+                 disk.key_len, disk.value_len);
+  hdr.lsn = disk.lsn;
+  return hdr;
+}
 
 // helper class that parses log and snapshot file names
 struct FileMetadata {
@@ -336,11 +289,40 @@ load_log_file(
   LogletBuffer buf(&allocator);
   bool uncommitted_records = false;
   off_t uncommitted_off = 0; // NOLINT(misc-include-cleaner)
+  // CRC32C of the on-disk bytes of the records buffered for the next commit.
+  uint32_t crc = 0;
+
+  // Every file starts with kDiskFileHeader. The writer emits it before any
+  // record, so a file too short to hold it, or whose header is a zeroed torn
+  // tail, has no commits and is truncated like any other uncommitted tail.
+  {
+    DiskFileHeader file_hdr;
+    ErrnoStatus<void> ret = read_full(r, writable_byte_view(file_hdr));
+    if (!ret) {
+      if (ret.error() != ENODATA) {
+        error("error reading log file header: {}", ret.error());
+        return DBError(DBCode::kCorruption);
+      }
+      uncommitted_records = r.offset() > 0;
+      goto eof;
+    }
+    if (file_hdr != kDiskFileHeader) {
+      if (is_last_file && all_zero(byte_view(file_hdr)) && rest_is_zero(r)) {
+        uncommitted_records = true;
+        goto eof;
+      }
+      error("{} is not a ramdb v{} log file; files from older builds must be "
+            "removed",
+            file.path_, kDiskFileHeader.version);
+      return DBError(DBCode::kCorruption);
+    }
+    uncommitted_off = r.offset();
+  }
 
   while (!target_lsn || cur_lsn < *target_lsn) {
-    // read the next ItemHeader from the log file.
-    SafeItemHeader tmp;
-    ErrnoStatus<void> ret = read_full(r, writable_byte_view(tmp));
+    // read the next record header from the log file.
+    DiskItemHeader disk_hdr;
+    ErrnoStatus<void> ret = read_full(r, writable_byte_view(disk_hdr));
     if (!ret) {
       if (ret.error() == ENODATA)
         goto eof;
@@ -355,7 +337,7 @@ load_log_file(
     // A zero header is never valid (key_len == 0). In the last file, treat it
     // as a torn tail from a crash mid-append and truncate, but only if nothing
     // but zeros follows; a zeroed header ahead of live records is corruption.
-    if (is_last_file && all_zero(byte_view(tmp))) {
+    if (is_last_file && all_zero(byte_view(disk_hdr))) {
       if (!rest_is_zero(r)) {
         error("zeroed record ahead of later records in {}", file.path_);
         return DBError(DBCode::kCorruption);
@@ -365,7 +347,7 @@ load_log_file(
 
     // validate the header.
     ItemHeader hdr;
-    if (std::optional<ItemHeader> ret = tmp(); ret) {
+    if (std::optional<ItemHeader> ret = to_item_header(disk_hdr); ret) {
       hdr = *ret;
     }
     else {
@@ -387,19 +369,20 @@ load_log_file(
         // the commit record just in case one comes into existence via
         // corruption.
         buf.take_buffer();
+        crc = 0;
         uncommitted_records = false;
         uncommitted_off = r.offset();
       }
 
       // kNormal/kTombstone records are written with the loglet's
-      // alignof(ItemHeader) padding (see Loglet::alloc), so the on-disk
-      // payload length is align_up(kv_bytes, alignof(ItemHeader)). kCommit
-      // records are written without that trailing padding (commit_buf is
-      // sizeof(ItemHeader) + sizeof(uint32_t)), so the unpadded kv_bytes is
-      // the right skip there.
+      // alignof(DiskItemHeader) padding (see Loglet::alloc_disk), so the
+      // on-disk payload length is align_up(kv_bytes, alignof(DiskItemHeader)).
+      // kCommit records are written without that trailing padding (commit_buf
+      // is sizeof(DiskItemHeader) + sizeof(uint32_t)), so the unpadded
+      // kv_bytes is the right skip there.
       size_t to_skip = hdr.storage == ItemStorage::kCommit
                            ? hdr.kv_bytes()
-                           : align_up(hdr.kv_bytes(), alignof(ItemHeader));
+                           : align_up(hdr.kv_bytes(), alignof(DiskItemHeader));
       ErrnoStatus<size_t> ret = r.skip(to_skip);
       if (!ret) {
         info("failure while skipping {} bytes in {}", to_skip, file.path_);
@@ -410,6 +393,8 @@ load_log_file(
         goto eof;
       continue;
     }
+
+    crc = crc32c_append(crc, byte_view(disk_hdr));
 
     // parse the header.
     using enum ItemStorage;
@@ -422,6 +407,8 @@ load_log_file(
         debug("out of memory in recovery buffer");
         return DBError(DBCode::kNoMemory);
       }
+      // the on-disk payload and its padding land directly after the
+      // rebuilt ItemHeader; both headers pad identically (see loglet.h).
       ret = read_full(r, dst->get_all());
       if (!ret) {
         if (ret.error() == ENODATA)
@@ -429,6 +416,7 @@ load_log_file(
         info("couldn't read item: {}", ret.error());
         return DBError(DBCode::kCorruption);
       }
+      crc = crc32c_append(crc, dst->get_all());
       break;
     }
 
@@ -451,10 +439,12 @@ load_log_file(
       }
       // The checksum is persisted little-endian (#1816).
       commit_crc = le_to_cpu(commit_crc);
-      if (!crc_valid(commit_crc, buf, &hdr)) {
+      // the writer checksums the commit header but not the crc it carries.
+      if (!crc_valid(commit_crc, crc)) {
         info("crc check failure checking commit for lsn {}", hdr.lsn);
         return DBError(DBCode::kCorruption);
       }
+      crc = 0;
 
       // insert the changes into the database.
       // for WAL files this applies just one lsn of items. snapshot

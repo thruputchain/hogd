@@ -7,7 +7,6 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
-#include <cstring>
 #include <format>
 #include <mutex>
 #include <new>
@@ -72,10 +71,10 @@ DiskWriter::write_worker(const std::stop_token &stoken)
 {
   // initialize the buffer used for commit records.
   // the uint32 is the crc32c of the committed data.
-  alignas(ItemHeader) uint8_t commit_buf[sizeof(ItemHeader) + sizeof(uint32_t)];
-  auto *commit_hdr =
-      new (commit_buf) ItemHeader(ItemStorage::kCommit, 0, sizeof(uint32_t), 0);
-  commit_hdr->clear_next();
+  alignas(DiskItemHeader)
+      uint8_t commit_buf[sizeof(DiskItemHeader) + sizeof(uint32_t)];
+  auto *commit_hdr = new (commit_buf)
+      DiskItemHeader(ItemStorage::kCommit, 0, sizeof(uint32_t), 0, 0);
 
   // called when a write to disk failed. wakes blocked commit() calls.
   auto signal_ioerror = [this] {
@@ -96,6 +95,12 @@ DiskWriter::write_worker(const std::stop_token &stoken)
     wal_grew_observer_();
 
   BufferedWriter w(*f);
+  if (ErrnoStatus<void> ret = write_full(w, byte_view(kDiskFileHeader)); !ret)
+      [[unlikely]] {
+    warn("couldn't write log file header: {}", ret.error());
+    signal_ioerror();
+    return;
+  }
   uint32_t crc = 0;
   size_t bytes_written = 0;
 
@@ -119,7 +124,7 @@ DiskWriter::write_worker(const std::stop_token &stoken)
       if (!ll) {
         // prepare the commit record.
         commit_hdr->lsn = synced_lsn_;
-        crc = crc32c_append(crc, writable_byte_view(*commit_hdr));
+        crc = crc32c_append(crc, byte_view(*commit_hdr));
         // Persist the checksum in a fixed (little-endian) byte order rather
         // than the host's native uint32_t representation (#1816).
         uint32_t crc_le = cpu_to_le(crc);
@@ -162,6 +167,12 @@ DiskWriter::write_worker(const std::stop_token &stoken)
           }
           if (auto flush_status = w.reset(*f); !flush_status) [[unlikely]] {
             warn("couldn't flush buffer to disk: {}", flush_status.error());
+            signal_ioerror();
+            return;
+          }
+          if (ErrnoStatus<void> ret = write_full(w, byte_view(kDiskFileHeader));
+              !ret) [[unlikely]] {
+            warn("couldn't write log file header: {}", ret.error());
             signal_ioerror();
             return;
           }
@@ -294,7 +305,7 @@ ScopedDiskWrite::get_loglet(size_t kv_len)
   assert(ul_.owns_lock());
 
   // Try to use the write head's current loglet.
-  if (head_.ll && head_.ll->bytes_left() >= sizeof(ItemHeader) + kv_len)
+  if (head_.ll && head_.ll->bytes_left() >= sizeof(DiskItemHeader) + kv_len)
       [[likely]] {
     return head_.ll.get();
   }
@@ -318,18 +329,10 @@ ScopedDiskWrite::modify(ItemHeader *src, bool use_src_lsn)
     return DBError(DBCode::kNoMemory);
 
   // append the modification record.
-  ItemHeader *dst = ll->clone(src);
+  DiskItemHeader *dst =
+      ll->alloc_disk(src->storage, src->type, src->key_len, src->value_len,
+                     use_src_lsn ? src->lsn : w_.cur_lsn_);
   assert(dst != nullptr);
-  // zero the alignment padding so the record/CRC don't carry stale memory; the
-  // lsn re-assignment and key/value copy below overwrite anything this clear
-  // overlaps. The guard avoids forming an out-of-range pointer when the
-  // payload is empty.
-  if (std::span<std::byte> all = dst->get_all();
-      all.size() >= alignof(ItemHeader)) [[likely]]
-    std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
-                alignof(ItemHeader));
-  dst->lsn = use_src_lsn ? src->lsn : w_.cur_lsn_;
-  dst->clear_next();
   std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
   return {dst->lsn};
 }
@@ -345,17 +348,9 @@ ScopedDiskWrite::remove(std::span<const std::byte> key)
     return DBError(DBCode::kNoMemory);
 
   // append the removal record.
-  ItemHeader *hdr = ll->alloc(ItemStorage::kTombstone, 0, key.size(), 0);
+  DiskItemHeader *hdr =
+      ll->alloc_disk(ItemStorage::kTombstone, 0, key.size(), 0, w_.cur_lsn_);
   assert(hdr != nullptr);
-  // zero the alignment padding; the lsn store and key copy below overwrite
-  // any overlap. The guard avoids forming an out-of-range pointer when the
-  // payload is empty (reachable via remove() with an empty key).
-  if (std::span<std::byte> all = hdr->get_all();
-      all.size() >= alignof(ItemHeader)) [[likely]]
-    std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
-                alignof(ItemHeader));
-  hdr->lsn = w_.cur_lsn_;
-  hdr->clear_next();
   std::ranges::copy(key, hdr->get_key().begin());
   return {};
 }

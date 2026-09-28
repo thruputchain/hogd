@@ -403,7 +403,7 @@ Database::write_snapshot(const std::string &path, uint64_t begin_lsn,
     record.reset();
 
     stats->items++;
-    stats->bytes += item->total_bytes();
+    stats->bytes += sizeof(DiskItemHeader) + item->kv_bytes();
   };
 
   // tell map that a snapshot is ongoing.
