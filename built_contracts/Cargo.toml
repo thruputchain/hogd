@@ -58,30 +58,28 @@ categories = ["blockchain"]
 edition = "2024"
 
 [workspace.dependencies]
-# groundhog dependencies
-sdk = { registry = "groundhog", version = "0.39.0" }
-groundhog-rv32-runtime = { registry = "groundhog", version = "0.39.0" }
+# SDK #482 is merged but not yet published; keep its SDK and interfaces together.
+sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
+groundhog-rv32-runtime = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
 # default features include std, which cannot build for the on-chain targets
-groundhog-domain-separator = { registry = "groundhog", version = "0.39.0", default-features = false }
-groundhog-xdr = { registry = "groundhog", version = "0.40.0", features = ["xdrs", "syscalls"] }
-groundhog-syscall = { registry = "groundhog", version = "0.40.0" }
+groundhog-domain-separator = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22", default-features = false }
+groundhog-xdr = { registry = "groundhog", version = "0.42.0", features = ["xdrs", "syscalls"] }
+groundhog-syscall = { registry = "groundhog", version = "0.42.0" }
 xdrs = { registry = "groundhog", version = "0.10.1", features = ["int128", "heapless"] }
 sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
 hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
-# Standard interface crates. Their own version line in sdk_rs.
-# ERC20 0.1.24 is the first release where mint and burn are their own events
-# rather than transfers from or to the zero address.
-groundhog-erc20-if = { registry = "groundhog", version = "0.1.37" }
+# Standard interface crates.
+groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless.
-bottle-test-if = { registry = "groundhog", version = "0.39.0" }
-erc20-test = { registry = "groundhog", version = "0.39.0" }
-erc20-bottle-test = { registry = "groundhog", version = "0.39.0" }
-erc20-native-test = { registry = "groundhog", version = "0.39.0" }
+bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
+erc20-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
+erc20-bottle-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
+erc20-native-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
 
 [profile.release]
 trim-paths = "all" # unstable

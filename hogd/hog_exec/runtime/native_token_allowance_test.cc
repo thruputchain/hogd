@@ -165,7 +165,7 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
         auto client =
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r_adj = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(100));
+            ctx, kSpenderAddr, make_difference(100), false);
         if (!r_adj.has_value() || !r_adj.value().has_value() ||
             !r_adj.value().value().has_value() ||
             !r_adj.value().value().value().is_ok()) {
@@ -287,7 +287,7 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
                     kNativeTokenContractAddress);
                 for (int128_t d : {100, 50}) {
                   auto r = co_await client.invoke_opt<u8"adjust_allowance">(
-                      ctx, kSpenderAddr, make_difference(d));
+                      ctx, kSpenderAddr, make_difference(d), false);
                   if (!r.has_value() || !r.value().has_value() ||
                       !r.value().value().has_value() ||
                       !r.value().value().value().is_ok()) {
@@ -363,7 +363,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
         auto client =
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(100'000));
+            ctx, kSpenderAddr, make_difference(100'000), false);
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -541,7 +541,7 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
                     kNativeTokenContractAddress);
 
                 auto grant = co_await client.invoke_opt<u8"adjust_allowance">(
-                    ctx, kSpenderAddr, make_difference(kGrant));
+                    ctx, kSpenderAddr, make_difference(kGrant), false);
                 if (!grant.has_value() || !grant.value().has_value() ||
                     !grant.value().value().has_value() ||
                     !grant.value().value().value().is_ok()) {
@@ -551,7 +551,7 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
                 }
 
                 auto over = co_await client.invoke_opt<u8"adjust_allowance">(
-                    ctx, kSpenderAddr, make_difference(kOverDecrement));
+                    ctx, kSpenderAddr, make_difference(kOverDecrement), false);
                 if (!over.has_value() || !over.value().has_value() ||
                     !over.value().value().has_value()) {
                   ADD_FAILURE()
@@ -743,7 +743,7 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
         auto client =
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(kSeedAllowance));
+            ctx, kSpenderAddr, make_difference(kSeedAllowance), false);
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -757,7 +757,7 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
         auto client =
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r_adj = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(kOverflowIncrement));
+            ctx, kSpenderAddr, make_difference(kOverflowIncrement), false);
         // Strict allowance must reject the overflowing increment at invoke.
         if (r_adj.has_value() && r_adj.value().has_value() &&
             r_adj.value().value().has_value() &&
@@ -869,8 +869,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
   }
 }
 
-// 8. adjust_allowance for self (owner == spender) must fail.
-TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
+// Self-allowances are ordinary entries, matching the reference interface.
+TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfSucceeds)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(196);
 
@@ -886,12 +886,20 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
                 auto client = ContractTraitClient<itc_erc20::ERC20>(
                     kNativeTokenContractAddress);
                 auto r = co_await client.invoke_opt<u8"adjust_allowance">(
-                    ctx, kOwnerAddr, make_difference(100));
-                if (r.has_value() && r.value().has_value() &&
-                    r.value().value().has_value() &&
-                    r.value().value().value().is_ok()) {
-                  ADD_FAILURE()
-                      << "adjust_allowance for self should not succeed";
+                    ctx, kOwnerAddr, make_difference(100), false);
+                if (!r.has_value() || !r.value().has_value() ||
+                    !r.value().value().has_value() ||
+                    !r.value().value().value().is_ok()) {
+                  ADD_FAILURE() << "adjust_allowance for self should succeed";
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                auto allowance =
+                    co_await client.invoke_opt<u8"allowance">(ctx, kOwnerAddr,
+                                                              kOwnerAddr);
+                if (!allowance || !*allowance || !**allowance ||
+                    !(***allowance).is_ok() ||
+                    amount_to_u128((***allowance).ok()) != 100) {
+                  ADD_FAILURE() << "self allowance did not retain the grant";
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
                 co_return InvokeStatus<void>{};
@@ -1063,7 +1071,7 @@ TEST_F(NativeTokenAllowanceTest,
         auto delta = make_difference(kTransferAmount);
         auto r =
             co_await client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
-                                                             delta);
+                                                             delta, false);
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -1275,7 +1283,7 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
         auto client =
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(kGrantAllowance));
+            ctx, kSpenderAddr, make_difference(kGrantAllowance), false);
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -1474,7 +1482,7 @@ TEST_F(NativeTokenAllowanceTest,
         auto client =
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto grant = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, kSpenderAddr, make_difference(kGrantedAllowance));
+            ctx, kSpenderAddr, make_difference(kGrantedAllowance), false);
         if (!grant.has_value() || !grant.value().has_value() ||
             !grant.value().value().has_value() ||
             !grant.value().value().value().is_ok()) {
@@ -2052,6 +2060,347 @@ TEST_F(NativeTokenAllowanceTest, AllowanceChargesForKeyDerivationSha256)
 
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+class NativeTokenCleanupTest : public NativeTokenAllowanceTest {
+protected:
+  static constexpr auto kOwner = make_contract_address(240);
+  static constexpr auto kSpender = make_contract_address(241);
+  static constexpr auto kReceiver = make_contract_address(242);
+  static constexpr int32_t kOwnerId = 70;
+  static constexpr int32_t kSpenderId = 71;
+
+  void SetUp() override
+  {
+    NativeTokenAllowanceTest::SetUp();
+    for (auto address :
+         {kOwner, kSpender, kReceiver, kNativeTokenContractAddress}) {
+      setup_grant_storage_token(address, 1'000'000'000);
+    }
+    for (auto [address, id] :
+         {std::pair{kOwner, kOwnerId}, std::pair{kSpender, kSpenderId}}) {
+      auto contract = make_native_contract(id);
+      write_contract(contract);
+      write_deployment(address, contract);
+    }
+  }
+
+  template<StringLiteral Name>
+  static x23::Async<InvokeStatus<void>> call(NativeSyscallContext &ctx,
+                                             auto... args)
+  {
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+    auto result = co_await client.template invoke_opt<Name>(ctx, args...);
+    if (!result || !*result || !**result || !(***result).is_ok()) {
+      ADD_FAILURE() << "token call failed";
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    co_return InvokeStatus<void>{};
+  }
+
+  static x23::Async<InvokeStatus<void>> spend(NativeSyscallContext &ctx)
+  {
+    co_return co_await call<u8"transfer_from">(ctx, kOwner, kReceiver,
+                                               make_amount(10));
+  }
+
+  ExecResult run(NativeContract::function_t owner,
+                 ContractAddress address = kOwner,
+                 NativeContract::function_t spender = spend,
+                 NativeContract::function_t reverted_owner = {})
+  {
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> owner_fns;
+    owner_fns.emplace(0, std::move(owner));
+    if (reverted_owner) {
+      owner_fns.emplace(1, std::move(reverted_owner));
+    }
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        spender_fns;
+    spender_fns.emplace(0, std::move(spender));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts;
+    contracts.emplace(kOwnerId,
+                      std::make_unique<NativeContract>(std::move(owner_fns)));
+    contracts.emplace(kSpenderId,
+                      std::make_unique<NativeContract>(std::move(spender_fns)));
+    contracts.emplace(
+        std::to_underlying(
+            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+        make_native_token_contract());
+    NativeContext context(std::move(contracts));
+    auto tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = address,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto handler = make_new_system_call_handler(tx, context);
+    EXPECT_TRUE(handler.root_invoke()().is_root_success());
+    auto result = handler.try_commit_transaction()();
+    if (result == ExecResult::ExecResultOK) {
+      EXPECT_TRUE(
+          handler.emit_events(result, ProposedTransaction{.signed_tx = tx})());
+    }
+    return result;
+  }
+
+  static NativeContract::function_t adjust(int128_t delta, bool exclusive)
+  {
+    return [delta, exclusive](
+               NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+      co_return co_await call<u8"adjust_allowance">(ctx, kSpender,
+                                                    make_difference(delta),
+                                                    exclusive);
+    };
+  }
+
+  static x23::Async<InvokeStatus<void>> clear(NativeSyscallContext &ctx)
+  {
+    co_return co_await call<u8"clear_allowance">(ctx, kSpender);
+  }
+
+  auto allowance_item()
+  {
+    auto data =
+        Serializer<SerializationFormat::kTxs>::serialize(kOwner, kSpender);
+    StorageKey key(StorageKeyType::ContractData);
+    key.contract_data_key() = sha256(*data);
+    return lookup_storage_item_from_db(
+        AddressAndKey{.address = kNativeTokenContractAddress, .key = key});
+  }
+
+  void expect_allowance(int128_t expected)
+  {
+    auto item = allowance_item();
+    ASSERT_TRUE(item);
+    EXPECT_EQ(from_xdr(item->nnint()), expected);
+  }
+
+  void seed_allowance()
+  {
+    ASSERT_EQ(run(adjust(100, false)), ExecResult::ExecResultOK);
+    advance_block();
+    expect_allowance(100);
+  }
+};
+
+TEST_F(NativeTokenCleanupTest, ClearDeletesEntryAndMissingClearSucceeds)
+{
+  seed_allowance();
+  ASSERT_EQ(run(clear), ExecResult::ExecResultOK);
+  advance_block();
+  EXPECT_FALSE(allowance_item());
+  ASSERT_EQ(run(clear), ExecResult::ExecResultOK);
+  advance_block();
+  EXPECT_FALSE(allowance_item());
+}
+
+TEST_F(NativeTokenCleanupTest, ClearAndRegrantUsesZeroAsTheNewBase)
+{
+  seed_allowance();
+  ASSERT_EQ(
+      run([](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto result = co_await clear(ctx);
+        if (!result) {
+          co_return result;
+        }
+        result = co_await clear(ctx);
+        if (!result) {
+          co_return result;
+        }
+        co_return co_await call<u8"adjust_allowance">(ctx, kSpender,
+                                                      make_difference(7),
+                                                      false);
+      }),
+      ExecResult::ExecResultOK);
+  advance_block();
+  expect_allowance(7);
+}
+
+TEST_F(NativeTokenCleanupTest, OrdinaryGrantAndSpendCanBothCommit)
+{
+  seed_allowance();
+  ASSERT_EQ(run(adjust(5, false)), ExecResult::ExecResultOK);
+  ASSERT_EQ(run(adjust(0, false), kSpender), ExecResult::ExecResultOK);
+  advance_block();
+  expect_allowance(95);
+}
+
+class NativeTokenCleanupOrderTest : public NativeTokenCleanupTest,
+                                    public ::testing::WithParamInterface<bool> {
+};
+
+TEST_P(NativeTokenCleanupOrderTest, ExclusiveZeroGrantConflictsWithSpending)
+{
+  seed_allowance();
+  const auto first = GetParam() ? kOwner : kSpender;
+  const auto second = GetParam() ? kSpender : kOwner;
+  ASSERT_EQ(run(adjust(0, true), first), ExecResult::ExecResultOK);
+  EXPECT_EQ(run(adjust(0, true), second),
+            ExecResult::ExecResultTxNonDeterministicError);
+  advance_block();
+  expect_allowance(GetParam() ? 100 : 90);
+}
+
+TEST_P(NativeTokenCleanupOrderTest, ClearConflictsWithSpending)
+{
+  seed_allowance();
+  const auto first = GetParam() ? kOwner : kSpender;
+  const auto second = GetParam() ? kSpender : kOwner;
+  ASSERT_EQ(run(clear, first), ExecResult::ExecResultOK);
+  EXPECT_EQ(run(clear, second), ExecResult::ExecResultTxNonDeterministicError);
+  advance_block();
+  if (GetParam()) {
+    EXPECT_FALSE(allowance_item());
+  }
+  else {
+    expect_allowance(90);
+  }
+}
+
+TEST_P(NativeTokenCleanupOrderTest, ClearConflictsWithRegrant)
+{
+  seed_allowance();
+  ASSERT_EQ(run(GetParam() ? NativeContract::function_t(clear)
+                           : adjust(5, false)),
+            ExecResult::ExecResultOK);
+  EXPECT_EQ(run(GetParam() ? adjust(5, false)
+                           : NativeContract::function_t(clear)),
+            ExecResult::ExecResultTxNonDeterministicError);
+  advance_block();
+  if (GetParam()) {
+    EXPECT_FALSE(allowance_item());
+  }
+  else {
+    expect_allowance(105);
+  }
+}
+
+TEST_P(NativeTokenCleanupOrderTest, LockSurvivesOrdinaryRegrantAndNestedSpend)
+{
+  seed_allowance();
+  ASSERT_EQ(
+      run([clear_first = GetParam()](
+              NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto result =
+            clear_first
+                ? co_await clear(ctx)
+                : co_await call<u8"adjust_allowance">(ctx, kSpender,
+                                                      make_difference(0), true);
+        if (!result) {
+          co_return result;
+        }
+        result =
+            co_await call<u8"adjust_allowance">(ctx, kSpender,
+                                                make_difference(20), false);
+        if (!result) {
+          co_return result;
+        }
+        CopyableInvokeInputs inputs{.entrypoint_id = 0,
+                                    .gas_limit = UINT64_MAX,
+                                    .flags =
+                                        std::to_underlying(InvokeFlag::None)};
+        CopyableInvokeOutputs outputs{};
+        auto invoke = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kSpender, std::span<const std::byte>{},
+            std::span<const std::byte>{}, inputs, outputs);
+        if (!invoke || *invoke != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Return) {
+          ADD_FAILURE() << "nested spend failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      }),
+      ExecResult::ExecResultOK);
+  EXPECT_EQ(run(adjust(5, false)),
+            ExecResult::ExecResultTxNonDeterministicError);
+  advance_block();
+  expect_allowance(GetParam() ? 10 : 110);
+}
+
+TEST_P(NativeTokenCleanupOrderTest, RevertedChildDiscardsAllowanceAndLock)
+{
+  seed_allowance();
+  auto parent =
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+    for (auto [method, expected] :
+         {std::pair{1U, InvocationFrameStatusCode::Fault},
+          std::pair{0U, InvocationFrameStatusCode::Return}}) {
+      CopyableInvokeInputs inputs{.entrypoint_id = method,
+                                  .gas_limit = UINT64_MAX,
+                                  .flags =
+                                      std::to_underlying(InvokeFlag::None)};
+      CopyableInvokeOutputs outputs{};
+      auto invoke =
+          co_await ctx.syscall<SyscallNo::kInvoke>(kOwner,
+                                                   std::span<const std::byte>{},
+                                                   std::span<const std::byte>{},
+                                                   inputs, outputs);
+      if (!invoke || *invoke != SyscallErrorCode::kSyscallErrorCodeNone ||
+          outputs.frame_status != expected) {
+        ADD_FAILURE() << "unexpected child outcome";
+        co_return InvokeError{InvokeErrorCode::Deterministic};
+      }
+    }
+    co_return InvokeStatus<void>{};
+  };
+  auto reverted_owner =
+      [clear_first = GetParam()](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+    auto result =
+        clear_first
+            ? co_await clear(ctx)
+            : co_await call<u8"adjust_allowance">(ctx, kSpender,
+                                                  make_difference(50), true);
+    if (!result) {
+      co_return result;
+    }
+    co_return InvokeError{InvokeErrorCode::Deterministic};
+  };
+  ASSERT_EQ(run(adjust(5, false), kSpender, std::move(parent),
+                std::move(reverted_owner)),
+            ExecResult::ExecResultOK);
+  ASSERT_EQ(run(adjust(0, false), kSpender), ExecResult::ExecResultOK);
+  advance_block();
+  expect_allowance(95);
+}
+
+INSTANTIATE_TEST_SUITE_P(NativeToken, NativeTokenCleanupOrderTest,
+                         ::testing::Bool());
+
+TEST_F(NativeTokenCleanupTest, ClearBalanceRejectsWithoutChangingBalance)
+{
+  ASSERT_EQ(
+      run([](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto calldata = ContractTraitMeta<itc_erc20::ERC20>::make_calldata<
+            u8"clear_balance">();
+        CopyableInvokeInputs inputs{
+            .entrypoint_id =
+                sdk_method_id(ContractTraitMeta<itc_erc20::ERC20>::entrypoint<
+                              u8"clear_balance">()),
+            .gas_limit = UINT64_MAX,
+            .flags = std::to_underlying(InvokeFlag::None)};
+        CopyableInvokeOutputs outputs{};
+        auto invoke = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kNativeTokenContractAddress,
+            std::as_bytes(std::span(calldata.data(), calldata.size())),
+            std::span<const std::byte>{}, inputs, outputs);
+        if (!invoke || *invoke != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "clear_balance did not reject deterministically";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      }),
+      ExecResult::ExecResultOK);
+  advance_block();
+  auto balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kOwner));
+  ASSERT_TRUE(balance);
+  EXPECT_EQ(from_xdr(balance->nnint()),
+            1'000'000'000 - replay_cache_cost_charged(1));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
