@@ -22,6 +22,8 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/rv32/artifact.h"
+#include "hogd/hog_exec/runtime/rv32/encoding.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
@@ -404,6 +406,50 @@ TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
   auto result = invoke_deployed(addr, 10'000);
 
   ASSERT_TRUE(result.is_root_success());
+}
+
+// #4051: the declared gas schedule gates acceptance only, never metering, so a
+// v3-stamped artifact meters identically to a v4 one.
+TEST_F(Rv32ProductionMappingTest, TransitionalGasScheduleIsMeteredLikeCurrent)
+{
+  constexpr uint32_t kDivX0X0X0 = 0x02004033U; // div x0,x0,x0
+  std::vector<uint32_t> program{kDivX0X0X0};
+  append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+
+  const std::vector<uint8_t> current_artifact =
+      rv32::test_artifact::build_artifact(program, std::span<const uint8_t>{});
+
+  // Restamp only the two gas header fields; digests are untouched, so the
+  // artifact still verifies.
+  std::vector<uint8_t> transitional_artifact = current_artifact;
+  rv32::store_u32_le(transitional_artifact, rv32::kArtifactGasVersionOffset,
+                     rv32::kTransitionalGasTableVersion);
+  rv32::store_u64_le(transitional_artifact, rv32::kArtifactGasDigestOffset,
+                     rv32::kTransitionalGasScheduleDigest);
+
+  auto deploy_artifact = [&](std::vector<uint8_t> const &artifact,
+                             uint64_t seed) {
+    auto contract = std::make_shared<Contract>(ContractType::kRv32);
+    contract->rv32_contract().data.append_range(artifact);
+    auto addr = make_contract_address(seed);
+    write_contract(contract);
+    write_deployment(addr, contract);
+    setup_grant_storage_token(addr, 1'000'000'000);
+    return addr;
+  };
+
+  const auto current_addr = deploy_artifact(current_artifact, 0);
+  const auto transitional_addr = deploy_artifact(transitional_artifact, 1);
+
+  constexpr GasAmount kGasLimit = 10'000;
+  const auto current_result = invoke_deployed(current_addr, kGasLimit);
+  const auto transitional_result =
+      invoke_deployed(transitional_addr, kGasLimit);
+
+  ASSERT_TRUE(current_result.is_root_success());
+  ASSERT_TRUE(transitional_result.is_root_success());
+  // The declared schedule changed; the metered cost did not.
+  EXPECT_EQ(transitional_result.gas_consumed_, current_result.gas_consumed_);
 }
 
 TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)
