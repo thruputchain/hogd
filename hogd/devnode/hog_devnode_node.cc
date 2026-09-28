@@ -62,7 +62,6 @@
 #include "hogd/hog_indexer/pull_controller.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
-#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/scheduler.h"
@@ -1127,15 +1126,6 @@ HogDevnodeNode::open_db_backend() const
         "hash {} does not match requested network hash {}",
         format_network_hash(recovered_tip->value.proposal_header.network_hash),
         format_network_hash(network_hash_)));
-  }
-  // Reject a recovered config whose parameter ids are not a gapless prefix
-  // from 0: the constructor now leaves defaults rather than aborting, so the
-  // devnode would otherwise serve with params ignoring the stored config.
-  if (RPCContext::has_committed_tip(*recovered_tip) &&
-      !config_hashable(recovered_tip->network_config)) {
-    throw std::runtime_error(
-        "recovered hog-devnode network config is not a gapless prefix of "
-        "parameter ids");
   }
   return db;
 }

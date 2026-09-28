@@ -99,9 +99,10 @@ TEST(RecoveryTests, RPCContextRejectsNonNotFoundDbTipError)
   EXPECT_THROW((void)RPCContext(std::move(dao), nullptr), std::system_error);
 }
 
-// #4176: constructing RPCContext over a recovered noncanonical network config
-// must not abort; StartupValidation rejects the tip later (covered separately).
-TEST(RecoveryTests, RPCContextAcceptsRecoveredNonCanonicalNetworkConfig)
+// #4176: a corrupt <DBTIP> can carry a noncanonical network config. Recovery
+// must fail loudly with a clear error rather than trip NetworkConfigParams'
+// opaque canonical-form CHECK.
+TEST(RecoveryTests, RPCContextRejectsRecoveredNonCanonicalNetworkConfig)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   ASSERT_TRUE(dir.has_value());
@@ -126,12 +127,8 @@ TEST(RecoveryTests, RPCContextAcceptsRecoveredNonCanonicalNetworkConfig)
   DBStatus<std::unique_ptr<Database>> db =
       Database::open(dir->get_path(), kHeapSize, 0);
   ASSERT_TRUE(db.has_value());
-
-  // Must not abort: construction recovers the tip and defers rejection.
-  RPCContext ctx(HogDbDAO(RAMDB(std::move(*db))), nullptr);
-  const DbTip recovered = ctx.get_tip();
-  EXPECT_FALSE(
-      NetworkConfigParams::is_canonical(recovered.network_config.v0()));
+  EXPECT_THROW((void)RPCContext(HogDbDAO(RAMDB(std::move(*db))), nullptr),
+               std::system_error);
 }
 
 TEST(RecoveryTests, SnapshotStalenessTracksScalarCommittedTip)

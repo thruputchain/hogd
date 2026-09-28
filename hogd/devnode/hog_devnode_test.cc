@@ -3077,7 +3077,8 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
 }
 
 // #4176: a noncanonical recovered network config clears the storage/network
-// hash checks (<DBTIP> is unhashed), so the devnode must reject it at recovery.
+// hash checks (<DBTIP> is unhashed), so RPCContext construction rejects it and
+// the devnode exits cleanly with a clear error rather than aborting.
 TEST(HogDevnode, DataDirRejectsNonCanonicalNetworkConfig)
 {
   std::filesystem::path data_dir = make_test_data_dir();
@@ -3109,7 +3110,7 @@ TEST(HogDevnode, DataDirRejectsNonCanonicalNetworkConfig)
           "--dev-account-tokens",
           "1000000000",
       },
-      "not a gapless prefix of parameter ids");
+      "network config is not canonical");
 }
 
 TEST(HogDevnode, NetworkOverridesSurviveRestartAndRejectChangedIntent)

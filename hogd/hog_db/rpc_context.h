@@ -73,12 +73,15 @@ public:
       // There is an existing dbtip, meaning that blocks have already been
       // committed to the db.
       auto state = tip_.take();
-      // The recovered tip is unvalidated; only hydrate params for a canonical
-      // config so a noncanonical one does not trip NetworkConfigParams'
-      // invariant. StartupValidation rejects it before set_tip() (see #4176).
-      if (NetworkConfigParams::is_canonical(ret->network_config.v0())) {
-        state->params = NetworkConfigParams(ret->network_config.v0());
+      // Recovered on-disk metadata is untrusted: a corrupt <DBTIP> can carry a
+      // noncanonical network config. Fail loudly with a clear error rather than
+      // tripping NetworkConfigParams' opaque canonical-form CHECK (#4176).
+      if (!NetworkConfigParams::is_canonical(ret->network_config.v0())) {
+        HogDbError(HogDbCode::kCorruption)
+            .raise("recovered DbTip network config is not canonical "
+                   "(parameter ids must be a gapless prefix from 0)");
       }
+      state->params = NetworkConfigParams(ret->network_config.v0());
       state->tip = std::move(*ret);
       current_committed_id_ = state->tip.id;
       current_committed_height_ = state->tip.value.proposal_header.block_height;
