@@ -97,6 +97,45 @@ TEST(RecoveryTests, RPCContextRejectsNonNotFoundDbTipError)
   EXPECT_THROW((void)RPCContext(std::move(dao), nullptr), std::system_error);
 }
 
+// #4176: a tampered but XDR-valid <DBTIP> can carry a noncanonical network
+// config (parameter ids not a gapless prefix from 0). Constructing RPCContext
+// over it must not trip NetworkConfigParams' canonical-form invariant; the
+// noncanonical tip is meant to be rejected later by StartupValidation, not by a
+// fatal abort during construction. (StartupValidation's own rejection is
+// covered by startup_validation_test.cc's RejectsNonCanonicalNetworkConfig.)
+TEST(RecoveryTests, RPCContextAcceptsRecoveredNonCanonicalNetworkConfig)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+
+  constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kHeapSize, 0);
+    ASSERT_TRUE(db.has_value());
+    HogDbDAO dao(RAMDB(std::move(*db)));
+
+    DbTip tip{};
+    tip.storage_long_hash = dao.compute_full_db_hash();
+    tip.network_config.v(0);
+    tip.network_config.v0().params.push_back(NetworkConfigParams::make_param(
+        ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
+    ASSERT_FALSE(NetworkConfigParams::is_canonical(tip.network_config.v0()));
+    ASSERT_TRUE(dao.write_dbtip(tip).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kHeapSize, 0);
+  ASSERT_TRUE(db.has_value());
+
+  // Must not abort: construction recovers the tip and defers rejection.
+  RPCContext ctx(HogDbDAO(RAMDB(std::move(*db))), nullptr);
+  const DbTip recovered = ctx.get_tip();
+  EXPECT_FALSE(
+      NetworkConfigParams::is_canonical(recovered.network_config.v0()));
+}
+
 TEST(RecoveryTests, SnapshotStalenessTracksScalarCommittedTip)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
