@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <exception>
 #include <format>
 #include <future>
 #include <limits>
@@ -119,17 +118,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     warn("no coordinator address provided, skipping coordinator connection");
   }
 
-  // Constructing the context recovers the persisted DbTip, which can raise on
-  // corrupt on-disk metadata (e.g. a noncanonical network config). Report that
-  // as a clean EXIT_FAILURE rather than letting it terminate the process.
-  std::optional<RPCContext> ctx_storage;
-  try {
-    ctx_storage.emplace(std::move(db_tmp), std::move(sched_db_client));
-  } catch (const std::exception &e) {
-    critical("Failed to recover database state: {}", e.what());
-    return EXIT_FAILURE;
-  }
-  RPCContext &ctx = *ctx_storage;
+  RPCContext ctx(std::move(db_tmp), std::move(sched_db_client));
 
   // load the tip metadata from the database (won't exist in a new database).
   HogDbStatus<DbTip> tip = ctx.get_db().read_dbtip();

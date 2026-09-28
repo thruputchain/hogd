@@ -82,7 +82,6 @@
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
-#include "network_config.hh"
 #include "pagination.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -3074,43 +3073,6 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
           "1000000000",
       },
       "recovered database storage hash does not match DbTip");
-}
-
-// #4176: a noncanonical recovered network config clears the storage/network
-// hash checks (<DBTIP> is unhashed), so RPCContext construction rejects it and
-// the devnode exits cleanly with a clear error rather than aborting.
-TEST(HogDevnode, DataDirRejectsNonCanonicalNetworkConfig)
-{
-  std::filesystem::path data_dir = make_test_data_dir();
-  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  initialize_persistent_data_dir(data_dir);
-
-  {
-    HogDbDAO db = open_persistent_hog_db(data_dir);
-    HogDbStatus<DbTip> tip = db.read_dbtip();
-    ASSERT_TRUE(tip.has_value());
-    NetworkConfig noncanonical;
-    noncanonical.v(0);
-    noncanonical.v0().params.push_back(NetworkConfigParams::make_param(
-        ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
-    ASSERT_FALSE(NetworkConfigParams::is_canonical(noncanonical.v0()));
-    tip->network_config = noncanonical;
-    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
-    ASSERT_TRUE(db.commit().has_value());
-  }
-
-  expect_startup_failure(
-      {
-          "--data-dir",
-          data_dir.string(),
-          "--dev-accounts",
-          "1",
-          "--dev-account-seed",
-          "groundhog-dev-accounts",
-          "--dev-account-tokens",
-          "1000000000",
-      },
-      "network config is not canonical");
 }
 
 TEST(HogDevnode, NetworkOverridesSurviveRestartAndRejectChangedIntent)

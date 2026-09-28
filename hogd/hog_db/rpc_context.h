@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
@@ -74,12 +75,11 @@ public:
       // committed to the db.
       auto state = tip_.take();
       // Recovered on-disk metadata is untrusted: a corrupt <DBTIP> can carry a
-      // noncanonical network config. Fail loudly with a clear error rather than
-      // tripping NetworkConfigParams' opaque canonical-form CHECK (#4176).
+      // noncanonical network config. Fail loudly with a clear message rather
+      // than tripping NetworkConfigParams' opaque canonical-form CHECK (#4176).
       if (!NetworkConfigParams::is_canonical(ret->network_config.v0())) {
-        HogDbError(HogDbCode::kCorruption)
-            .raise("recovered DbTip network config is not canonical "
-                   "(parameter ids must be a gapless prefix from 0)");
+        panic("recovered DbTip network config is not canonical (parameter ids "
+              "must be a gapless prefix from 0)");
       }
       state->params = NetworkConfigParams(ret->network_config.v0());
       state->tip = std::move(*ret);

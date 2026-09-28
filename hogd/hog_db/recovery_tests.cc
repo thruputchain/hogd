@@ -127,8 +127,8 @@ TEST(RecoveryTests, RPCContextRejectsRecoveredNonCanonicalNetworkConfig)
   DBStatus<std::unique_ptr<Database>> db =
       Database::open(dir->get_path(), kHeapSize, 0);
   ASSERT_TRUE(db.has_value());
-  EXPECT_THROW((void)RPCContext(HogDbDAO(RAMDB(std::move(*db))), nullptr),
-               std::system_error);
+  X23_EXPECT_DEATH((void)RPCContext(HogDbDAO(RAMDB(std::move(*db))), nullptr),
+                   "network config is not canonical");
 }
 
 TEST(RecoveryTests, SnapshotStalenessTracksScalarCommittedTip)
