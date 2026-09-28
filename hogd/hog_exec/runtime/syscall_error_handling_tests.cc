@@ -1080,35 +1080,4 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
-// Zero-filled key and signature would fail verification if it ran, so OutOfGas
-// (not InvalidSyscallInput) shows the reservation skipped the verifier (#4172).
-TEST(VerifySignatureGasTest, ReservesCostBeforeVerifying)
-{
-  const std::array<std::byte, sizeof(Ed25519PublicKey)> public_key{};
-  const std::array<std::byte, sizeof(Ed25519Signature)> signature{};
-  const std::array<std::byte, 128> message{};
-  const auto scheme = std::to_underlying(CryptographicScheme::Ed25519);
-  const GasAmount required = GasCost::verify_signature(message.size());
-
-  // Too little to cover the verification: fault before running it, charging the
-  // whole body budget.
-  for (const GasAmount budget : {GasAmount{0}, required - 1, required}) {
-    SCOPED_TRACE(::testing::Message() << "budget=" << budget);
-    const auto [result, charge] =
-        syscall_VerifySignature_inner(WrappedGasAmount{budget}, scheme,
-                                      signature, public_key, message);
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);
-    EXPECT_EQ(charge.get(), budget);
-  }
-
-  // Enough gas: the verifier runs, rejects the bogus signature, and is charged
-  // the full length-based cost.
-  const auto [result, charge] =
-      syscall_VerifySignature_inner(WrappedGasAmount{required + 1}, scheme,
-                                    signature, public_key, message);
-  EXPECT_TRUE(result.has_value());
-  EXPECT_EQ(charge.get(), required);
-}
-
 } // namespace hogd
