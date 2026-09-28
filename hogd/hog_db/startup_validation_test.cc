@@ -21,6 +21,7 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/startup_validation.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -232,33 +233,39 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
   }
 }
 
-// #4181: `<DBTIP` is unhashed, so a savepoint depth of zero can be persisted
-// with a matching config hash and an untouched state hash. Genesis rejects that
-// depth (every root commit pushes one savepoint), so recovery must too, or the
-// first root push returns kRPCUnrecoverable.
-TEST_F(RecoveredTipTest, RejectsZeroSavepointDepth)
+// #4181: `<DBTIP` is unhashed, so a savepoint depth outside the domain genesis
+// admits can be persisted with a matching config hash and an untouched state
+// hash. Genesis rejects both a zero depth (every root commit pushes one
+// savepoint, so the first push would return kRPCUnrecoverable) and one past the
+// ceiling this build's executor stacks sustain, so recovery must too. The
+// accepted at-ceiling case is exercised by AcceptsTheTipItsHeaderCommitsTo,
+// whose stock config states exactly kSavepointDepthCeiling.
+TEST_F(RecoveredTipTest, RejectsOutOfRangeSavepointDepth)
 {
-  HogDbDAO db = reopen();
-  HogDbStatus<DbTip> tip = db.read_dbtip();
-  ASSERT_TRUE(tip.has_value());
+  for (const uint32_t depth : {uint32_t{0}, kSavepointDepthCeiling + 1}) {
+    HogDbDAO db = reopen();
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value());
 
-  const StorageLongHash state_hash = db.compute_full_db_hash();
-  NetworkConfigParams::set_param(tip->network_config,
-                                 ConfigParamID::kConfigParamMaxSavepointDepth,
-                                 0);
-  ASSERT_TRUE(NetworkConfigParams::is_canonical(tip->network_config.v0()));
-  tip->value.proposal_header.config_hash = compute_config_hash(
-      make_config_hash_preimage(cost_model_, tip->network_config,
-                                tip->default_wallet));
-  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
-  ASSERT_TRUE(db.commit().has_value());
+    const StorageLongHash state_hash = db.compute_full_db_hash();
+    NetworkConfigParams::set_param(tip->network_config,
+                                   ConfigParamID::kConfigParamMaxSavepointDepth,
+                                   depth);
+    ASSERT_TRUE(NetworkConfigParams::is_canonical(tip->network_config.v0()));
+    tip->value.proposal_header.config_hash = compute_config_hash(
+        make_config_hash_preimage(cost_model_, tip->network_config,
+                                  tip->default_wallet));
+    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+    ASSERT_TRUE(db.commit().has_value());
 
-  // Unchanged, which is why the integrity gate does not catch this.
-  EXPECT_EQ(db.compute_full_db_hash(), state_hash);
+    // Unchanged, which is why the integrity gate does not catch this.
+    EXPECT_EQ(db.compute_full_db_hash(), state_hash);
 
-  const HogDbStatus<DbTip> recovered = db.read_dbtip();
-  ASSERT_TRUE(recovered.has_value());
-  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *recovered, cost_model_));
+    const HogDbStatus<DbTip> recovered = db.read_dbtip();
+    ASSERT_TRUE(recovered.has_value());
+    EXPECT_FALSE(
+        StartupValidation::tip_is_servable(db, *recovered, cost_model_));
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
