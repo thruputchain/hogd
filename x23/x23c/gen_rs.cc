@@ -155,14 +155,14 @@ struct GenRs {
 
     show_comment(d.comment, false);
 
-    if (!d.attrs.empty()) {
+    if (!d.attrs.empty() && d.attrs != kLegacySerdeHex) {
       prtop("{}\n", d.attrs);
     }
 
-    if (get_opaque_array_size(d).has_value()) {
-      // type is a byte array
+    if (get_opaque_array_size(d).has_value() || d.attrs == kLegacySerdeHex) {
+      // Legacy markers and inferred byte arrays use the same gated adapter.
       prtop("{}", feature_attr("serde", "serde(with = "
-                                        "\"serde_arrays::hex\")"));
+                                        "\"xdr_common::serde_hex\")"));
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -346,7 +346,7 @@ struct GenRs {
 
   static constexpr string_view kRustBoxPtr = R"(#[rust(box_ptr)])";
   static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
-  static constexpr string_view kSerdeArrays =
+  static constexpr string_view kLegacySerdeHex =
       R"(#[serde(with = "serde_arrays::hex")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
@@ -408,12 +408,13 @@ GenRs::convert_to_newtype(const Definition &d)
     string comment = *remainder;
     string attrs;
 
-    if (optional<string> remainder = substring_removed(comment, kSerdeArrays)) {
+    if (optional<string> remainder =
+            substring_removed(comment, kLegacySerdeHex)) {
       comment = *remainder;
       if (!attrs.empty()) {
         attrs += "\n";
       }
-      attrs += kSerdeArrays;
+      attrs += kLegacySerdeHex;
     }
 
     auto visitor = NewtypeVisitor{.comment = comment, .attrs = attrs};
@@ -1359,9 +1360,8 @@ use core::ops::{{Deref, DerefMut}};
 
   preamble +=
       std::format(R"(
-{0}{1})",
-                  gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"),
-                  gs.cfg("serde", "use ::serde_arrays;"));
+{0})",
+                  gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"));
 
   return preamble + gs.top_ + R"(
 //
