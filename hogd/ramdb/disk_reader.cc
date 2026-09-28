@@ -474,6 +474,18 @@ load_log_file(
         return DBError{DBCode::kCorruption};
       }
 
+      // A commit at the maximum LSN cannot advance cur_lsn without wrapping to
+      // zero. That would break the invariant above that cur_lsn stays greater
+      // than every WAL begin lsn, and a later recovery would mistake the
+      // wrapped cur_lsn for an empty database (#4179). The writer never emits
+      // such a commit (see DiskWriter::sync), and snapshot commits bypass the
+      // sequence check above, so guard both paths here.
+      if (hdr.lsn == std::numeric_limits<uint64_t>::max()) {
+        error("commit record lsn {} in {} would overflow cur_lsn", hdr.lsn,
+              file.path_);
+        return DBError{DBCode::kCorruption};
+      }
+
       cur_lsn = hdr.lsn + 1;
       info("replayed lsn {}, cur_lsn now {}", hdr.lsn, cur_lsn);
       break;

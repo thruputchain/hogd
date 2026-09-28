@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <mutex>
 #include <new>
 #include <span>
@@ -199,6 +200,18 @@ DiskWriter::sync()
       [this] { sync_active_.store(false, std::memory_order_relaxed); }};
 
   std::unique_lock ul(to_disk_lock_);
+
+  // Refuse to advance past the maximum LSN before enqueuing any work: the
+  // ++cur_lsn_ below would wrap to zero, committing at an LSN whose successor
+  // overflows and, on the next recovery, yielding a wrapped cur_lsn that
+  // recovery would mistake for an empty database (#4179). The 2^64 LSN space is
+  // never exhausted in practice, so reaching this point means recovery seeded
+  // the writer from tampered snapshot metadata; fail the sync (leaving the
+  // dirty heads intact and retryable) rather than corrupt the on-disk state.
+  if (cur_lsn_ == std::numeric_limits<uint64_t>::max()) {
+    error("writer LSN space exhausted; refusing to wrap cur_lsn to zero");
+    return DBError(DBCode::kIO);
+  }
 
   // Reserve the queue slots (one per dirty head plus the commit marker) before
   // draining any head, so an allocation failure here leaves the heads and
