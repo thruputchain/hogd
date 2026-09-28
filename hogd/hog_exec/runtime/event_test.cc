@@ -1415,9 +1415,10 @@ TEST(EventRpcValidationProposalData,
                      ++i) {
                   QueueEntry entry;
                   entry.resize(kQueueEntryMaxLen, static_cast<uint8_t>(i));
-                  auto status = co_await ctx.handler().retrocausal_queue_insert(
-                      make_validation_proposal_observation_key(i),
-                      std::as_bytes(std::span(entry.data(), entry.size())));
+                  auto status =
+                      co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                          make_validation_proposal_observation_key(i),
+                          std::as_bytes(std::span(entry.data(), entry.size())));
                   if (!status.has_value()) {
                     co_return InvokeError{InvokeErrorCode::Unrecoverable};
                   }
