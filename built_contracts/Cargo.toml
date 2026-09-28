@@ -60,12 +60,12 @@ edition = "2024"
 
 [workspace.dependencies]
 # groundhog dependencies
-sdk = { registry = "groundhog", version = "0.39.0" }
-groundhog-rv32-runtime = { registry = "groundhog", version = "0.39.0" }
+sdk = { registry = "groundhog", version = "0.40.0" }
+groundhog-rv32-runtime = { registry = "groundhog", version = "0.40.0" }
 # default features include std, which cannot build for the on-chain targets
-groundhog-domain-separator = { registry = "groundhog", version = "0.39.0", default-features = false }
-groundhog-xdr = { registry = "groundhog", version = "0.41.0", features = ["xdrs", "syscalls"] }
-groundhog-syscall = { registry = "groundhog", version = "0.41.0" }
+groundhog-domain-separator = { registry = "groundhog", version = "0.40.0", default-features = false }
+groundhog-xdr = { registry = "groundhog", version = "0.42.0", features = ["xdrs", "syscalls"] }
+groundhog-syscall = { registry = "groundhog", version = "0.42.0" }
 xdrs = { registry = "groundhog", version = "0.10.1", features = ["int128", "heapless"] }
 sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
@@ -75,17 +75,17 @@ serde = { version = "1.0.217", default-features = false }
 # Standard interface crates. Their own version line in sdk_rs.
 # ERC20 0.1.24 is the first release where mint and burn are their own events
 # rather than transfers from or to the zero address.
-groundhog-erc20-if = { registry = "groundhog", version = "0.1.39" }
+groundhog-erc20-if = { registry = "groundhog", version = "0.1.40" }
 # The permit interface releases in lockstep with groundhog-erc20-if and pins
 # it exactly, so the two move together.
-groundhog-erc20-permit-if = { registry = "groundhog", version = "0.1.39" }
+groundhog-erc20-permit-if = { registry = "groundhog", version = "0.1.40" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless.
-bottle-test-if = { registry = "groundhog", version = "0.39.0" }
-erc20-test = { registry = "groundhog", version = "0.39.0" }
-erc20-bottle-test = { registry = "groundhog", version = "0.39.0" }
-erc20-native-test = { registry = "groundhog", version = "0.39.0" }
+bottle-test-if = { registry = "groundhog", version = "0.40.0" }
+erc20-test = { registry = "groundhog", version = "0.40.0" }
+erc20-bottle-test = { registry = "groundhog", version = "0.40.0" }
+erc20-native-test = { registry = "groundhog", version = "0.40.0" }
 
 [profile.release]
 trim-paths = "all" # unstable

@@ -44,7 +44,6 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
@@ -141,8 +140,8 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
           co_return NativeContractBuilder::host_fn_error_conversion(
               ins.error());
 
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("marker_a"),
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("marker_a"),
             std::as_bytes(std::span(std::string_view("a_ok"))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
@@ -176,8 +175,8 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
           co_return NativeContractBuilder::host_fn_error_conversion(
               ins.error());
 
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("marker_b"),
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("marker_b"),
             std::as_bytes(std::span(std::string_view("b_ok"))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)

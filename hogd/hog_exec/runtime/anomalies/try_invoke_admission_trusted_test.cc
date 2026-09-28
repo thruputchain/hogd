@@ -76,7 +76,6 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
@@ -183,8 +182,8 @@ protected:
     return [p = std::string(payload)](
                NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
-      auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-          ctx.handler(), key, std::as_bytes(std::span(std::string_view(p))));
+      auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+          key, std::as_bytes(std::span(std::string_view(p))));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -423,9 +422,8 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
         std::string_view marker = child_committed ? "success" : "fallback";
 
         auto key = make_storage_key("root-branch");
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key,
-            std::as_bytes(std::span(std::string_view(marker))));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(std::string_view(marker))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

@@ -34,7 +34,6 @@
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "model_checker/async.h"
@@ -87,8 +86,8 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
-          auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(calldata)));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span(calldata)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE()
@@ -262,8 +261,8 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
     fns_writer.emplace(
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
-          auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span{"hello"}));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span{"hello"}));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "TryInvokeGoodWorkflow: Failed to set "
@@ -369,8 +368,8 @@ make_try_invoke_handle_errors_context()
   fns_w.emplace(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("test");
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key, std::as_bytes(std::span{"hello"}));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span{"hello"}));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
@@ -382,8 +381,8 @@ make_try_invoke_handle_errors_context()
   fns_w.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("test");
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key, std::as_bytes(std::span{"world"}));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span{"world"}));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
@@ -833,8 +832,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
-          auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(calldata)));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span(calldata)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring in method 0";
@@ -1007,8 +1006,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
-          auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(calldata)));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span(calldata)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring in method 0";
@@ -1939,8 +1938,8 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                 [str_abc](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto key0 = make_storage_key("test0");
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key0, std::as_bytes(std::span(str_abc)));
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      key0, std::as_bytes(std::span(str_abc)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
@@ -1953,8 +1952,8 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                 [str_def](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto key1 = make_storage_key("test1");
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key1, std::as_bytes(std::span(str_def)));
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      key1, std::as_bytes(std::span(str_def)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
@@ -1967,8 +1966,8 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                 [str_ghi](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto key2 = make_storage_key("test2");
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key2, std::as_bytes(std::span(str_ghi)));
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      key2, std::as_bytes(std::span(str_ghi)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
@@ -2153,8 +2152,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
       0,
       [str_short](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key0, std::as_bytes(std::span(str_short)));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key0, std::as_bytes(std::span(str_short)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeAccounting: Failed to set bytestring "
@@ -2167,9 +2166,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                 [str_medium](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto key0 = make_storage_key("test0");
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key0,
-                      std::as_bytes(std::span(str_medium)));
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      key0, std::as_bytes(std::span(str_medium)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -2183,8 +2181,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
       2,
       [str_long](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key0, std::as_bytes(std::span(str_long)));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key0, std::as_bytes(std::span(str_long)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeAccounting: Failed to set bytestring "
@@ -2353,8 +2351,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
       0,
       [str_long](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key0, std::as_bytes(std::span(str_long)));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key0, std::as_bytes(std::span(str_long)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
@@ -2367,8 +2365,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
       1,
       [str_short](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key0 = make_storage_key("test0");
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key0, std::as_bytes(std::span(str_short)));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key0, std::as_bytes(std::span(str_short)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
@@ -2925,9 +2923,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         [](NativeSyscallContext &ctx, int64_t set_amount,
            int64_t add_amount) -> x23::Async<InvokeStatus<void>> {
           int128_t set_128 = set_amount;
-          auto [r, _gas] =
-              co_await syscall_NonnegativeIntSetAdd_inner(ctx.handler(), kKey,
-                                                          &set_128, add_amount);
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kKey, &set_128, int128_t{add_amount});
 
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2941,9 +2938,9 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         1,
         [](NativeSyscallContext &ctx,
            int64_t add_amount) -> x23::Async<InvokeStatus<void>> {
-          auto [r, _gas] =
-              co_await syscall_NonnegativeIntSetAdd_inner(ctx.handler(), kKey,
-                                                          nullptr, add_amount);
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kKey, static_cast<int128_t const *>(nullptr),
+              int128_t{add_amount});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -2955,9 +2952,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         3, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // reset contract state
           int128_t set_value = 35;
-          auto [r, _gas] =
-              co_await syscall_NonnegativeIntSetAdd_inner(ctx.handler(), kKey,
-                                                          &set_value, 0);
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kKey, &set_value, int128_t{0});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -3384,8 +3380,8 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   fns_w.emplace(0,
                 [str_hello, key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(str_hello)));
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      key, std::as_bytes(std::span(str_hello)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()

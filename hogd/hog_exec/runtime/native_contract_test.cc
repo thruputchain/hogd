@@ -32,7 +32,6 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "invoke_args.hh"
@@ -656,8 +655,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         auto bstring = make_bytestring("bad");
         // comment this set_bytestring to verify that the test framework
         // does, in fact, throw errors if you get_bytestring from the snapshot
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), kBadKey, std::as_bytes(std::span(bstring)));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            kBadKey, std::as_bytes(std::span(bstring)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -776,19 +775,15 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           }
 
           // add ops shouldn't query db
-          auto [r, _gas] =
-              co_await syscall_NonnegativeIntSetAdd_inner(ctx.handler(),
-                                                          kBadKey, nullptr,
-                                                          100);
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kBadKey, static_cast<int128_t const *>(nullptr), int128_t{100});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto [r2, _gas2] =
-              co_await syscall_NonnegativeIntSetAdd_inner(ctx.handler(),
-                                                          kBadKey, nullptr,
-                                                          -200);
+          auto r2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kBadKey, static_cast<int128_t const *>(nullptr), int128_t{-200});
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -810,10 +805,8 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           int128_t set_value = 100;
-          auto [r, _gas] =
-              co_await syscall_NonnegativeIntSetAdd_inner(ctx.handler(),
-                                                          kBadKey, &set_value,
-                                                          200);
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kBadKey, &set_value, int128_t{200});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1025,8 +1018,8 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto data = make_bytestring("child_write");
         constexpr StorageKeyContractData kKey{};
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), kKey, std::as_bytes(std::span(data)));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            kKey, std::as_bytes(std::span(data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1089,8 +1082,8 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto value = make_bytestring("12345678"); // 8 bytes
-        auto [set_res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), kKey, std::as_bytes(std::span(value)));
+        auto set_res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            kKey, std::as_bytes(std::span(value)));
         if (!set_res.has_value() ||
             set_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "BytestringSet failed";

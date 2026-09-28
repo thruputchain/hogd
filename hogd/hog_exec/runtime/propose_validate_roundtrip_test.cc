@@ -26,7 +26,6 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -97,8 +96,8 @@ protected:
     return [k = std::string(key_name), v = std::string(value)](
                NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key(k);
-      auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-          ctx.handler(), key, std::as_bytes(std::span(std::string_view(v))));
+      auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+          key, std::as_bytes(std::span(std::string_view(v))));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -327,10 +326,8 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 
         // Write something to prove we survived both try_invokes
         auto key = make_storage_key("result");
-        auto [ws, _wg] =
-            co_await syscall_BytestringSet_inner(ctx.handler(), key,
-                                                 std::as_bytes(std::span(
-                                                     std::string_view("ok"))));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(std::string_view("ok"))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -941,9 +938,8 @@ TEST_P(ProposeValidateRoundtripTest,
         }
 
         auto marker = std::string_view("honest");
-        auto [write_status, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("marker"),
-            std::as_bytes(std::span(marker)));
+        auto write_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("marker"), std::as_bytes(std::span(marker)));
         if (!write_status.has_value() ||
             write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1076,9 +1072,8 @@ TEST_P(ProposeValidateRoundtripTest,
         }
         uint32_t index = static_cast<uint32_t>(calldata[0]) |
                          (static_cast<uint32_t>(calldata[1]) << 8);
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_depth_poc_key(index),
-            std::as_bytes(std::span(calldata)));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_depth_poc_key(index), std::as_bytes(std::span(calldata)));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -2646,8 +2641,8 @@ TEST_P(ProposeValidateRoundtripTest,
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto overwrite = std::string_view("overwritten");
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key, std::as_bytes(std::span(overwrite)));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(overwrite)));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -3142,10 +3137,8 @@ TEST_P(ProposeValidateRoundtripTest,
     }
 
     auto marker = std::string_view("seen");
-    auto [ws, _gas] =
-        co_await syscall_BytestringSet_inner(ctx.handler(),
-                                             make_storage_key("marker"),
-                                             std::as_bytes(std::span(marker)));
+    auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+        make_storage_key("marker"), std::as_bytes(std::span(marker)));
     if (!ws.has_value() ||
         ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
       co_return InvokeError{InvokeErrorCode::Deterministic};
