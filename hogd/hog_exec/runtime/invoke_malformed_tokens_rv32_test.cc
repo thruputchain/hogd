@@ -294,10 +294,10 @@ TEST_F(InvokeMalformedTokensRv32Test, UnownedTokensAreBilledByLength)
   EXPECT_EQ(one.token_bytes, kOneTokenBytes);
   EXPECT_EQ(many.token_bytes, kManyTokenBytes);
 
-  // Each charge is the flat crossing plus the parse, priced like a bytestring
-  // copy of the forwarded bytes.
+  // Each charge is the flat crossing plus the parse, priced one hash block per
+  // forwarded id.
   auto const parse_charge = [](size_t bytes) {
-    return kBytestringReadBlockCost * GasCost::bytestring_blocks(bytes);
+    return kSHA256HashBlockCost * (bytes / sizeof(uint32_t));
   };
   EXPECT_EQ(one.charge, kSyscallBaseCost + parse_charge(kOneTokenBytes));
   EXPECT_EQ(many.charge, kSyscallBaseCost + parse_charge(kManyTokenBytes));

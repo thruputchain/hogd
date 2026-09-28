@@ -170,8 +170,8 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
     // Self-invoke forwarding a fabricated token id 0xDEAD: reentrance wins
     // over the ownership check, and no child frame runs. The losing input is
     // still traced (#2973). The one-id span is well-formed, so the host parses
-    // it before admission runs; that parse is billed one bytestring-read block
-    // on top of the crossing, even though the call is rejected (#4174).
+    // it before admission runs; that parse is billed one hash block per id on
+    // top of the crossing, even though the call is rejected (#4174).
     SyscallTraceBody body(SyscallNo::kInvoke);
     body.invoke().inputs.address = addr;
     body.invoke().inputs.owned_auth_token_ids_list.append_range(
@@ -182,11 +182,11 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
         .flags = 0,
     };
     expected.push_back(
-        make_entry(98'773, 98'773 - kSyscallBaseCost - kBytestringReadBlockCost,
+        make_entry(98'773, 98'773 - kSyscallBaseCost - kSHA256HashBlockCost,
                    std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
-  expected.push_back(empty_return_entry(98'663 - kBytestringReadBlockCost));
+  expected.push_back(empty_return_entry(98'663 - kSHA256HashBlockCost));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

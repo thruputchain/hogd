@@ -148,15 +148,18 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
 
   // A well-formed span is copied into a vector and SipHashed id-by-id into a
-  // set, so the parse work is proportional to the list length. A rejected
-  // Invoke would otherwise report gas 0 and pay only the fixed crossing charge,
+  // set, so the parse work is proportional to the id count. A rejected Invoke
+  // would otherwise report gas 0 and pay only the fixed crossing charge,
   // letting a contract force that length-proportional work at will regardless
-  // of list size (#4174). Price the span the way a bytestring copy of the same
-  // bytes is priced and reject up front when the frame cannot afford it, so the
-  // parse is never done for free.
+  // of list size (#4174). Charge one hash-block cost per id -- the nearest
+  // calibrated hashing rate in the schedule, which conservatively covers the
+  // SipHash and set insertion each id costs (pricing only the byte copy would
+  // leave the per-id hashing nearly free) -- reusing an existing schedule
+  // constant so the gas-schedule digest is unchanged. Reject up front when the
+  // frame cannot afford it, so the parse is never done for free.
   const WrappedGasAmount parse_gas{
-      kBytestringReadBlockCost *
-      GasCost::bytestring_blocks(input_owned_auth_token_ids.size())};
+      kSHA256HashBlockCost *
+      (input_owned_auth_token_ids.size() / sizeof(uint32_t))};
   if (remaining_gas.get() <= parse_gas.get()) {
     co_return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
                                  remaining_gas};
