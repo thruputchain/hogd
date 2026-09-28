@@ -455,18 +455,8 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
 }
 
-// Mirrors the validated-block commit in [schedulercoord_commit_block()] while a
-// local nomination is pending: [reenqueue_txs()] (nothing to return here),
-// [remove_from_scheduler()], then [abandon_pending_nomination()].
-//   1. txs[0] is affordable, txs[1] exceeds all of the account's hogs, and
-//      txs[2] is an ordinary follow-up; all three are queued before
-//      nomination.
-//   2. Nominating schedules txs[0], discards txs[1], and excludes the account,
-//      leaving txs[2] on the runqueue with no [ready_accounts_] entry.
-//   3. A competing validated block containing txs[0] and txs[2] commits.
-//      Removing txs[2] empties the runqueue of an account absent from
-//      [ready_accounts_], which used to fail a CHECK.
-//   4. Abandoning the nomination must leave the account schedulable again.
+// A validated-block commit empties an excluded account's runqueue while the
+// nomination is pending: remove_from_scheduler(), then abandon.
 TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];

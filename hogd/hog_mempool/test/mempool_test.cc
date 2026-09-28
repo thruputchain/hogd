@@ -1451,18 +1451,8 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
-// Same state as [CommitOfExcludedAccountTxSucceeds], but the block that
-// commits is one this node *validated* while its own nomination was still
-// pending, so the commit takes the validated-block path: [reenqueue_txs()],
-// [remove_from_scheduler()], and only then [abandon_pending_nomination()].
-//   1. Submit an affordable tx (txs[0]) and an over-budget tx (txs[1]).
-//   2. Nominate: txs[0] is included and txs[1] excludes the account.
-//   3. The client resubmits txs[0], which returns to the runqueue while the
-//      account stays out of [ready_accounts_].
-//   4. Validate the same proposal and commit the *validated* block id.
-//      [remove_from_scheduler()] empties the excluded account's runqueue
-//      before the nomination is abandoned; this used to fail a CHECK.
-//   5. The next nomination still schedules the account's new tx.
+// [CommitOfExcludedAccountTxSucceeds] through the validated-block commit path,
+// which removes committed txs before abandoning the pending nomination.
 TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1476,7 +1466,7 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  // 1.
+  // txs[1] excludes the account from the nomination below.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[1]})())();
   EXPECT_EQ(scheduler->size(), 2UL);
@@ -1486,18 +1476,17 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
 
-  // 2.
   auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
   const Proposal proposal = res_nominate.proposed_block().proposal;
 
-  // 3.
+  // The resubmit lands on the excluded account's runqueue.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(scheduler->size(), 1UL);
 
-  // 4.
+  // Commit the validated block, not the nominated one.
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
                                                                proposal)();
@@ -1511,7 +1500,7 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
 
-  // 5.
+  // The account is schedulable again once the nomination is abandoned.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[2]})())();
   EXPECT_EQ(scheduler->size(), 1UL);
