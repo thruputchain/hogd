@@ -17,7 +17,12 @@ For macOS users, an automated setup script is available that installs all depend
 
 The setup script installs all required dependencies including LLVM, CMake, Python packages, Rust toolchains, and development tools.
 
-**Note:** An SSH agent must be running to fetch private submodules. Configure your SSH keys with GitHub before running the build.
+**Note:** The `protocol`, `built_contracts/integration_test_contracts`,
+`groundhog-go`, and `hogx` submodules are fetched over SSH and require
+membership in the groundhogchain GitHub organization; an SSH agent with your
+GitHub key must be running before the build. Contract authors do not need to
+build this repository: `hog-devnode` ships in the public client bundle (see
+[Building `hog-devnode` for contract development](#building-hog-devnode-for-contract-development)).
 
 ## Docker
 
@@ -34,7 +39,8 @@ For development and testing in a containerized environment, use the Docker-based
 ./docker/local-ci.sh shell
 ~~~~
 
-See `docker/README.md` for detailed usage, including SSH agent setup for private submodules, tidy checks, and more.
+See `docker/README.md` for detailed usage, including SSH agent setup for the
+organization-only submodules, tidy checks, and more.
 
 ## Manual Installation (All Platforms)
 
@@ -69,7 +75,9 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     cargo install --force cbindgen
     ~~~~
 
-1. Configure cargo to authenticate with the groundhog crate registry.
+1. Configure cargo to authenticate with the groundhog crate registry. This
+   step is only needed to build the contract fixtures under
+   `built_contracts/`; release archives of `hog-devnode` do not require it.
    First, ensure `~/.cargo/config.toml` includes:
 
     ~~~~ .toml
@@ -128,7 +136,12 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
 Contract authors normally do not build this repository. The `groundhog` CLI
 (from [groundhog-rpc](https://github.com/groundhogchain/groundhog-rpc)) drives
 a local node through the `hog-devnode` binary, which ships in the
-`groundhog-client` release archive; see
+`groundhog-client` release archive. The devnode is also published on its own
+from this repository's [releases](https://github.com/groundhogchain/hogd/releases)
+as `hog-devnode-linux-x86_64.tar.gz`, `hog-devnode-linux-arm64.tar.gz`, and
+`hog-devnode-macos-arm64.tar.gz`. Only those three targets are published; there
+is no macOS x86_64 or Windows build. `groundhog toolchain install` fetches the
+matching public bundle, so most users never download these by hand; see
 [Develop Locally](https://docs.groundhog.dev/tutorials/develop-locally/) on the
 developer docs site.
 

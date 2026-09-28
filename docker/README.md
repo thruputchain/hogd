@@ -25,9 +25,13 @@ Supports both **podman** (preferred) and **docker**. The helper script auto-dete
 ./docker/local-ci.sh shell
 ```
 
-### SSH Agent Setup (for private submodules)
+### SSH Agent Setup (for organization-only submodules)
 
-The build requires access to private GitHub repositories. If you have SSH access:
+The full build fetches the `protocol`, `built_contracts/integration_test_contracts`,
+`groundhog-go`, and `hogx` submodules over SSH, which requires membership in the
+groundhogchain GitHub organization. Contract authors do not need this: `hog-devnode`
+ships in the public client bundle (see "Building `hog-devnode` for contract
+development" in the top-level README). If you have SSH access:
 
 ```bash
 # Start SSH agent (if not running)
@@ -105,7 +109,7 @@ The `full` command combines: Clang Debug build + all tidy checks
 
 ### What Is Skipped Locally (without SSH agent)
 
-- Private submodules (protocol, integration_test_contracts)
+- Organization-only submodules (protocol, integration_test_contracts, groundhog-go, hogx)
 - `built_contracts/` - requires private Cargo dependencies
 
 With SSH agent configured, the full CI test suite runs locally.
