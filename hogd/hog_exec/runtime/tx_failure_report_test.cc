@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "contract.hh"
 #include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
