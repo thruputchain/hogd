@@ -263,12 +263,12 @@ TEST_F(InvokeMalformedTokensRv32Test, UnownedTokensAreBilledByLength)
     auto const *trace = handler.get_trace();
     EXPECT_NE(trace, nullptr);
     if (trace == nullptr) {
-      return Rejection{0, 0};
+      return Rejection{.charge = 0, .token_bytes = 0};
     }
     auto const *record = single_invoke_record(*trace);
     EXPECT_NE(record, nullptr);
     if (record == nullptr) {
-      return Rejection{0, 0};
+      return Rejection{.charge = 0, .token_bytes = 0};
     }
     // Rejected at admission (ids the frame does not own): no child frame, and
     // the caller's outputs are left untouched.
@@ -277,8 +277,9 @@ TEST_F(InvokeMalformedTokensRv32Test, UnownedTokensAreBilledByLength)
               SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
     EXPECT_EQ(record->body.invoke().outputs, nullptr);
     return Rejection{
-        record->gas_remaining_at_start - record->gas_remaining_at_end,
-        record->body.invoke().inputs.owned_auth_token_ids_list.size()};
+        .charge = record->gas_remaining_at_start - record->gas_remaining_at_end,
+        .token_bytes =
+            record->body.invoke().inputs.owned_auth_token_ids_list.size()};
   };
 
   auto const one =
