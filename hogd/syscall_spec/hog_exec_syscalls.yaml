@@ -1,0 +1,55 @@
+# hog_exec / C++-specific syscall properties, keyed by syscall name.
+#
+# These are implementation details of the hog_exec runtime that do NOT affect
+# the wire ABI, so they live here rather than in protocol/syscalls.yaml: the
+# guest passes the same arguments either way, and the Rust/TS SDKs generated
+# from the protocol spec do not care. gen_syscalls.py reads this alongside
+# syscalls.yaml as the single source of truth for these flags. Every key must
+# name a syscall defined in syscalls.yaml, or generation fails.
+#
+# Recognized per-syscall properties (all default to false when absent):
+#   needs_gas: the inner body is handed the frame's remaining gas
+#              (WrappedGasAmount remaining_gas) so it can reserve variable,
+#              input-dependent costs before doing the work.
+#   async:     the inner body reads or writes hog_db and so may suspend; its
+#              generated declaration returns MaybeAsyncSyscallInnerResult and
+#              its body is a coroutine. Every other body lands in MaybeAsync's
+#              value arm at no cost.
+syscalls:
+  SHA256:
+    needs_gas: true
+  SHA256Update:
+    needs_gas: true
+  GetTransactionStatistics:
+    needs_gas: true
+  VerifySignature:
+    needs_gas: true
+  Invoke:
+    needs_gas: true
+    # Invoke recurses into Runtime::invoke, so it suspends wherever the child
+    # invocation does.
+    async: true
+  BytestringGetLen:
+    async: true
+  BytestringGet:
+    async: true
+  BytestringSet:
+    async: true
+  NonnegativeIntGet:
+    async: true
+  NonnegativeIntSetAdd:
+    async: true
+  DeleteObject:
+    async: true
+  RetrocausalQueueInsert:
+    async: true
+  RetrocausalQueueConsume:
+    async: true
+  RetrocausalQueuePeekLen:
+    async: true
+  DeployContract:
+    async: true
+  ChangePublicKeyRegistration:
+    async: true
+  WriteAddressRequiredWeight:
+    async: true

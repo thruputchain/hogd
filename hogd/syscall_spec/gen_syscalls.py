@@ -51,42 +51,51 @@ def validate_and_extract_error_codes(syscall: dict) -> list[str]:
     return error_codes
 
 
-# Syscalls whose inner body reads or writes hog_db, and so may suspend.
+# hog_exec/C++-specific syscall properties, read from hog_exec_syscalls.yaml
+# (see --hog_exec_yaml). They are hog_exec implementation details that do not
+# affect the wire ABI, so they live beside gen_syscalls.py rather than in
+# protocol/syscalls.yaml. Both sets are populated from that file before any
+# code is generated; see load_hog_exec_spec below.
 #
-# Their generated declaration returns MaybeAsyncSyscallInnerResult instead of a
-# plain SyscallInnerResult, and their bodies are coroutines; every other body
-# returns its result directly and lands in MaybeAsync's value arm at no cost
-# (see wrap_after_parse_async in syscall_entry_outer.h).
+# ASYNC_SYSCALLS: bodies that read or write hog_db and so may suspend. Their
+# generated declaration returns MaybeAsyncSyscallInnerResult instead of a plain
+# SyscallInnerResult, and their bodies are coroutines; every other body returns
+# its result directly and lands in MaybeAsync's value arm at no cost (see
+# wrap_after_parse_async in syscall_entry_outer.h).
 #
-# This lives here rather than in protocol/syscalls.yaml because whether a body
-# suspends is a hog_exec implementation detail -- the wire ABI is identical
-# either way, and the Rust/TS SDKs generated from the same spec do not care.
-# A stale entry cannot go unnoticed: the body definition would no longer match
-# this declaration and the build fails.
-ASYNC_SYSCALLS = frozenset({
-    "BytestringGetLen",
-    "BytestringGet",
-    "BytestringSet",
-    "NonnegativeIntGet",
-    "NonnegativeIntSetAdd",
-    "DeleteObject",
-    "RetrocausalQueueInsert",
-    "RetrocausalQueueConsume",
-    "RetrocausalQueuePeekLen",
-    "DeployContract",
-    "ChangePublicKeyRegistration",
-    "WriteAddressRequiredWeight",
-    # Invoke recurses into Runtime::invoke, so it suspends wherever the child
-    # invocation does.
-    "Invoke",
-})
+# NEEDS_GAS_SYSCALLS: bodies handed the frame's remaining gas (WrappedGasAmount
+# remaining_gas) so they can reserve variable, input-dependent costs.
+#
+# A stale entry cannot go unnoticed: an unknown name fails validation, and a
+# wrong flag makes the generated declaration no longer match the body, so the
+# build fails.
+ASYNC_SYSCALLS = frozenset()
+NEEDS_GAS_SYSCALLS = frozenset()
 
-# Syscalls whose inner body needs the frame's remaining gas, beyond those that
-# set `needs_gas` in the spec: a hog_exec detail (same wire ABI) kept here so a
-# hog_exec-only fix needs no protocol bump (VerifySignature, issue #4172).
-HOG_EXEC_NEEDS_GAS_SYSCALLS = frozenset({
-    "VerifySignature",
-})
+# Per-syscall properties recognized in hog_exec_syscalls.yaml.
+HOG_EXEC_PROPERTIES = frozenset({"needs_gas", "async"})
+
+
+def load_hog_exec_spec(path: str, known_syscall_names: set) -> dict:
+    """Load hog_exec_syscalls.yaml into {name: {property: value}}.
+
+    Validates that every entry names a real syscall and only sets recognized
+    properties, so a stale or misspelled entry fails the build.
+    """
+    raw = yaml.load(open(path, 'r').read(), Loader=Loader)
+    entries = (raw or {}).get("syscalls") or {}
+    result = {}
+    for name, props in entries.items():
+        if name not in known_syscall_names:
+            raise ValueError(
+                f"hog_exec_syscalls.yaml names unknown syscall '{name}'")
+        props = props or {}
+        for key in props:
+            if key not in HOG_EXEC_PROPERTIES:
+                raise ValueError(
+                    f"hog_exec syscall '{name}': unknown property '{key}'")
+        result[name] = props
+    return result
 
 
 """
@@ -300,9 +309,7 @@ def gen_inner_outer(
     if user_arg_count > syscall_input_count:
         raise ValueError("too many syscall args")
 
-    needs_gas = (("needs_gas" in syscall and syscall["needs_gas"]) or
-                 name in HOG_EXEC_NEEDS_GAS_SYSCALLS)
-    if needs_gas:
+    if name in NEEDS_GAS_SYSCALLS:
         inner_arg_decl_strs = [
             "WrappedGasAmount remaining_gas"
         ] + inner_arg_decl_strs
@@ -557,6 +564,11 @@ parser.add_argument(
     required=True,
     help="input yaml")
 parser.add_argument(
+    '--hog_exec_yaml',
+    type=str,
+    required=True,
+    help="hog_exec/C++-specific syscall properties yaml")
+parser.add_argument(
     '--output_dir',
     type=str,
     default=".",
@@ -578,6 +590,16 @@ spec = spec_full["syscalls"]
 
 # Validate syscall numbering and order early to provide a clear error message
 validate_syscall_numbers_in_order(spec_full)
+
+# Load the hog_exec-specific properties and derive the flag sets the generators
+# consult. Done before any code is generated so a bad entry fails fast.
+hog_exec_spec = load_hog_exec_spec(args.hog_exec_yaml,
+                                   {s["name"] for s in spec})
+ASYNC_SYSCALLS = frozenset(
+    name for name, props in hog_exec_spec.items() if props.get("async", False))
+NEEDS_GAS_SYSCALLS = frozenset(
+    name for name, props in hog_exec_spec.items()
+    if props.get("needs_gas", False))
 
 cpp_to_rust_typenames = load_cpp_to_rust_map(spec_full)
 primitive_types = load_known_primitive_types(spec_full)
