@@ -24,7 +24,6 @@
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
-#include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
 #include "invoke_flag.hh"
@@ -1081,57 +1080,39 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
-// VerifySignature reserves the length-priced Ed25519 cost before verifying;
-// driven through wrap_outer to cover the needs_gas-without-handler path
-// (#4172).
-TEST_F(SyscallErrorHandlingTest, VerifySignatureReservesGasBeforeVerifying)
+// VerifySignature reserves the length-priced Ed25519 cost before running the
+// verifier. This is only observable at the body: through the wrapper the frame
+// still faults OutOfGas and is charged its whole budget either way, so what the
+// reservation changes is just whether ed25519_verify runs (#4172). Zero-filled
+// key and signature would fail verification if it ran, so an OutOfGas result
+// rather than InvalidSyscallInput shows it did not.
+TEST(VerifySignatureGasTest, ReservesCostBeforeVerifying)
 {
-  auto context = make_hog_exec_context();
-  auto handler = make_new_system_call_handler(Transaction{}, *context);
-  ASSERT_TRUE(handler
-                  .start_frame(kPlaceholderInvocation,
-                               std::to_underlying(InvokeFlag::None),
-                               ValidatedAuthTokens{})
-                  .has_value());
-
-  // wrap_outer arg order: scheme, then each span as (offset, length). Regions
-  // are disjoint and zero-filled, so verification fails only once it runs.
-  constexpr GasAmount kPublicKeyAddr = 0;
-  constexpr GasAmount kSignatureAddr = 32;
-  constexpr GasAmount kMessageAddr = 96;
-  constexpr GasAmount kMessageSize = 128;
-  std::array<std::byte, kMessageAddr + kMessageSize> memory{};
+  const std::array<std::byte, sizeof(Ed25519PublicKey)> public_key{};
+  const std::array<std::byte, sizeof(Ed25519Signature)> signature{};
+  const std::array<std::byte, 128> message{};
   const auto scheme = std::to_underlying(CryptographicScheme::Ed25519);
-  const GasAmount required = GasCost::verify_signature(kMessageSize);
-  const GasAmount cost = kSyscallBaseCost + required;
+  const GasAmount required = GasCost::verify_signature(message.size());
 
-  // At or below the full cost the frame faults before verifying, charged only
-  // what it had.
-  for (const GasAmount budget :
-       {GasAmount{0}, kSyscallBaseCost, cost - 1, cost}) {
+  // Too little to cover the verification: fault before running it, charging the
+  // whole body budget.
+  for (const GasAmount budget : {GasAmount{0}, required - 1, required}) {
     SCOPED_TRACE(::testing::Message() << "budget=" << budget);
-    auto [result, charged] =
-        wrap_outer<SyscallMeta<SyscallNo::kVerifySignature>>(
-            handler,
-            ExecutionContext{.memory = memory, .gas_remaining = budget},
-            SyscallNo::kVerifySignature, scheme, kSignatureAddr,
-            sizeof(Ed25519Signature), kPublicKeyAddr, sizeof(Ed25519PublicKey),
-            kMessageAddr, kMessageSize)();
+    const auto [result, charge] =
+        syscall_VerifySignature_inner(WrappedGasAmount{budget}, scheme,
+                                      signature, public_key, message);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);
-    EXPECT_EQ(charged, budget);
+    EXPECT_EQ(charge.get(), budget);
   }
 
-  // One unit more, and the verifier runs and is charged the full cost.
-  auto [result, charged] = wrap_outer<SyscallMeta<SyscallNo::kVerifySignature>>(
-      handler, ExecutionContext{.memory = memory, .gas_remaining = cost + 1},
-      SyscallNo::kVerifySignature, scheme, kSignatureAddr,
-      sizeof(Ed25519Signature), kPublicKeyAddr, sizeof(Ed25519PublicKey),
-      kMessageAddr, kMessageSize)();
+  // Enough gas: the verifier runs, rejects the bogus signature, and is charged
+  // the full length-based cost.
+  const auto [result, charge] =
+      syscall_VerifySignature_inner(WrappedGasAmount{required + 1}, scheme,
+                                    signature, public_key, message);
   EXPECT_TRUE(result.has_value());
-  EXPECT_EQ(charged, cost);
-
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
+  EXPECT_EQ(charge.get(), required);
 }
 
 } // namespace hogd
