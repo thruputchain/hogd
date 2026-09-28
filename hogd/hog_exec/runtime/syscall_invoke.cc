@@ -147,9 +147,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
         WrappedGasAmount{0}};
   }
 
-  // Parsing is per-id work, so charge one hash block per id and reject up
-  // front: a rejected Invoke must not get that work for only the flat crossing
-  // (#4174).
+  // Charge one hash block per forwarded id up front, so a rejected Invoke does
+  // not get the parse for only the flat crossing (#4174).
   const WrappedGasAmount parse_gas{
       kSHA256HashBlockCost *
       (input_owned_auth_token_ids.size() / sizeof(uint32_t))};
