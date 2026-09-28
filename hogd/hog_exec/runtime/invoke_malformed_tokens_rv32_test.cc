@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 #include "built_contracts/invoke_malformed_tokens_test.h"
 #include "ffi_enums.hh"
@@ -234,6 +235,75 @@ TEST_F(InvokeMalformedTokensRv32Test, WellFormedTokensRunChild)
   EXPECT_EQ(child->invocation.invoked_address, kTargetAddress);
   EXPECT_TRUE(is_large_calldata(child->invocation.calldata));
   EXPECT_EQ(child->status.status_code(), InvocationFrameStatusCode::Abort);
+}
+
+// #4174: a rejected Invoke that forwards a well-formed but unowned token span is
+// billed for parsing it. The host copies the span into a vector and SipHashes
+// every id before admission can see the ids are not owned, so that work grows
+// with the span length; pricing it keeps a contract from forcing an arbitrarily
+// long parse for the flat crossing charge. Two unowned spans of different
+// lengths, both refused at admission, therefore differ in gas by exactly the
+// parse charge for the extra bytes.
+TEST_F(InvokeMalformedTokensRv32Test, UnownedTokensAreBilledByLength)
+{
+  deploy_target();
+
+  struct Rejection {
+    GasAmount charge;
+    size_t token_bytes;
+  };
+
+  auto run = [this](auto invocation) -> Rejection {
+    auto handler = make_new_system_call_handler(
+        Transaction{.invocation = std::move(invocation),
+                    .uniquifier = make_new_uniquifier()},
+        *runtime_context_);
+    handler.enable_tracing();
+    EXPECT_TRUE(handler.root_invoke()().is_root_success());
+    auto const *trace = handler.get_trace();
+    EXPECT_NE(trace, nullptr);
+    if (trace == nullptr) {
+      return Rejection{0, 0};
+    }
+    auto const *record = single_invoke_record(*trace);
+    EXPECT_NE(record, nullptr);
+    if (record == nullptr) {
+      return Rejection{0, 0};
+    }
+    // Rejected at admission (ids the frame does not own): no child frame, and
+    // the caller's outputs are left untouched.
+    EXPECT_EQ(record->status.error(), HostFnErrorCode::NoneOrRecoverable);
+    EXPECT_EQ(record->status.syscall_return_code(),
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+    EXPECT_EQ(record->body.invoke().outputs, nullptr);
+    return Rejection{
+        record->gas_remaining_at_start - record->gas_remaining_at_end,
+        record->body.invoke().inputs.owned_auth_token_ids_list.size()};
+  };
+
+  auto const one = run(
+      client_.make_invocation<u8"test_one_unowned_token">(kGasLimit,
+                                                          kTargetAddress));
+  auto const many = run(
+      client_.make_invocation<u8"test_many_unowned_tokens">(kGasLimit,
+                                                            kTargetAddress));
+
+  // Mirrors ONE_TOKEN_BYTES / MANY_TOKEN_COUNT in the contract.
+  constexpr size_t kOneTokenBytes = sizeof(uint32_t);
+  constexpr size_t kManyTokenBytes = 512 * sizeof(uint32_t);
+  EXPECT_EQ(one.token_bytes, kOneTokenBytes);
+  EXPECT_EQ(many.token_bytes, kManyTokenBytes);
+
+  // Each charge is the flat crossing plus the parse, priced like a bytestring
+  // copy of the forwarded bytes.
+  auto const parse_charge = [](size_t bytes) {
+    return kBytestringReadBlockCost * GasCost::bytestring_blocks(bytes);
+  };
+  EXPECT_EQ(one.charge, kSyscallBaseCost + parse_charge(kOneTokenBytes));
+  EXPECT_EQ(many.charge, kSyscallBaseCost + parse_charge(kManyTokenBytes));
+  // The point of the fix: the charge scales with the span, so the many-id span
+  // costs strictly more than the one-id span rather than the same flat amount.
+  EXPECT_GT(many.charge, one.charge);
 }
 
 } // namespace hogd

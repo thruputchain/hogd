@@ -15,6 +15,30 @@ static LARGE_CALLDATA: [u8; LARGE_CALLDATA_LEN] = [0x5a; LARGE_CALLDATA_LEN];
 /// #2327 report.
 const MALFORMED_TOKEN_BYTES: [u8; 1] = [0x7f];
 
+/// Distinct token ids so a span parses cleanly (no duplicate rejection) and
+/// admission is what refuses it, for ids the frame does not own. Built in
+/// .rodata by a const fn, so it costs no stack and no runtime allocation.
+const MANY_TOKEN_COUNT: usize = 512;
+const MANY_TOKEN_BYTES_LEN: usize = MANY_TOKEN_COUNT * 4;
+
+const fn distinct_token_bytes<const LEN: usize>() -> [u8; LEN] {
+    let mut bytes = [0u8; LEN];
+    let mut i = 0;
+    while i * 4 + 3 < LEN {
+        let id = (i as u32) + 1;
+        bytes[i * 4] = id as u8;
+        bytes[i * 4 + 1] = (id >> 8) as u8;
+        bytes[i * 4 + 2] = (id >> 16) as u8;
+        bytes[i * 4 + 3] = (id >> 24) as u8;
+        i += 1;
+    }
+    bytes
+}
+
+static ONE_TOKEN_BYTES: [u8; 4] = distinct_token_bytes::<4>();
+static MANY_TOKEN_BYTES: [u8; MANY_TOKEN_BYTES_LEN] =
+    distinct_token_bytes::<MANY_TOKEN_BYTES_LEN>();
+
 /// No registered method has this id (ids are 8-byte hashes), so a child frame
 /// that does start aborts in the dispatcher with LibraryExn::UnknownMethod.
 const UNREGISTERED_ENTRYPOINT_ID: u64 = 0;
@@ -72,6 +96,17 @@ fn invoke_with_malformed_tokens(address: &ContractAddress) {
     assert_outputs_untouched(&outputs);
 }
 
+/// A well-formed, unowned token span forwarded to `target`: admission refuses
+/// it as kInvalidSyscallInput because the frame owns no tokens, after the host
+/// has parsed the whole span. Empty calldata keeps the syscall's gas the
+/// crossing plus the span's parse charge and nothing else.
+fn invoke_with_unowned_tokens(target: &ContractAddress, tokens: &[u8]) {
+    let mut outputs = seeded_outputs();
+    let res = sys::raw_Invoke(target, &[], tokens, &inputs(), &mut outputs);
+    expect_err(res, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+    assert_outputs_untouched(&outputs);
+}
+
 #[contract]
 impl InvokeMalformedTokensTest for InvokeMalformedTokensTestContract {
     fn test_malformed_tokens_beat_reentrance() {
@@ -105,5 +140,13 @@ impl InvokeMalformedTokensTest for InvokeMalformedTokensTestContract {
                 panic!("expected a child frame but Invoke failed with {:?}", e)
             }
         }
+    }
+
+    fn test_one_unowned_token(target: &ContractAddress) {
+        invoke_with_unowned_tokens(target, &ONE_TOKEN_BYTES);
+    }
+
+    fn test_many_unowned_tokens(target: &ContractAddress) {
+        invoke_with_unowned_tokens(target, &MANY_TOKEN_BYTES);
     }
 }

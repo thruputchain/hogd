@@ -36,4 +36,16 @@ pub trait InvokeMalformedTokensTest {
     /// entrypoint id no method registers, so it aborts (UnknownMethod) before
     /// touching its calldata; the host-side trace shows the calldata arrived.
     fn test_well_formed_tokens_run_child(target: &ContractAddress);
+
+    /// Forward a single well-formed, unowned token id to `target`. Admission
+    /// refuses it as kInvalidSyscallInput because the frame owns no tokens,
+    /// after the host has parsed the one-id span (#4174).
+    fn test_one_unowned_token(target: &ContractAddress);
+
+    /// The same, with a many-id span. The span is well-formed and every id is
+    /// unowned, so admission refuses it too -- but only after the host has
+    /// copied and hashed the whole span, which is why its parse must be billed
+    /// in proportion to the span length rather than at the flat crossing
+    /// (#4174).
+    fn test_many_unowned_tokens(target: &ContractAddress);
 }

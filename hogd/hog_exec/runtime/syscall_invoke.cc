@@ -138,22 +138,49 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
         WrappedGasAmount{0}};
   }
 
+  // A malformed span (not a whole number of 4-byte ids) is refused by this O(1)
+  // length check before anything is copied or hashed, so -- as #2327 pinned --
+  // it still costs only the crossing and cannot buy host work for free.
+  if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
+  }
+
+  // A well-formed span is copied into a vector and SipHashed id-by-id into a
+  // set, so the parse work is proportional to the list length. A rejected
+  // Invoke would otherwise report gas 0 and pay only the fixed crossing charge,
+  // letting a contract force that length-proportional work at will regardless
+  // of list size (#4174). Price the span the way a bytestring copy of the same
+  // bytes is priced and reject up front when the frame cannot afford it, so the
+  // parse is never done for free.
+  const WrappedGasAmount parse_gas{
+      kBytestringReadBlockCost *
+      GasCost::bytestring_blocks(input_owned_auth_token_ids.size())};
+  if (remaining_gas.get() <= parse_gas.get()) {
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
+                                 remaining_gas};
+  }
+  const GasAmount gas_after_parse = remaining_gas.get() - parse_gas.get();
+
   // Materialized once; the frame stack takes the list over without copying.
+  // parse() re-checks the length (guaranteed to pass here) and otherwise fails
+  // only on a duplicate id, which it finds while hashing -- work parse_gas has
+  // already paid for.
   auto owned_auth_tokens =
       ValidatedAuthTokens::parse(input_owned_auth_token_ids);
   if (!owned_auth_tokens.has_value()) {
-    co_return SyscallInnerResult{owned_auth_tokens.error().code(),
-                                 WrappedGasAmount{0}};
+    co_return SyscallInnerResult{owned_auth_tokens.error().code(), parse_gas};
   }
 
-  // Admission before the calldata is copied: a rejection reports gas 0, so
-  // copying first would be unpriced, length-proportional work a contract could
-  // repeat at will (#2973). invoke() relies on this having run.
+  // Admission before the calldata is copied: a rejection reports only the parse
+  // charge, so copying first would be unpriced, length-proportional work a
+  // contract could repeat at will (#2973). invoke() relies on this having run.
   auto admitted =
       syscall_handler.validate_new_invocation(input_address, input_inputs.flags,
                                               *owned_auth_tokens);
   if (!admitted.has_value()) {
-    co_return SyscallInnerResult{admitted.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{admitted.error().code(), parse_gas};
   }
 
   Calldata calldata;
@@ -166,15 +193,17 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                 input_calldata.size());
   }
 
+  // The child runs on what is left after the parse charge, and every exit below
+  // adds parse_gas back so the parse is billed on the success path too.
   auto [invoke_res, gas_amount] = co_await syscall_handler.invoke(
       input_address, input_inputs.entrypoint_id,
-      std::min<GasAmount>(input_inputs.gas_limit, remaining_gas.get()),
+      std::min<GasAmount>(input_inputs.gas_limit, gas_after_parse),
       std::move(calldata), input_inputs.flags, std::move(*owned_auth_tokens));
 
   // A SystemError ends execution of the whole block.
   if (!invoke_res.has_value()) {
     co_return SyscallInnerResult{invoke_res.error().to_host_fn_error(),
-                                 WrappedGasAmount{gas_amount}};
+                                 WrappedGasAmount{gas_amount + parse_gas.get()}};
   }
 
   // A SyscallError means the invoke was rejected before a child frame ran: a
@@ -183,7 +212,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   SyscallStatus<InvocationFrameStatusCode> const &frame = *invoke_res;
   if (!frame.has_value()) {
     co_return SyscallInnerResult{frame.error().code(),
-                                 WrappedGasAmount{gas_amount}};
+                                 WrappedGasAmount{gas_amount + parse_gas.get()}};
   }
 
   // A child frame ran. Report its outcome (Return / Abort / Fault) via
@@ -193,7 +222,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   if (!return_buffer_host.has_value()) {
     // Handle the SystemError case
     co_return SyscallInnerResult{return_buffer_host.error().to_host_fn_error(),
-                                 WrappedGasAmount{gas_amount}};
+                                 WrappedGasAmount{gas_amount + parse_gas.get()}};
   }
 
   SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
@@ -209,7 +238,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // above, so the dereference is safe.
   output_outputs.frame_status = *frame;
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{gas_amount}};
+                               WrappedGasAmount{gas_amount + parse_gas.get()}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
