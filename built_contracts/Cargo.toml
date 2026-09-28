@@ -43,6 +43,7 @@ members = [
     "local_test_contracts/drip_faucet",
     "local_test_contracts/faucet_caller",
     "local_test_contracts/invoke_malformed_tokens_test",
+    "local_test_contracts/itc_erc20_permit",
     "local_test_contracts/tx_context_test",
 ]
 
@@ -73,6 +74,7 @@ serde = { version = "1.0.217", default-features = false }
 
 # Standard interface crates.
 groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
+groundhog-erc20-permit-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", rev = "f42ac46b3915198fc27747e299c4f8223c57df22" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless.

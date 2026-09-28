@@ -502,22 +502,9 @@ protected:
     return {commit, records};
   }
 
-  // Runs the allowance-netting sequence from hogd#1918 against both backends:
-  // in ONE transaction a caller decrements a *fresh* (caller, spender)
-  // allowance by `magnitude` and then, as a sibling call, increments it
-  // straight back. Under the old deferred (non-strict) NNInt path the
-  // decrement returned Ok and emitted an allowance-change event for a diff the
-  // committed allowance could never fund; the sibling increment then netted
-  // the pending add back to zero, so nothing was left for commit-time
-  // validation to reject. With strict allowance updates the decrement must be
-  // rejected at invoke, and the increment that follows it must be unaffected.
-  //
-  // Steps (recorded in order): adjust_allowance(spender, -magnitude),
-  // adjust_allowance(spender, +magnitude), allowance(caller, spender),
-  // allowance(caller, untouched_spender). The two trailing reads pin the
-  // committed allowance without reaching into either backend's storage-key
-  // derivation: the second one is a known zero, so the netted-away outcome
-  // (both reads equal) is distinguishable from the correct one (they differ).
+  // Reject a fresh allowance's decrement at invoke, even if a later grant
+  // would net it to zero (#1918). Trailing reads compare the resulting grant
+  // with an untouched allowance without relying on either backend's storage.
   std::pair<MultiStepOutcome, MultiStepOutcome>
   run_allowance_netting_parity(int128_t magnitude)
   {
@@ -1753,8 +1740,8 @@ TEST_F(Erc20ParityTest, OneOverBalanceTransferFromToRecipientParity)
 // transfer above (issue #2135), neither backend guards the zero recipient: the
 // allowance is spent, the zero address is credited, and a standard
 // Transfer(owner, zero, amount) event is emitted. This locks in that the two
-// implementations agree on the delegated path too --- the amendment case on
-// that issue.
+// implementations agree on the delegated path too (the amendment in that
+// issue).
 TEST_F(Erc20ParityTest, TransferFromToZeroAddressParity)
 {
   auto [native_record, rv32_record] = run_transfer_from_parity(
@@ -2345,22 +2332,9 @@ TEST_F(Erc20ParityTest, MintThenBurnSameTxNetsSupplyParity)
             std::optional<uint128_t>(0));
 }
 
-// The distinction issue #2135 turns on, pinned in a single transaction: a
-// zero-recipient transfer and a real burn both emit Transfer(x, zero, amount),
-// but only burn() moves supply. The transfer credits the zero address as an
-// ordinary account and leaves total_supply() alone; the burn debits the holder
-// and reduces total_supply(). Both backends agree, byte-for-byte.
-//
-// This is the working-as-intended reading of that issue: the zero address is
-// not a burn sink, and a zero-recipient Transfer event is a naming convention
-// (see the SDK's groundhog-erc20 events.rs) rather than a supply-reducing
-// state transition. Burning is the separate, owner-gated burn() call.
-//
-// The two paths are deliberately indistinguishable by event alone --- burn()
-// emits the same Transfer(owner, zero, amount) bytes, pinned by
-// NativeTokenAllowanceTest.GenesisRootBurnAuthorityIsNotHeightLimitedByPrecompile
-// against the bytes the zero-recipient transfer tests expect. Supply is the
-// signal that separates them, and that is what this test pins.
+// Transferring to the zero address credits an ordinary account; only burn()
+// reduces supply (#2135). Check both operations in one transaction on each
+// backend.
 TEST_F(Erc20ParityTest,
        BurnReducesSupplyWhereZeroRecipientTransferDoesNotParity)
 {

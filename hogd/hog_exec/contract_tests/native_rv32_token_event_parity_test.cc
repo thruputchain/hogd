@@ -377,12 +377,8 @@ protected:
     return log.value().events[0];
   }
 
-  // Assert two events are identical except for the emitting contract address.
-  // `expected_topics` is the topic count the event's shape implies --- three
-  // for Transfer and AllowanceChange (signature + two addresses), two for Mint
-  // and Burn (signature + the one address a supply change names) --- so a
-  // backend that silently reshaped an event fails here rather than matching a
-  // like-shaped sibling.
+  // Ignore the emitting address, but check the topic count independently so
+  // identical mistakes in both backends cannot pass the byte comparison.
   static void
   expect_events_match(std::optional<TxEmittedEvent> const &rv32_ev,
                       std::optional<TxEmittedEvent> const &native_ev,
@@ -436,7 +432,7 @@ TEST_F(NativeRv32TokenEventParityTest,
 
 // Mint and burn events: a supply change is its own event on
 // groundhog-erc20-if, not a Transfer from or to the zero address, so a mint
-// emits Mint(receiver) and a burn emits Burn(owner) --- two topics each ---
+// emits Mint(receiver) and a burn emits Burn(owner), each with two topics,
 // byte-identically on the rv32 itc_erc20 and the native precompile (modulo
 // the emitting contract address). Both run from the genesis root address: the
 // native token's mint/burn are gated on it, and the rv32 token is initialized

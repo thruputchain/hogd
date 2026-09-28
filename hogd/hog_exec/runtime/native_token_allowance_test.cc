@@ -1027,8 +1027,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
 // native-token balance row. Because the native token has no transfer-to-zero
 // burn semantics, the zero recipient is NOT special-cased as a
 // supply-reducing burn: total_supply() stays unchanged and a standard
-// Transfer(owner, zero, amount) event is emitted --- a real burn says so by
-// name, through burn() and its own Burn event.
+// Transfer(owner, zero, amount) event is emitted. A real burn uses burn()
+// and emits its own Burn event.
 // This locks in the behavior as working-as-intended.
 TEST_F(NativeTokenAllowanceTest,
        TransferFromToZeroConsumesAllowanceAndKeepsSupply)
@@ -2229,31 +2229,35 @@ TEST_F(NativeTokenCleanupTest, OrdinaryGrantAndSpendCanBothCommit)
   expect_allowance(95);
 }
 
-class NativeTokenCleanupOrderTest : public NativeTokenCleanupTest,
-                                    public ::testing::WithParamInterface<bool> {
-};
+enum class AllowanceTxOrder { kExclusiveFirst, kOrdinaryFirst };
+
+class NativeTokenCleanupOrderTest
+  : public NativeTokenCleanupTest,
+    public ::testing::WithParamInterface<AllowanceTxOrder> {};
 
 TEST_P(NativeTokenCleanupOrderTest, ExclusiveZeroGrantConflictsWithSpending)
 {
   seed_allowance();
-  const auto first = GetParam() ? kOwner : kSpender;
-  const auto second = GetParam() ? kSpender : kOwner;
+  const bool owner_first = GetParam() == AllowanceTxOrder::kExclusiveFirst;
+  const auto first = owner_first ? kOwner : kSpender;
+  const auto second = owner_first ? kSpender : kOwner;
   ASSERT_EQ(run(adjust(0, true), first), ExecResult::ExecResultOK);
   EXPECT_EQ(run(adjust(0, true), second),
             ExecResult::ExecResultTxNonDeterministicError);
   advance_block();
-  expect_allowance(GetParam() ? 100 : 90);
+  expect_allowance(owner_first ? 100 : 90);
 }
 
 TEST_P(NativeTokenCleanupOrderTest, ClearConflictsWithSpending)
 {
   seed_allowance();
-  const auto first = GetParam() ? kOwner : kSpender;
-  const auto second = GetParam() ? kSpender : kOwner;
+  const bool owner_first = GetParam() == AllowanceTxOrder::kExclusiveFirst;
+  const auto first = owner_first ? kOwner : kSpender;
+  const auto second = owner_first ? kSpender : kOwner;
   ASSERT_EQ(run(clear, first), ExecResult::ExecResultOK);
   EXPECT_EQ(run(clear, second), ExecResult::ExecResultTxNonDeterministicError);
   advance_block();
-  if (GetParam()) {
+  if (owner_first) {
     EXPECT_FALSE(allowance_item());
   }
   else {
@@ -2264,14 +2268,16 @@ TEST_P(NativeTokenCleanupOrderTest, ClearConflictsWithSpending)
 TEST_P(NativeTokenCleanupOrderTest, ClearConflictsWithRegrant)
 {
   seed_allowance();
-  ASSERT_EQ(run(GetParam() ? NativeContract::function_t(clear)
-                           : adjust(5, false)),
-            ExecResult::ExecResultOK);
-  EXPECT_EQ(run(GetParam() ? adjust(5, false)
-                           : NativeContract::function_t(clear)),
+  const bool clear_first = GetParam() == AllowanceTxOrder::kExclusiveFirst;
+  auto first =
+      clear_first ? NativeContract::function_t(clear) : adjust(5, false);
+  auto second =
+      clear_first ? adjust(5, false) : NativeContract::function_t(clear);
+  ASSERT_EQ(run(std::move(first)), ExecResult::ExecResultOK);
+  EXPECT_EQ(run(std::move(second)),
             ExecResult::ExecResultTxNonDeterministicError);
   advance_block();
-  if (GetParam()) {
+  if (clear_first) {
     EXPECT_FALSE(allowance_item());
   }
   else {
@@ -2279,11 +2285,28 @@ TEST_P(NativeTokenCleanupOrderTest, ClearConflictsWithRegrant)
   }
 }
 
-TEST_P(NativeTokenCleanupOrderTest, LockSurvivesOrdinaryRegrantAndNestedSpend)
+INSTANTIATE_TEST_SUITE_P(NativeToken, NativeTokenCleanupOrderTest,
+                         ::testing::Values(AllowanceTxOrder::kExclusiveFirst,
+                                           AllowanceTxOrder::kOrdinaryFirst),
+                         [](auto const &info) {
+                           return info.param ==
+                                          AllowanceTxOrder::kExclusiveFirst
+                                      ? "ExclusiveFirst"
+                                      : "OrdinaryFirst";
+                         });
+
+enum class AllowanceLockSource { kClear, kAdjustment };
+
+class NativeTokenCleanupLockTest
+  : public NativeTokenCleanupTest,
+    public ::testing::WithParamInterface<AllowanceLockSource> {};
+
+TEST_P(NativeTokenCleanupLockTest, LockSurvivesOrdinaryRegrantAndNestedSpend)
 {
   seed_allowance();
+  const bool clear_first = GetParam() == AllowanceLockSource::kClear;
   ASSERT_EQ(
-      run([clear_first = GetParam()](
+      run([clear_first](
               NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto result =
             clear_first
@@ -2318,10 +2341,10 @@ TEST_P(NativeTokenCleanupOrderTest, LockSurvivesOrdinaryRegrantAndNestedSpend)
   EXPECT_EQ(run(adjust(5, false)),
             ExecResult::ExecResultTxNonDeterministicError);
   advance_block();
-  expect_allowance(GetParam() ? 10 : 110);
+  expect_allowance(clear_first ? 10 : 110);
 }
 
-TEST_P(NativeTokenCleanupOrderTest, RevertedChildDiscardsAllowanceAndLock)
+TEST_P(NativeTokenCleanupLockTest, RevertedChildDiscardsAllowanceAndLock)
 {
   seed_allowance();
   auto parent =
@@ -2348,7 +2371,7 @@ TEST_P(NativeTokenCleanupOrderTest, RevertedChildDiscardsAllowanceAndLock)
     co_return InvokeStatus<void>{};
   };
   auto reverted_owner =
-      [clear_first = GetParam()](
+      [clear_first = GetParam() == AllowanceLockSource::kClear](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
     auto result =
         clear_first
@@ -2368,8 +2391,14 @@ TEST_P(NativeTokenCleanupOrderTest, RevertedChildDiscardsAllowanceAndLock)
   expect_allowance(95);
 }
 
-INSTANTIATE_TEST_SUITE_P(NativeToken, NativeTokenCleanupOrderTest,
-                         ::testing::Bool());
+INSTANTIATE_TEST_SUITE_P(NativeToken, NativeTokenCleanupLockTest,
+                         ::testing::Values(AllowanceLockSource::kClear,
+                                           AllowanceLockSource::kAdjustment),
+                         [](auto const &info) {
+                           return info.param == AllowanceLockSource::kClear
+                                      ? "Clear"
+                                      : "Adjustment";
+                         });
 
 TEST_F(NativeTokenCleanupTest, ClearBalanceRejectsWithoutChangingBalance)
 {

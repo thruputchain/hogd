@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <bit>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <string_view>
@@ -22,16 +24,16 @@
 
 namespace hogd {
 
-// The C++ mirror of the SDK's `Signed<T>` auth token (spec kind
-// `signed_token`). A `Signed<T>` contributes *no bytes* to the serialized
-// payload -- its u32 handle travels out-of-band on the auth-token channel, and
-// the guest fills it in from the handles the host supplies -- so the mirror is
-// an empty marker rather than a uint32_t. (Specs before sdk_rs 0.18 described
-// `Signed<T>` as a bare u32, which was wrong on the wire.)
-//
-// Deliberately has no serializer: no C++ test invokes an entrypoint carrying
-// one yet, and a zero-byte codec should be written against a real caller.
-struct SignedToken {};
+// The C++ mirror of the SDK's `Signed<T>` (spec kind `signed_token`): an XDR
+// struct with no fields, since its handle travels out-of-band. `handle` is not
+// on the wire: decoding leaves it kUnassigned and NativeContractBuilder fills
+// it in declaration order.
+struct SignedToken {
+  static constexpr uint32_t kUnassigned = UINT32_MAX;
+  uint32_t handle = kUnassigned;
+
+  bool operator==(SignedToken const &) const noexcept = default;
+};
 
 template<typename T, uint64_t Selector> struct ContractException {
   constexpr static uint64_t kSelector = Selector;
@@ -206,3 +208,17 @@ concept is_contract_result_type = requires {
 static_assert(is_contract_result_type<Result<void>>);
 
 } // namespace hogd
+
+// A SignedToken is an XDR struct with no fields, so both XDR and CXS encode it
+// as zero bytes; x23 reads the field list from tuple_size.
+template<>
+struct std::tuple_size<hogd::SignedToken>
+  : std::integral_constant<std::size_t, 0> {};
+
+// NOLINTBEGIN(readability-identifier-naming)
+template<> struct x23::xdr_meta<hogd::SignedToken> {
+  static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
+  static constexpr const char *type_name = "SignedToken";
+  static constexpr std::array<std::string_view, 0> field_names{};
+};
+// NOLINTEND(readability-identifier-naming)

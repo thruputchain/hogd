@@ -412,6 +412,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "groundhog-erc20-permit-if"
+version = "0.1.40"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git?rev=f42ac46b3915198fc27747e299c4f8223c57df22#f42ac46b3915198fc27747e299c4f8223c57df22"
+dependencies = [
+ "groundhog-erc20-if",
+ "sdk",
+ "thiserror",
+]
+
+[[package]]
 name = "groundhog-event"
 version = "0.40.0"
 source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git?rev=f42ac46b3915198fc27747e299c4f8223c57df22#f42ac46b3915198fc27747e299c4f8223c57df22"
@@ -658,6 +668,15 @@ dependencies = [
  "erc20-native-test",
  "groundhog-erc20-if",
  "itc_erc20",
+ "sdk",
+]
+
+[[package]]
+name = "itc_erc20_permit"
+version = "0.2.0"
+dependencies = [
+ "groundhog-erc20-if",
+ "groundhog-erc20-permit-if",
  "sdk",
 ]
 
