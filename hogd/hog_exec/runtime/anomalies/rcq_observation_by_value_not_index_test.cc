@@ -46,7 +46,6 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -148,8 +147,8 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         observed_values.push_back(entry[0]);
 
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("result"),
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("result"),
             std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
@@ -275,8 +274,8 @@ TEST_F(RCQObservationByValueTest,
           co_return InvokeError{InvokeErrorCode::Deterministic};
         consumed_values.push_back(entry[0]);
 
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("result"),
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("result"),
             std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
@@ -381,10 +380,8 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
           insert_res.error());
 
     auto marker = std::string_view("ok");
-    auto [ws, _wg] =
-        co_await syscall_BytestringSet_inner(ctx.handler(),
-                                             make_storage_key("marker"),
-                                             std::as_bytes(std::span(marker)));
+    auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+        make_storage_key("marker"), std::as_bytes(std::span(marker)));
     if (!ws.has_value() ||
         ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
       co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -465,8 +462,8 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         entry.resize(entry_len);
 
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("saw"),
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("saw"),
             std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
