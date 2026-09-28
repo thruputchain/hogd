@@ -24,17 +24,10 @@
 
 namespace hogd {
 
-// The C++ mirror of the SDK's `Signed<T>` auth token (spec kind
-// `signed_token`). A `Signed<T>` contributes *no bytes* to the serialized
-// payload -- its u32 handle travels out-of-band on the auth-token channel, and
-// the receiver fills it in from the handles the host supplies -- so the mirror
-// is an XDR struct with no fields. (Specs before sdk_rs 0.18 described
-// `Signed<T>` as a bare u32, which was wrong on the wire.)
-//
-// `handle` is not a field on the wire: decoding leaves it at kUnassigned, and
-// NativeContractBuilder assigns the parent-supplied handles to a method's
-// SignedToken arguments in declaration order, as the SDK's entrypoint glue
-// does.
+// The C++ mirror of the SDK's `Signed<T>` (spec kind `signed_token`): an XDR
+// struct with no fields, since its handle travels out-of-band. `handle` is not
+// on the wire: decoding leaves it kUnassigned and NativeContractBuilder fills
+// it in declaration order.
 struct SignedToken {
   static constexpr uint32_t kUnassigned = UINT32_MAX;
   uint32_t handle = kUnassigned;

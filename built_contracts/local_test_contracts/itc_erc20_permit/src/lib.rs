@@ -1,12 +1,5 @@
-//! The RV32 reference for the native token's `ERC20Permit` surface.
-//!
-//! `itc_erc20` is the reference the native token's ERC20 methods are held
-//! byte-identical to; this crate is that same contract -- the same storage
-//! keys, the same strict allowance and balance updates, the same events --
-//! with `ERC20Permit` implemented on top. Keeping the two in one contract
-//! lets a conformance test spend a permit-written allowance through the
-//! ordinary `transfer_from` and read it back through `allowance`, exactly as
-//! it would against the native token.
+//! `itc_erc20` with `ERC20Permit` on top: the same storage keys, updates and
+//! events. The RV32 reference for the native token's permit surface.
 
 #![no_std]
 

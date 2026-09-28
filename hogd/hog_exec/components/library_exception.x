@@ -15,13 +15,9 @@ namespace hogd {
 /// Syscall error number (`sdk::sys::SysErr`).
 typedef int SysErr;
 
-/// Syscall failure: which call failed and the error number.
-///
-/// `call_number` is a `SyscallNo` value, declared unsigned because the SDK's
-/// `SyscallNo` is a `u32` newtype. CXS inlines unsigned values up to 62 but
-/// signed ones only up to 31, so declaring it as the (signed) XDR enum would
-/// encode every syscall numbered 32 or above one byte longer than an RV32
-/// contract throwing the same exception.
+/// Syscall failure: which call failed and the error number. Unsigned because
+/// the SDK's `SyscallNo` is a u32; CXS inlines unsigned values up to 62 but
+/// signed only to 31, so a signed enum encodes syscalls >= 32 a byte longer.
 struct SyscallExn {
   unsigned int call_number;
   SysErr err_number;

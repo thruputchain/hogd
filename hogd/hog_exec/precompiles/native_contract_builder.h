@@ -83,10 +83,7 @@ constexpr bool kArgNestsSignedToken = [] {
 }();
 
 // Assign the parent-supplied auth-token handles to `args`' SignedToken
-// arguments in declaration order, as the SDK's
-// `receive_auth_handles_from_slice` does. False when the counts differ -- a
-// handle short, or one left over -- which the SDK reports as a DecodingArgs
-// abort.
+// arguments in declaration order; false when the counts differ.
 template<typename... Args>
 bool
 assign_auth_handles(std::tuple<Args...> &args,

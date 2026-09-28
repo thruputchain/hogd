@@ -8,7 +8,9 @@
 #![allow(clippy::useless_conversion)]
 
 use crate::interface::*;
-use crate::permit_interface::{ERC20Permit, ERC20PermitError, PermitGrant};
+use crate::permit_interface::{
+    ClearAllowanceGrant, ERC20Permit, ERC20PermitError, PermitGrant,
+};
 use sdk::signer::Signed;
 use sdk::*;
 
@@ -177,14 +179,30 @@ impl ERC20 for Token {
     }
 }
 
-// The owner of a grant is whoever minted it: `consume` reports that address
-// from the runtime, and reaching this contract at all proves the grant names
-// it as consumer. Both methods consume before anything else, as the SDK's
-// example permit token does, so nothing the grant says is acted on before
-// the runtime has vouched for it.
+// The grant's owner is its minter, reported by `consume`. Every method
+// consumes first, so nothing in the grant is acted on unverified.
 #[contract(version = "0.1.0")]
 impl ERC20Permit for Token {
-    fn permit(&mut self, grant: Signed<PermitGrant>) {
+    fn transfer_from_signed(
+        &mut self,
+        grant: Signed<PermitGrant>,
+        receiver: &ContractAddress,
+        amount: Amount,
+    ) {
+        let (grant, owner) = grant.consume();
+        // The grant names who may spend it and how much. No allowance is
+        // written or read, so this is the whole authorization check.
+        ensure(get_caller() == grant.spender, ERC20PermitError::NotSpender);
+        ensure(amount <= grant.amount, ERC20PermitError::ExceedsGrant);
+
+        let diff = amount_to_diff(amount);
+        add_to_balance(&owner, -diff);
+        add_to_balance(receiver, diff);
+
+        log_transfer_event(&owner, receiver, amount);
+    }
+
+    fn increase_allowance_signed(&mut self, grant: Signed<PermitGrant>) {
         let (grant, owner) = grant.consume();
         let diff = amount_to_diff(grant.amount);
 
@@ -193,20 +211,16 @@ impl ERC20Permit for Token {
         log_approval_event(&owner, &grant.spender, diff);
     }
 
-    fn transfer_from_signed(
-        &mut self,
-        grant: Signed<PermitGrant>,
-        receiver: &ContractAddress,
-    ) {
+    fn clear_allowance_signed(&mut self, grant: Signed<ClearAllowanceGrant>) {
         let (grant, owner) = grant.consume();
-        // The grant names who may spend it. No allowance is written or read,
-        // so this is the whole authorization check.
-        ensure(get_caller() == grant.spender, ERC20PermitError::NotSpender);
+        let key = get_allowance_key(&owner, &grant.spender);
+        let cleared = non_negative_int_try_get(&key)
+            .none_if_missing()
+            .unwrap_or(0);
+        // Delete rather than zero, freeing the entry's storage, and lock it so
+        // no other transaction's write to the allowance lands in the block.
+        delete_exclusive(&key);
 
-        let diff = amount_to_diff(grant.amount);
-        add_to_balance(&owner, -diff);
-        add_to_balance(receiver, diff);
-
-        log_transfer_event(&owner, receiver, grant.amount);
+        log_approval_event(&owner, &grant.spender, -cleared);
     }
 }

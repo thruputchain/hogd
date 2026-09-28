@@ -36,6 +36,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "standard_asset_events.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
@@ -421,16 +422,9 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   co_return Result<void, ERC20Exception>::make_ok();
 }
 
-// The owner-to-receiver leg every spending path shares -- transfer,
-// transfer_from and transfer_from_signed -- mirroring the reference's
-// add_to_balance(owner, -diff), add_to_balance(receiver, diff), then the
-// Transfer event. `amount` is already range-checked to [0, INT128_MAX], and
-// any authorization (caller, allowance, grant) has already been checked.
-// `entry_point` names the caller in log lines.
-//
-// Generic over the caller's result type, since the ERC20Permit methods reject
-// with the same ERC20Error through their own interface's Result:
-// `Erc20ExceptionT` is the ERC20Error exception within `ResultT`.
+// The owner-to-receiver leg every spending path shares: strict debit, credit,
+// Transfer event. `amount` is already range-checked and the caller authorized;
+// ResultT/Erc20ExceptionT are the calling interface's Result and ERC20Error.
 template<typename ResultT, typename Erc20ExceptionT>
 x23::Async<InvokeStatus<ResultT>>
 move_balance(NativeSyscallContext &ctx, ContractAddress const &owner,
@@ -682,27 +676,20 @@ using PermitResult = Result<void, PermitErc20Exception, PermitException>;
 static_assert(ERC20Exception::kSelector == PermitErc20Exception::kSelector,
               "ERC20Error must reject identically through either interface");
 
-// A consumed PermitGrant and the address that minted it -- the owner whose
-// tokens it authorizes spending.
-struct ConsumedGrant {
-  itc_erc20_permit::PermitGrant grant;
+// A consumed grant and the address that minted it: the owner it speaks for.
+template<typename Grant> struct Consumed {
+  Grant grant;
   ContractAddress owner;
 };
 
-using ConsumeGrantResult = std::variant<ConsumedGrant, LibraryException>;
+template<typename Grant>
+using ConsumeResult = std::variant<Consumed<Grant>, LibraryException>;
 
-// Consume `token` as the SDK's `Signed<PermitGrant>::consume` does, returning
-// the grant or the library exception the SDK would throw:
-//
-//  - the ConsumeAuthToken syscall rejecting the handle (not this contract's
-//    to consume, expired, already spent) throws LibraryExn::Syscall;
-//  - a payload that is not exactly one CXS PermitGrant throws
-//    AuthTokenError::ConsumeDecodeFailure;
-//  - child tokens, which a PermitGrant has no Signed field to receive, throw
-//    AuthTokenError::ReceiveAuthHandlesFailure. They are unwrapped into this
-//    frame by the syscall either way, as they are for the reference.
-x23::Async<InvokeStatus<ConsumeGrantResult>>
-consume_permit_grant(NativeSyscallContext &ctx, SignedToken const &token)
+// Consume `token` as the SDK's `Signed<Grant>::consume` does, returning the
+// grant or the library exception the SDK would throw in its place.
+template<typename Grant>
+x23::Async<InvokeStatus<ConsumeResult<Grant>>>
+consume_grant(NativeSyscallContext &ctx, SignedToken const &token)
 {
   auto auth_token_exception = [](AuthTokenErrorKind kind) {
     LibraryExn exn(LibraryExnKind::kLibraryExnAuthToken);
@@ -722,7 +709,7 @@ consume_permit_grant(NativeSyscallContext &ctx, SignedToken const &token)
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    co_return ConsumeGrantResult{
+    co_return ConsumeResult<Grant>{
         NativeContractBuilder::syscall_exception(SyscallNo::kConsumeAuthToken,
                                                  *r)};
   }
@@ -735,26 +722,28 @@ consume_permit_grant(NativeSyscallContext &ctx, SignedToken const &token)
     co_return InvokeError{InvokeErrorCode::Unrecoverable};
   }
 
-  itc_erc20_permit::PermitGrant grant{};
+  Grant grant{};
   auto const *payload_bytes = reinterpret_cast<uint8_t const *>(payload.data());
   if (!x23::deserialize_cxs(&grant, std::span<uint8_t const>(payload_bytes,
                                                              payload_len))) {
-    co_return ConsumeGrantResult{auth_token_exception(
+    co_return ConsumeResult<Grant>{auth_token_exception(
         AuthTokenErrorKind::kAuthTokenConsumeDecodeFailure)};
   }
+  // Grants have no Signed field to receive child tokens. The syscall has
+  // unwrapped them into this frame either way, as it has for the reference.
   if (child_count != 0) {
-    co_return ConsumeGrantResult{auth_token_exception(
+    co_return ConsumeResult<Grant>{auth_token_exception(
         AuthTokenErrorKind::kAuthTokenReceiveAuthHandlesFailure)};
   }
-  co_return ConsumeGrantResult{ConsumedGrant{.grant = grant, .owner = minter}};
+  co_return ConsumeResult<Grant>{
+      Consumed<Grant>{.grant = grant, .owner = minter}};
 }
 
-// The grant's amount as a signed delta, or nullopt when it exceeds INT128_MAX
-// -- the reference's amount_to_diff, which throws ERC20Error::TooLarge.
+// `amount` as a signed delta, or nullopt when it exceeds INT128_MAX -- the
+// reference's amount_to_diff, which throws ERC20Error::TooLarge.
 std::optional<int128_t>
-grant_amount(itc_erc20_permit::PermitGrant const &grant)
+signed_amount(uint128_t amount)
 {
-  const uint128_t amount = from_xdr(grant.amount);
   if (amount > kMaxInt128) {
     return std::nullopt;
   }
@@ -762,37 +751,87 @@ grant_amount(itc_erc20_permit::PermitGrant const &grant)
 }
 
 x23::Async<InvokeStatus<PermitResult>>
-permit_impl(NativeSyscallContext &ctx, SignedToken grant_token)
+transfer_from_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token,
+                          ContractAddress receiver, amount_t amount)
 {
-  trace("native token permit: handle {}", grant_token.handle);
+  trace("native token transfer_from_signed: handle {} receiver {} amount {}",
+        grant_token.handle, x23::show(receiver), x23::show(amount));
   if (!ctx.consume_gas(1)) {
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
-  auto consumed = co_await consume_permit_grant(ctx, grant_token);
+  auto consumed =
+      co_await consume_grant<itc_erc20_permit::PermitGrant>(ctx, grant_token);
   if (!consumed.has_value()) {
     co_return consumed.error();
   }
   if (auto *exn = std::get_if<LibraryException>(&*consumed)) {
     co_return PermitResult::make_err(std::move(*exn));
   }
-  auto const &[grant, owner] = std::get<ConsumedGrant>(*consumed);
+  auto const &[grant, owner] =
+      std::get<Consumed<itc_erc20_permit::PermitGrant>>(*consumed);
 
-  auto diff = grant_amount(grant);
+  // The grant names who may spend it and how much; no allowance is written or
+  // read, so this is the whole authorization check.
+  auto caller = co_await get_msg_sender(ctx);
+  if (!caller.has_value()) {
+    co_return caller.error();
+  }
+  if (*caller != grant.spender) {
+    co_return PermitResult::make_err(
+        PermitException{itc_erc20_permit::ERC20PermitError::NotSpender});
+  }
+  const uint128_t requested =
+      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
+  if (requested > from_xdr(grant.amount)) {
+    co_return PermitResult::make_err(
+        PermitException{itc_erc20_permit::ERC20PermitError::ExceedsGrant});
+  }
+
+  auto diff = signed_amount(requested);
   if (!diff) {
     co_return PermitResult::make_err(
         PermitErc20Exception{itc_erc20_permit::ERC20Error::TooLarge});
   }
-  // An owner granting itself an allowance: the reference's get_allowance_key
-  // rejects it with Internal, as adjust_allowance_impl does.
+
+  co_return co_await move_balance<PermitResult, PermitErc20Exception>(
+      ctx, owner, receiver, *diff, "transfer_from_signed");
+}
+
+x23::Async<InvokeStatus<PermitResult>>
+increase_allowance_signed_impl(NativeSyscallContext &ctx,
+                               SignedToken grant_token)
+{
+  trace("native token increase_allowance_signed: handle {}",
+        grant_token.handle);
+  if (!ctx.consume_gas(1)) {
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+
+  auto consumed =
+      co_await consume_grant<itc_erc20_permit::PermitGrant>(ctx, grant_token);
+  if (!consumed.has_value()) {
+    co_return consumed.error();
+  }
+  if (auto *exn = std::get_if<LibraryException>(&*consumed)) {
+    co_return PermitResult::make_err(std::move(*exn));
+  }
+  auto const &[grant, owner] =
+      std::get<Consumed<itc_erc20_permit::PermitGrant>>(*consumed);
+
+  auto diff = signed_amount(from_xdr(grant.amount));
+  if (!diff) {
+    co_return PermitResult::make_err(
+        PermitErc20Exception{itc_erc20_permit::ERC20Error::TooLarge});
+  }
+  // A self-allowance: the reference's get_allowance_key rejects it with
+  // Internal, as adjust_allowance_impl does.
   if (owner == grant.spender) {
     co_return PermitResult::make_err(
         PermitErc20Exception{itc_erc20_permit::ERC20Error::Internal});
   }
 
-  // The allowance grows by the grant rather than being set to it, as
-  // adjust_allowance does: a grant is single-use, so there is no second grant
-  // for a set-to-value to defend against.
+  // Adds to the allowance rather than setting it, as adjust_allowance does.
   auto adjusted = co_await adjust_allowance(ctx, owner, grant.spender, *diff);
   if (!adjusted.has_value()) {
     co_return adjusted.error();
@@ -803,7 +842,7 @@ permit_impl(NativeSyscallContext &ctx, SignedToken grant_token)
   }
 
   if (auto err = co_await emit_approval_event(ctx, owner, grant.spender, *diff,
-                                              "permit");
+                                              "increase_allowance_signed");
       !err.has_value()) {
     co_return err.error();
   }
@@ -811,43 +850,86 @@ permit_impl(NativeSyscallContext &ctx, SignedToken grant_token)
 }
 
 x23::Async<InvokeStatus<PermitResult>>
-transfer_from_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token,
-                          ContractAddress receiver)
+clear_allowance_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token)
 {
-  trace("native token transfer_from_signed: handle {} receiver {}",
-        grant_token.handle, x23::show(receiver));
+  trace("native token clear_allowance_signed: handle {}", grant_token.handle);
   if (!ctx.consume_gas(1)) {
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
-  auto consumed = co_await consume_permit_grant(ctx, grant_token);
+  auto consumed = co_await consume_grant<itc_erc20_permit::ClearAllowanceGrant>(
+      ctx, grant_token);
   if (!consumed.has_value()) {
     co_return consumed.error();
   }
   if (auto *exn = std::get_if<LibraryException>(&*consumed)) {
     co_return PermitResult::make_err(std::move(*exn));
   }
-  auto const &[grant, owner] = std::get<ConsumedGrant>(*consumed);
+  auto const &[grant, owner] =
+      std::get<Consumed<itc_erc20_permit::ClearAllowanceGrant>>(*consumed);
 
-  // The grant names who may spend it; no allowance is written or read, so the
-  // caller being that spender is the whole authorization check.
-  auto caller = co_await get_msg_sender(ctx);
-  if (!caller.has_value()) {
-    co_return caller.error();
-  }
-  if (*caller != grant.spender) {
+  if (owner == grant.spender) {
     co_return PermitResult::make_err(
-        PermitException{itc_erc20_permit::ERC20PermitError::NotSpender});
+        PermitErc20Exception{itc_erc20_permit::ERC20Error::Internal});
   }
 
-  auto amount = grant_amount(grant);
-  if (!amount) {
+  auto key = co_await allowance_key(ctx, owner, grant.spender);
+  if (!key.has_value()) {
+    co_return key.error();
+  }
+
+  // The amount removed, for the Approval event: the committed allowance plus
+  // this transaction's pending delta, as the reference's try_get reads it.
+  int128_t base{};
+  bool base_present{};
+  int128_t pending{};
+  auto get = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      *key, /*load_from_snapshot=*/true, base, base_present, pending);
+  if (!get.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(get.error());
+  }
+  int128_t cleared = 0;
+  if (*get == SyscallErrorCode::kSyscallErrorCodeNone) {
+    if (!base_present || integer_add_overflow(base, pending)) {
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    cleared = base + pending;
+  }
+  else if (*get != SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+    co_return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  // Delete rather than zero, freeing the entry's storage, then lock it, as
+  // the SDK's delete_exclusive does: no other transaction's write to the
+  // allowance can land in the same block.
+  auto deleted = co_await ctx.syscall<SyscallNo::kDeleteObject>(*key);
+  if (!deleted.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(deleted.error());
+  }
+  if (*deleted != SyscallErrorCode::kSyscallErrorCodeNone) {
     co_return PermitResult::make_err(
-        PermitErc20Exception{itc_erc20_permit::ERC20Error::TooLarge});
+        NativeContractBuilder::syscall_exception(SyscallNo::kDeleteObject,
+                                                 *deleted));
+  }
+  auto locked = co_await ctx.syscall<SyscallNo::kSetStorageFlags>(
+      *key, StorageDeltaFlagSet{
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock)});
+  if (!locked.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(locked.error());
+  }
+  if (*locked != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return PermitResult::make_err(
+        NativeContractBuilder::syscall_exception(SyscallNo::kSetStorageFlags,
+                                                 *locked));
   }
 
-  co_return co_await move_balance<PermitResult, PermitErc20Exception>(
-      ctx, owner, receiver, *amount, "transfer_from_signed");
+  if (auto err =
+          co_await emit_approval_event(ctx, owner, grant.spender, -cleared,
+                                       "clear_allowance_signed");
+      !err.has_value()) {
+    co_return err.error();
+  }
+  co_return PermitResult::make_ok();
 }
 
 } // namespace
@@ -1023,9 +1105,12 @@ make_native_token_contract()
       });
 
   // ERC20Permit
-  builder.add<itc_erc20_permit::ERC20Permit, u8"permit">(permit_impl);
   builder.add<itc_erc20_permit::ERC20Permit, u8"transfer_from_signed">(
       transfer_from_signed_impl);
+  builder.add<itc_erc20_permit::ERC20Permit, u8"increase_allowance_signed">(
+      increase_allowance_signed_impl);
+  builder.add<itc_erc20_permit::ERC20Permit, u8"clear_allowance_signed">(
+      clear_allowance_signed_impl);
 
   assert(builder.check_methods<itc_erc20::ERC20>());
   assert(builder.check_methods<itc_erc20_permit::ERC20Permit>());

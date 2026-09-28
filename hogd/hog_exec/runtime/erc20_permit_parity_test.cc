@@ -50,22 +50,9 @@
 #include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
 
-//
-// Conformance tests for the native token's ERC20Permit surface
-// (groundhog-erc20-permit-if): each scenario runs once against the native
-// token precompile and once against the RV32 reference `itc_erc20_permit`
-// (itc_erc20 with ERC20Permit on top), with the same actors at the same
-// addresses, and requires the two to agree byte-for-byte on the commit result,
-// on every call's return or abort bytes, and on the emitted events (modulo the
-// emitting contract address).
-//
-// The owner is a native driver that mints real PermitGrant auth tokens
-// through kMintAuthToken, so the grant's minter -- the address the token
-// contract treats as the owner -- is supplied by the runtime exactly as it is
-// for a wallet's grant. A step either calls the token directly from the owner
-// or has the owner forward the grants' handles to a relay at another actor,
-// which calls the token with them.
-//
+// Conformance tests for the native token's ERC20Permit surface: each scenario
+// runs against the native precompile and the RV32 reference itc_erc20_permit,
+// and the two must agree byte-for-byte.
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -116,6 +103,8 @@ struct GrantSpec {
   std::optional<std::vector<uint8_t>> payload = std::nullopt;
   // Child tokens attached to the grant's node.
   uint32_t child_count = 0;
+  // Mint a ClearAllowanceGrant { spender } rather than a PermitGrant.
+  bool clear = false;
 };
 
 // One call to the token in a scenario.
@@ -226,12 +215,22 @@ protected:
 
   static constexpr int32_t kDriverId = 60;
 
-  // Driver method ids: the scenario (rooted at the owner), the setup calls
-  // (rooted at the genesis root), and one relay per step.
-  static constexpr Runtime::MethodID kScenarioMethod = 0;
+  // Driver method ids: the setup calls (rooted at the genesis root), one per
+  // scenario (rooted at the owner), and one relay per scenario step.
   static constexpr Runtime::MethodID kSetupInitializeMethod = 1;
   static constexpr Runtime::MethodID kSetupMintMethod = 2;
+  static constexpr Runtime::MethodID kScenarioBase = 10;
   static constexpr Runtime::MethodID kRelayBase = 100;
+  static constexpr Runtime::MethodID kRelaysPerScenario = 100;
+
+  static constexpr Runtime::MethodID scenario_method(size_t scenario)
+  {
+    return kScenarioBase + scenario;
+  }
+  static constexpr Runtime::MethodID relay_method(size_t scenario, size_t step)
+  {
+    return kRelayBase + (scenario * kRelaysPerScenario) + step;
+  }
 
   // Far enough out that no test reaches it.
   static constexpr BlockHeight kGrantExpiry = 1'000'000;
@@ -314,11 +313,14 @@ protected:
       payload.append_range(*spec.payload);
     }
     else {
-      auto encoded = x23::serialize_cxs(
-          itc_erc20_permit::PermitGrant{.spender = spec.spender,
-                                        .amount = to_xdr(spec.amount)});
+      auto encoded =
+          spec.clear
+              ? x23::serialize_cxs(itc_erc20_permit::ClearAllowanceGrant{
+                    .spender = spec.spender})
+              : x23::serialize_cxs(itc_erc20_permit::PermitGrant{
+                    .spender = spec.spender, .amount = to_xdr(spec.amount)});
       if (!encoded) {
-        ADD_FAILURE() << "could not encode a PermitGrant";
+        ADD_FAILURE() << "could not encode a grant";
         co_return std::nullopt;
       }
       payload.append_range(*encoded);
@@ -345,15 +347,16 @@ protected:
     co_return handle;
   }
 
-  static StorageKeyContractData step_key(size_t i)
+  static StorageKeyContractData step_key(size_t scenario, size_t i)
   {
-    return make_storage_key("permit_step_" + std::to_string(i));
+    return make_storage_key("permit_s" + std::to_string(scenario) + "_step_" +
+                            std::to_string(i));
   }
 
   // The driver contract for one leg: every method's token calls target
   // `token`.
-  static std::unique_ptr<NativeContract> make_driver(ContractAddress token,
-                                                     std::vector<Step> steps)
+  static std::unique_ptr<NativeContract>
+  make_driver(ContractAddress token, std::vector<std::vector<Step>> scenarios)
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
 
@@ -382,65 +385,67 @@ protected:
           co_return InvokeStatus<void>{};
         });
 
-    for (size_t i = 0; i < steps.size(); ++i) {
-      // The relay: forward whatever handles the owner passed down.
-      fns.emplace(kRelayBase + i,
-                  [token, step = steps[i]](NativeSyscallContext &ctx)
-                      -> x23::Async<InvokeStatus<void>> {
-                    auto parent =
-                        ctx.handler().get_parent_supplied_auth_tokens();
-                    Record record;
-                    co_await append_invoke_record(
-                        ctx, token, step.method, step.calldata,
-                        std::vector<uint32_t>(parent.begin(), parent.end()),
-                        record);
-                    ctx.handler().set_return_buffer(ReturnBuffer(record.begin(),
-                                                                 record.end()),
-                                                    false, {});
-                    co_return InvokeStatus<void>{};
-                  });
+    for (size_t sc = 0; sc < scenarios.size(); ++sc) {
+      auto const &steps = scenarios[sc];
+      for (size_t i = 0; i < steps.size(); ++i) {
+        // The relay: forward whatever handles the owner passed down.
+        fns.emplace(
+            relay_method(sc, i),
+            [token, step = steps[i]](
+                NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+              auto parent = ctx.handler().get_parent_supplied_auth_tokens();
+              Record record;
+              co_await append_invoke_record(
+                  ctx, token, step.method, step.calldata,
+                  std::vector<uint32_t>(parent.begin(), parent.end()), record);
+              ctx.handler().set_return_buffer(ReturnBuffer(record.begin(),
+                                                           record.end()),
+                                              false, {});
+              co_return InvokeStatus<void>{};
+            });
+      }
+
+      fns.emplace(
+          scenario_method(sc),
+          [token, sc,
+           steps](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+            std::vector<std::vector<uint32_t>> minted(steps.size());
+            for (size_t i = 0; i < steps.size(); ++i) {
+              auto const &step = steps[i];
+              if (step.reuse_grants_of) {
+                minted[i] = minted[*step.reuse_grants_of];
+              }
+              for (auto const &grant : step.grants) {
+                auto handle = co_await mint_grant(ctx, token, grant);
+                if (!handle) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                minted[i].push_back(*handle);
+              }
+
+              Record record;
+              if (step.caller == kOwner) {
+                co_await append_invoke_record(ctx, token, step.method,
+                                              step.calldata, minted[i], record);
+              }
+              else {
+                co_await append_invoke_record(ctx, step.caller,
+                                              relay_method(sc, i), {},
+                                              minted[i], record);
+              }
+
+              auto set = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                  step_key(sc, i),
+                  std::as_bytes(std::span(record.data(), record.size())));
+              if (!set.has_value() ||
+                  *set != SyscallErrorCode::kSyscallErrorCodeNone) {
+                ADD_FAILURE() << "could not persist step " << i;
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
+            }
+            co_return InvokeStatus<void>{};
+          });
     }
-
-    fns.emplace(kScenarioMethod,
-                [token, steps = std::move(steps)](NativeSyscallContext &ctx)
-                    -> x23::Async<InvokeStatus<void>> {
-                  std::vector<std::vector<uint32_t>> minted(steps.size());
-                  for (size_t i = 0; i < steps.size(); ++i) {
-                    auto const &step = steps[i];
-                    if (step.reuse_grants_of) {
-                      minted[i] = minted[*step.reuse_grants_of];
-                    }
-                    for (auto const &grant : step.grants) {
-                      auto handle = co_await mint_grant(ctx, token, grant);
-                      if (!handle) {
-                        co_return InvokeError{InvokeErrorCode::Deterministic};
-                      }
-                      minted[i].push_back(*handle);
-                    }
-
-                    Record record;
-                    if (step.caller == kOwner) {
-                      co_await append_invoke_record(ctx, token, step.method,
-                                                    step.calldata, minted[i],
-                                                    record);
-                    }
-                    else {
-                      co_await append_invoke_record(ctx, step.caller,
-                                                    kRelayBase + i, {},
-                                                    minted[i], record);
-                    }
-
-                    auto set = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-                        step_key(i),
-                        std::as_bytes(std::span(record.data(), record.size())));
-                    if (!set.has_value() ||
-                        *set != SyscallErrorCode::kSyscallErrorCodeNone) {
-                      ADD_FAILURE() << "could not persist step " << i;
-                      co_return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                  }
-                  co_return InvokeStatus<void>{};
-                });
 
     return std::make_unique<NativeContract>(std::move(fns));
   }
@@ -449,7 +454,7 @@ protected:
   // Returns the commit result, and the transaction's id for its event log.
   std::pair<ExecResult, EphemeralTxIdentifier>
   run_driver_tx(RuntimeContext &ctx, ContractAddress root,
-                Runtime::MethodID method)
+                Runtime::MethodID method, bool advance = true)
   {
     EphemeralTxIdentifier tx_id;
     SignedTransaction tx{
@@ -467,14 +472,16 @@ protected:
       EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
                                       ProposedTransaction{.signed_tx = tx})());
     }
-    advance_block();
+    if (advance) {
+      advance_block();
+    }
     return {commit, tx_id};
   }
 
-  Record read_record(size_t i)
+  Record read_record(size_t scenario, size_t i)
   {
     StorageKey key(StorageKeyType::ContractData);
-    key.contract_data_key() = step_key(i);
+    key.contract_data_key() = step_key(scenario, i);
     auto item = lookup_storage_item_from_db(
         AddressAndKey{.address = kOwner, .key = std::move(key)});
     EXPECT_TRUE(item.has_value()) << "no record for step " << i;
@@ -485,13 +492,17 @@ protected:
     return Record(bs.begin(), bs.end());
   }
 
-  // Runs `steps` against `token`: initializes it (the RV32 reference only)
-  // and funds the owner from the genesis root, then runs the scenario rooted
-  // at the owner.
-  LegOutcome run_leg(ContractAddress token, std::vector<Step> const &steps)
+  // Runs `scenarios` against `token`: initializes it (the RV32 reference
+  // only) and funds the owner from the genesis root, then runs the scenarios
+  // rooted at the owner, one block per entry of `blocks`, each block holding
+  // the scenarios listed in it. Returns one outcome per scenario.
+  std::vector<LegOutcome>
+  run_leg(ContractAddress token,
+          std::vector<std::vector<Step>> const &scenarios,
+          std::vector<std::vector<size_t>> const &blocks)
   {
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
-    native_map.emplace(kDriverId, make_driver(token, steps));
+    native_map.emplace(kDriverId, make_driver(token, scenarios));
     native_map.emplace(
         std::to_underlying(
             HogexecPrecompiledNativeContracts::kNativeContractHogToken),
@@ -515,30 +526,36 @@ protected:
         run_driver_tx(ctx, kGenesisRootContractAddress, kSetupMintMethod).first,
         ExecResult::ExecResultOK);
 
-    auto [commit, tx_id] = run_driver_tx(ctx, kOwner, kScenarioMethod);
-    LegOutcome out{.commit = commit, .records = {}, .events = {}};
-    if (commit == ExecResult::ExecResultOK) {
-      for (size_t i = 0; i < steps.size(); ++i) {
-        out.records.push_back(read_record(i));
+    std::vector<LegOutcome> out(scenarios.size());
+    for (auto const &block : blocks) {
+      std::vector<std::pair<size_t, EphemeralTxIdentifier>> committed;
+      for (size_t sc : block) {
+        auto [commit, tx_id] = run_driver_tx(ctx, kOwner, scenario_method(sc),
+                                             /*advance=*/false);
+        out[sc].commit = commit;
+        if (commit == ExecResult::ExecResultOK) {
+          committed.emplace_back(sc, tx_id);
+        }
       }
-      auto log = get_tx_event_log(tx_id)();
-      EXPECT_TRUE(log.has_value());
-      if (log.has_value()) {
-        out.events.assign(log->events.begin(), log->events.end());
+      advance_block();
+      for (auto const &[sc, tx_id] : committed) {
+        for (size_t i = 0; i < scenarios[sc].size(); ++i) {
+          out[sc].records.push_back(read_record(sc, i));
+        }
+        auto log = get_tx_event_log(tx_id)();
+        EXPECT_TRUE(log.has_value());
+        if (log.has_value()) {
+          out[sc].events.assign(log->events.begin(), log->events.end());
+        }
       }
     }
     return out;
   }
 
-  // Runs `steps` on both backends, requires byte parity, and returns the
-  // native leg's per-step records with any relay framing removed, so a test
-  // can pin what each step did.
-  std::vector<Record> expect_parity(std::vector<Step> const &steps)
+  // Requires the two backends' outcomes for one scenario to match.
+  static void expect_outcomes_match(LegOutcome const &native,
+                                    LegOutcome const &rv32)
   {
-    auto native = run_leg(kNativeToken, steps);
-    auto rv32 = run_leg(kRv32Token, steps);
-
-    EXPECT_EQ(native.commit, ExecResult::ExecResultOK);
     EXPECT_EQ(native.commit, rv32.commit);
     EXPECT_EQ(native.records.size(), rv32.records.size());
     for (size_t i = 0; i < native.records.size() && i < rv32.records.size();
@@ -559,6 +576,30 @@ protected:
                 rv32.events[i].serialized_event)
           << "event " << i << " differs (topics + data)";
     }
+  }
+
+  // Runs `scenarios` on both backends under the `blocks` schedule, requiring
+  // parity scenario by scenario; returns the native outcomes.
+  std::vector<LegOutcome>
+  expect_schedule_parity(std::vector<std::vector<Step>> const &scenarios,
+                         std::vector<std::vector<size_t>> const &blocks)
+  {
+    auto native = run_leg(kNativeToken, scenarios, blocks);
+    auto rv32 = run_leg(kRv32Token, scenarios, blocks);
+    for (size_t sc = 0; sc < scenarios.size(); ++sc) {
+      SCOPED_TRACE("scenario " + std::to_string(sc));
+      expect_outcomes_match(native[sc], rv32[sc]);
+    }
+    return native;
+  }
+
+  // Runs `steps` on both backends, requires byte parity, and returns the
+  // native leg's per-step records with any relay framing removed, so a test
+  // can pin what each step did.
+  std::vector<Record> expect_parity(std::vector<Step> const &steps)
+  {
+    auto native = std::move(expect_schedule_parity({steps}, {{0}})[0]);
+    EXPECT_EQ(native.commit, ExecResult::ExecResultOK);
 
     std::vector<Record> results;
     for (size_t i = 0; i < native.records.size() && i < steps.size(); ++i) {
@@ -613,13 +654,13 @@ protected:
   std::vector<TxEmittedEvent> native_events_;
 };
 
-// A permit writes an allowance the spender then draws on through the ordinary
-// transfer_from, exactly as an adjust_allowance by the owner would.
-TEST_F(Erc20PermitParityTest, PermitWritesAllowanceSpentByTransferFrom)
+// A signed increase writes an allowance the spender then draws on through the
+// ordinary transfer_from, exactly as an adjust_allowance by the owner would.
+TEST_F(Erc20PermitParityTest, IncreaseAllowanceSignedIsSpentByTransferFrom)
 {
   auto results = expect_parity({
-      permit_step<u8"permit">(kSpender, {{.spender = kSpender, .amount = 500}},
-                              SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = 500}}, SignedToken{}),
       erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
       erc20_step<u8"transfer_from">(kSpender, kOwner, kReceiver,
                                     make_amount(300)),
@@ -636,20 +677,19 @@ TEST_F(Erc20PermitParityTest, PermitWritesAllowanceSpentByTransferFrom)
   EXPECT_EQ(results[4],
             aborted(erc20_abort(itc_erc20_permit::ERC20Error::TooLarge)));
   EXPECT_EQ(results[5], ok_amount(300));
-  // Approval for the permit, Transfer for the one transfer_from that landed.
+  // Approval for the increase, Transfer for the one transfer_from that landed.
   EXPECT_EQ(native_events_.size(), 2U);
 }
 
-// Anyone may submit a permit; the owner is the grant's minter, never the
+// Anyone may submit a grant; the owner is its minter, never the
 // caller. Here the third party submits, and the owner submits its own.
-TEST_F(Erc20PermitParityTest, PermitOwnerIsMinterWhoeverSubmits)
+TEST_F(Erc20PermitParityTest, OwnerIsMinterWhoeverSubmits)
 {
   auto results = expect_parity({
-      permit_step<u8"permit">(kThirdParty,
-                              {{.spender = kSpender, .amount = 70}},
-                              SignedToken{}),
-      permit_step<u8"permit">(kOwner, {{.spender = kSpender, .amount = 30}},
-                              SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
+          kThirdParty, {{.spender = kSpender, .amount = 70}}, SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
+          kOwner, {{.spender = kSpender, .amount = 30}}, SignedToken{}),
       erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
       erc20_step<u8"allowance">(kSpender, kThirdParty, kSpender),
   });
@@ -661,14 +701,14 @@ TEST_F(Erc20PermitParityTest, PermitOwnerIsMinterWhoeverSubmits)
   EXPECT_EQ(results[3], ok_amount(0));
 }
 
-// transfer_from_signed moves the granted amount in the one call and leaves no
+// transfer_from_signed moves the whole grant in the one call and leaves no
 // allowance behind.
 TEST_F(Erc20PermitParityTest, TransferFromSignedMovesWithoutAllowance)
 {
   auto results = expect_parity({
       permit_step<u8"transfer_from_signed">(
           kSpender, {{.spender = kSpender, .amount = 400}}, SignedToken{},
-          kReceiver),
+          kReceiver, make_amount(400)),
       erc20_step<u8"get_balance_of">(kSpender, kReceiver),
       erc20_step<u8"get_balance_of">(kSpender, kOwner),
       erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
@@ -688,10 +728,10 @@ TEST_F(Erc20PermitParityTest, TransferFromSignedRejectsAnyoneButSpender)
   auto results = expect_parity({
       permit_step<u8"transfer_from_signed">(
           kThirdParty, {{.spender = kSpender, .amount = 10}}, SignedToken{},
-          kThirdParty),
+          kThirdParty, make_amount(10)),
       permit_step<u8"transfer_from_signed">(
           kOwner, {{.spender = kSpender, .amount = 10}}, SignedToken{},
-          kReceiver),
+          kReceiver, make_amount(10)),
       erc20_step<u8"get_balance_of">(kSpender, kOwner),
   });
   ASSERT_EQ(results.size(), 3U);
@@ -710,10 +750,10 @@ TEST_F(Erc20PermitParityTest, TransferFromSignedBalanceBoundary)
   auto results = expect_parity({
       permit_step<u8"transfer_from_signed">(
           kSpender, {{.spender = kSpender, .amount = kOwnerFunds + 1}},
-          SignedToken{}, kReceiver),
+          SignedToken{}, kReceiver, make_amount(kOwnerFunds + 1)),
       permit_step<u8"transfer_from_signed">(
           kSpender, {{.spender = kSpender, .amount = kOwnerFunds}},
-          SignedToken{}, kReceiver),
+          SignedToken{}, kReceiver, make_amount(kOwnerFunds)),
       erc20_step<u8"get_balance_of">(kSpender, kReceiver),
   });
   ASSERT_EQ(results.size(), 3U);
@@ -728,15 +768,14 @@ TEST_F(Erc20PermitParityTest, GrantAboveInt128MaxIsTooLarge)
 {
   constexpr uint128_t kHuge = kMaxInt128 + 1;
   auto results = expect_parity({
-      permit_step<u8"permit">(kSpender,
-                              {{.spender = kSpender, .amount = kHuge}},
-                              SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = kHuge}}, SignedToken{}),
       permit_step<u8"transfer_from_signed">(
           kSpender, {{.spender = kSpender, .amount = kHuge}}, SignedToken{},
-          kReceiver),
-      permit_step<u8"permit">(kSpender,
-                              {{.spender = kSpender, .amount = kMaxInt128}},
-                              SignedToken{}),
+          kReceiver, make_amount(kHuge)),
+      permit_step<u8"increase_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = kMaxInt128}},
+          SignedToken{}),
   });
   ASSERT_EQ(results.size(), 3U);
   auto too_large = aborted(erc20_abort(itc_erc20_permit::ERC20Error::TooLarge));
@@ -752,11 +791,12 @@ TEST_F(Erc20PermitParityTest, GrantAboveInt128MaxIsTooLarge)
 TEST_F(Erc20PermitParityTest, GrantToSelf)
 {
   auto results = expect_parity({
-      permit_step<u8"permit">(kOwner, {{.spender = kOwner, .amount = 5}},
-                              SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
+          kOwner, {{.spender = kOwner, .amount = 5}}, SignedToken{}),
       permit_step<u8"transfer_from_signed">(kOwner,
                                             {{.spender = kOwner, .amount = 5}},
-                                            SignedToken{}, kReceiver),
+                                            SignedToken{}, kReceiver,
+                                            make_amount(5)),
   });
   ASSERT_EQ(results.size(), 2U);
   EXPECT_EQ(results[0],
@@ -772,14 +812,14 @@ TEST_F(Erc20PermitParityTest, GrantToSelf)
 TEST_F(Erc20PermitParityTest, GrantForAnotherConsumerIsNotConsumable)
 {
   auto results = expect_parity({
-      permit_step<u8"permit">(
+      permit_step<u8"increase_allowance_signed">(
           kSpender,
           {{.spender = kSpender, .amount = 5, .consumer = kOtherContract}},
           SignedToken{}),
       permit_step<u8"transfer_from_signed">(
           kSpender,
           {{.spender = kSpender, .amount = 5, .consumer = kOtherContract}},
-          SignedToken{}, kReceiver),
+          SignedToken{}, kReceiver, make_amount(5)),
   });
   ASSERT_EQ(results.size(), 2U);
   auto refused = aborted(
@@ -797,13 +837,14 @@ TEST_F(Erc20PermitParityTest, GrantForAnotherConsumerIsNotConsumable)
 TEST_F(Erc20PermitParityTest, HandleCountMustMatchSignedArguments)
 {
   auto results = expect_parity({
-      permit_step<u8"permit">(kSpender, {}, SignedToken{}),
-      permit_step<u8"permit">(kSpender,
-                              {{.spender = kSpender, .amount = 1},
-                               {.spender = kSpender, .amount = 2}},
-                              SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(kSpender, {}, SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
+          kSpender,
+          {{.spender = kSpender, .amount = 1},
+           {.spender = kSpender, .amount = 2}},
+          SignedToken{}),
       permit_step<u8"transfer_from_signed">(kSpender, {}, SignedToken{},
-                                            kReceiver),
+                                            kReceiver, make_amount(1)),
       Step{.caller = kOwner,
            .grants = {{.spender = kSpender, .amount = 1}},
            .method = erc20_meta::method_id<u8"transfer">(),
@@ -833,23 +874,24 @@ TEST_F(Erc20PermitParityTest, MalformedGrantsFailAtConsume)
   std::vector<uint8_t> truncated(valid->begin(), valid->end() - 1);
 
   auto results = expect_parity({
-      permit_step<u8"permit">(
+      permit_step<u8"increase_allowance_signed">(
           kSpender, {{.spender = kSpender, .amount = 5, .payload = trailing}},
           SignedToken{}),
-      permit_step<u8"permit">(
+      permit_step<u8"increase_allowance_signed">(
           kSpender, {{.spender = kSpender, .amount = 5, .payload = truncated}},
           SignedToken{}),
-      permit_step<u8"permit">(kSpender,
-                              {{.spender = kSpender,
-                                .amount = 5,
-                                .payload = std::vector<uint8_t>{}}},
-                              SignedToken{}),
-      permit_step<u8"permit">(
+      permit_step<u8"increase_allowance_signed">(kSpender,
+                                                 {{.spender = kSpender,
+                                                   .amount = 5,
+                                                   .payload =
+                                                       std::vector<uint8_t>{}}},
+                                                 SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
           kSpender, {{.spender = kSpender, .amount = 5, .child_count = 1}},
           SignedToken{}),
       permit_step<u8"transfer_from_signed">(
           kSpender, {{.spender = kSpender, .amount = 5, .child_count = 2}},
-          SignedToken{}, kReceiver),
+          SignedToken{}, kReceiver, make_amount(5)),
       erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
   });
   ASSERT_EQ(results.size(), 6U);
@@ -871,12 +913,14 @@ TEST_F(Erc20PermitParityTest, MalformedGrantsFailAtConsume)
 TEST_F(Erc20PermitParityTest, ConsumedGrantCannotBeReplayed)
 {
   auto results = expect_parity({
-      permit_step<u8"permit">(kOwner, {{.spender = kSpender, .amount = 9}},
-                              SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
+          kOwner, {{.spender = kSpender, .amount = 9}}, SignedToken{}),
       Step{.caller = kOwner,
            .grants = {},
-           .method = permit_meta::method_id<u8"permit">(),
-           .calldata = permit_meta::make_calldata<u8"permit">(SignedToken{}),
+           .method = permit_meta::method_id<u8"increase_allowance_signed">(),
+           .calldata =
+               permit_meta::make_calldata<u8"increase_allowance_signed">(
+                   SignedToken{}),
            .reuse_grants_of = 0},
       erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
   });
@@ -885,6 +929,160 @@ TEST_F(Erc20PermitParityTest, ConsumedGrantCannotBeReplayed)
   ASSERT_FALSE(results[1].empty());
   EXPECT_EQ(results[1][0], 0x01) << "the replay reached a token frame";
   EXPECT_EQ(results[2], ok_amount(9));
+}
+
+// A grant is a ceiling: the spender moves what it asks for, up to the grant,
+// and the unused remainder goes nowhere.
+TEST_F(Erc20PermitParityTest, TransferFromSignedMovesUpToTheGrant)
+{
+  auto results = expect_parity({
+      permit_step<u8"transfer_from_signed">(
+          kSpender, {{.spender = kSpender, .amount = 400}}, SignedToken{},
+          kReceiver, make_amount(150)),
+      permit_step<u8"transfer_from_signed">(
+          kSpender, {{.spender = kSpender, .amount = 400}}, SignedToken{},
+          kReceiver, make_amount(0)),
+      erc20_step<u8"get_balance_of">(kSpender, kReceiver),
+      erc20_step<u8"get_balance_of">(kSpender, kOwner),
+      erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
+  });
+  ASSERT_EQ(results.size(), 5U);
+  EXPECT_EQ(results[0], ok());
+  EXPECT_EQ(results[1], ok());
+  EXPECT_EQ(results[2], ok_amount(150));
+  EXPECT_EQ(results[3], ok_amount(kOwnerFunds - 150));
+  EXPECT_EQ(results[4], ok_amount(0));
+  EXPECT_EQ(native_events_.size(), 2U);
+}
+
+// Asking for more than the grant is ExceedsGrant, checked after the spender
+// (a stranger asking too much is still NotSpender) and before the amount's
+// range (an over-grant request above INT128_MAX is still ExceedsGrant).
+TEST_F(Erc20PermitParityTest, TransferFromSignedRefusesMoreThanTheGrant)
+{
+  constexpr uint128_t kHuge = kMaxInt128 + 1;
+  auto results = expect_parity({
+      permit_step<u8"transfer_from_signed">(
+          kSpender, {{.spender = kSpender, .amount = 10}}, SignedToken{},
+          kReceiver, make_amount(11)),
+      permit_step<u8"transfer_from_signed">(
+          kThirdParty, {{.spender = kSpender, .amount = 10}}, SignedToken{},
+          kReceiver, make_amount(11)),
+      permit_step<u8"transfer_from_signed">(
+          kSpender, {{.spender = kSpender, .amount = kHuge}}, SignedToken{},
+          kReceiver, make_amount(kHuge + 1)),
+      erc20_step<u8"get_balance_of">(kSpender, kOwner),
+  });
+  ASSERT_EQ(results.size(), 4U);
+  auto exceeds =
+      aborted(permit_abort(itc_erc20_permit::ERC20PermitError::ExceedsGrant));
+  EXPECT_EQ(results[0], exceeds);
+  EXPECT_EQ(results[1], aborted(permit_abort(
+                            itc_erc20_permit::ERC20PermitError::NotSpender)));
+  EXPECT_EQ(results[2], exceeds);
+  EXPECT_EQ(results[3], ok_amount(kOwnerFunds));
+  EXPECT_TRUE(native_events_.empty());
+}
+
+// A signed clear deletes the allowance, reporting the amount removed, and a
+// write later in the same transaction applies after it.
+TEST_F(Erc20PermitParityTest, ClearAllowanceSignedDeletesTheAllowance)
+{
+  auto results = expect_parity({
+      permit_step<u8"increase_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = 500}}, SignedToken{}),
+      permit_step<u8"clear_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = 0, .clear = true}},
+          SignedToken{}),
+      erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
+      erc20_step<u8"transfer_from">(kSpender, kOwner, kReceiver,
+                                    make_amount(1)),
+      permit_step<u8"increase_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = 7}}, SignedToken{}),
+      erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
+  });
+  ASSERT_EQ(results.size(), 6U);
+  EXPECT_EQ(results[0], ok());
+  EXPECT_EQ(results[1], ok());
+  EXPECT_EQ(results[2], ok_amount(0));
+  EXPECT_EQ(results[3],
+            aborted(erc20_abort(itc_erc20_permit::ERC20Error::TooLarge)));
+  EXPECT_EQ(results[4], ok());
+  EXPECT_EQ(results[5], ok_amount(7));
+  // Approval +500, Approval -500 for the clear, Approval +7.
+  EXPECT_EQ(native_events_.size(), 3U);
+}
+
+// Clearing an allowance that was never granted succeeds and removes nothing;
+// clearing a self-allowance is Internal, as granting one is.
+TEST_F(Erc20PermitParityTest, ClearAllowanceSignedEdgeCases)
+{
+  auto results = expect_parity({
+      permit_step<u8"clear_allowance_signed">(
+          kThirdParty, {{.spender = kSpender, .amount = 0, .clear = true}},
+          SignedToken{}),
+      permit_step<u8"clear_allowance_signed">(
+          kOwner, {{.spender = kOwner, .amount = 0, .clear = true}},
+          SignedToken{}),
+      erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
+  });
+  ASSERT_EQ(results.size(), 3U);
+  EXPECT_EQ(results[0], ok());
+  EXPECT_EQ(results[1],
+            aborted(erc20_abort(itc_erc20_permit::ERC20Error::Internal)));
+  EXPECT_EQ(results[2], ok_amount(0));
+}
+
+// A grant's payload is the type its request signed for: redeemed at another
+// method it fails to decode, whichever way round.
+TEST_F(Erc20PermitParityTest, GrantRedeemedForTheWrongOperationFailsToDecode)
+{
+  auto results = expect_parity({
+      permit_step<u8"clear_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = 5}}, SignedToken{}),
+      permit_step<u8"increase_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = 0, .clear = true}},
+          SignedToken{}),
+      permit_step<u8"transfer_from_signed">(
+          kSpender, {{.spender = kSpender, .amount = 0, .clear = true}},
+          SignedToken{}, kReceiver, make_amount(0)),
+      erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
+  });
+  ASSERT_EQ(results.size(), 4U);
+  auto decode_failure = aborted(
+      auth_token_abort(AuthTokenErrorKind::kAuthTokenConsumeDecodeFailure));
+  EXPECT_EQ(results[0], decode_failure);
+  EXPECT_EQ(results[1], decode_failure);
+  EXPECT_EQ(results[2], decode_failure);
+  EXPECT_EQ(results[3], ok_amount(0));
+}
+
+// A clear and an increase of the same allowance cannot both land in one block:
+// the later transaction fails at commit, on both backends, and the allowance
+// is left cleared. (The deletion alone conflicts; the exclusive lock it also
+// takes matters for storage refunds, which the zeroed cost model hides.)
+TEST_F(Erc20PermitParityTest, ClearConflictsWithAnIncreaseInTheSameBlock)
+{
+  auto outcomes = expect_schedule_parity(
+      {
+          {permit_step<u8"increase_allowance_signed">(
+              kSpender, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
+          {permit_step<u8"clear_allowance_signed">(
+              kSpender, {{.spender = kSpender, .amount = 0, .clear = true}},
+              SignedToken{})},
+          {permit_step<u8"increase_allowance_signed">(
+              kThirdParty, {{.spender = kSpender, .amount = 70}},
+              SignedToken{})},
+          {erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
+      },
+      {{0}, {1, 2}, {3}});
+  ASSERT_EQ(outcomes.size(), 4U);
+  EXPECT_EQ(outcomes[0].commit, ExecResult::ExecResultOK);
+  EXPECT_EQ(outcomes[1].commit, ExecResult::ExecResultOK);
+  EXPECT_NE(outcomes[2].commit, ExecResult::ExecResultOK)
+      << "the increase landed beside the clear";
+  ASSERT_EQ(outcomes[3].records.size(), 1U);
+  EXPECT_EQ(outcomes[3].records[0], ok_amount(0));
 }
 
 // SignedToken is the C++ mirror of `Signed<T>`: no bytes on the wire, its
@@ -900,10 +1098,14 @@ TEST(SignedTokenCodec, EncodesAsZeroBytes)
   EXPECT_TRUE(x23::deserialize_cxs(&decoded, std::span<uint8_t const>{}));
   EXPECT_EQ(decoded.handle, SignedToken::kUnassigned);
 
+  // Only the non-Signed arguments reach the wire: the same bytes as a
+  // transfer(receiver, amount).
   auto calldata =
       permit_meta::make_calldata<u8"transfer_from_signed">(SignedToken{},
-                                                           ContractAddress{});
-  EXPECT_EQ(calldata.size(), sizeof(ContractAddress));
+                                                           ContractAddress{},
+                                                           make_amount(7));
+  EXPECT_EQ(calldata, erc20_meta::make_calldata<u8"transfer">(ContractAddress{},
+                                                              make_amount(7)));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
