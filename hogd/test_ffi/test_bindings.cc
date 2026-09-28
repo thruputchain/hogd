@@ -812,7 +812,7 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
 OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           int32_t invoke_flags) noexcept
+                           uint32_t invoke_flags) noexcept
 {
   if (!syscall_handler) {
     best_effort_log(
@@ -1666,7 +1666,7 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
 OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           int32_t invoke_flags)
+                           uint32_t invoke_flags)
 {
   hogd::do_ffi_trace(
       "FFI (start): open_mock_invocation_frame(syscall_handler={}, "
