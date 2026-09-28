@@ -264,19 +264,29 @@ SystemCallHandler::perform_initial_validation()
   // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
       contracts_to_deploy_.size() > permitted) {
-    error("Transaction attaches {} contracts; chain permits {}",
-          contracts_to_deploy_.size(), permitted);
-    return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
+    warn("tx {}: attaches {} contracts; chain permits {}",
+         show_byte_array(get_source_tx_hash()), contracts_to_deploy_.size(),
+         permitted);
+    return reject_contract_attachment(
+        ContractRejectDiagnostic{.contract_index = permitted,
+                                 .code =
+                                     ContractRejectCode::ContractRejectTooMany},
+        0);
   }
 
   // The blob bound is the chain's (#2569): a configuration may raise it past
   // the default, and hog_db stores whatever a loadable genesis admits.
-  for (auto const &contract : contracts_to_deploy_) {
+  for (size_t i = 0; i < contracts_to_deploy_.size(); ++i) {
     if (const uint32_t permitted = config_params().max_contract_size_bytes;
-        contract_blob_size(contract) > permitted) {
-      error("Transaction attaches a {}-byte contract; chain permits {}",
-            contract_blob_size(contract), permitted);
-      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
+        contract_blob_size(contracts_to_deploy_[i]) > permitted) {
+      warn("tx {}: attached contract {} is {} bytes; chain permits {}",
+           show_byte_array(get_source_tx_hash()), i,
+           contract_blob_size(contracts_to_deploy_[i]), permitted);
+      return reject_contract_attachment(
+          ContractRejectDiagnostic{
+              .contract_index = static_cast<uint32_t>(i),
+              .code = ContractRejectCode::ContractRejectBlobTooLarge},
+          0);
     }
   }
 
@@ -292,7 +302,10 @@ SystemCallHandler::perform_initial_validation()
         NewContractSet::make(contracts_to_deploy_, runtime_context_,
                              config_params());
     if (!res.has_value()) {
-      return {res.error(), gas_consumed};
+      warn("tx {}: refusing attached contract {}: {}",
+           show_byte_array(get_source_tx_hash()), res.error().contract_index,
+           x23::show(res.error().code));
+      return reject_contract_attachment(res.error(), gas_consumed);
     }
     newly_created_contracts_ = std::move(*res);
 
@@ -1229,15 +1242,40 @@ SystemCallHandler::report_db_conflict_diagnostic() const
     first = conflict.conflicts().data();
   }
 
+  TxFailureCause cause(TxFailureKind::TxFailureDbConflict);
+  cause.conflict() = *first;
+  report_tx_failure(std::move(cause));
+}
+
+std::pair<InvokeStatus<void>, GasAmount>
+SystemCallHandler::reject_contract_attachment(
+    ContractRejectDiagnostic const &rejection, GasAmount gas_consumed) const
+{
+  // Only a proposer has an author to tell: in validation the same rejection
+  // means the proposer included a malformed transaction, and nobody is waiting
+  // on this hash.
+  if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+    TxFailureCause cause(TxFailureKind::TxFailureContractRejected);
+    cause.contract() = rejection;
+    report_tx_failure(std::move(cause));
+  }
+  return {InvokeError{InvokeErrorCode::ValidationFailure}, gas_consumed};
+}
+
+void
+SystemCallHandler::report_tx_failure(TxFailureCause cause) const
+{
   // Fire-and-forget: drive the async send in a detached coroutine so execution
   // never waits on it (the same detached-await shape as the event server's own
   // detached sends). report_tx_failure copies the client, so the send is
   // self-contained and safe to outlive us.
   const BlockHeight height = get_block_height();
-  [](x23::Async<void> send)
-      -> x23::Detached { co_await send; }(event_server_proxy_.report_tx_failure(
-          get_source_tx_hash(),
-          TxFailureDiagnostic{.attempt_height = height, .conflict = *first}));
+  [](x23::Async<void> send) -> x23::Detached {
+    co_await send;
+  }(event_server_proxy_.report_tx_failure(get_source_tx_hash(),
+                                          TxFailureDiagnostic{
+                                              .attempt_height = height,
+                                              .cause = std::move(cause)}));
 }
 
 void

@@ -169,21 +169,24 @@ RuntimeContext::RuntimeContext(
   : contracts_(std::move(contracts))
 {}
 
-InvokeErrorCode
+std::expected<void, ContractRejectCode>
 RuntimeContext::verify_contract(Contract const &contract,
                                 NetworkConfigParams const & /*params*/,
                                 hogd::PreparedContract & /*out*/) const
 {
   // kMockTest images are prebuilt in contracts_; nothing to hand back.
   if (contract.contract_type() != ContractType::kMockTest) {
-    return InvokeErrorCode::Deterministic;
+    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
   }
   const int32_t contract_id = contract.mock_contract_id();
   auto it = contracts_.find(contract_id);
-  if (it == contracts_.end() || !runtime_contract_image_is_valid(it->second)) {
-    return InvokeErrorCode::Deterministic;
+  if (it == contracts_.end()) {
+    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
   }
-  return InvokeErrorCode::None;
+  if (!runtime_contract_image_is_valid(it->second)) {
+    return std::unexpected(ContractRejectCode::ContractRejectInvalidProgram);
+  }
+  return {};
 }
 
 x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>

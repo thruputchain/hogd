@@ -398,9 +398,9 @@ class TracingRv32Context final : public RuntimeContext {
 public:
   PairHistogram *active_histogram = nullptr;
 
-  InvokeErrorCode verify_contract(Contract const &contract,
-                                  NetworkConfigParams const &params,
-                                  PreparedContract &out) const override
+  std::expected<void, ContractRejectCode>
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  PreparedContract &out) const override
   {
     return delegate_.verify_contract(contract, params, out);
   }

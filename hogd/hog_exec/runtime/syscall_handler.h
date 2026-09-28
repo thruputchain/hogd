@@ -621,6 +621,19 @@ private:
   // pinned tip, and the send runs in its own detached coroutine.
   void report_db_conflict_diagnostic() const;
 
+  // Rejects the transaction for a refused contract attachment: in proposal
+  // mode, fire-and-forgets `rejection` to the event server as this
+  // transaction's TxFailureDiagnostic (the same best-effort relay as
+  // report_db_conflict_diagnostic) so the author can learn why it was dropped.
+  // Returns the ValidationFailure perform_initial_validation() hands back.
+  std::pair<InvokeStatus<void>, GasAmount>
+  reject_contract_attachment(ContractRejectDiagnostic const &rejection,
+                             GasAmount gas_consumed) const;
+
+  // Sends `cause` for this transaction at the executing block height. Never
+  // fails and never suspends.
+  void report_tx_failure(TxFailureCause cause) const;
+
   BlockExecutionMode get_block_execution_mode() const
   {
     if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {

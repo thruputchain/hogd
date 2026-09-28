@@ -152,6 +152,44 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
   }
 }
 
+// A refused contract attachment reaches the event server as this tx's
+// diagnostic, naming the first offending attachment in transaction order.
+// Independent of the db: the rejection happens before any storage is touched.
+TEST_P(TxFailureReportTest, RefusedContractAttachmentForwardsOneReport)
+{
+  NativeContext context(
+      std::unordered_map<int32_t, std::unique_ptr<NativeContract>>{});
+
+  // Attachment 0 passes the structural gate (it is rv32); attachment 1 is
+  // native, which no transaction may deploy.
+  Contract rv32_contract(ContractType::kRv32);
+  rv32_contract.rv32_contract().data.push_back(0);
+  Transaction tx{
+      .invocation = Invocation{.invoked_address = make_contract_address(0),
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+      .uniquifier = make_new_uniquifier(),
+  };
+  tx.contracts_to_deploy.push_back(std::move(rv32_contract));
+  tx.contracts_to_deploy.push_back(*make_native_contract(0));
+
+  auto handler = make_new_system_call_handler(std::move(tx), context);
+  EXPECT_FALSE(handler.root_invoke()().is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction()(),
+            ExecResult::ExecResultTxValidationFailure);
+
+  wait_for_failure_reports(1)();
+  auto reports = get_failure_reports()();
+  ASSERT_EQ(reports.size(), 1);
+  EXPECT_EQ(reports[0].first, handler.get_source_tx_hash());
+  TxFailureCause const &cause = reports[0].second.cause;
+  ASSERT_EQ(cause.kind(), TxFailureKind::TxFailureContractRejected);
+  EXPECT_EQ(cause.contract().contract_index, 1);
+  EXPECT_EQ(cause.contract().code,
+            ContractRejectCode::ContractRejectNotDeployable);
+}
+
 INSTANTIATE_TEST_SUITE_P(TxFailureReportTest, TxFailureReportTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDb),

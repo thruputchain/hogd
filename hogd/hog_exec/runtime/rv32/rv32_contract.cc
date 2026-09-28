@@ -38,22 +38,59 @@ static_assert(rv32::kDefaultMaxCodeBytes ==
 static_assert(rv32::kDefaultMaxMemoryBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
 
-std::optional<Rv32Contract>
+ContractRejectCode
+to_contract_reject_code(rv32::ArtifactError error)
+{
+  using enum rv32::ArtifactError;
+  switch (error) {
+  case kTooSmall:
+  case kBadMagic:
+  case kBadHeaderSize:
+  case kInvalidSectionLayout:
+    return ContractRejectCode::ContractRejectMalformedArtifact;
+  case kUnsupportedFormatVersion:
+    return ContractRejectCode::ContractRejectUnsupportedFormat;
+  case kUnsupportedVmProfile:
+  case kUnsupportedFlags:
+  case kUnsupportedEntryAbi:
+  case kUnsupportedSyscallAbi:
+    return ContractRejectCode::ContractRejectUnsupportedAbi;
+  case kGasScheduleVersionMismatch:
+  case kGasScheduleDigestMismatch:
+    return ContractRejectCode::ContractRejectGasScheduleMismatch;
+  case kMemorySizeInvalid:
+    return ContractRejectCode::ContractRejectMemoryTooLarge;
+  case kCodeSizeInvalid:
+    return ContractRejectCode::ContractRejectCodeSizeInvalid;
+  case kInitialMemoryTooLarge:
+    return ContractRejectCode::ContractRejectInitialMemoryInvalid;
+  case kCodeDigestMismatch:
+  case kInitialMemoryDigestMismatch:
+    return ContractRejectCode::ContractRejectDigestMismatch;
+  case kInvalidProgram:
+    return ContractRejectCode::ContractRejectInvalidProgram;
+  }
+  // Every enumerator returns above; an out-of-range value is memory corruption.
+  CHECK(false);
+  return ContractRejectCode::ContractRejectMalformedArtifact;
+}
+
+std::expected<Rv32Contract, rv32::ArtifactError>
 Rv32Contract::create(ContractBlob const &contract_blob, rv32::Rv32Limits limits)
 {
   auto artifact = rv32::parse_threaded_artifact(contract_blob.data, limits);
   if (!artifact.has_value()) {
-    return std::nullopt;
+    return std::unexpected(artifact.error());
   }
 
   auto pre_instantiation = rv32::ThreadedMachinePreInstantiation::create(
       artifact->code, artifact->initial_memory, artifact->initial_memory_start,
       artifact->memory_bytes, false);
   if (!pre_instantiation.has_value()) {
-    return std::nullopt;
+    return std::unexpected(rv32::ArtifactError::kInvalidProgram);
   }
 
-  return std::make_optional<Rv32Contract>(std::move(*pre_instantiation));
+  return Rv32Contract(std::move(*pre_instantiation));
 }
 
 Rv32Contract::Rv32Contract(
@@ -206,13 +243,13 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
                      total_gas_consumed};
 }
 
-InvokeErrorCode
+std::expected<void, ContractRejectCode>
 Rv32Context::verify_contract(Contract const &contract,
                              NetworkConfigParams const &params,
                              PreparedContract &out) const
 {
   if (contract.contract_type() != ContractType::kRv32) {
-    return InvokeErrorCode::Deterministic;
+    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
   }
   // Verify full translatability, not just artifact parsing: parse_threaded_-
   // artifact only runs the structural artifact checks, whereas Rv32Contract::-
@@ -227,15 +264,15 @@ Rv32Context::verify_contract(Contract const &contract,
   // deployment instead of lowering the identical bytes a second time (#3536).
   // Attachment uses the chain's bounds; a deployed contract runs under the
   // VM's ceilings (StorageSnapshotCache).
-  std::optional<Rv32Contract> translated = Rv32Contract::create(
+  auto translated = Rv32Contract::create(
       contract.rv32_contract(),
       rv32::Rv32Limits{.max_code_bytes = params.max_rv32_code_bytes,
                        .max_memory_bytes = params.max_rv32_memory_bytes});
   if (!translated.has_value()) {
-    return InvokeErrorCode::Deterministic;
+    return std::unexpected(to_contract_reject_code(translated.error()));
   }
-  out.rv32 = std::move(translated);
-  return InvokeErrorCode::None;
+  out.rv32.emplace(std::move(*translated));
+  return {};
 }
 
 x23::Async<SystemStatus<std::unique_ptr<Runtime>>>

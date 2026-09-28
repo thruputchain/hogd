@@ -2,9 +2,11 @@
 
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <memory>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
@@ -61,13 +63,18 @@ public:
   // `out` is built in place: the caller supplies storage at whatever scope it
   // wants the preparation to live, and the context memoizes nothing. It is
   // written only on success; on rejection it is left as the caller had it.
-  virtual InvokeErrorCode verify_contract(Contract const &contract,
-                                          NetworkConfigParams const &params,
-                                          PreparedContract &out) const = 0;
+  //
+  // A rejection names why, so the executor can tell the author (it rides the
+  // proposer's TxFailureDiagnostic). A context that cannot run the contract's
+  // type at all reports ContractRejectNotDeployable.
+  virtual std::expected<void, ContractRejectCode>
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  PreparedContract &out) const = 0;
 
   // Convenience for callers that only want the verdict and would discard the
-  // preparation. Defined out-of-line so PreparedContract is complete where the
-  // discarded instance is constructed and destroyed.
+  // preparation and the reason: None on success, Deterministic on rejection.
+  // Defined out-of-line so PreparedContract is complete where the discarded
+  // instance is constructed and destroyed.
   //
   // Overriders hide this overload; a class whose callers use it through the
   // derived type needs `using RuntimeContext::verify_contract;`.

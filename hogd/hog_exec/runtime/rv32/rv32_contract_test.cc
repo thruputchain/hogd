@@ -5,6 +5,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -14,6 +15,7 @@
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
@@ -22,6 +24,7 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
@@ -784,6 +787,67 @@ TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
   Rv32Context context;
   EXPECT_EQ(context.verify_contract(contract, NetworkConfigParams{}),
             InvokeErrorCode::Deterministic);
+}
+
+namespace {
+
+// The reason verification names for `artifact`, or nullopt when it verifies.
+std::optional<ContractRejectCode>
+rv32_reject_reason(std::vector<uint8_t> const &artifact)
+{
+  ContractBlob blob;
+  blob.data.append_range(artifact);
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract() = std::move(blob);
+  PreparedContract prepared;
+  auto res =
+      Rv32Context{}.verify_contract(contract, NetworkConfigParams{}, prepared);
+  if (res.has_value()) {
+    return std::nullopt;
+  }
+  return res.error();
+}
+
+} // namespace
+
+// Each rejection names the check that refused it, so an author can tell a
+// toolchain/node mismatch from a corrupt or unsupported build.
+TEST(Rv32ContractTest, VerifyNamesRejectionReason)
+{
+  const std::vector<uint8_t> valid =
+      rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
+                                          std::vector<uint8_t>{0});
+  EXPECT_EQ(rv32_reject_reason(valid), std::nullopt);
+
+  EXPECT_EQ(rv32_reject_reason({0xde, 0xad, 0xbe, 0xef}),
+            ContractRejectCode::ContractRejectMalformedArtifact);
+
+  std::vector<uint8_t> truncated = valid;
+  truncated.resize(truncated.size() - 1);
+  EXPECT_EQ(rv32_reject_reason(truncated),
+            ContractRejectCode::ContractRejectMalformedArtifact);
+
+  // An artifact stamped by a toolchain on a different gas schedule.
+  std::vector<uint8_t> other_schedule = valid;
+  const uint32_t other_version = rv32::kGasTableVersion + 1;
+  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+    other_schedule[rv32::kArtifactGasVersionOffset + i] =
+        static_cast<uint8_t>(other_version >> (i * 8));
+  }
+  EXPECT_EQ(rv32_reject_reason(other_schedule),
+            ContractRejectCode::ContractRejectGasScheduleMismatch);
+
+  // 0x53 is an F-extension opcode: parses structurally, fails translation.
+  EXPECT_EQ(rv32_reject_reason(
+                rv32::test_artifact::build_artifact({0x00000053U},
+                                                    std::vector<uint8_t>{0})),
+            ContractRejectCode::ContractRejectInvalidProgram);
+
+  PreparedContract prepared;
+  auto native = Rv32Context{}.verify_contract(Contract(ContractType::kNative),
+                                              NetworkConfigParams{}, prepared);
+  ASSERT_FALSE(native.has_value());
+  EXPECT_EQ(native.error(), ContractRejectCode::ContractRejectNotDeployable);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -48,14 +48,15 @@ public:
              TxEventLog const &tx_event_log,
              ProposedTransaction const &proposed_tx);
 
-  // Best-effort report that [tx_hash] failed nondeterministically during 2pc,
-  // with the diagnostic hog_db attached. Awaitable; callers fire-and-forget it
-  // (see report_db_conflict_diagnostic, which spawns it detached the same way
-  // ExecutorContext spawns emit_events). The coroutine copies client_ up front
-  // (client_t wraps a refcounted ClientRef), so a spawned send is
-  // self-contained and can safely outlive this proxy; a slow or dead event
-  // server costs nothing but the dropped report -- RPC errors are logged and
-  // swallowed, because a diagnostic must never disturb execution.
+  // Best-effort report that [tx_hash] was excluded from the proposal: a 2pc
+  // conflict hog_db diagnosed, or a refused contract attachment. Awaitable;
+  // callers fire-and-forget it (see SystemCallHandler::report_tx_failure,
+  // which spawns it detached the same way ExecutorContext spawns
+  // emit_events). The coroutine copies client_ up front (client_t wraps a
+  // refcounted ClientRef), so a spawned send is self-contained and can safely
+  // outlive this proxy; a slow or dead event server costs nothing but the
+  // dropped report -- RPC errors are logged and swallowed, because a
+  // diagnostic must never disturb execution.
   x23::Async<void> report_tx_failure(TransactionHash tx_hash,
                                      TxFailureDiagnostic diag);
 

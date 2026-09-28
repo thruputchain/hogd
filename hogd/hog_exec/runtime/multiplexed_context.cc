@@ -38,14 +38,14 @@ MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
                                                         syscall_handler);
 }
 
-InvokeErrorCode
+std::expected<void, ContractRejectCode>
 MultiplexedContext::verify_contract(Contract const &contract,
                                     NetworkConfigParams const &params,
                                     PreparedContract &out) const
 {
   auto it = contexts_.find(contract.contract_type());
   if (it == contexts_.end()) {
-    return InvokeErrorCode::Deterministic;
+    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
   }
   return it->second.first->verify_contract(contract, params, out);
 }

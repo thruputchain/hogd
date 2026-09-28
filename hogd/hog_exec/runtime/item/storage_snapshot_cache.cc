@@ -82,8 +82,13 @@ StorageSnapshotCache::load_contract_entry(SHA256Hash hash)
     if (contract.contract_type() == ContractType::kRv32) {
       // Deployed under whatever bounds were in force then; the ceilings keep
       // it runnable after the chain lowers them.
-      prepared.rv32 = Rv32Contract::create(contract.rv32_contract(),
-                                           rv32::Rv32Limits::ceiling());
+      // A deployed artifact that does not translate leaves this empty;
+      // make_new_runtime reports that as Unrecoverable.
+      if (auto translated = Rv32Contract::create(contract.rv32_contract(),
+                                                 rv32::Rv32Limits::ceiling());
+          translated.has_value()) {
+        prepared.rv32.emplace(std::move(*translated));
+      }
     }
     entry.emplace(ContractCacheEntry{.contract = std::move(contract),
                                      .prepared = std::move(prepared)});

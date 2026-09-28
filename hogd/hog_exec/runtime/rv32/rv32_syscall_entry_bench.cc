@@ -247,9 +247,10 @@ constexpr int64_t kColdIterations = 20000;
 // request so a new benchmark cannot silently measure a stub runtime.
 class NoChildRuntimeContext final : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*contract*/,
-                                  NetworkConfigParams const & /*params*/,
-                                  PreparedContract & /*out*/) const override
+  std::expected<void, ContractRejectCode>
+  verify_contract(Contract const & /*contract*/,
+                  NetworkConfigParams const & /*params*/,
+                  PreparedContract & /*out*/) const override
   {
     std::abort();
   }

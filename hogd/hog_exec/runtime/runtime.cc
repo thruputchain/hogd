@@ -19,7 +19,9 @@ RuntimeContext::verify_contract(Contract const &contract,
                                 NetworkConfigParams const &params) const
 {
   PreparedContract discarded;
-  return verify_contract(contract, params, discarded);
+  return verify_contract(contract, params, discarded).has_value()
+             ? InvokeErrorCode::None
+             : InvokeErrorCode::Deterministic;
 }
 
 x23::Async<InvokeResult>
