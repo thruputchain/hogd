@@ -582,7 +582,7 @@ TEST_F(DatabaseTest, IgnoresNonCanonicalSnapshotAlias)
 // as a fresh, empty database and silently drop committed state (#4179).
 TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
 {
-  constexpr uint64_t max_lsn = std::numeric_limits<uint64_t>::max();
+  constexpr uint64_t kMaxLsn = std::numeric_limits<uint64_t>::max();
   const size_t heap_size =
       Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
   const std::string preserved_key = "preserved";
@@ -615,7 +615,7 @@ TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
   std::memcpy(&commit_header, bytes.data() + commit_offset,
               sizeof(commit_header));
   ASSERT_EQ(commit_header.storage, ItemStorage::kCommit);
-  commit_header.lsn = max_lsn - 1;
+  commit_header.lsn = kMaxLsn - 1;
   commit_header.clear_next();
   std::memcpy(bytes.data() + commit_offset, &commit_header,
               sizeof(commit_header));
@@ -631,14 +631,14 @@ TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
     ASSERT_TRUE(write_full(*file, std::span(bytes)));
   }
 
-  ASSERT_TRUE(dir_.rename("0-1.snap", std::format("0-{}.snap", max_lsn)));
+  ASSERT_TRUE(dir_.rename("0-1.snap", std::format("0-{}.snap", kMaxLsn)));
   ASSERT_TRUE(dir_.unlink("0.log"));
 
   // Recovery still restores the untouched snapshot row and reports the
   // maximum LSN; it must not have wrapped.
   auto recovered = Database::check(dir_.get_path(), heap_size);
   ASSERT_TRUE(recovered);
-  EXPECT_EQ(*recovered, max_lsn);
+  EXPECT_EQ(*recovered, kMaxLsn);
 
   ASSERT_TRUE(open_db());
   ASSERT_TRUE(db_->get(std::as_bytes(std::span(preserved_key))));
@@ -655,7 +655,7 @@ TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
   // than opening an empty database.
   auto rechecked = Database::check(dir_.get_path(), heap_size);
   ASSERT_TRUE(rechecked);
-  EXPECT_EQ(*rechecked, max_lsn);
+  EXPECT_EQ(*rechecked, kMaxLsn);
 
   ASSERT_TRUE(open_db());
   ASSERT_TRUE(db_->get(std::as_bytes(std::span(preserved_key))));
