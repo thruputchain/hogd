@@ -155,6 +155,7 @@ target_link_libraries(
   runtime
   hog_exec_common
   components
+  storage_cost
   unified_lib
   protocol
   metrics

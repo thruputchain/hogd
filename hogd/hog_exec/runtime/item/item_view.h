@@ -28,6 +28,16 @@ namespace hogd {
 
 class SnapshotStorageItem;
 class StorageSnapshotCache;
+struct StorageCostModel;
+
+// Signed bounds: positive changes increase storage cost, negative changes
+// decrease it. A missing endpoint is unknown, not zero (nor an assumed maximum
+// item size). These describe local footprints, not the DB's final allocation of
+// charges/refunds among transactions sharing a key.
+struct StorageCostChangeBounds {
+  std::optional<int128_t> lower;
+  std::optional<int128_t> upper;
+};
 
 // Each of the item types has the following methods:
 // get_delta()
@@ -372,6 +382,20 @@ public:
   std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
   get_delta(std::span<QueueEntry const> observed_entries = {}) const;
 
+  // Compare this view with an earlier view of the same key in the same
+  // transaction. Only inspects locally available state; never loads a snapshot.
+  // Keep the earlier view before replacing its pending write. Both footprints
+  // are priced with cost_model, so callers can use the executing tip's prices.
+  //
+  // Bytestrings, NNInts and deletions have exact pending footprints. An
+  // unloaded snapshot or a partial queue/auth/replay-cache view may leave an
+  // endpoint unknown. A negative bound alone does not authorize an
+  // in-transaction refund: callers must separately enforce the DB's
+  // locking/refund rules.
+  [[nodiscard]] StorageCostChangeBounds
+  get_storage_cost_change_bounds(ItemView const &before,
+                                 StorageCostModel const &cost_model) const;
+
   void sync_retrocausally_consumed(RetrocausalQueueItem const &item)
   {
     retrocausally_consumed_count_ = item.get_retrocausally_consumed_count();
@@ -383,6 +407,10 @@ public:
   }
 
 private:
+  // nullopt means the footprint is unavailable; its cost is still nonnegative.
+  std::optional<int128_t>
+  get_known_storage_cost(StorageCostModel const &cost_model) const;
+
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
                AddressAuthDataItem>

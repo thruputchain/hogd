@@ -6,6 +6,7 @@
 #include <optional>
 #include <random>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -20,6 +21,7 @@
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -71,6 +73,79 @@ replay_exhausted_at_cap(bool cap_exceeded)
 }
 
 } // namespace
+
+std::optional<int128_t>
+ItemView::get_known_storage_cost(StorageCostModel const &cost_model) const
+{
+  return std::visit(
+      [&](auto const &item) -> std::optional<int128_t> {
+        using T = std::decay_t<decltype(item)>;
+        if constexpr (std::is_same_v<T, DeletedItem>) {
+          return 0;
+        }
+        else if constexpr (std::is_same_v<T, BytestringItem>) {
+          return cost_model.get_bytestring_cost(item.bytestring_.size());
+        }
+        else if constexpr (std::is_same_v<T, NNIntItem>) {
+          // A blind add has an unknown numeric value, but a fixed footprint.
+          return cost_model.get_nnint_cost();
+        }
+        else if constexpr (std::is_same_v<T, UnmodifiedItem>) {
+          if (!item.is_loaded()) {
+            return std::nullopt;
+          }
+          auto const &base = item.base_item();
+          auto type = base.type();
+          if (!type) {
+            return 0;
+          }
+          switch (*type) {
+          case ItemViewType::kBytestring:
+            return cost_model.get_bytestring_cost(base.bytestring().size());
+          case ItemViewType::kNNInt:
+            return cost_model.get_nnint_cost();
+          case ItemViewType::kRetrocausalQueue:
+            return cost_model.get_retrocausal_queue_cost(
+                base.retrocausal_queue_metadata().live_entries);
+          default:
+            return std::nullopt;
+          }
+        }
+        else {
+          // These variants contain partial changes, not complete items. In
+          // particular, an RCQ's insert/consume delta is not its exit
+          // footprint.
+          return std::nullopt;
+        }
+      },
+      delta_args_);
+}
+
+StorageCostChangeBounds
+ItemView::get_storage_cost_change_bounds(
+    ItemView const &before, StorageCostModel const &cost_model) const
+{
+  if (this == &before ||
+      (std::holds_alternative<UnmodifiedItem>(before.delta_args_) &&
+       std::holds_alternative<UnmodifiedItem>(delta_args_))) {
+    // Reading an item does not change its footprint, even if neither view
+    // loaded the snapshot (or only one of them did).
+    return {0, 0};
+  }
+
+  auto prior_cost = before.get_known_storage_cost(cost_model);
+  auto next_cost = get_known_storage_cost(cost_model);
+  if (prior_cost && next_cost) {
+    int128_t change = *next_cost - *prior_cost;
+    return {change, change};
+  }
+
+  // An unknown footprint has nonnegative cost but no assumed upper limit.
+  // For example, a blind deletion has bounds [unknown, 0], and a blind NNInt
+  // write has bounds [unknown, nnint_cost] (it can replace another item type).
+  return {prior_cost ? std::optional<int128_t>(-(*prior_cost)) : std::nullopt,
+          next_cost};
+}
 
 std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
 ItemView::get_delta(std::span<QueueEntry const> observed_entries) const

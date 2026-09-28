@@ -15,6 +15,7 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
+#include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/queue_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -709,5 +710,178 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+TEST(ItemViewStorageCostTest, BlindWritesDoNotAssumeAnEmptySnapshot)
+{
+  StorageCostModel model(100, 7, 5, 5, 0);
+  ItemView before;
+  ItemView after = before;
+
+  auto bounds = after.get_storage_cost_change_bounds(before, model);
+  EXPECT_EQ(bounds.lower, 0);
+  EXPECT_EQ(bounds.upper, 0);
+
+  ASSERT_TRUE(after.set(NNIntItem(std::nullopt, to_xdr(int128_t(1)))));
+  bounds = after.get_storage_cost_change_bounds(before, model);
+  EXPECT_EQ(bounds.lower, std::nullopt);
+  EXPECT_EQ(bounds.upper, 100);
+
+  ASSERT_TRUE(after.set(BytestringItem(Bytestring{1, 2, 3})));
+  bounds = after.get_storage_cost_change_bounds(before, model);
+  EXPECT_EQ(bounds.lower, std::nullopt);
+  EXPECT_EQ(bounds.upper, 121);
+
+  ASSERT_TRUE(after.set(DeletedItem{}));
+  bounds = after.get_storage_cost_change_bounds(before, model);
+  EXPECT_EQ(bounds.lower, std::nullopt);
+  EXPECT_EQ(bounds.upper, 0);
+  ASSERT_NE(before.get<UnmodifiedItem>(), nullptr);
+  EXPECT_FALSE(before.get<UnmodifiedItem>()->is_loaded());
+}
+
+TEST(ItemViewStorageCostTest, KnownFootprintsAndCrossTypeReplacements)
+{
+  StorageCostModel model(100, 7, 5, 5, 0);
+  std::vector<std::pair<ItemView, int128_t>> states;
+  auto add_state = [&](auto item, int128_t cost) {
+    ItemView view;
+    ASSERT_TRUE(view.set(item));
+    states.emplace_back(std::move(view), cost);
+  };
+  add_state(DeletedItem{}, 0);
+  add_state(BytestringItem(Bytestring{}), 100);
+  add_state(BytestringItem(Bytestring{1, 2, 3}), 121);
+  add_state(NNIntItem(std::nullopt, to_xdr(int128_t(0))), 100);
+  add_state(NNIntItem(to_xdr(int128_t(7)), to_xdr(int128_t(2))), 100);
+
+  for (auto const &[before, before_cost] : states) {
+    for (auto const &[after, after_cost] : states) {
+      auto bounds = after.get_storage_cost_change_bounds(before, model);
+      EXPECT_EQ(bounds.lower, after_cost - before_cost);
+      EXPECT_EQ(bounds.upper, after_cost - before_cost);
+    }
+  }
+}
+
+TEST(ItemViewStorageCostTest, ComposedWritesAndFrameCopies)
+{
+  StorageCostModel model(100, 7, 5, 5, 0);
+  ItemView empty;
+  ASSERT_TRUE(empty.set(DeletedItem{}));
+  ItemView parent = empty;
+  ASSERT_TRUE(parent.set(BytestringItem(Bytestring{1, 2, 3})));
+
+  ItemView child = parent;
+  ASSERT_TRUE(child.set(DeletedItem{}));
+  ASSERT_TRUE(child.set(NNIntItem(std::nullopt, to_xdr(int128_t(1)))));
+  auto bounds = child.get_storage_cost_change_bounds(parent, model);
+  EXPECT_EQ(bounds.lower, -21);
+  EXPECT_EQ(bounds.upper, -21);
+
+  // Discarding a child leaves the parent's accounting unchanged.
+  bounds = parent.get_storage_cost_change_bounds(empty, model);
+  EXPECT_EQ(bounds.lower, 121);
+  EXPECT_EQ(bounds.upper, 121);
+
+  parent = child;
+  bounds = parent.get_storage_cost_change_bounds(empty, model);
+  EXPECT_EQ(bounds.lower, 100);
+  EXPECT_EQ(bounds.upper, 100);
+
+  ASSERT_TRUE(parent.set(DeletedItem{}));
+  bounds = parent.get_storage_cost_change_bounds(child, model);
+  EXPECT_EQ(bounds.lower, -100);
+  EXPECT_EQ(bounds.upper, -100);
+  bounds = parent.get_storage_cost_change_bounds(empty, model);
+  EXPECT_EQ(bounds.lower, 0);
+  EXPECT_EQ(bounds.upper, 0);
+}
+
+TEST(ItemViewStorageCostTest, UsesSuppliedPricesAndIgnoresStorageFlags)
+{
+  ItemView before;
+  ASSERT_TRUE(before.set(BytestringItem(Bytestring{1})));
+  ItemView after = before;
+  ASSERT_TRUE(after.set(BytestringItem(Bytestring{1, 2, 3})));
+  ASSERT_TRUE(after.set_flags(kExclusive));
+
+  for (uint32_t per_byte : {0U, 7U, 1000U}) {
+    StorageCostModel model(100, per_byte, 5, 5, 0);
+    auto bounds = after.get_storage_cost_change_bounds(before, model);
+    EXPECT_EQ(bounds.lower, int128_t{2} * per_byte);
+    EXPECT_EQ(bounds.upper, int128_t{2} * per_byte);
+  }
+}
+
+TEST_F(ItemViewTest, StorageCostBoundsUseLoadedSnapshot)
+{
+  StorageCostModel model(100, 7, 5, 5, 0);
+  StorageSnapshotCache cache(BlockID{1},
+                             BlockExecutionContext{.block_height = 1,
+                                                   .block_timepoint = 0},
+                             *db_proxy_);
+  AddressAndKey addrkey{};
+  server_->impl()->setup_create_item(addrkey,
+                                     StorageItemWrapper(Bytestring{1, 2, 3},
+                                                        &model));
+
+  ItemView before;
+  ItemView unread = before;
+  auto *unmodified = before.get<UnmodifiedItem>();
+  ASSERT_NE(unmodified, nullptr);
+  ASSERT_TRUE(unmodified->load(cache, FrameItemKey::from(addrkey))());
+  auto bounds = before.get_storage_cost_change_bounds(unread, model);
+  EXPECT_EQ(bounds.lower, 0);
+  EXPECT_EQ(bounds.upper, 0);
+
+  ItemView after = before;
+  ASSERT_TRUE(after.set(DeletedItem{}));
+  bounds = after.get_storage_cost_change_bounds(before, model);
+  EXPECT_EQ(bounds.lower, -121);
+  EXPECT_EQ(bounds.upper, -121);
+}
+
+TEST_F(ItemViewTest, StorageCostBoundsUseLoadedAbsence)
+{
+  StorageCostModel model(100, 7, 5, 5, 0);
+  StorageSnapshotCache cache(BlockID{1},
+                             BlockExecutionContext{.block_height = 1,
+                                                   .block_timepoint = 0},
+                             *db_proxy_);
+  ItemView before;
+  auto *unmodified = before.get<UnmodifiedItem>();
+  ASSERT_NE(unmodified, nullptr);
+  ASSERT_TRUE(unmodified->load(cache, FrameItemKey::from(AddressAndKey{}))());
+
+  ItemView after = before;
+  ASSERT_TRUE(after.set(NNIntItem(std::nullopt, to_xdr(int128_t(1)))));
+  auto bounds = after.get_storage_cost_change_bounds(before, model);
+  EXPECT_EQ(bounds.lower, 100);
+  EXPECT_EQ(bounds.upper, 100);
+}
+
+TEST_F(ItemViewTest, StorageCostBoundsDoNotPricePartialQueuesAsCompleteItems)
+{
+  StorageCostModel model(100, 7, 5, 5, 0);
+  auto snapshot = make_empty_item();
+  ItemView before;
+  ASSERT_TRUE(before.set(BytestringItem(Bytestring{1, 2, 3})));
+  ItemView after = before;
+  ASSERT_TRUE(after.set(RetrocausalQueueItem(*snapshot)));
+
+  auto bounds = after.get_storage_cost_change_bounds(before, model);
+  EXPECT_EQ(bounds.lower, -121);
+  EXPECT_EQ(bounds.upper, std::nullopt);
+
+  ItemView deleted = after;
+  ASSERT_TRUE(deleted.set(DeletedItem{}));
+  bounds = deleted.get_storage_cost_change_bounds(after, model);
+  EXPECT_EQ(bounds.lower, std::nullopt);
+  EXPECT_EQ(bounds.upper, 0);
+
+  bounds = after.get_storage_cost_change_bounds(after, model);
+  EXPECT_EQ(bounds.lower, 0);
+  EXPECT_EQ(bounds.upper, 0);
+}
 
 } // namespace hogd
