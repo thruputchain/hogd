@@ -51,10 +51,8 @@ def validate_and_extract_error_codes(syscall: dict) -> list[str]:
     return error_codes
 
 
-# hog_exec-specific syscall flags, populated from hog_exec_syscalls.yaml before
-# any code is generated (see load_hog_exec_spec). ASYNC_SYSCALLS bodies may
-# suspend (coroutine, MaybeAsyncSyscallInnerResult); NEEDS_GAS_SYSCALLS bodies
-# get the frame's remaining gas. That yaml documents both properties.
+# Populated from hog_exec_syscalls.yaml before generation (see
+# load_hog_exec_spec); that file documents both flags.
 ASYNC_SYSCALLS = frozenset()
 NEEDS_GAS_SYSCALLS = frozenset()
 
@@ -577,8 +575,7 @@ spec = spec_full["syscalls"]
 # Validate syscall numbering and order early to provide a clear error message
 validate_syscall_numbers_in_order(spec_full)
 
-# Load the hog_exec-specific properties and derive the flag sets the generators
-# consult. Done before any code is generated so a bad entry fails fast.
+# Load and validate hog_exec flags before any code is generated.
 hog_exec_spec = load_hog_exec_spec(args.hog_exec_yaml,
                                    {s["name"] for s in spec})
 ASYNC_SYSCALLS = frozenset(
