@@ -81,20 +81,11 @@ ASYNC_SYSCALLS = frozenset({
     "Invoke",
 })
 
-# Syscalls whose inner body needs the frame's remaining gas passed in, on top
-# of any that request it via `needs_gas` in the spec.
-#
-# Like ASYNC_SYSCALLS this is a hog_exec implementation detail: whether the
-# body receives the gas amount does not change the wire ABI (the guest passes
-# the same arguments either way) and the Rust/TS SDKs generated from the spec
-# do not care, so it lives here rather than in protocol/syscalls.yaml. Keeping
-# it here also avoids coupling a hog_exec-only bugfix to a protocol bump.
-#
-# VerifySignature needs it to reserve the message-length-priced Ed25519
-# verification cost before running the verifier, so a low-gas child frame
-# cannot perform the full curve work for the price of the crossing (#4172).
-# A stale entry cannot go unnoticed: the body definition would no longer match
-# the generated declaration and the build fails.
+# Syscalls whose inner body needs the frame's remaining gas, on top of any that
+# set `needs_gas` in the spec. Like ASYNC_SYSCALLS this is a hog_exec detail
+# (identical wire ABI) kept out of protocol/syscalls.yaml, so a hog_exec-only
+# fix needs no protocol bump. VerifySignature uses it to reserve the
+# length-priced Ed25519 cost before running the verifier (issue #4172).
 HOG_EXEC_NEEDS_GAS_SYSCALLS = frozenset({
     "VerifySignature",
 })

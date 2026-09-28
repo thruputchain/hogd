@@ -135,11 +135,9 @@ syscall_VerifySignature_inner(WrappedGasAmount remaining_gas,
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
-    // Verification is priced by message length, so reserve that cost before
-    // running it. Otherwise a child frame with a tiny gas limit could perform
-    // the full curve work and fault only afterward, letting a parent recover
-    // via TryInvoke and repeat the underpriced work while paying only each
-    // child's capped budget (issue #4172).
+    // Reserve the length-priced cost before running the verifier: otherwise a
+    // low-gas child frame does the full curve work and faults only after, so a
+    // TryInvoke parent repeats it for the price of the crossing (issue #4172).
     const WrappedGasAmount gas{GasCost::verify_signature(input_message.size())};
     if (remaining_gas.get() <= gas.get()) {
       return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
