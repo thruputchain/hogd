@@ -19,6 +19,7 @@
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
@@ -548,7 +549,8 @@ TEST_F(DirectStalenessTest,
                         true, std::as_writable_bytes(std::span(&observed, 1)),
                         observed_len);
                 if (!res.has_value()) {
-                  co_return InvokeError{InvokeErrorCode::Unrecoverable};
+                  co_return NativeContractBuilder::host_fn_error_conversion(
+                      res.error());
                 }
                 if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
                     observed_len != 1 || observed != kForgedEntry) {
