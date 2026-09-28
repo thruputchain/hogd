@@ -15,9 +15,7 @@ static LARGE_CALLDATA: [u8; LARGE_CALLDATA_LEN] = [0x5a; LARGE_CALLDATA_LEN];
 /// #2327 report.
 const MALFORMED_TOKEN_BYTES: [u8; 1] = [0x7f];
 
-/// Distinct token ids so a span parses cleanly (no duplicate rejection) and
-/// admission is what refuses it, for ids the frame does not own. Built in
-/// .rodata by a const fn, so it costs no stack and no runtime allocation.
+/// Distinct token ids so a span parses cleanly and admission is what refuses it.
 const MANY_TOKEN_COUNT: usize = 512;
 const MANY_TOKEN_BYTES_LEN: usize = MANY_TOKEN_COUNT * 4;
 
@@ -96,10 +94,8 @@ fn invoke_with_malformed_tokens(address: &ContractAddress) {
     assert_outputs_untouched(&outputs);
 }
 
-/// A well-formed, unowned token span forwarded to `target`: admission refuses
-/// it as kInvalidSyscallInput because the frame owns no tokens, after the host
-/// has parsed the whole span. Empty calldata keeps the syscall's gas the
-/// crossing plus the span's parse charge and nothing else.
+/// Forward a well-formed, unowned token span to `target`; admission refuses it
+/// as kInvalidSyscallInput after the host has parsed the span.
 fn invoke_with_unowned_tokens(target: &ContractAddress, tokens: &[u8]) {
     let mut outputs = seeded_outputs();
     let res = sys::raw_Invoke(target, &[], tokens, &inputs(), &mut outputs);

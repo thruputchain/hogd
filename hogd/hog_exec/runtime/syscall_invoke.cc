@@ -139,25 +139,18 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
         WrappedGasAmount{0}};
   }
 
-  // A malformed span (not a whole number of 4-byte ids) is refused by this O(1)
-  // length check before anything is copied or hashed, so -- as #2327 pinned --
-  // it still costs only the crossing and cannot buy host work for free.
+  // A malformed span is refused before anything is copied or hashed, so it
+  // still costs only the crossing (#2327).
   if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
     co_return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};
   }
 
-  // A well-formed span is copied into a vector and SipHashed id-by-id into a
-  // set, so the parse work is proportional to the id count. A rejected Invoke
-  // would otherwise report gas 0 and pay only the fixed crossing charge,
-  // letting a contract force that length-proportional work at will regardless
-  // of list size (#4174). Charge one hash-block cost per id -- the nearest
-  // calibrated hashing rate in the schedule, which conservatively covers the
-  // SipHash and set insertion each id costs (pricing only the byte copy would
-  // leave the per-id hashing nearly free) -- reusing an existing schedule
-  // constant so the gas-schedule digest is unchanged. Reject up front when the
-  // frame cannot afford it, so the parse is never done for free.
+  // Parsing a well-formed span copies and SipHashes one id at a time, so the
+  // cost grows with the id count. Charge one hash block per id (reusing a
+  // schedule constant, so the digest is unchanged) and reject up front, so a
+  // rejected Invoke cannot force that work for only the flat crossing (#4174).
   const WrappedGasAmount parse_gas{
       kSHA256HashBlockCost *
       (input_owned_auth_token_ids.size() / sizeof(uint32_t))};
@@ -167,10 +160,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
   const GasAmount gas_after_parse = remaining_gas.get() - parse_gas.get();
 
-  // Materialized once; the frame stack takes the list over without copying.
-  // parse() re-checks the length (guaranteed to pass here) and otherwise fails
-  // only on a duplicate id, which it finds while hashing -- work parse_gas has
-  // already paid for.
+  // Materialized once; the frame stack takes the list over without copying. A
+  // failure here is a duplicate id, found while hashing, which parse_gas
+  // covers.
   auto owned_auth_tokens =
       ValidatedAuthTokens::parse(input_owned_auth_token_ids);
   if (!owned_auth_tokens.has_value()) {

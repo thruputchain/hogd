@@ -237,13 +237,8 @@ TEST_F(InvokeMalformedTokensRv32Test, WellFormedTokensRunChild)
   EXPECT_EQ(child->status.status_code(), InvocationFrameStatusCode::Abort);
 }
 
-// #4174: a rejected Invoke that forwards a well-formed but unowned token span
-// is billed for parsing it. The host copies the span into a vector and
-// SipHashes every id before admission can see the ids are not owned, so that
-// work grows with the span length; pricing it keeps a contract from forcing an
-// arbitrarily long parse for the flat crossing charge. Two unowned spans of
-// different lengths, both refused at admission, therefore differ in gas by
-// exactly the parse charge for the extra bytes.
+// #4174: a rejected Invoke is billed for parsing its forwarded token span, so
+// two unowned spans of different lengths differ in gas by the per-id charge.
 TEST_F(InvokeMalformedTokensRv32Test, UnownedTokensAreBilledByLength)
 {
   deploy_target();
