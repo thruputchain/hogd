@@ -1,20 +1,14 @@
-# hog_exec / C++-specific syscall properties, keyed by syscall name.
+# hog_exec / C++-specific syscall properties, keyed by syscall name. These are
+# hog_exec implementation details that do not affect the wire ABI, so they live
+# here rather than in protocol/syscalls.yaml. gen_syscalls.py reads this as the
+# single source of truth for these flags; every key must name a syscall in
+# syscalls.yaml and set only known properties, or generation fails.
 #
-# These are implementation details of the hog_exec runtime that do NOT affect
-# the wire ABI, so they live here rather than in protocol/syscalls.yaml: the
-# guest passes the same arguments either way, and the Rust/TS SDKs generated
-# from the protocol spec do not care. gen_syscalls.py reads this alongside
-# syscalls.yaml as the single source of truth for these flags. Every key must
-# name a syscall defined in syscalls.yaml, or generation fails.
-#
-# Recognized per-syscall properties (all default to false when absent):
-#   needs_gas: the inner body is handed the frame's remaining gas
-#              (WrappedGasAmount remaining_gas) so it can reserve variable,
-#              input-dependent costs before doing the work.
-#   async:     the inner body reads or writes hog_db and so may suspend; its
-#              generated declaration returns MaybeAsyncSyscallInnerResult and
-#              its body is a coroutine. Every other body lands in MaybeAsync's
-#              value arm at no cost.
+# Properties (default false):
+#   needs_gas: inner body is handed the frame's remaining gas (WrappedGasAmount
+#              remaining_gas) to reserve variable, input-dependent costs.
+#   async:     inner body may suspend (reads/writes hog_db); its declaration
+#              returns MaybeAsyncSyscallInnerResult and body is a coroutine.
 syscalls:
   SHA256:
     needs_gas: true

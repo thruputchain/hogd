@@ -51,24 +51,10 @@ def validate_and_extract_error_codes(syscall: dict) -> list[str]:
     return error_codes
 
 
-# hog_exec/C++-specific syscall properties, read from hog_exec_syscalls.yaml
-# (see --hog_exec_yaml). They are hog_exec implementation details that do not
-# affect the wire ABI, so they live beside gen_syscalls.py rather than in
-# protocol/syscalls.yaml. Both sets are populated from that file before any
-# code is generated; see load_hog_exec_spec below.
-#
-# ASYNC_SYSCALLS: bodies that read or write hog_db and so may suspend. Their
-# generated declaration returns MaybeAsyncSyscallInnerResult instead of a plain
-# SyscallInnerResult, and their bodies are coroutines; every other body returns
-# its result directly and lands in MaybeAsync's value arm at no cost (see
-# wrap_after_parse_async in syscall_entry_outer.h).
-#
-# NEEDS_GAS_SYSCALLS: bodies handed the frame's remaining gas (WrappedGasAmount
-# remaining_gas) so they can reserve variable, input-dependent costs.
-#
-# A stale entry cannot go unnoticed: an unknown name fails validation, and a
-# wrong flag makes the generated declaration no longer match the body, so the
-# build fails.
+# hog_exec-specific syscall flags, populated from hog_exec_syscalls.yaml before
+# any code is generated (see load_hog_exec_spec). ASYNC_SYSCALLS bodies may
+# suspend (coroutine, MaybeAsyncSyscallInnerResult); NEEDS_GAS_SYSCALLS bodies
+# get the frame's remaining gas. That yaml documents both properties.
 ASYNC_SYSCALLS = frozenset()
 NEEDS_GAS_SYSCALLS = frozenset()
 
