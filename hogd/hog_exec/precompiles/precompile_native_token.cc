@@ -1,7 +1,9 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -39,6 +41,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/format.h"
+#include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 
 namespace hogd {
