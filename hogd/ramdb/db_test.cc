@@ -25,7 +25,6 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/random_bytes.h"
-#include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
@@ -378,7 +377,7 @@ TEST_F(DatabaseTest, RecoveryTruncatesZeroFilledTail)
         f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
     ASSERT_TRUE(static_cast<bool>(size));
     committed_size = *size;
-    std::array<std::byte, 2 * sizeof(DiskItemHeader)> zeros{};
+    std::array<std::byte, 2 * sizeof(SafeItemHeader)> zeros{};
     ASSERT_TRUE(static_cast<bool>(write_full(*f, zeros)));
   }
 
@@ -416,7 +415,7 @@ TEST_F(DatabaseTest, RecoveryRejectsInteriorZeros)
     ASSERT_TRUE(static_cast<bool>(f));
     ASSERT_TRUE(static_cast<bool>(
         f->lseek(first_commit_end, SEEK_SET))); // NOLINT(misc-include-cleaner)
-    std::array<std::byte, sizeof(DiskItemHeader)> zeros{};
+    std::array<std::byte, sizeof(SafeItemHeader)> zeros{};
     ASSERT_TRUE(static_cast<bool>(write_full(*f, zeros)));
   }
 
@@ -437,7 +436,7 @@ TEST_F(DatabaseTest, RecoveryRejectsGarbageTail)
   {
     ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY | O_APPEND);
     ASSERT_TRUE(static_cast<bool>(f));
-    std::array<std::byte, sizeof(DiskItemHeader)> garbage{};
+    std::array<std::byte, sizeof(SafeItemHeader)> garbage{};
     garbage.fill(std::byte{0xff});
     ASSERT_TRUE(static_cast<bool>(write_full(*f, garbage)));
   }
@@ -447,8 +446,8 @@ TEST_F(DatabaseTest, RecoveryRejectsGarbageTail)
   EXPECT_EQ(ret.error(), DBCode::kCorruption);
 }
 
-// A log file is kDiskFileHeader followed by records whose headers omit the
-// in-memory ItemHeader::next link.
+// Log records use SafeItemHeader, which omits the in-memory ItemHeader::next
+// link.
 TEST_F(DatabaseTest, LogFileUsesCompactRecordFormat)
 {
   uint64_t lsn = 0;
@@ -457,70 +456,13 @@ TEST_F(DatabaseTest, LogFileUsesCompactRecordFormat)
 
   ErrnoStatus<File> f = dir_.openat("0.log", O_RDONLY);
   ASSERT_TRUE(static_cast<bool>(f));
-  DiskFileHeader file_hdr{};
-  ASSERT_TRUE(static_cast<bool>(read_full(*f, writable_byte_view(file_hdr))));
-  EXPECT_EQ(file_hdr, kDiskFileHeader);
-
   ErrnoStatus<off_t> size =
       f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
   ASSERT_TRUE(static_cast<bool>(size));
-  size_t put_record = align_up(sizeof(DiskItemHeader) + kKeySize + kValueSize,
-                               alignof(DiskItemHeader));
-  size_t commit_record = sizeof(DiskItemHeader) + sizeof(uint32_t);
-  EXPECT_EQ(static_cast<size_t>(*size),
-            sizeof(DiskFileHeader) + put_record + commit_record);
-}
-
-// A file without the current file header, such as one written by a build that
-// predates it, fails recovery instead of being parsed as records.
-TEST_F(DatabaseTest, RecoveryRejectsUnknownFileFormat)
-{
-  uint64_t lsn = 0;
-  sync_n(1, lsn);
-  db_.reset();
-
-  {
-    ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY);
-    ASSERT_TRUE(static_cast<bool>(f));
-    DiskFileHeader old_version = kDiskFileHeader;
-    old_version.version = kDiskFileHeader.version - 1;
-    ASSERT_TRUE(static_cast<bool>(write_full(*f, byte_view(old_version))));
-  }
-
-  DBStatus<void> ret = open_db();
-  ASSERT_FALSE(static_cast<bool>(ret));
-  EXPECT_EQ(ret.error(), DBCode::kCorruption);
-}
-
-// A crash before a new log file's first commit can leave only part of its file
-// header, or zeros where it should be. That file holds no commits, so recovery
-// truncates it and keeps the earlier files' state.
-TEST_F(DatabaseTest, RecoveryTruncatesTornFileHeader)
-{
-  uint64_t lsn = 0;
-  sync_n(1, lsn);
-  auto oracle = oracle_;
-  db_.reset();
-
-  std::array<std::byte, sizeof(DiskFileHeader) / 2> partial{};
-  std::ranges::copy(byte_view(kDiskFileHeader).first(partial.size()),
-                    partial.begin());
-  std::array<std::byte, 4 * sizeof(DiskFileHeader)> zeros{};
-
-  for (std::span<const std::byte> torn : {std::span<const std::byte>(partial),
-                                          std::span<const std::byte>(zeros)}) {
-    {
-      ErrnoStatus<File> f =
-          dir_.openat("1.log", O_WRONLY | O_CREAT | O_TRUNC, 0600);
-      ASSERT_TRUE(static_cast<bool>(f));
-      ASSERT_TRUE(static_cast<bool>(write_full(*f, torn)));
-    }
-
-    ASSERT_TRUE(static_cast<bool>(open_db()));
-    oracle_ = oracle;
-    check_integrity();
-    db_.reset();
-  }
+  size_t put_record = align_up(sizeof(SafeItemHeader) + kKeySize + kValueSize,
+                               alignof(SafeItemHeader));
+  size_t commit_record = sizeof(SafeItemHeader) + sizeof(uint32_t);
+  EXPECT_EQ(static_cast<size_t>(*size), put_record + commit_record);
 }
 
 // Database::check must not modify the files it checks: it reports the last
@@ -540,11 +482,11 @@ TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
         f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
     ASSERT_TRUE(static_cast<bool>(size));
     committed_size = *size;
-    std::array<std::byte, 2 * sizeof(DiskItemHeader)> zeros{};
+    std::array<std::byte, 2 * sizeof(SafeItemHeader)> zeros{};
     ASSERT_TRUE(static_cast<bool>(write_full(*f, zeros)));
   }
   const off_t appended_size = // NOLINT(misc-include-cleaner)
-      committed_size + static_cast<off_t>(2 * sizeof(DiskItemHeader));
+      committed_size + static_cast<off_t>(2 * sizeof(SafeItemHeader));
 
   auto file_size = [this] {
     ErrnoStatus<File> f = dir_.openat("0.log", O_RDONLY);
@@ -1056,7 +998,7 @@ TEST_F(DatabaseTest, RecoverSkipsUncommittedLSNs)
     ASSERT_TRUE(f);
     auto len = f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
     ASSERT_TRUE(len);
-    auto r = f->ftruncate(*len - (sizeof(DiskItemHeader) * 2));
+    auto r = f->ftruncate(*len - (sizeof(SafeItemHeader) * 2));
     ASSERT_TRUE(r);
     lsn--;
   }
@@ -1195,28 +1137,24 @@ TEST_F(DatabaseTest, IncrementalSnapshotAfterReopenRejectsGap)
 
 // Regression for #1605: the recovery skip path used the unpadded
 // key_len + value_len, but the writer pads kNormal/kTombstone records to
-// alignof(DiskItemHeader). After a snapshot covers a misaligned record,
-// recovery reads the next header from inside that padding and reports
-// kCorruption.
+// alignof(ItemHeader). After a snapshot covers a misaligned record, recovery
+// reads the next header from inside that padding and reports kCorruption.
 TEST_F(DatabaseTest, RecoverySkipAlignsPaddedRecord)
 {
   constexpr uint64_t kInfTargetLSN = std::numeric_limits<uint64_t>::max();
-  constexpr size_t kOddKeyLen = 5;
-  // one byte short of the odd-key record, so the log rolls over after it.
+  // one byte short of the "abcde" record below, so the log rolls over after it.
   constexpr size_t kRolloverAfterFirstRecordBytes =
-      align_up(sizeof(DiskItemHeader) + kOddKeyLen, alignof(DiskItemHeader)) -
-      1;
+      align_up(sizeof(SafeItemHeader) + 5, alignof(SafeItemHeader)) - 1;
 
   db_.reset();
   ASSERT_TRUE(dir_.unlink_all());
   DBStatus<void> ret = open_db(kInfTargetLSN, kRolloverAfterFirstRecordBytes);
   ASSERT_TRUE(ret);
 
-  std::string odd_key(kOddKeyLen, 'a');
+  std::string odd_key = "abcde";
   std::string empty_value;
   // key_len + value_len must be unaligned for the bug to bite.
-  ASSERT_NE((odd_key.size() + empty_value.size()) % alignof(DiskItemHeader),
-            0U);
+  ASSERT_NE((odd_key.size() + empty_value.size()) % alignof(ItemHeader), 0U);
 
   DBStatus<void> put_ret = db_->put(std::as_bytes(std::span(odd_key)), 0,
                                     std::as_bytes(std::span(empty_value)));

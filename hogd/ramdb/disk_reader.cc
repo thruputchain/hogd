@@ -30,7 +30,6 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
 
@@ -125,25 +124,6 @@ rest_is_zero(BufferedReader &r)
     if (!all_zero(std::span(buf).first(*n)))
       return false;
   }
-}
-
-// to_item_header validates a record header read from disk and returns the
-// in-memory ItemHeader it describes. The on-disk log could be corrupted, and
-// loading an out of range value into ItemHeader::storage would be UB, so this
-// checks storage before converting it.
-std::optional<ItemHeader>
-to_item_header(const DiskItemHeader &disk)
-{
-  if (disk.storage > std::to_underlying(ItemStorage::kCommit))
-    return std::nullopt;
-  if (disk.key_len == 0)
-    return std::nullopt;
-  if (sizeof(ItemHeader) + disk.kv_bytes() > kBigItemThreshold)
-    return std::nullopt;
-  ItemHeader hdr(static_cast<ItemStorage>(disk.storage), disk.type,
-                 disk.key_len, disk.value_len);
-  hdr.lsn = disk.lsn;
-  return hdr;
 }
 
 // helper class that parses log and snapshot file names
@@ -292,37 +272,10 @@ load_log_file(
   // CRC32C of the on-disk bytes of the records buffered for the next commit.
   uint32_t crc = 0;
 
-  // Every file starts with kDiskFileHeader. The writer emits it before any
-  // record, so a file too short to hold it, or whose header is a zeroed torn
-  // tail, has no commits and is truncated like any other uncommitted tail.
-  {
-    DiskFileHeader file_hdr;
-    ErrnoStatus<void> ret = read_full(r, writable_byte_view(file_hdr));
-    if (!ret) {
-      if (ret.error() != ENODATA) {
-        error("error reading log file header: {}", ret.error());
-        return DBError(DBCode::kCorruption);
-      }
-      uncommitted_records = r.offset() > 0;
-      goto eof;
-    }
-    if (file_hdr != kDiskFileHeader) {
-      if (is_last_file && all_zero(byte_view(file_hdr)) && rest_is_zero(r)) {
-        uncommitted_records = true;
-        goto eof;
-      }
-      error("{} is not a ramdb v{} log file; files from older builds must be "
-            "removed",
-            file.path_, kDiskFileHeader.version);
-      return DBError(DBCode::kCorruption);
-    }
-    uncommitted_off = r.offset();
-  }
-
   while (!target_lsn || cur_lsn < *target_lsn) {
-    // read the next record header from the log file.
-    DiskItemHeader disk_hdr;
-    ErrnoStatus<void> ret = read_full(r, writable_byte_view(disk_hdr));
+    // read the next SafeItemHeader from the log file.
+    SafeItemHeader tmp;
+    ErrnoStatus<void> ret = read_full(r, writable_byte_view(tmp));
     if (!ret) {
       if (ret.error() == ENODATA)
         goto eof;
@@ -337,7 +290,7 @@ load_log_file(
     // A zero header is never valid (key_len == 0). In the last file, treat it
     // as a torn tail from a crash mid-append and truncate, but only if nothing
     // but zeros follows; a zeroed header ahead of live records is corruption.
-    if (is_last_file && all_zero(byte_view(disk_hdr))) {
+    if (is_last_file && all_zero(byte_view(tmp))) {
       if (!rest_is_zero(r)) {
         error("zeroed record ahead of later records in {}", file.path_);
         return DBError(DBCode::kCorruption);
@@ -347,7 +300,7 @@ load_log_file(
 
     // validate the header.
     ItemHeader hdr;
-    if (std::optional<ItemHeader> ret = to_item_header(disk_hdr); ret) {
+    if (std::optional<ItemHeader> ret = tmp(); ret) {
       hdr = *ret;
     }
     else {
@@ -375,14 +328,14 @@ load_log_file(
       }
 
       // kNormal/kTombstone records are written with the loglet's
-      // alignof(DiskItemHeader) padding (see Loglet::alloc_disk), so the
-      // on-disk payload length is align_up(kv_bytes, alignof(DiskItemHeader)).
-      // kCommit records are written without that trailing padding (commit_buf
-      // is sizeof(DiskItemHeader) + sizeof(uint32_t)), so the unpadded
-      // kv_bytes is the right skip there.
+      // alignof(ItemHeader) padding (see Loglet::alloc_disk), so the on-disk
+      // payload length is align_up(kv_bytes, alignof(ItemHeader)). kCommit
+      // records are written without that trailing padding (commit_buf is
+      // sizeof(SafeItemHeader) + sizeof(uint32_t)), so the unpadded kv_bytes
+      // is the right skip there.
       size_t to_skip = hdr.storage == ItemStorage::kCommit
                            ? hdr.kv_bytes()
-                           : align_up(hdr.kv_bytes(), alignof(DiskItemHeader));
+                           : align_up(hdr.kv_bytes(), alignof(ItemHeader));
       ErrnoStatus<size_t> ret = r.skip(to_skip);
       if (!ret) {
         info("failure while skipping {} bytes in {}", to_skip, file.path_);
@@ -394,7 +347,7 @@ load_log_file(
       continue;
     }
 
-    crc = crc32c_append(crc, byte_view(disk_hdr));
+    crc = crc32c_append(crc, byte_view(tmp));
 
     // parse the header.
     using enum ItemStorage;

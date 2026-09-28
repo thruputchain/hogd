@@ -71,10 +71,10 @@ DiskWriter::write_worker(const std::stop_token &stoken)
 {
   // initialize the buffer used for commit records.
   // the uint32 is the crc32c of the committed data.
-  alignas(DiskItemHeader)
-      uint8_t commit_buf[sizeof(DiskItemHeader) + sizeof(uint32_t)];
+  alignas(SafeItemHeader)
+      uint8_t commit_buf[sizeof(SafeItemHeader) + sizeof(uint32_t)];
   auto *commit_hdr = new (commit_buf)
-      DiskItemHeader(ItemStorage::kCommit, 0, sizeof(uint32_t), 0, 0);
+      SafeItemHeader(ItemStorage::kCommit, 0, sizeof(uint32_t), 0, 0);
 
   // called when a write to disk failed. wakes blocked commit() calls.
   auto signal_ioerror = [this] {
@@ -95,12 +95,6 @@ DiskWriter::write_worker(const std::stop_token &stoken)
     wal_grew_observer_();
 
   BufferedWriter w(*f);
-  if (ErrnoStatus<void> ret = write_full(w, byte_view(kDiskFileHeader)); !ret)
-      [[unlikely]] {
-    warn("couldn't write log file header: {}", ret.error());
-    signal_ioerror();
-    return;
-  }
   uint32_t crc = 0;
   size_t bytes_written = 0;
 
@@ -167,12 +161,6 @@ DiskWriter::write_worker(const std::stop_token &stoken)
           }
           if (auto flush_status = w.reset(*f); !flush_status) [[unlikely]] {
             warn("couldn't flush buffer to disk: {}", flush_status.error());
-            signal_ioerror();
-            return;
-          }
-          if (ErrnoStatus<void> ret = write_full(w, byte_view(kDiskFileHeader));
-              !ret) [[unlikely]] {
-            warn("couldn't write log file header: {}", ret.error());
             signal_ioerror();
             return;
           }
@@ -305,7 +293,7 @@ ScopedDiskWrite::get_loglet(size_t kv_len)
   assert(ul_.owns_lock());
 
   // Try to use the write head's current loglet.
-  if (head_.ll && head_.ll->bytes_left() >= sizeof(DiskItemHeader) + kv_len)
+  if (head_.ll && head_.ll->bytes_left() >= sizeof(SafeItemHeader) + kv_len)
       [[likely]] {
     return head_.ll.get();
   }
@@ -329,7 +317,7 @@ ScopedDiskWrite::modify(ItemHeader *src, bool use_src_lsn)
     return DBError(DBCode::kNoMemory);
 
   // append the modification record.
-  DiskItemHeader *dst =
+  SafeItemHeader *dst =
       ll->alloc_disk(src->storage, src->type, src->key_len, src->value_len,
                      use_src_lsn ? src->lsn : w_.cur_lsn_);
   assert(dst != nullptr);
@@ -348,7 +336,7 @@ ScopedDiskWrite::remove(std::span<const std::byte> key)
     return DBError(DBCode::kNoMemory);
 
   // append the removal record.
-  DiskItemHeader *hdr =
+  SafeItemHeader *hdr =
       ll->alloc_disk(ItemStorage::kTombstone, 0, key.size(), 0, w_.cur_lsn_);
   assert(hdr != nullptr);
   std::ranges::copy(key, hdr->get_key().begin());

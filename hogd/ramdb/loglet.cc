@@ -122,19 +122,19 @@ Loglet::clone(ItemHeader *src)
   return dst;
 }
 
-DiskItemHeader *
+SafeItemHeader *
 Loglet::alloc_disk(ItemStorage storage, uint8_t type, size_t key_len,
                    size_t value_len, uint64_t lsn)
 {
   assert(is_attached());
   assert(key_len <=
-         std::numeric_limits<decltype(DiskItemHeader::key_len)>::max());
+         std::numeric_limits<decltype(SafeItemHeader::key_len)>::max());
   assert(value_len <=
-         std::numeric_limits<decltype(DiskItemHeader::value_len)>::max());
+         std::numeric_limits<decltype(SafeItemHeader::value_len)>::max());
 
   // check if there is enough space.
-  size_t len = sizeof(DiskItemHeader) + key_len + value_len;
-  len = align_up(len, alignof(DiskItemHeader));
+  size_t len = sizeof(SafeItemHeader) + key_len + value_len;
+  len = align_up(len, alignof(SafeItemHeader));
   if (unlikely(pos_ + len >= len_))
     return nullptr;
 
@@ -142,11 +142,11 @@ Loglet::alloc_disk(ItemStorage storage, uint8_t type, size_t key_len,
   // deterministic; the caller's key/value copy overwrites any overlap. A
   // record with no payload has no padding and the word would be the header.
   std::byte *rec = start_ + pos_;
-  if (len > sizeof(DiskItemHeader))
-    std::memset(rec + len - alignof(DiskItemHeader), 0,
-                alignof(DiskItemHeader));
+  if (len > sizeof(SafeItemHeader))
+    std::memset(rec + len - alignof(SafeItemHeader), 0,
+                alignof(SafeItemHeader));
 
-  auto *h = new (rec) DiskItemHeader(storage, type, key_len, value_len, lsn);
+  auto *h = new (rec) SafeItemHeader(storage, type, key_len, value_len, lsn);
   pos_ += len;
   return h;
 }
