@@ -232,6 +232,35 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
   }
 }
 
+// #4181: `<DBTIP` is unhashed, so a savepoint depth of zero can be persisted
+// with a matching config hash and an untouched state hash. Genesis rejects that
+// depth (every root commit pushes one savepoint), so recovery must too, or the
+// first root push returns kRPCUnrecoverable.
+TEST_F(RecoveredTipTest, RejectsZeroSavepointDepth)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  const StorageLongHash state_hash = db.compute_full_db_hash();
+  NetworkConfigParams::set_param(tip->network_config,
+                                 ConfigParamID::kConfigParamMaxSavepointDepth,
+                                 0);
+  ASSERT_TRUE(NetworkConfigParams::is_canonical(tip->network_config.v0()));
+  tip->value.proposal_header.config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model_, tip->network_config,
+                                tip->default_wallet));
+  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  // Unchanged, which is why the integrity gate does not catch this.
+  EXPECT_EQ(db.compute_full_db_hash(), state_hash);
+
+  const HogDbStatus<DbTip> recovered = db.read_dbtip();
+  ASSERT_TRUE(recovered.has_value());
+  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *recovered, cost_model_));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
