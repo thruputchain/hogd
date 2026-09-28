@@ -116,7 +116,8 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
 // public key
 // Returns: Status code indicating if verification succeeded and gas cost
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_VerifySignature_inner(int32_t input_scheme,
+syscall_VerifySignature_inner(WrappedGasAmount remaining_gas,
+                              int32_t input_scheme,
                               std::span<const std::byte> input_signature,
                               std::span<const std::byte> input_public_key,
                               std::span<const std::byte> input_message)
@@ -134,11 +135,19 @@ syscall_VerifySignature_inner(int32_t input_scheme,
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
+    // Verification is priced by message length, so reserve that cost before
+    // running it. Otherwise a child frame with a tiny gas limit could perform
+    // the full curve work and fault only afterward, letting a parent recover
+    // via TryInvoke and repeat the underpriced work while paying only each
+    // child's capped budget (issue #4172).
+    const WrappedGasAmount gas{GasCost::verify_signature(input_message.size())};
+    if (remaining_gas.get() <= gas.get()) {
+      return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
+    }
     // Charged whether or not verification succeeds: ed25519 only exits early
     // when the encoded point fails to decompress, which the attacker choosing
     // the signature controls, so a free failure path sells verification for
     // the price of the crossing.
-    const WrappedGasAmount gas{GasCost::verify_signature(input_message.size())};
     if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         input_signature.subspan<0, sizeof(Ed25519Signature)>(),
                         input_message)) {
