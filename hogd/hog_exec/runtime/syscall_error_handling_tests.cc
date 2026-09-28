@@ -1095,7 +1095,7 @@ TEST_F(SyscallErrorHandlingTest, VerifySignatureReservesGasBeforeVerifying)
                   .has_value());
 
   // wrap_outer arg order: scheme, then each span as (offset, length). Regions
-  // are disjoint and zero-filled -- verification fails, but only once it runs.
+  // are disjoint and zero-filled, so verification fails only once it runs.
   constexpr GasAmount kPublicKeyAddr = 0;
   constexpr GasAmount kSignatureAddr = 32;
   constexpr GasAmount kMessageAddr = 96;
