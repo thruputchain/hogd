@@ -326,8 +326,9 @@ run_step(NativeSyscallContext &ctx, Step const &step)
   CopyableInvokeInputs inputs{
       .entrypoint_id = step.method,
       .gas_limit = UINT64_MAX,
-      .flags = step.try_invoke ? std::to_underlying(InvokeFlag::TryInvoke)
-                               : std::to_underlying(InvokeFlag::None),
+      .flags = step.try_invoke
+                   ? InvokeFlagSet{std::to_underlying(InvokeFlag::TryInvoke)}
+                   : InvokeFlagSet{std::to_underlying(InvokeFlag::None)},
   };
   CopyableInvokeOutputs outputs{};
   auto res = co_await ctx.syscall<SyscallNo::kInvoke>(

@@ -85,7 +85,7 @@ make_mocked_handler(void *db, void *rc)
 // Open a mock invocation frame on a mocked handler.
 inline TestFFIErrorCode
 open_frame(void *syscall_handler, Invocation const &invocation,
-           int32_t flags = 0)
+           InvokeFlagSet flags = 0)
 {
   auto serialized = x23::serialize(invocation);
   FFISerializedInvocation ffi = {
@@ -103,7 +103,7 @@ open_frame(void *syscall_handler, Invocation const &invocation,
 // so a caller can tell whether a regression admitted one after all.
 inline OpenMockInvocationFrameResult
 expect_frame_refused(void *syscall_handler, Invocation const &invocation,
-                     SyscallErrorCode code, int32_t flags = 0)
+                     SyscallErrorCode code, InvokeFlagSet flags = 0)
 {
   auto serialized = x23::serialize(invocation);
   FFISerializedInvocation ffi = {

@@ -37,6 +37,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -46,6 +47,7 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -116,23 +118,28 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
       // queue_b
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key_a = make_storage_key("queue_a");
+        uint8_t entry = 0;
+        RuntimeMemoryLength entry_len = 0;
         auto peek_res =
-            co_await ctx.handler().retrocausal_queue_consume(key_a, true);
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key_a, true, std::as_writable_bytes(std::span(&entry, 1)),
+                entry_len);
         if (!peek_res.has_value())
-          co_return peek_res.error().to_invoke_error();
-        if (!peek_res.value().has_value())
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
+        if (peek_res.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
 
-        auto const &entry = peek_res.value().value();
-        if (entry.size() != 1 || entry[0] != kValA)
+        if (entry_len != 1 || entry != kValA)
           co_return InvokeError{InvokeErrorCode::Deterministic};
 
         uint8_t val = kValB;
         auto key_b = make_storage_key("queue_b");
-        auto ins = co_await ctx.handler().retrocausal_queue_insert(
+        auto ins = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key_b, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
-          co_return ins.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              ins.error());
 
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_a"),
@@ -146,23 +153,28 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
       // queue_a
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key_b = make_storage_key("queue_b");
+        uint8_t entry = 0;
+        RuntimeMemoryLength entry_len = 0;
         auto peek_res =
-            co_await ctx.handler().retrocausal_queue_consume(key_b, true);
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key_b, true, std::as_writable_bytes(std::span(&entry, 1)),
+                entry_len);
         if (!peek_res.has_value())
-          co_return peek_res.error().to_invoke_error();
-        if (!peek_res.value().has_value())
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
+        if (peek_res.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
 
-        auto const &entry = peek_res.value().value();
-        if (entry.size() != 1 || entry[0] != kValB)
+        if (entry_len != 1 || entry != kValB)
           co_return InvokeError{InvokeErrorCode::Deterministic};
 
         uint8_t val = kValA;
         auto key_a = make_storage_key("queue_a");
-        auto ins = co_await ctx.handler().retrocausal_queue_insert(
+        auto ins = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key_a, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
-          co_return ins.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              ins.error());
 
         auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_b"),

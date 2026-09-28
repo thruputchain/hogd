@@ -291,11 +291,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                 });
   fns_2.emplace(
       1, [key1](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto res = co_await ctx.handler().get_bytestring(key1);
+        RuntimeMemoryLength written_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+            key1, std::span<std::byte>{}, written_len);
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().result.has_value()) {
+        if (res.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test1 should be "
                            "absent after revert";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -324,11 +326,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                 });
   fns_3.emplace(
       1, [key2](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto res = co_await ctx.handler().get_bytestring(key2);
+        RuntimeMemoryLength written_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+            key2, std::span<std::byte>{}, written_len);
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().result.has_value()) {
+        if (res.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test2 should be "
                            "absent after revert";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -914,8 +918,9 @@ TEST_P(RevertTest, DeleteMasksLoadUntilFrameReverts)
   // Method 0: delete, read behind the delete, revert.
   fns_1.emplace(
       0, [key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto del = co_await ctx.handler().delete_object(key);
-        if (!del.has_value() || !del.value().has_value()) {
+        auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
+        if (!del.has_value() ||
+            del.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "DeleteMasksLoadUntilFrameReverts: delete failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }

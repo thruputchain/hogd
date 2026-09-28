@@ -665,12 +665,16 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
         // This would have failed if the bytestring was not loaded lazily:
         // we're getting the bytestring from the prior write, not the snapshot
-        auto r2 = co_await ctx.handler().get_bytestring(kBadKey);
-        if (!r2.has_value() || !r2.value().result.has_value()) {
+        Bytestring read_back;
+        read_back.resize(bstring.size());
+        RuntimeMemoryLength written_len = 0;
+        auto r2 = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+            kBadKey, std::as_writable_bytes(std::span(read_back)), written_len);
+        if (!r2.has_value() ||
+            r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        assert(r2.value().result.value());
-        if (*r2.value().result.value() != bstring) {
+        if (written_len != bstring.size() || read_back != bstring) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};
@@ -760,9 +764,14 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // get_nnint() with force_load_from_snapshot=false from clean state
           // should not query db
-          auto r0 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r0.has_value() || !r0.value().result.has_value() ||
-              r0.value().result.value().first.has_value()) {
+          int128_t current_set = 0;
+          bool current_set_opt = false;
+          int128_t current_add = 0;
+          auto r0 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              kBadKey, false, current_set, current_set_opt, current_add);
+          if (!r0.has_value() ||
+              r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              current_set_opt) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -786,11 +795,13 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           }
 
           // assert that get_nnint() without a load doesn't query db
-          auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r3.has_value() || !r3.value().result.has_value()) {
+          auto r3 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              kBadKey, false, current_set, current_set_opt, current_add);
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r3.value().result.value().first.has_value()) {
+          if (current_set_opt) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
@@ -810,21 +821,28 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           // assert that get_nnint() after a set doesn't query db, even with
           // force_load_from_snapshot=true
-          auto r2 = co_await ctx.handler().get_nnint(kBadKey, true);
-          if (!r2.has_value() || !r2.value().result.has_value()) {
+          int128_t current_set = 0;
+          bool current_set_opt = false;
+          int128_t current_add = 0;
+          auto r2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              kBadKey, true, current_set, current_set_opt, current_add);
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!r2.value().result.value().first.has_value()) {
+          if (!current_set_opt) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // get_nnint() after a set with force_load_from_snapshot=false should
           // co_return the set value if it exists
-          auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r3.has_value() || !r3.value().result.has_value()) {
+          auto r3 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              kBadKey, false, current_set, current_set_opt, current_add);
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!r3.value().result.value().first.has_value()) {
+          if (!current_set_opt) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 

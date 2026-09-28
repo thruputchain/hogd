@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
@@ -30,6 +31,8 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -110,11 +113,13 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   fns.emplace(0,
               [contract_hash](
                   NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto r = co_await ctx.handler().deploy_contract(kDeployNonce,
-                                                                contract_hash);
+                ContractAddress deployed{};
+                auto r = co_await ctx.syscall<SyscallNo::kDeployContract>(
+                    kDeployNonce, contract_hash, deployed);
                 if (!r.has_value())
-                  co_return r.error().to_invoke_error();
-                if (!r.value().has_value())
+                  co_return NativeContractBuilder::host_fn_error_conversion(
+                      r.error());
+                if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone)
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 co_return InvokeStatus<void>{};
               });

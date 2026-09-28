@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 33
+#define TEST_FFI_VERSION_MINOR 34
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -323,7 +323,7 @@ struct OpenMockInvocationFrameResult {
 struct OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           int32_t invoke_flags);
+                           uint32_t invoke_flags);
 
 struct ForeignTracedInvokeResult
 finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code);
