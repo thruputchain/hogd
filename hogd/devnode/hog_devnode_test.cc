@@ -3076,10 +3076,8 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
       "recovered database storage hash does not match DbTip");
 }
 
-// #4176: `<DBTIP` is global metadata excluded from the storage hash, so a
-// noncanonical recovered network config passes the storage/network hash checks.
-// The devnode must reject it at recovery rather than serve with default
-// execution parameters that ignore the stored config.
+// #4176: a noncanonical recovered network config clears the storage/network
+// hash checks (<DBTIP> is unhashed), so the devnode must reject it at recovery.
 TEST(HogDevnode, DataDirRejectsNonCanonicalNetworkConfig)
 {
   std::filesystem::path data_dir = make_test_data_dir();

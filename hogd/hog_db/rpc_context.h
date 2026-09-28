@@ -73,12 +73,9 @@ public:
       // There is an existing dbtip, meaning that blocks have already been
       // committed to the db.
       auto state = tip_.take();
-      // The recovered tip is still unvalidated here: a tampered but XDR-valid
-      // <DBTIP> can carry a noncanonical network config, which would trip
-      // NetworkConfigParams' canonical-form invariant and abort the process.
-      // Hydrate the params only for a canonical config and leave the defaults
-      // otherwise; hog_db_init rejects a noncanonical recovered tip cleanly via
-      // StartupValidation::tip_is_servable() before ever calling set_tip().
+      // The recovered tip is unvalidated; only hydrate params for a canonical
+      // config so a noncanonical one does not trip NetworkConfigParams'
+      // invariant. StartupValidation rejects it before set_tip() (see #4176).
       if (NetworkConfigParams::is_canonical(ret->network_config.v0())) {
         state->params = NetworkConfigParams(ret->network_config.v0());
       }

@@ -1128,12 +1128,9 @@ HogDevnodeNode::open_db_backend() const
         format_network_hash(recovered_tip->value.proposal_header.network_hash),
         format_network_hash(network_hash_)));
   }
-  // A recovered network config whose parameter ids are not a gapless prefix
-  // from 0 cannot be hydrated into NetworkConfigParams (see rpc_context.h),
-  // which now leaves the execution defaults in place rather than aborting.
-  // Reject it here so the devnode does not serve with parameters that ignore
-  // the stored config; hog_db_init makes the equivalent check via
-  // StartupValidation::tip_is_servable().
+  // Reject a recovered config whose parameter ids are not a gapless prefix
+  // from 0: the constructor now leaves defaults rather than aborting, so the
+  // devnode would otherwise serve with params ignoring the stored config.
   if (RPCContext::has_committed_tip(*recovered_tip) &&
       !config_hashable(recovered_tip->network_config)) {
     throw std::runtime_error(

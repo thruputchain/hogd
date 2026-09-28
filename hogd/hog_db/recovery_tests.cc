@@ -99,12 +99,8 @@ TEST(RecoveryTests, RPCContextRejectsNonNotFoundDbTipError)
   EXPECT_THROW((void)RPCContext(std::move(dao), nullptr), std::system_error);
 }
 
-// #4176: a tampered but XDR-valid <DBTIP> can carry a noncanonical network
-// config (parameter ids not a gapless prefix from 0). Constructing RPCContext
-// over it must not trip NetworkConfigParams' canonical-form invariant; the
-// noncanonical tip is meant to be rejected later by StartupValidation, not by a
-// fatal abort during construction. (StartupValidation's own rejection is
-// covered by startup_validation_test.cc's RejectsNonCanonicalNetworkConfig.)
+// #4176: constructing RPCContext over a recovered noncanonical network config
+// must not abort; StartupValidation rejects the tip later (covered separately).
 TEST(RecoveryTests, RPCContextAcceptsRecoveredNonCanonicalNetworkConfig)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
