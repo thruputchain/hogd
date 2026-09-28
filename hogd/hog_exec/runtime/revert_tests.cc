@@ -19,6 +19,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
