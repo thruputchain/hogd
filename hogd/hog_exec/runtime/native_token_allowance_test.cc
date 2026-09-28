@@ -15,6 +15,7 @@
 #include "built_contracts/itc_erc20.h"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"

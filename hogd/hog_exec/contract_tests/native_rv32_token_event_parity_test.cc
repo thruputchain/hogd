@@ -539,10 +539,11 @@ TEST_F(NativeRv32TokenEventParityTest, ClearAllowanceEventsMatchRv32AndNative)
   ASSERT_TRUE(native_clear);
   auto expected = make_event_from_cxs_struct(
       native_token_allowance_change_event_signature(),
-      NativeTokenAllowanceChangeEvent{kAlice, kSpender,
-                                      to_xdr(-(kAllowanceAmount -
-                                               static_cast<int128_t>(
-                                                   kTransferFromAmount)))});
+      NativeTokenAllowanceChangeEvent{
+          .owner_address = kAlice,
+          .spender_address = kSpender,
+          .difference = to_xdr(-(kAllowanceAmount -
+                                 static_cast<int128_t>(kTransferFromAmount)))});
   ASSERT_TRUE(expected);
   EXPECT_TRUE(std::ranges::equal(native_clear->serialized_event, *expected));
 
@@ -553,7 +554,9 @@ TEST_F(NativeRv32TokenEventParityTest, ClearAllowanceEventsMatchRv32AndNative)
   ASSERT_TRUE(native_empty);
   auto expected_empty = make_event_from_cxs_struct(
       native_token_allowance_change_event_signature(),
-      NativeTokenAllowanceChangeEvent{kAlice, kSpender, to_xdr(int128_t{0})});
+      NativeTokenAllowanceChangeEvent{.owner_address = kAlice,
+                                      .spender_address = kSpender,
+                                      .difference = to_xdr(int128_t{0})});
   ASSERT_TRUE(expected_empty);
   EXPECT_TRUE(
       std::ranges::equal(native_empty->serialized_event, *expected_empty));

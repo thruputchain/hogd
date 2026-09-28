@@ -1,6 +1,5 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <limits>
@@ -30,6 +29,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "standard_asset_events.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
@@ -599,7 +599,9 @@ emit_allowance_change(NativeSyscallContext &ctx, ContractAddress const &owner,
 {
   auto event = make_event_from_cxs_struct(
       native_token_allowance_change_event_signature(),
-      NativeTokenAllowanceChangeEvent{owner, spender, to_xdr(difference)});
+      NativeTokenAllowanceChangeEvent{.owner_address = owner,
+                                      .spender_address = spender,
+                                      .difference = to_xdr(difference)});
   if (!event) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
