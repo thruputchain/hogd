@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -191,14 +192,17 @@ decoding_args_abort()
 class Erc20PermitParityTest : public ::testing::Test,
                               public NativeContractTestFramework {
 public:
-  Erc20PermitParityTest()
-    : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/true,
-          /*genesis_cost_model=*/zero_cost_model_xdr())
-  {}
+  Erc20PermitParityTest() : Erc20PermitParityTest(zero_cost_model_xdr()) {}
 
 protected:
+  // Runs under `cost_model`, or the default one when unset.
+  explicit Erc20PermitParityTest(
+      std::optional<StorageCostModelXdr> const &cost_model)
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDb, /*empty_genesis=*/true, cost_model)
+  {}
+
   // Actors, identical across the two legs so the only legitimate difference
   // between them is the token contract they call.
   static constexpr ContractAddress kOwner = make_contract_address(201);
@@ -262,10 +266,8 @@ protected:
     }
   }
 
-  // Invokes `method` on `target` forwarding `handles`, and appends the outcome
-  // to `record`: 0x00, the child frame status and its literal return/abort
-  // bytes when a child frame ran; 0x01 and the syscall error when the invoke
-  // was rejected before one did; 0xEE and the host error otherwise.
+  // Invokes `method` on `target` forwarding `handles`, and appends a tagged
+  // outcome to `record`.
   static x23::Async<void>
   append_invoke_record(NativeSyscallContext &ctx, ContractAddress const &target,
                        Runtime::MethodID method, Calldata const &calldata,
@@ -281,15 +283,18 @@ protected:
         target, std::as_bytes(std::span(calldata.data(), calldata.size())),
         std::span<uint32_t>(handles), inputs, outputs);
     if (!r.has_value()) {
+      // The host failed the syscall.
       record.push_back(0xEE);
       record.push_back(static_cast<uint8_t>(r.error().code()));
       co_return;
     }
     if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      // The invoke was rejected before a child frame ran.
       record.push_back(0x01);
       record.push_back(static_cast<uint8_t>(r.value()));
       co_return;
     }
+    // A child frame ran: its status and literal return/abort bytes.
     record.push_back(0x00);
     record.push_back(static_cast<uint8_t>(outputs.frame_status));
     auto rb = ctx.handler().get_return_buffer();
@@ -492,14 +497,15 @@ protected:
     return Record(bs.begin(), bs.end());
   }
 
-  // Runs `scenarios` against `token`: initializes it (the RV32 reference
-  // only) and funds the owner from the genesis root, then runs the scenarios
-  // rooted at the owner, one block per entry of `blocks`, each block holding
-  // the scenarios listed in it. Returns one outcome per scenario.
+  // Runs `scenarios` against `token` (after initializing the RV32 reference
+  // and funding the owner), one block per entry of `blocks`; returns one
+  // outcome per scenario. `after_block(n)` runs once setup is done (n = 0)
+  // and after each block (n = blocks run so far).
   std::vector<LegOutcome>
   run_leg(ContractAddress token,
           std::vector<std::vector<Step>> const &scenarios,
-          std::vector<std::vector<size_t>> const &blocks)
+          std::vector<std::vector<size_t>> const &blocks,
+          std::function<void(size_t)> const &after_block = {})
   {
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(kDriverId, make_driver(token, scenarios));
@@ -526,8 +532,12 @@ protected:
         run_driver_tx(ctx, kGenesisRootContractAddress, kSetupMintMethod).first,
         ExecResult::ExecResultOK);
 
+    if (after_block) {
+      after_block(0);
+    }
     std::vector<LegOutcome> out(scenarios.size());
-    for (auto const &block : blocks) {
+    for (size_t b = 0; b < blocks.size(); ++b) {
+      auto const &block = blocks[b];
       std::vector<std::pair<size_t, EphemeralTxIdentifier>> committed;
       for (size_t sc : block) {
         auto [commit, tx_id] = run_driver_tx(ctx, kOwner, scenario_method(sc),
@@ -547,6 +557,9 @@ protected:
         if (log.has_value()) {
           out[sc].events.assign(log->events.begin(), log->events.end());
         }
+      }
+      if (after_block) {
+        after_block(b + 1);
       }
     }
     return out;
@@ -804,11 +817,8 @@ TEST_F(Erc20PermitParityTest, GrantToSelf)
   EXPECT_EQ(results[1], ok());
 }
 
-// A grant minted for another consumer reaches the token (the handle is the
-// caller's to forward) but the runtime refuses to let it be consumed there.
-// kConsumeAuthToken is syscall 32, the first number whose CXS encoding differs
-// between a signed and an unsigned integer, so this also pins that the native
-// LibraryExn::Syscall abort encodes the syscall number as the SDK's u32 does.
+// A grant minted for another consumer reaches the token but cannot be consumed
+// there; this also pins the unsigned encoding of syscall number 32.
 TEST_F(Erc20PermitParityTest, GrantForAnotherConsumerIsNotConsumable)
 {
   auto results = expect_parity({
@@ -1058,9 +1068,7 @@ TEST_F(Erc20PermitParityTest, GrantRedeemedForTheWrongOperationFailsToDecode)
 }
 
 // A clear and an increase of the same allowance cannot both land in one block:
-// the later transaction fails at commit, on both backends, and the allowance
-// is left cleared. (The deletion alone conflicts; the exclusive lock it also
-// takes matters for storage refunds, which the zeroed cost model hides.)
+// the later transaction fails at commit, on both backends.
 TEST_F(Erc20PermitParityTest, ClearConflictsWithAnIncreaseInTheSameBlock)
 {
   auto outcomes = expect_schedule_parity(
@@ -1083,6 +1091,150 @@ TEST_F(Erc20PermitParityTest, ClearConflictsWithAnIncreaseInTheSameBlock)
       << "the increase landed beside the clear";
   ASSERT_EQ(outcomes[3].records.size(), 1U);
   EXPECT_EQ(outcomes[3].records[0], ok_amount(0));
+}
+
+// The permit surface under the default storage cost model. The two backends
+// charge storage differently overall, but an allowance entry is one
+// nonnegative-int item on both, charged to the token contract.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class Erc20PermitStorageRefundTest : public Erc20PermitParityTest {
+public:
+  Erc20PermitStorageRefundTest() : Erc20PermitParityTest(std::nullopt) {}
+
+protected:
+  static constexpr int128_t kActorFunds = 1'000'000'000'000;
+
+  static int128_t entry_cost()
+  {
+    return get_default_cost_model()->get_nnint_cost();
+  }
+
+  // Funds every actor well past what the scenarios cost, and `token` with
+  // `token_funds`.
+  void fund(ContractAddress token, int128_t token_funds)
+  {
+    for (auto const &addr :
+         {kOwner, kSpender, kThirdParty, kGenesisRootContractAddress}) {
+      setup_grant_storage_token(addr, kActorFunds);
+    }
+    setup_grant_storage_token(token, token_funds);
+  }
+
+  int128_t storage_balance(ContractAddress const &addr)
+  {
+    auto item = lookup_storage_item_from_db(
+        make_free_native_token_balance_addrkey(addr));
+    EXPECT_TRUE(item.has_value());
+    return item.has_value() ? from_xdr(item->nnint()) : 0;
+  }
+
+  // Runs `scenarios` on `token` under `blocks`, recording the token contract's
+  // storage balance once setup is done and after each block.
+  std::vector<LegOutcome>
+  run_recording_balance(ContractAddress token,
+                        std::vector<std::vector<Step>> const &scenarios,
+                        std::vector<std::vector<size_t>> const &blocks,
+                        std::vector<int128_t> &balances)
+  {
+    return run_leg(token, scenarios, blocks,
+                   [&](size_t) { balances.push_back(storage_balance(token)); });
+  }
+};
+
+// Clearing an allowance refunds its entry's storage cost to the token
+// contract, on both backends.
+TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceSignedRefundsTheEntry)
+{
+  std::vector<std::vector<Step>> const scenarios{
+      {permit_step<u8"increase_allowance_signed">(
+          kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
+      {permit_step<u8"clear_allowance_signed">(
+          kOwner, {{.spender = kSpender, .amount = 0, .clear = true}},
+          SignedToken{})},
+  };
+  std::vector<std::vector<LegOutcome>> legs;
+  for (auto token : {kNativeToken, kRv32Token}) {
+    SCOPED_TRACE(token == kNativeToken ? "native" : "rv32");
+    fund(token, kActorFunds);
+    std::vector<int128_t> balances;
+    legs.push_back(
+        run_recording_balance(token, scenarios, {{0}, {1}}, balances));
+    ASSERT_EQ(balances.size(), 3U);
+    EXPECT_EQ(balances[0] - balances[1], entry_cost()) << "the entry's cost";
+    EXPECT_EQ(balances[2] - balances[1], entry_cost()) << "the refund";
+    for (auto const &outcome : legs.back()) {
+      EXPECT_EQ(outcome.commit, ExecResult::ExecResultOK);
+    }
+  }
+  for (size_t sc = 0; sc < scenarios.size(); ++sc) {
+    expect_outcomes_match(legs[0][sc], legs[1][sc]);
+  }
+}
+
+// The refund is usable in the transaction that clears: with the token
+// contract unable to pay for a second entry, a new allowance fails alone but
+// commits after a clear in the same transaction. This is what the exclusive
+// lock on the deletion buys; an unlocked delete refunds only at commit.
+TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceSignedRefundIsUsableInTheTx)
+{
+  std::vector<std::vector<Step>> const scenarios{
+      {permit_step<u8"increase_allowance_signed">(
+          kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
+      {permit_step<u8"increase_allowance_signed">(
+          kOwner, {{.spender = kThirdParty, .amount = 70}}, SignedToken{})},
+      {
+          permit_step<u8"clear_allowance_signed">(
+              kOwner, {{.spender = kSpender, .amount = 0, .clear = true}},
+              SignedToken{}),
+          permit_step<u8"increase_allowance_signed">(
+              kOwner, {{.spender = kThirdParty, .amount = 70}}, SignedToken{}),
+          erc20_step<u8"allowance">(kOwner, kOwner, kSpender),
+          erc20_step<u8"allowance">(kOwner, kOwner, kThirdParty),
+      },
+  };
+  // One short of paying for two entries once setup's writes are paid for.
+  int128_t const headroom = (2 * entry_cost()) - 1;
+
+  std::vector<std::vector<LegOutcome>> legs;
+  for (auto token : {kNativeToken, kRv32Token}) {
+    SCOPED_TRACE(token == kNativeToken ? "native" : "rv32");
+    // Setup writes the total supply; the RV32 reference also writes its owner
+    // record and the owner's balance.
+    int128_t setup_cost = entry_cost();
+    if (token == kRv32Token) {
+      setup_cost += get_default_cost_model()->get_bytestring_cost(
+                        sizeof(ContractAddress)) +
+                    entry_cost();
+    }
+    fund(token, setup_cost + headroom);
+
+    std::vector<int128_t> balances;
+    legs.push_back(
+        run_recording_balance(token, scenarios, {{0}, {1}, {2}}, balances));
+    auto const &out = legs.back();
+    ASSERT_EQ(balances.size(), 4U);
+    ASSERT_EQ(out.size(), 3U);
+    EXPECT_EQ(balances[0], headroom) << "setup cost other than expected";
+
+    EXPECT_EQ(out[0].commit, ExecResult::ExecResultOK);
+    EXPECT_EQ(balances[1], entry_cost() - 1);
+
+    EXPECT_NE(out[1].commit, ExecResult::ExecResultOK)
+        << "a second entry committed without the storage to pay for it";
+    EXPECT_EQ(balances[2], entry_cost() - 1);
+
+    EXPECT_EQ(out[2].commit, ExecResult::ExecResultOK)
+        << "the clear's refund was not usable in its own transaction";
+    ASSERT_EQ(out[2].records.size(), 4U);
+    EXPECT_EQ(out[2].records[0], ok());
+    EXPECT_EQ(out[2].records[1], ok());
+    EXPECT_EQ(out[2].records[2], ok_amount(0));
+    EXPECT_EQ(out[2].records[3], ok_amount(70));
+    EXPECT_EQ(balances[3], entry_cost() - 1);
+  }
+  for (size_t sc = 0; sc < scenarios.size(); ++sc) {
+    expect_outcomes_match(legs[0][sc], legs[1][sc]);
+  }
 }
 
 // SignedToken is the C++ mirror of `Signed<T>`: no bytes on the wire, its
