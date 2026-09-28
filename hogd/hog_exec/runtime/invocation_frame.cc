@@ -220,8 +220,16 @@ InvocationFrame::try_acquire_frame_locks(
   for (auto const &[addr, deployment] : new_contract_deployments_) {
     AddressAndKey addrkey = {.address = addr,
                              .key = StorageKey(StorageKeyType::Metadata)};
+    // Reserve the deployment address exclusively. deploy_contract() only
+    // rejects addresses already visible in the shared snapshot or this
+    // transaction's frame-local map, so two sibling transactions in the same
+    // block can each derive the same address, both observe DeployContract
+    // success, and -- because the ordinary NewDeploymentLock admits identical
+    // hashes -- both commit their success-conditioned effects. An exclusive
+    // lock on the metadata key serializes the address so at most one sibling
+    // wins (#4187).
     db_proxy.add_delta(addrkey, make_deployed_contract_delta(deployment),
-                       std::to_underlying(StorageDeltaFlags::None));
+                       std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   }
 
   auto res = co_await db_proxy.try_push_current_subtransaction();
@@ -258,7 +266,9 @@ InvocationFrame::collect_storage_deltas(
     out.push_back(FlaggedStorageDelta{
         .addrkey = addrkey,
         .delta = delta,
-        .flags = std::to_underlying(StorageDeltaFlags::None),
+        // Matches the exclusive reservation try_acquire_frame_locks() commits
+        // for deployment metadata (#4187).
+        .flags = std::to_underlying(StorageDeltaFlags::ExclusiveLock),
     });
   }
 }

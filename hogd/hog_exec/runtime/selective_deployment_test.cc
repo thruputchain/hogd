@@ -1823,6 +1823,130 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, RaisedContractSizeLimitTest,
                                            TestDB::kHogDb),
                          test_db_to_string);
 
+// Regression test for #4187: two same-block transactions from the same
+// deployer can derive the same deployment address (same nonce + contract
+// hash), and both observe DeployContract success because deploy_contract()
+// only checks the shared snapshot and the transaction's own frame-local map.
+// The deployment metadata delta must reserve that address exclusively so the
+// two commits serialize: exactly one wins and commits its success-conditioned
+// effect, and the sibling loses lock acquisition before its effect persists.
+TEST_P(SelectiveDeploymentTest,
+       ConcurrentIdenticalDeploymentsSerializeOnExclusiveLock)
+{
+  Contract contract_to_deploy(ContractType::kRv32);
+  contract_to_deploy.rv32_contract() =
+      ContractBlob{.data = {9, 8, 7, 6, 5, 4, 3, 2, 1}};
+  const auto contract_hash = sha256(contract_to_deploy);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 42;
+    return nonce;
+  }();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0,
+      [contract_hash](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        ContractAddress deployed{};
+        auto deploy_result =
+            co_await ctx.syscall<SyscallNo::kDeployContract>(kDeployNonce,
+                                                             contract_hash,
+                                                             deployed);
+        if (!deploy_result.has_value()) {
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              deploy_result.error());
+        }
+        if (deploy_result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto const &calldata = ctx.handler().get_calldata();
+        if (calldata.size() != 1 || (calldata[0] != 1 && calldata[0] != 2)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        const auto key =
+            make_storage_key(calldata[0] == 1 ? "effect_one" : "effect_two");
+        auto write_result = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(calldata)));
+        if (!write_result.has_value()) {
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              write_result.error());
+        }
+        if (write_result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  NativeContext native_context(std::move(contract_map));
+  NoopRv32Context noop_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kRv32, {&noop_context, false}}});
+
+  const auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  const auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+  const auto deployed_addr =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   contract_hash);
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+  setup_grant_storage_token(deployed_addr, 1'000'000'000);
+
+  auto make_tx = [&](uint8_t selector) {
+    return SignedTransaction{
+        .tx = Transaction{
+            .invocation = Invocation{.invoked_address = deployer_addr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {selector}},
+            .uniquifier = make_new_uniquifier(),
+            .contracts_to_deploy = {contract_to_deploy},
+        }};
+  };
+  const auto first_tx = make_tx(1);
+  const auto second_tx = make_tx(2);
+  auto first_handler = make_new_system_call_handler(first_tx, context);
+  auto second_handler = make_new_system_call_handler(second_tx, context);
+
+  // Both transactions execute against the unchanged snapshot, so both observe
+  // a successful DeployContract.
+  ASSERT_TRUE(first_handler.root_invoke()().is_root_success());
+  ASSERT_TRUE(second_handler.root_invoke()().is_root_success());
+
+  // The first commit wins the exclusive lock on the deployment address; the
+  // second loses it and is rejected before its effect can persist.
+  ASSERT_EQ(first_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      first_handler.emit_events(ExecResult::ExecResultOK,
+                                ProposedTransaction{.signed_tx = first_tx})());
+  ASSERT_EQ(second_handler.try_commit_transaction()(),
+            ExecResult::ExecResultTxNonDeterministicError);
+
+  advance_block();
+
+  // The deployment landed exactly once, with the expected hash.
+  const auto deployment = lookup_deployment_from_db(deployed_addr);
+  ASSERT_TRUE(deployment.has_value());
+  EXPECT_EQ(deployment->hash, contract_hash);
+
+  // Only the winning transaction's success-conditioned effect persisted.
+  const auto first_effect = lookup_storage_item_from_db(
+      make_contract_data_addrkey(deployer_addr, "effect_one"));
+  const auto second_effect = lookup_storage_item_from_db(
+      make_contract_data_addrkey(deployer_addr, "effect_two"));
+  ASSERT_TRUE(first_effect.has_value());
+  EXPECT_EQ(first_effect->bytestring(), Bytestring({1}));
+  EXPECT_FALSE(second_effect.has_value());
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, SelectiveDeploymentTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDb),
