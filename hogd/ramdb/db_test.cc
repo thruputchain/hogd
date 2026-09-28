@@ -575,11 +575,9 @@ TEST_F(DatabaseTest, IgnoresNonCanonicalSnapshotAlias)
   EXPECT_EQ(count, 0U);
 }
 
-// A data-directory attacker can repackage a valid snapshot with a CRC-valid
-// commit record whose LSN sits at the top of the uint64 range (CRC32C is an
-// integrity check, not an authenticity boundary). Recovery and the writer must
-// refuse to let the next LSN wrap to zero; otherwise the wrapped LSN would open
-// as a fresh, empty database and silently drop committed state (#4179).
+// Recovery and the writer must refuse to let the next LSN wrap to zero;
+// otherwise the wrapped LSN would open as a fresh, empty database and silently
+// drop committed state (#4179).
 TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
 {
   constexpr uint64_t kMaxLsn = std::numeric_limits<uint64_t>::max();
@@ -651,8 +649,8 @@ TEST_F(DatabaseTest, MaximumSnapshotLsnDoesNotWrapRecoveryToEmptyDatabase)
   db_.reset();
 
   // Because the wrapping commit was refused, a second recovery still finds the
-  // maximum LSN -- never zero -- and keeps the preserved snapshot row rather
-  // than opening an empty database.
+  // maximum LSN, never zero, and keeps the preserved snapshot row rather than
+  // opening an empty database.
   auto rechecked = Database::check(dir_.get_path(), heap_size);
   ASSERT_TRUE(rechecked);
   EXPECT_EQ(*rechecked, kMaxLsn);
@@ -683,8 +681,7 @@ TEST_F(DatabaseTest, MaximumSnapshotCommitLsnRejectedByRecovery)
   db_.reset();
 
   // Rewrite the snapshot's trailing commit record to claim the maximum LSN,
-  // refreshing the CRC so only the overflow guard -- not the checksum -- can
-  // reject it.
+  // refreshing the CRC so only the overflow guard can reject it.
   ErrnoStatus<struct stat> snapshot_stat = dir_.stat("0-1.snap");
   ASSERT_TRUE(snapshot_stat);
   std::vector<std::byte> bytes(static_cast<size_t>(snapshot_stat->st_size));
