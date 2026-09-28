@@ -33,8 +33,9 @@ TEST(VerifySignatureGasTest, ReservesVerificationCostBeforeRunning)
   // exhaustion faults too, matching the outer wrapper and the SHA256 path.
   for (const GasAmount budget : {GasAmount{0}, required - 1, required}) {
     SCOPED_TRACE(::testing::Message() << "budget=" << budget);
-    const auto [result, charge] = syscall_VerifySignature_inner(
-        WrappedGasAmount{budget}, scheme, signature, public_key, message);
+    const auto [result, charge] =
+        syscall_VerifySignature_inner(WrappedGasAmount{budget}, scheme,
+                                      signature, public_key, message);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);
     EXPECT_EQ(charge.get(), budget);
@@ -42,8 +43,9 @@ TEST(VerifySignatureGasTest, ReservesVerificationCostBeforeRunning)
 
   // With enough gas the verifier runs and is charged the full length-based
   // cost, whatever the verification outcome.
-  const auto [result, charge] = syscall_VerifySignature_inner(
-      WrappedGasAmount{required + 1}, scheme, signature, public_key, message);
+  const auto [result, charge] =
+      syscall_VerifySignature_inner(WrappedGasAmount{required + 1}, scheme,
+                                    signature, public_key, message);
   EXPECT_TRUE(result.has_value());
   EXPECT_EQ(charge.get(), required);
 }
