@@ -1095,10 +1095,14 @@ TEST_F(SyscallErrorHandlingTest, VerifySignatureReservesGasBeforeVerifying)
                                ValidatedAuthTokens{})
                   .has_value());
 
-  // Disjoint public key, signature, and message regions. The contents are
-  // zero, which fails verification -- but only once the verifier runs.
+  // Disjoint public key, signature, and message regions in guest memory. The
+  // contents are zero, which fails verification -- but only once it runs. The
+  // wrap_outer arg order is scheme, then each span as (offset, length).
+  constexpr GasAmount kPublicKeyAddr = 0;
+  constexpr GasAmount kSignatureAddr = 32;
+  constexpr GasAmount kMessageAddr = 96;
   constexpr GasAmount kMessageSize = 128;
-  std::array<std::byte, 96 + kMessageSize> memory{};
+  std::array<std::byte, kMessageAddr + kMessageSize> memory{};
   const auto scheme = std::to_underlying(CryptographicScheme::Ed25519);
   const GasAmount required = GasCost::verify_signature(kMessageSize);
   const GasAmount cost = kSyscallBaseCost + required;
@@ -1112,9 +1116,9 @@ TEST_F(SyscallErrorHandlingTest, VerifySignatureReservesGasBeforeVerifying)
         wrap_outer<SyscallMeta<SyscallNo::kVerifySignature>>(
             handler,
             ExecutionContext{.memory = memory, .gas_remaining = budget},
-            SyscallNo::kVerifySignature, scheme, /*signature=*/32,
-            sizeof(Ed25519Signature), /*public_key=*/0,
-            sizeof(Ed25519PublicKey), /*message=*/96, kMessageSize)();
+            SyscallNo::kVerifySignature, scheme, kSignatureAddr,
+            sizeof(Ed25519Signature), kPublicKeyAddr, sizeof(Ed25519PublicKey),
+            kMessageAddr, kMessageSize)();
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);
     EXPECT_EQ(charged, budget);
@@ -1123,9 +1127,9 @@ TEST_F(SyscallErrorHandlingTest, VerifySignatureReservesGasBeforeVerifying)
   // One unit more, and the verifier runs and is charged the full cost.
   auto [result, charged] = wrap_outer<SyscallMeta<SyscallNo::kVerifySignature>>(
       handler, ExecutionContext{.memory = memory, .gas_remaining = cost + 1},
-      SyscallNo::kVerifySignature, scheme, /*signature=*/32,
-      sizeof(Ed25519Signature), /*public_key=*/0, sizeof(Ed25519PublicKey),
-      /*message=*/96, kMessageSize)();
+      SyscallNo::kVerifySignature, scheme, kSignatureAddr,
+      sizeof(Ed25519Signature), kPublicKeyAddr, sizeof(Ed25519PublicKey),
+      kMessageAddr, kMessageSize)();
   EXPECT_TRUE(result.has_value());
   EXPECT_EQ(charged, cost);
 
