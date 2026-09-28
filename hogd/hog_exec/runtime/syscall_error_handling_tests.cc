@@ -1080,12 +1080,8 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
-// VerifySignature reserves the length-priced Ed25519 cost before running the
-// verifier. This is only observable at the body: through the wrapper the frame
-// still faults OutOfGas and is charged its whole budget either way, so what the
-// reservation changes is just whether ed25519_verify runs (#4172). Zero-filled
-// key and signature would fail verification if it ran, so an OutOfGas result
-// rather than InvalidSyscallInput shows it did not.
+// Zero-filled key and signature would fail verification if it ran, so OutOfGas
+// (not InvalidSyscallInput) shows the reservation skipped the verifier (#4172).
 TEST(VerifySignatureGasTest, ReservesCostBeforeVerifying)
 {
   const std::array<std::byte, sizeof(Ed25519PublicKey)> public_key{};
