@@ -6,12 +6,11 @@
 #include <utility>
 #include <vector>
 
-#include "hogd/base/types.h"
+#include "ffi_enums.hh"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
-#include "syscall_error.hh"
 #include "types.hh"
 
 namespace hogd {
