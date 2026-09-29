@@ -1016,9 +1016,8 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
-    // The queue is already in the frame after the insert, so these reads reach
-    // no database and bill no cold-load gas -- but every RCQ read pays the flat
-    // storage access, the same as a warm bytestring read.
+    // Warm queue: no cold-load gas, but every RCQ read pays the flat storage
+    // access.
     SyscallTraceBody body(SyscallNo::kRetrocausalQueuePeekLen);
     body.retrocausal_queue_peek_len().inputs.key = key;
     body.retrocausal_queue_peek_len().outputs =

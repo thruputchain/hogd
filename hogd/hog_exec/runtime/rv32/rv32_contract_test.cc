@@ -701,9 +701,7 @@ TEST_F(Rv32ProductionMappingTest,
 }
 
 // Regression test for #4200: a missing-key RetrocausalQueuePeekLen must pay the
-// host cold-load charge on its first touch of each key, so distinct missing
-// keys cost one extra kDBRPCCost each rather than reading cold storage for
-// free. Mirrors DistinctMissingBytestringReadsAreChargedHostGas.
+// host cold-load charge, so distinct keys cost one extra kDBRPCCost each.
 TEST_F(Rv32ProductionMappingTest,
        DistinctMissingRcqPeekLenReadsAreChargedHostGas)
 {

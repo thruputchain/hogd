@@ -2096,15 +2096,10 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
-  // Price the database load the read below is about to do, on this
-  // transaction's first touch of the key, so an RCQ read of cold storage costs
-  // the same host gas as a bytestring or NNInt read of it (see get_bytestring).
-  // Both DB-reaching states are billed: an unmodified key that is not yet
-  // loaded reaches the snapshot through ensure_loaded(), and a deleted key
-  // rebuilds a fully-consumed view from the snapshot in
-  // make_replaced_key_queue_item(). note_item_load() is per-key idempotent, so
-  // it charges kDBRPCCost only on the first touch; a queue already held in the
-  // frame answers without a load and is left at zero.
+  // Charge this transaction's first touch of the key so a cold RCQ read costs
+  // the same host gas as a bytestring read (see get_bytestring). Only the two
+  // states that reach the snapshot -- an unloaded unmodified key and a deleted
+  // key -- bill it; note_item_load() is per-key idempotent.
   const GasAmount load_gas = [&]() -> GasAmount {
     if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
       return unmodified_item->is_loaded() ? 0 : note_item_load(item_key);

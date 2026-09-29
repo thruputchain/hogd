@@ -54,9 +54,7 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
                                  WrappedGasAmount{0}};
   }
   // Both syscall-visible exits pay the storage access and the first-touch load;
-  // the read reaches the snapshot database before it can tell whether the key
-  // holds a queue, so a miss is not cheaper work than a hit. See
-  // syscall_BytestringGet_inner.
+  // see syscall_BytestringGet_inner.
   auto const &[rcq_syscall_status, load_gas] = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
