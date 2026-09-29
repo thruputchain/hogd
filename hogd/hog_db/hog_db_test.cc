@@ -1348,10 +1348,7 @@ TEST_F(HogDbTest, DbHashDeltaAuthLockMatchesFullStateHash)
   });
 }
 
-// A new auth row whose change writes no threshold requires
-// kDefaultNewAddressRequiredWeight, so registering a key never leaves an
-// address anyone can originate from (issue #3069). A written threshold, zero
-// included, replaces the default.
+// A written threshold, zero included, replaces the new-row default (#3069).
 TEST_F(HogDbTest, NewAuthRowTakesDefaultRequiredWeightUnlessWritten)
 {
   Address defaulted = make_address(kAddress + 16);

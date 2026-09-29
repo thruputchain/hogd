@@ -814,13 +814,8 @@ TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
 // it: the genesis root's row has no keys and `required_weight = 0`, and the
 // ceremony transactions reach it with an unsigned default claim.
 //
-// Only the address itself can reach this state, and only on purpose: its row
-// is written solely by its own code, and a new row requires
-// kDefaultNewAddressRequiredWeight unless the address writes a zero threshold
-// with WriteAddressRequiredWeight (issue #3069). The zero threshold is a
-// property of a present row: with no row, a source claim has nothing to
-// satisfy and is rejected, leaving kPubkeySignature as the only claim that can
-// authorize the address.
+// Only the address can set this: a new row defaults to
+// kDefaultNewAddressRequiredWeight unless it writes a zero threshold (#3069).
 TEST_F(AuthClaimTests, ZeroRequiredWeightAuthDataAcceptsUnsignedSourceClaim)
 {
   AuthClaim claim = make_claim(/*allowed_keys=*/0, /*required_weight=*/0);

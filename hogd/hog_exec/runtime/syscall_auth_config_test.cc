@@ -606,10 +606,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMaxIndexBoundary)
   ASSERT_EQ(auth_data.public_keys[kMaxSigners - 1]->max_weight, Weight{5});
 }
 
-// A row created by key registration alone requires
-// kDefaultNewAddressRequiredWeight: the threshold the transaction never wrote
-// fails closed rather than committing at zero, which would let anyone
-// originate from the address (issue #3069).
+// A key-only first registration commits kDefaultNewAddressRequiredWeight
+// rather than zero (issue #3069).
 TEST_F(SyscallAuthConfigTest,
        KeyOnlyFirstRegistrationTakesDefaultRequiredWeight)
 {
@@ -850,10 +848,8 @@ TEST_F(SyscallAuthConfigTest, DeletionOnlyFirstTouchTakesAuthLock)
   EXPECT_TRUE(item->auth_data().public_keys[1]);
 }
 
-// The default threshold only fills in for one the transaction never wrote: an
-// address that registers its first key and writes a zero threshold in the same
-// transaction commits the zero, which is how it opts into being publicly
-// originatable.
+// Writing a zero threshold with the first key is how an address opts into
+// being publicly originatable; the default does not override it.
 TEST_F(SyscallAuthConfigTest, ExplicitZeroRequiredWeightOverridesDefault)
 {
   auto contract_addr = make_contract_address(0);
