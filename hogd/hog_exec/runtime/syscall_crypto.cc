@@ -60,7 +60,12 @@ syscall_SHA256Update_inner(SystemCallHandler &handler,
 
   auto r = handler.sha256_update(input_index, input_buffer, input_reset);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table. The indices are
+    // contract-chosen, so colliding ones let a full-slot table serve a miss
+    // out of a single bucket; charging the stream cost keeps that probe from
+    // being free repeatable work rather than selling it for the crossing
+    // (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
 
   if (auto *stats = handler.get_transaction_stats()) {
@@ -84,7 +89,9 @@ syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
 {
   auto r = handler.sha256_copy(input_src_index, input_dst_index);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table; charge for it, as Update
+    // does (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
 
   // Cloning a stream compresses nothing, so the stream is the whole cost.
@@ -98,7 +105,10 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
 {
   auto r = handler.sha256_finalize(input_index);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table, and a miss erases
+    // nothing, so a colliding index can be finalized-and-missed repeatedly;
+    // charge for the probe, as Update does (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
   output_output = *r;
   if (auto *trace_data =
