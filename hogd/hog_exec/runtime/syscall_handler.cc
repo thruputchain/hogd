@@ -2055,18 +2055,34 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
 }
 } // namespace
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+x23::Async<SystemStatus<StorageRead<void>>>
 SystemCallHandler::retrocausal_queue_insert(
     StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
 {
   if (queue_entry.size() > kQueueEntryMaxLen) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    // Rejected on the argument alone, before any frame or storage work, so it
+    // pays no load and no access -- the caller charges the crossing only.
+    co_return StorageRead<void>{
+        .result =
+            SyscallError{
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+        .load_gas = 0};
   }
   const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
+
+  // First touch of the key loads its committed queue; price that load here, as
+  // get_bytestring() does. A key already modified this transaction was loaded
+  // by that earlier touch and pays nothing.
+  GasAmount load_gas = 0;
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    load_gas = unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+  }
+  else if (!item_view->get<RetrocausalQueueItem>()) {
+    load_gas = note_item_load(item_key);
+  }
 
   auto queue_item =
       co_await retrocausal_queue_item_from_view(item_view, item_key, addrkey,
@@ -2076,13 +2092,16 @@ SystemCallHandler::retrocausal_queue_insert(
     co_return queue_item.error();
   }
   if (!queue_item.value().has_value()) {
-    co_return queue_item.value().error();
+    co_return StorageRead<void>{.result = queue_item.value().error(),
+                                .load_gas = load_gas};
   }
 
   // Now we have either grabbed the preexisting RCQItem, or created a new one.
   // In either case, we can now insert the new entry.
-  co_return queue_item.value().value()->insert_entry(
-      queue_entry_from_span(queue_entry));
+  co_return StorageRead<void>{.result =
+                                  queue_item.value().value()->insert_entry(
+                                      queue_entry_from_span(queue_entry)),
+                              .load_gas = load_gas};
 }
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>

@@ -29,6 +29,7 @@
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -697,6 +698,90 @@ TEST_F(Rv32ProductionMappingTest,
   EXPECT_GT(distinct_result.gas_consumed_, same_result.gas_consumed_);
   EXPECT_EQ(distinct_result.gas_consumed_ - same_result.gas_consumed_,
             (kReadCount - 1) * kDBRPCCost);
+}
+
+// Insert gas scales with entry size: two identical programs differing only in
+// the inserted entry size differ by exactly the size-proportional write charge.
+TEST_F(Rv32ProductionMappingTest, RcqInsertChargesForEntrySize)
+{
+  constexpr size_t kKeyCount = 4;
+  constexpr int32_t kRcqInsertSyscallNo = 20;
+  constexpr uint32_t kKeyBytes = StorageKeyContractData{}.size();
+  constexpr uint32_t kEntryAddress = kKeyCount * kKeyBytes;
+  constexpr size_t kMemoryBytes = kEntryAddress + kQueueEntryMaxLen;
+
+  auto make_program = [&](uint32_t entry_size) {
+    std::vector<uint8_t> memory(kMemoryBytes, 0);
+    for (size_t i = 0; i < kKeyCount; ++i) {
+      memory[i * kKeyBytes] = static_cast<uint8_t>(i + 1);
+    }
+    std::fill(memory.begin() + kEntryAddress, memory.end(), 0xA5);
+
+    std::vector<uint32_t> program;
+    for (size_t i = 0; i < kKeyCount; ++i) {
+      append_syscall(program,
+                     {kRcqInsertSyscallNo, static_cast<int32_t>(i * kKeyBytes),
+                      static_cast<int32_t>(kEntryAddress),
+                      static_cast<int32_t>(entry_size)});
+    }
+    append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+    return std::pair{std::move(program), std::move(memory)};
+  };
+
+  auto [empty_program, empty_memory] = make_program(0);
+  auto [full_program, full_memory] = make_program(kQueueEntryMaxLen);
+  const auto empty_addr = deploy_words(empty_program, 0, empty_memory);
+  const auto full_addr = deploy_words(full_program, 1, full_memory);
+
+  const auto empty_result = invoke_deployed(empty_addr, 1'000'000);
+  const auto full_result = invoke_deployed(full_addr, 1'000'000);
+  ASSERT_TRUE(empty_result.is_root_success());
+  ASSERT_TRUE(full_result.is_root_success());
+
+  EXPECT_GT(full_result.gas_consumed_, empty_result.gas_consumed_);
+  EXPECT_EQ(full_result.gas_consumed_ - empty_result.gas_consumed_,
+            kKeyCount * kBytestringWriteBlockCost *
+                GasCost::bytestring_blocks(kQueueEntryMaxLen));
+}
+
+// Each distinct key is a first-touch cold load; repeated inserts on one key
+// load it only once, so the distinct-key program pays the extra cold loads.
+TEST_F(Rv32ProductionMappingTest, RcqInsertDistinctKeysAreChargedHostGas)
+{
+  constexpr size_t kKeyCount = 4;
+  constexpr int32_t kRcqInsertSyscallNo = 20;
+  constexpr uint32_t kKeyBytes = StorageKeyContractData{}.size();
+
+  auto make_program = [&](bool distinct) {
+    std::vector<uint32_t> program;
+    std::vector<uint8_t> memory(kKeyCount * kKeyBytes);
+    for (size_t i = 0; i < kKeyCount; ++i) {
+      const uint32_t key_address = distinct ? i * kKeyBytes : 0;
+      if (distinct || i == 0) {
+        std::fill_n(memory.begin() + key_address, kKeyBytes,
+                    static_cast<uint8_t>(i + 1));
+      }
+      append_syscall(program,
+                     {kRcqInsertSyscallNo, static_cast<int32_t>(key_address),
+                      /*entry_ptr=*/0, /*entry_size=*/0});
+    }
+    append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+    return std::pair{std::move(program), std::move(memory)};
+  };
+
+  auto [same_program, same_memory] = make_program(false);
+  auto [distinct_program, distinct_memory] = make_program(true);
+  const auto same_addr = deploy_words(same_program, 0, same_memory);
+  const auto distinct_addr = deploy_words(distinct_program, 1, distinct_memory);
+
+  const auto same_result = invoke_deployed(same_addr, 1'000'000);
+  const auto distinct_result = invoke_deployed(distinct_addr, 1'000'000);
+  ASSERT_TRUE(same_result.is_root_success());
+  ASSERT_TRUE(distinct_result.is_root_success());
+
+  EXPECT_GT(distinct_result.gas_consumed_, same_result.gas_consumed_);
+  EXPECT_EQ(distinct_result.gas_consumed_ - same_result.gas_consumed_,
+            (kKeyCount - 1) * kDBRPCCost);
 }
 
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
