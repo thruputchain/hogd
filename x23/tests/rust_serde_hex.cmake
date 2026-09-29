@@ -10,14 +10,6 @@ struct Packet {
 
 // #[rust(newtype)]
 typedef opaque Hash[32];
-
-// #[rust(newtype)]
-// #[serde(with = "serde_arrays::hex")]
-typedef Digest LegacyHash;
-
-// #[rust(newtype)]
-// #[serde(with = "serde_arrays::hex")]
-typedef opaque LegacyOpaque[32];
 ]=])
 
 foreach(mode default enabled disabled)
@@ -35,8 +27,8 @@ foreach(mode default enabled disabled)
     message(FATAL_ERROR "x23c failed for ${mode}: ${error}")
   endif()
   file(READ "${TEST_DIR}/${mode}.rs" rust)
-  string(FIND "${rust}" "serde_arrays" legacy_pos)
-  if(NOT legacy_pos EQUAL -1)
+  string(FIND "${rust}" "serde_arrays" serde_arrays_pos)
+  if(NOT serde_arrays_pos EQUAL -1)
     message(FATAL_ERROR "Generated Rust still refers to serde_arrays (${mode})")
   endif()
   string(REGEX MATCHALL "serde\\(with = \"xdr_common::serde_hex\"\\)" adapters "${rust}")
@@ -46,10 +38,9 @@ foreach(mode default enabled disabled)
       message(FATAL_ERROR "Hex adapter was emitted with Serde disabled")
     endif()
   else()
-    # Inline opaque, newtype, and legacy-marked direct/alias newtypes.
-    # Counting also catches duplicate attributes on the legacy newtype.
-    if(NOT count EQUAL 4)
-      message(FATAL_ERROR "Expected four hex adapters for ${mode}, got ${count}")
+    # Inline opaque and a byte-array newtype.
+    if(NOT count EQUAL 2)
+      message(FATAL_ERROR "Expected two hex adapters for ${mode}, got ${count}")
     endif()
     if(mode STREQUAL "default")
       string(FIND "${rust}"
