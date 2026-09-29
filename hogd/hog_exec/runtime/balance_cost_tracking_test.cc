@@ -1720,9 +1720,10 @@ TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
     ContractAddress addr;
     GasAmount gas_limit;
   };
-  constexpr static std::array<ReadPlan, 3> kReads{{{kFreshAddr, kTwoGas},
-                                                   {kFreshAddr, kTwoGas},
-                                                   {kFundedAddr, UINT64_MAX}}};
+  constexpr static std::array<ReadPlan, 3> kReads{
+      {{.addr = kFreshAddr, .gas_limit = kTwoGas},
+       {.addr = kFreshAddr, .gas_limit = kTwoGas},
+       {.addr = kFundedAddr, .gas_limit = UINT64_MAX}}};
 
   std::array<GasAmount, kReads.size()> charges{};
   std::array<InvocationFrameStatusCode, kReads.size()> statuses{};
