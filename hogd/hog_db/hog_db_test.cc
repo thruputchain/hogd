@@ -1439,6 +1439,25 @@ TEST_F(HogDbTest, KeyRegistrationThenRemovalOnMissingAuthRowWritesNothing)
   EXPECT_EQ(*balance, kBalance);
 }
 
+// The ExclusiveLock flag prices a removal on a missing row the same way: it
+// reserves nothing, so an address with no balance can still commit it.
+TEST_F(HogDbTest, ExclusiveKeyRemovalOnMissingAuthRowReservesNothing)
+{
+  Address addr = make_address(kAddress + 25);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
+}
+
 TEST_F(HogDbTest, DbHashDeltaBalanceLockMatchesFullStateHash)
 {
   Address addr = make_address(kAddress + 10);
