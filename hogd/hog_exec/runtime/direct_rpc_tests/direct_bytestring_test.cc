@@ -4,18 +4,17 @@
 #include <print>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <utility>
-#include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hog_exec/common/storage_output.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/rpc_msg.hh"
 
 namespace hogd {
 
@@ -1896,126 +1895,70 @@ TEST_P(DirectBytestringTest, BugHuntLargeBytestringExhaustsBalance)
   ASSERT_TRUE(r.has_value() && !r.value());
 }
 
-// A subtransaction whose delta batch would not fit the executor->HogDb RPC
-// message is rejected as a concurrency-control conflict (a clean `false`, not a
-// system error), so an oversized push can never reach serialization and become
-// a node-unrecoverable error. This is the general r/w-footprint bound; here it
-// is driven by spraying max-size bytestrings across many keys (the same check
-// covers many-keys and RCQ-observation overflow).
-TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
+// The proxy counts each staged delta's storage output as the protocol defines
+// it, from the values rather than their encoding, so the figure is the one
+// every node computes. Observation-only deltas are not counted, and a discard
+// or a push starts the count over.
+TEST_P(DirectBytestringTest, StagedOutputCountsProtocolCharges)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000'000);
+  constexpr uint64_t kPerDelta = kStorageOutputBytesPerDelta;
 
-  // Positive control: a normal small batch commits.
-  {
-    auto tx = make_new_per_tx_db_proxy();
-    for (int i = 0; i < 10; ++i) {
-      tx.add_delta(make_addrkey(contract_addr, "k" + std::to_string(i)),
-                   make_bytestring_delta("value"),
-                   std::to_underlying(StorageDeltaFlags::None));
-    }
-    auto r = tx.try_push_current_subtransaction()();
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r.value()) << "a small delta batch must commit";
-  }
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(make_addrkey(contract_addr, "a"), make_bytestring_delta(""),
+               std::to_underlying(StorageDeltaFlags::None));
+  tx.add_delta(make_addrkey(contract_addr, "b"),
+               make_bytestring_delta(std::string(1000, 'x')),
+               std::to_underlying(StorageDeltaFlags::None));
+  EXPECT_EQ(tx.staged_output_bytes(), kPerDelta + (kPerDelta + 1000));
 
-  // A batch of max-size (1 KiB) bytestrings across enough distinct keys to
-  // exceed the 16 MiB cap. Each delta is ~1104 bytes (key+framing+1028), so
-  // 16000 deltas ~= 16.8 MiB > cap. Rejected before any push is attempted.
-  {
-    const std::string max_value(kDefaultMaxBytestringLen, 'x');
-    auto tx = make_new_per_tx_db_proxy();
-    for (int i = 0; i < 16000; ++i) {
-      tx.add_delta(make_addrkey(contract_addr, "spray" + std::to_string(i)),
-                   make_bytestring_delta(max_value),
-                   std::to_underlying(StorageDeltaFlags::None));
-    }
-    auto r = tx.try_push_current_subtransaction()();
-    ASSERT_TRUE(r.has_value())
-        << "over-budget push must be a clean conflict, not a system error";
-    EXPECT_FALSE(r.value())
-        << "an over-cap delta batch must be rejected as a conflict";
-  }
+  StorageDelta observed(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+  observed.retrocausal_queue().observed_concurrent_entries.push_back(
+      QueueEntry(kQueueEntryMaxLen));
+  tx.add_observation_delta(make_addrkey(contract_addr, "q"),
+                           std::move(observed));
+  EXPECT_EQ(tx.staged_output_bytes(), kPerDelta + (kPerDelta + 1000))
+      << "an observation-only delta carries no storage output";
+
+  tx.discard_current_subtransaction();
+  EXPECT_EQ(tx.staged_output_bytes(), 0U);
+
+  tx.add_delta(make_addrkey(contract_addr, "c"), make_bytestring_delta("value"),
+               std::to_underlying(StorageDeltaFlags::None));
+  EXPECT_EQ(tx.staged_output_bytes(), kPerDelta + 5);
+  auto r = tx.try_push_current_subtransaction()();
+  ASSERT_TRUE(r.has_value());
+  EXPECT_TRUE(r.value());
+  EXPECT_EQ(tx.staged_output_bytes(), 0U);
 }
 
-// The footprint gate in DatabaseProxy::try_push_new_subtransaction is strict
-// (footprint + kMessageOverhead > kExecToDbMessageCap): a batch whose
-// type-derived footprint lands exactly on the budget is pushed; one XDR word
-// (4 bytes) more is rejected as a clean conflict. The bound arithmetic is
-// mirrored from database_proxy.cc, so a change to the cap, the message
-// overhead, or the per-delta bound moves this boundary and fails the test --
-// an off-by-one tightening would abort transactions other validators accept.
-TEST_P(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
+// Each arm is charged what the protocol states, independent of its encoding.
+TEST(StorageOutputTest, ChargesEachArmAsTheProtocolStates)
 {
-  constexpr size_t kWord = 4;
-  constexpr auto kXdrMaxOf = []<typename T>(std::type_identity<T>) {
-    return x23::detail::xdr_size_bounds<T>().max_;
-  };
-  constexpr size_t kCap = 0x100'0000;
-  constexpr size_t kOverhead = kXdrMaxOf(std::type_identity<x23::rpc_msg>{}) +
-                               kXdrMaxOf(std::type_identity<BlockID>{}) +
-                               kXdrMaxOf(std::type_identity<TransactionID>{}) +
-                               kWord;
-  constexpr size_t kBudget = kCap - kOverhead;
-  constexpr size_t kFraming =
-      kXdrMaxOf(std::type_identity<AddressAndKey>{}) +
-      kXdrMaxOf(std::type_identity<StorageDeltaFlagSet>{}) +
-      kXdrMaxOf(std::type_identity<StorageDeltaType>{});
-  constexpr size_t kMinDelta = kFraming + kWord; // zero-length bytestring
-  constexpr auto kBoundOf = [](size_t len) {
-    return kMinDelta + ((len + 3) & ~size_t{3});
-  };
-  constexpr size_t kMaxLen = kDefaultMaxBytestringLen;
-  constexpr size_t kPerMax = kBoundOf(kMaxLen);
+  constexpr uint64_t kPerDelta = kStorageOutputBytesPerDelta;
 
-  // Bytestring lengths whose per-delta bounds sum to exactly `target`
-  // (everything in the bound arithmetic is a multiple of one XDR word).
-  auto lens_for_target = [&](size_t target) {
-    std::vector<size_t> lens;
-    size_t left = target;
-    while (left > 2 * kPerMax) {
-      lens.push_back(kMaxLen);
-      left -= kPerMax;
-    }
-    const size_t t1 = (left / 2) & ~size_t{3};
-    lens.push_back(t1 - kMinDelta);
-    lens.push_back((left - t1) - kMinDelta);
-    size_t total = 0;
-    for (size_t len : lens) {
-      total += kBoundOf(len);
-    }
-    EXPECT_EQ(total, target);
-    return lens;
-  };
+  StorageDelta nnint(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+  EXPECT_EQ(storage_output_bytes(nnint), kPerDelta);
+  EXPECT_EQ(storage_output_bytes(
+                StorageDelta(StorageDeltaType::kDeltaTypeDelete)),
+            kPerDelta);
 
-  auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, 1'000'000'000'000);
+  StorageDelta rq(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+  rq.retrocausal_queue().insert.added_entries.push_back(QueueEntry(10));
+  rq.retrocausal_queue().consume =
+      RetrocausalQueueConsumeDelta{.past_block_consume = {},
+                                   .current_block_consumed = {QueueEntry(20)}};
+  rq.retrocausal_queue().observed_concurrent_entries.push_back(QueueEntry(30));
+  EXPECT_EQ(storage_output_bytes(rq),
+            kPerDelta + (2 * uint64_t{kStorageOutputBytesPerQueueEntry}) + 10 +
+                20)
+      << "observed entries are not counted";
 
-  auto push_batch_of = [&](std::vector<size_t> const &lens) {
-    auto tx = make_new_per_tx_db_proxy();
-    for (size_t i = 0; i < lens.size(); ++i) {
-      tx.add_delta(make_addrkey(contract_addr, "cap" + std::to_string(i)),
-                   make_bytestring_delta(std::string(lens[i], 'x')),
-                   std::to_underlying(StorageDeltaFlags::None));
-    }
-    return tx.try_push_current_subtransaction()();
-  };
-
-  {
-    auto r = push_batch_of(lens_for_target(kBudget));
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r.value())
-        << "a batch footprint of exactly the message budget must be pushed";
-  }
-
-  {
-    auto r = push_batch_of(lens_for_target(kBudget + kWord));
-    ASSERT_TRUE(r.has_value())
-        << "an over-budget push must be a clean conflict, not a system error";
-    EXPECT_FALSE(r.value())
-        << "one XDR word over the message budget must be rejected";
-  }
+  StorageDelta auth(StorageDeltaType::kDeltaTypeAuthDataChange);
+  auth.auth_data_change().auth_data_change_signers.resize(3);
+  EXPECT_EQ(storage_output_bytes(auth),
+            kPerDelta + (3 * uint64_t{kStorageOutputBytesPerAuthSigner}));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

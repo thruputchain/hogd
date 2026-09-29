@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -15,6 +16,7 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/common/storage_output.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -161,11 +163,41 @@ public:
     current_subtransaction_batch_.reserve(delta_count);
   }
 
+  // Stages a delta the transaction wrote, counting its storage output.
   void add_delta(AddressAndKey addrkey, StorageDelta delta,
                  StorageDeltaFlagSet flags)
   {
+    staged_output_bytes_ += storage_output_bytes(delta);
     current_subtransaction_batch_.emplace_back(std::move(addrkey),
                                                std::move(delta), flags);
+  }
+
+  // Stages an RCQ delta carrying only a validator's rebuilt observations, for
+  // a queue the transaction did not otherwise modify. Not counted as storage
+  // output: a proposer's batch has no such delta, so counting it would make
+  // the two disagree about a transaction's output. kMaxConcurrentRcqReadsPerTx
+  // bounds these instead.
+  void add_observation_delta(AddressAndKey addrkey, StorageDelta delta)
+  {
+    CHECK(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
+    current_subtransaction_batch_.emplace_back(std::move(addrkey),
+                                               std::move(delta),
+                                               std::to_underlying(
+                                                   StorageDeltaFlags::None));
+  }
+
+  // Storage output staged since the last push or discard: what the next
+  // push would count against max_subtransaction_output_bytes.
+  uint64_t staged_output_bytes() const { return staged_output_bytes_; }
+
+  // Drops the staged deltas without sending them, as a push refused before
+  // reaching HogDb must.
+  void discard_current_subtransaction()
+  {
+    current_subtransaction_batch_.clear();
+    staged_output_bytes_ = 0;
+    last_push_conflict_ =
+        DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
   }
 
   // Conflict diagnostics from the most recent failed push, at the level
@@ -231,6 +263,7 @@ private:
   // acquire and release both touch only the running thread's pool, so that
   // stays correct under interleaving.
   StorageDeltaBatch current_subtransaction_batch_;
+  uint64_t staged_output_bytes_ = 0;
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;
