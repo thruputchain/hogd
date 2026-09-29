@@ -49,7 +49,12 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     auto const &auth_data = after->to_auth_data();
     x23assert(auth_data.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return ctx.cost_model->get_auth_data_cost(auth_data->count_active_keys());
+    auto const &item = *auth_data;
+    // A change that leaves no row reserves nothing, as AuthLock charges it.
+    if (!item.writes_row()) {
+      return 0;
+    }
+    return ctx.cost_model->get_auth_data_cost(item.count_active_keys());
   }
   if (after->is_retrocausal_queue()) {
     // Delegate validation and consume-counting to RetrocausalQueueLock.

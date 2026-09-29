@@ -60,7 +60,9 @@ syscall_SHA256Update_inner(SystemCallHandler &handler,
 
   auto r = handler.sha256_update(input_index, input_buffer, input_reset);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table, so charge for the probe
+    // (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
 
   if (auto *stats = handler.get_transaction_stats()) {
@@ -84,7 +86,9 @@ syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
 {
   auto r = handler.sha256_copy(input_src_index, input_dst_index);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table, so charge for the probe
+    // (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
 
   // Cloning a stream compresses nothing, so the stream is the whole cost.
@@ -98,7 +102,9 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
 {
   auto r = handler.sha256_finalize(input_index);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table, so charge for the probe
+    // (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
   output_output = *r;
   if (auto *trace_data =

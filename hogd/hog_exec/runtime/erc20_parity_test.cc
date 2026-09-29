@@ -502,22 +502,9 @@ protected:
     return {commit, records};
   }
 
-  // Runs the allowance-netting sequence from hogd#1918 against both backends:
-  // in ONE transaction a caller decrements a *fresh* (caller, spender)
-  // allowance by `magnitude` and then, as a sibling call, increments it
-  // straight back. Under the old deferred (non-strict) NNInt path the
-  // decrement returned Ok and emitted an Approval event for a diff the
-  // committed allowance could never fund; the sibling increment then netted
-  // the pending add back to zero, so nothing was left for commit-time
-  // validation to reject. With strict allowance updates the decrement must be
-  // rejected at invoke, and the increment that follows it must be unaffected.
-  //
-  // Steps (recorded in order): adjust_allowance(spender, -magnitude),
-  // adjust_allowance(spender, +magnitude), allowance(caller, spender),
-  // allowance(caller, untouched_spender). The two trailing reads pin the
-  // committed allowance without reaching into either backend's storage-key
-  // derivation: the second one is a known zero, so the netted-away outcome
-  // (both reads equal) is distinguishable from the correct one (they differ).
+  // Reject a fresh allowance's decrement at invoke, even if a later grant
+  // would net it to zero (#1918). Trailing reads compare the resulting grant
+  // with an untouched allowance without relying on either backend's storage.
   std::pair<MultiStepOutcome, MultiStepOutcome>
   run_allowance_netting_parity(int128_t magnitude)
   {
@@ -528,18 +515,18 @@ protected:
         make_storage_key("rv32_step0"), make_storage_key("rv32_step1"),
         make_storage_key("rv32_step2"), make_storage_key("rv32_step3")};
 
-    auto make_steps =
-        [magnitude](ContractAddress token, ContractAddress caller,
-                    ContractAddress spender, ContractAddress zero_spender,
-                    std::vector<StorageKeyContractData> const &keys) {
-          return std::vector<CaptureStep>{
-              make_step<u8"adjust_allowance">(token, keys[0], spender,
-                                              make_difference(-magnitude)),
-              make_step<u8"adjust_allowance">(token, keys[1], spender,
-                                              make_difference(magnitude)),
-              make_step<u8"allowance">(token, keys[2], caller, spender),
-              make_step<u8"allowance">(token, keys[3], caller, zero_spender)};
-        };
+    auto make_steps = [magnitude](
+                          ContractAddress token, ContractAddress caller,
+                          ContractAddress spender, ContractAddress zero_spender,
+                          std::vector<StorageKeyContractData> const &keys) {
+      return std::vector<CaptureStep>{
+          make_step<u8"adjust_allowance">(token, keys[0], spender,
+                                          make_difference(-magnitude), false),
+          make_step<u8"adjust_allowance">(token, keys[1], spender,
+                                          make_difference(magnitude), false),
+          make_step<u8"allowance">(token, keys[2], caller, spender),
+          make_step<u8"allowance">(token, keys[3], caller, zero_spender)};
+    };
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_caller_fns;
@@ -670,7 +657,8 @@ protected:
                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
         auto r = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, spender, make_difference(static_cast<int128_t>(amount)));
+            ctx, spender, make_difference(static_cast<int128_t>(amount)),
+            false);
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -945,7 +933,7 @@ protected:
                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
         auto r = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, spender, make_difference(static_cast<int128_t>(amt)));
+            ctx, spender, make_difference(static_cast<int128_t>(amt)), false);
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -1089,7 +1077,7 @@ protected:
                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
         auto r = co_await client.invoke_opt<u8"adjust_allowance">(
-            ctx, spender, make_difference(static_cast<int128_t>(amt)));
+            ctx, spender, make_difference(static_cast<int128_t>(amt)), false);
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
@@ -1226,7 +1214,7 @@ protected:
     native_caller_fns.emplace(
         0, make_capture_driver<u8"adjust_allowance">(
                kNativeTokenAddr, native_result_key, kNativeCallerAddr,
-               make_difference(static_cast<int128_t>(amount))));
+               make_difference(static_cast<int128_t>(amount)), false));
     auto native_caller =
         std::make_unique<NativeContract>(std::move(native_caller_fns));
 
@@ -1235,7 +1223,7 @@ protected:
     rv32_caller_fns.emplace(
         0, make_capture_driver<u8"adjust_allowance">(
                kRv32TokenAddr, rv32_result_key, kRv32CallerAddr,
-               make_difference(static_cast<int128_t>(amount))));
+               make_difference(static_cast<int128_t>(amount)), false));
     auto rv32_caller =
         std::make_unique<NativeContract>(std::move(rv32_caller_fns));
 
@@ -1752,8 +1740,8 @@ TEST_F(Erc20ParityTest, OneOverBalanceTransferFromToRecipientParity)
 // transfer above (issue #2135), neither backend guards the zero recipient: the
 // allowance is spent, the zero address is credited, and a standard
 // Transfer(owner, zero, amount) event is emitted. This locks in that the two
-// implementations agree on the delegated path too --- the amendment case on
-// that issue.
+// implementations agree on the delegated path too (the amendment in that
+// issue).
 TEST_F(Erc20ParityTest, TransferFromToZeroAddressParity)
 {
   auto [native_record, rv32_record] = run_transfer_from_parity(
@@ -1783,8 +1771,7 @@ TEST_F(Erc20ParityTest, TransferFromToZeroAddressParity)
       << "the delegated transfer must not have gone to the default recipient";
 }
 
-// adjust_allowance(self, +amount): granting oneself an allowance is rejected by
-// both backends with ERC20Error::Internal at invoke, byte-identically.
+// Self-allowance grants succeed on both backends.
 TEST_F(Erc20ParityTest, AdjustAllowanceToSelfParity)
 {
   auto [native_record, rv32_record] =
@@ -1792,19 +1779,15 @@ TEST_F(Erc20ParityTest, AdjustAllowanceToSelfParity)
   EXPECT_EQ(native_record, rv32_record)
       << "native precompile and RV32 itc_erc20 diverged on adjust_allowance "
          "to self";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(static_cast<ExecResult>(native_record[0]),
+            ExecResult::ExecResultOK);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
 }
 
-// hogd#1918, allowance-netting form: decrementing a fresh (owner, spender)
-// allowance and immediately incrementing it back, in one transaction, must not
-// launder the invalid decrement. Both backends reject the decrement at invoke
-// (ERC20Error::TooLarge) and let the increment through, so the committed
-// allowance is exactly the increment -- byte-identically. Before the strict
-// NNInt update, the decrement returned Ok (and emitted an Approval event for a
-// diff nothing could fund), and the increment netted the pending add back to
-// zero so the root commit found nothing to reject; that history would show up
-// here as a Return status on step 0 and a zero trailing allowance read. The
-// event-side counterpart lives in
-// NativeRv32TokenEventParityTest.NettedNegativeApprovalEmitsNoEventRv32AndNative.
+// hogd#1918: a failed decrement must not be staged for a later grant to offset.
+// The event counterpart is NettedNegativeAllowanceChangeEmitsOnlyTheValidEvent.
 TEST_F(Erc20ParityTest, NegativeAllowanceNettingParity)
 {
   auto [native_outcome, rv32_outcome] =
@@ -2349,22 +2332,9 @@ TEST_F(Erc20ParityTest, MintThenBurnSameTxNetsSupplyParity)
             std::optional<uint128_t>(0));
 }
 
-// The distinction issue #2135 turns on, pinned in a single transaction: a
-// zero-recipient transfer and a real burn both emit Transfer(x, zero, amount),
-// but only burn() moves supply. The transfer credits the zero address as an
-// ordinary account and leaves total_supply() alone; the burn debits the holder
-// and reduces total_supply(). Both backends agree, byte-for-byte.
-//
-// This is the working-as-intended reading of that issue: the zero address is
-// not a burn sink, and a zero-recipient Transfer event is a naming convention
-// (see the SDK's groundhog-erc20 events.rs) rather than a supply-reducing
-// state transition. Burning is the separate, owner-gated burn() call.
-//
-// The two paths are deliberately indistinguishable by event alone --- burn()
-// emits the same Transfer(owner, zero, amount) bytes, pinned by
-// NativeTokenAllowanceTest.GenesisRootBurnAuthorityIsNotHeightLimitedByPrecompile
-// against the bytes the zero-recipient transfer tests expect. Supply is the
-// signal that separates them, and that is what this test pins.
+// Transferring to the zero address credits an ordinary account; only burn()
+// reduces supply (#2135). Check both operations in one transaction on each
+// backend.
 TEST_F(Erc20ParityTest,
        BurnReducesSupplyWhereZeroRecipientTransferDoesNotParity)
 {

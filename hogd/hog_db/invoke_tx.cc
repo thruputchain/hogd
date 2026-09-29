@@ -530,14 +530,13 @@ InvokeTX::request_auth_data(Address const &addr,
                             StorageDeltaFlagSet flags)
 {
   auto base_auth_data = block_.get().get_db().read_address_auth_data(addr);
-  if (!base_auth_data) {
-    if (base_auth_data.error() != HogDbCode::kNotFound) {
-      return base_auth_data.error();
-    }
-    base_auth_data = AddressAuthData{};
+  if (!base_auth_data && base_auth_data.error() != HogDbCode::kNotFound) {
+    return base_auth_data.error();
   }
 
-  AuthDataItem auth_data_item(std::move(base_auth_data.value()));
+  AuthDataItem auth_data_item = base_auth_data
+                                    ? AuthDataItem(std::move(*base_auth_data))
+                                    : AuthDataItem::for_missing_row();
   for (const auto &signer : auth_data_change.auth_data_change_signers) {
     if (signer.public_key_id >= kMaxSigners) {
       last_conflict_reason_ = DbConflictCode::CapacityExceeded;

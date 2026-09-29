@@ -21,9 +21,10 @@ OUTPUT_ROOT=$1
 BUILD_DIR=${BUILD_DIR:-release}
 SECONDS_MEASURED=${SCHEDGATEWAY_BENCH_SECONDS:-20}
 WARMUP_SECONDS=${SCHEDGATEWAY_BENCH_WARMUP:-2}
-# The client fails rather than replaying a nonce once its prepared corpus runs
-# out; this leaves ample headroom over the measured rate at either width.
-TRANSACTIONS=${SCHEDGATEWAY_BENCH_TRANSACTIONS:-300000}
+# The client fails rather than replaying a nonce once its prepared corpus
+# runs out, and every connection drains it at its own rate, so the corpus
+# must scale with the width. Budget per connection, at ~2x the measured rate.
+TRANSACTIONS_PER_CONN=${SCHEDGATEWAY_BENCH_TRANSACTIONS_PER_CONN:-150000}
 
 rm -rf "$OUTPUT_ROOT"
 mkdir -p "$OUTPUT_ROOT"
@@ -36,5 +37,5 @@ for connections in 1 4; do
     --connections "$connections" \
     --seconds "$SECONDS_MEASURED" \
     --warmup "$WARMUP_SECONDS" \
-    --transactions "$TRANSACTIONS"
+    --transactions "$((TRANSACTIONS_PER_CONN * connections))"
 done

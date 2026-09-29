@@ -174,7 +174,9 @@ TEST_F(Sha256IncrementalTest, UpdateChecksGasBeforeCreatingResettingOrAppending)
             ASSERT_TRUE(result.has_value());
             EXPECT_EQ(*result,
                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-            EXPECT_EQ(charged, kSyscallBaseCost);
+            // The miss still probed the stream table, so it pays the stream
+            // cost on top of the crossing (#4218).
+            EXPECT_EQ(charged, kSyscallBaseCost + kSHA256StreamCost);
             EXPECT_FALSE(handler.sha256_finalize(0).has_value());
           }
           else {
@@ -196,6 +198,122 @@ TEST_F(Sha256IncrementalTest, UpdateChecksGasBeforeCreatingResettingOrAppending)
       }
     }
   }
+  EXPECT_TRUE(
+      handler.finish_frame(InvokeStatus<void>{}, nullptr)().has_value());
+}
+
+// A failed stream lookup still probes the table, so Finalize and Copy misses
+// pay the stream cost, not just the crossing (#4218).
+TEST_F(Sha256IncrementalTest, FailedStreamLookupsPayTheStreamCost)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+  ASSERT_TRUE(
+      handler
+          .start_frame(Invocation{.invoked_address = make_contract_address(0),
+                                  .entrypoint = {},
+                                  .gas_limit = UINT64_MAX,
+                                  .calldata = {}},
+                       std::to_underlying(InvokeFlag::None),
+                       ValidatedAuthTokens{})
+          .has_value());
+
+  // One live stream, so a miss below has a populated table to probe.
+  ASSERT_TRUE(
+      handler.sha256_update(7, std::span<const std::byte>{}, true).has_value());
+
+  const GasAmount kMissCost = kSyscallBaseCost + kSHA256StreamCost;
+  std::vector<std::byte> memory(sizeof(SHA256Hash));
+
+  // Repeated finalize misses each pay the probe and leave the table untouched.
+  for (int i = 0; i < 4; ++i) {
+    SCOPED_TRACE(::testing::Message() << "finalize miss " << i);
+    auto [result, charged] =
+        wrap_outer<SyscallMeta<SyscallNo::kSHA256Finalize>>(
+            handler,
+            ExecutionContext{.memory = memory, .gas_remaining = UINT64_MAX},
+            SyscallNo::kSHA256Finalize, 9, 0, 0, 0, 0, 0, 0)();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+    EXPECT_EQ(charged, kMissCost);
+  }
+
+  // A copy whose source is missing is charged the same way.
+  {
+    auto [result, charged] = wrap_outer<SyscallMeta<SyscallNo::kSHA256Copy>>(
+        handler,
+        ExecutionContext{.memory = memory, .gas_remaining = UINT64_MAX},
+        SyscallNo::kSHA256Copy, 9, 10, 0, 0, 0, 0, 0)();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+    EXPECT_EQ(charged, kMissCost);
+  }
+
+  // The live stream survived every miss and still finalizes cleanly.
+  auto digest = handler.sha256_finalize(7);
+  ASSERT_TRUE(digest.has_value());
+  EXPECT_EQ(*digest, sha256(std::span<const std::byte>{}));
+
+  EXPECT_TRUE(
+      handler.finish_frame(InvokeStatus<void>{}, nullptr)().has_value());
+}
+
+// A single-slot table so a copy with a present source but a missing
+// destination is rejected for capacity, the path that probes two slots before
+// failing.
+class Sha256SingleBufferTest : public ::testing::Test,
+                               public NativeContractTestFramework {
+public:
+  Sha256SingleBufferTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDb, true, std::nullopt, single_buffer_config())
+  {}
+
+private:
+  static NetworkConfig single_buffer_config()
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                   1);
+    return config;
+  }
+};
+
+// A copy rejected because the table is full still probed both slots, so it
+// pays the stream cost like any other failed lookup (#4218).
+TEST_F(Sha256SingleBufferTest, FullTableCopyRejectionPaysAndKeepsSource)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+  ASSERT_TRUE(
+      handler
+          .start_frame(Invocation{.invoked_address = make_contract_address(0),
+                                  .entrypoint = {},
+                                  .gas_limit = UINT64_MAX,
+                                  .calldata = {}},
+                       std::to_underlying(InvokeFlag::None),
+                       ValidatedAuthTokens{})
+          .has_value());
+
+  // Fill the single slot with a real stream at index 0.
+  ASSERT_TRUE(
+      handler.sha256_update(0, std::span<const std::byte>{}, true).has_value());
+
+  std::vector<std::byte> memory(sizeof(SHA256Hash));
+  auto [result, charged] = wrap_outer<SyscallMeta<SyscallNo::kSHA256Copy>>(
+      handler, ExecutionContext{.memory = memory, .gas_remaining = UINT64_MAX},
+      SyscallNo::kSHA256Copy, 0, 1, 0, 0, 0, 0, 0)();
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+  EXPECT_EQ(charged, kSyscallBaseCost + kSHA256StreamCost);
+
+  // The source survived the rejected copy and still finalizes cleanly.
+  auto digest = handler.sha256_finalize(0);
+  ASSERT_TRUE(digest.has_value());
+  EXPECT_EQ(*digest, sha256(std::span<const std::byte>{}));
+
   EXPECT_TRUE(
       handler.finish_frame(InvokeStatus<void>{}, nullptr)().has_value());
 }

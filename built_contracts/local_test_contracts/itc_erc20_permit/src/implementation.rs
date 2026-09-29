@@ -1,11 +1,4 @@
-//! `itc_erc20`'s implementation, unchanged apart from formatting and the
-//! `checked` feature (which the native token has no counterpart for), plus
-//! `ERC20Permit`.
-
-// If the interface's `Amount` type changes away from `i128`, our casts
-// below will be necessary
-#![allow(clippy::unnecessary_cast)]
-#![allow(clippy::useless_conversion)]
+//! The RV32 reference for native HOG's ERC20 and ERC20Permit interfaces.
 
 use crate::interface::*;
 use crate::permit_interface::{
@@ -32,14 +25,6 @@ fn get_allowance_key(
     owner: &ContractAddress,
     spender: &ContractAddress,
 ) -> StorageKey {
-    // Spending one's own tokens needs no allowance; reject (owner == spender)
-    // as a proper contract error rather than a debug-only assert, so the
-    // behavior is identical in release. (ERC20Error::Internal for now; a more
-    // descriptive variant can follow in an sdk update.)
-    if owner == spender {
-        throw(ERC20Error::Internal);
-    }
-
     (b"allowance", owner, spender).hash().into()
 }
 
@@ -78,6 +63,15 @@ fn add_to_allowance(
         .unwrap_or_else(|_| throw(ERC20Error::TooLarge))
 }
 
+fn clear_allowance_for(owner: &ContractAddress, spender: &ContractAddress) {
+    let key = get_allowance_key(owner, spender);
+    let remaining = non_negative_int_try_get(&key)
+        .none_if_missing()
+        .unwrap_or(0);
+    delete_exclusive(&key);
+    AllowanceChangeEvent::new(owner, spender, -remaining).log();
+}
+
 #[sdk::storage]
 pub struct Token;
 
@@ -99,7 +93,7 @@ impl ERC20 for Token {
         add_to_balance(&caller, -diff);
         add_to_balance(to, diff);
 
-        log_transfer_event(&caller, to, amount);
+        TransferEvent::new(&caller, to, diff).log();
     }
 
     fn transfer_from(
@@ -117,19 +111,37 @@ impl ERC20 for Token {
         add_to_balance(owner, -diff);
         add_to_balance(receiver, diff);
 
-        log_transfer_event(owner, receiver, amount);
+        TransferEvent::new(owner, receiver, diff).log();
     }
 
     fn adjust_allowance(
         &mut self,
         spender: &ContractAddress,
-        diff: Difference,
+        difference: Difference,
+        exclusive: bool,
     ) {
         let owner = get_caller();
+        add_to_allowance(&owner, spender, difference);
+        if exclusive {
+            set_storage_flags(
+                &get_allowance_key(&owner, spender),
+                StorageDeltaFlags::ExclusiveLock,
+            );
+        }
+        AllowanceChangeEvent::new(&owner, spender, difference).log();
+    }
 
-        add_to_allowance(&owner, spender, diff);
+    fn clear_allowance(&mut self, spender: &ContractAddress) {
+        clear_allowance_for(&get_caller(), spender);
+    }
 
-        log_approval_event(&owner, spender, diff);
+    fn clear_balance(&mut self) {
+        let key = get_balance_key(&get_caller());
+        let balance = non_negative_int_try_get(&key)
+            .none_if_missing()
+            .unwrap_or(0);
+        ensure(balance == 0, ERC20Error::BalanceNotZero);
+        delete_exclusive(&key);
     }
 
     fn allowance(
@@ -159,7 +171,7 @@ impl ERC20 for Token {
         add_to_balance(receiver, diff);
         add_to_total_supply(diff);
 
-        log_mint_event(receiver, amount);
+        MintEvent::new(receiver, diff).log();
     }
 
     fn burn(&mut self, owner: &ContractAddress, amount: Amount) {
@@ -169,7 +181,7 @@ impl ERC20 for Token {
         add_to_balance(owner, -diff);
         add_to_total_supply(-diff);
 
-        log_burn_event(owner, amount);
+        BurnEvent::new(owner, diff).log();
     }
 
     fn total_supply(&self) -> Amount {
@@ -199,7 +211,7 @@ impl ERC20Permit for Token {
         add_to_balance(&owner, -diff);
         add_to_balance(receiver, diff);
 
-        log_transfer_event(&owner, receiver, amount);
+        TransferEvent::new(&owner, receiver, diff).log();
     }
 
     fn increase_allowance_signed(&mut self, grant: Signed<PermitGrant>) {
@@ -208,19 +220,11 @@ impl ERC20Permit for Token {
 
         add_to_allowance(&owner, &grant.spender, diff);
 
-        log_approval_event(&owner, &grant.spender, diff);
+        AllowanceChangeEvent::new(&owner, &grant.spender, diff).log();
     }
 
     fn clear_allowance_signed(&mut self, grant: Signed<ClearAllowanceGrant>) {
         let (grant, owner) = grant.consume();
-        let key = get_allowance_key(&owner, &grant.spender);
-        let cleared = non_negative_int_try_get(&key)
-            .none_if_missing()
-            .unwrap_or(0);
-        // Delete rather than zero, freeing the entry's storage, and lock it so
-        // no other transaction's write to the allowance lands in the block.
-        delete_exclusive(&key);
-
-        log_approval_event(&owner, &grant.spender, -cleared);
+        clear_allowance_for(&owner, &grant.spender);
     }
 }

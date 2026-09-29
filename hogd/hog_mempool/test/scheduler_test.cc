@@ -455,6 +455,118 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
 }
 
+// A validated-block commit empties an excluded account's runqueue while the
+// nomination is pending: remove_from_scheduler(), then abandon.
+TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 4);
+  const auto balance = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10; // affordable
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  txs[1].tx.invocation.gas_limit =
+      txs[0].tx.invocation.gas_limit * 2;        // > balance
+  txs[2].tx.uniquifier.block_expiry_height = 12; // affordable
+  txs[3].tx.uniquifier.block_expiry_height = 13; // submitted after commit
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/balance);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1], txs[2]},
+                     hash_txs({txs[0], txs[1], txs[2]}))();
+  EXPECT_EQ(scheduler->size(), 3UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[0]);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  ASSERT_NE(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+
+  x23::Vec<TransactionHash> committed;
+  committed.push_back(sha256(txs[0].tx));
+  committed.push_back(sha256(txs[2].tx));
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(committed))();
+  scheduler->abandon_pending_nomination(/*block_id=*/1);
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+
+  scheduler->add_txs({txs[3]}, hash_txs({txs[3]}))();
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[3]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+}
+
+// Same commit sequence as above, but the unaffordable tx is the account's
+// first: nomination schedules nothing for the account, excludes it, and leaves
+// the later affordable tx on the runqueue for a competing block to commit.
+TEST(Scheduler, ValidatedCommitAfterUnaffordableHeadTxLeavesAccountReady)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  const auto balance = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10;
+  txs[0].tx.invocation.gas_limit =
+      txs[1].tx.invocation.gas_limit * 2;        // > balance
+  txs[1].tx.uniquifier.block_expiry_height = 11; // affordable
+  txs[2].tx.uniquifier.block_expiry_height = 12; // submitted after commit
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/balance);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 1UL);
+  ASSERT_NE(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
+
+  x23::Vec<TransactionHash> committed;
+  committed.push_back(sha256(txs[1].tx));
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(committed))();
+  scheduler->abandon_pending_nomination(/*block_id=*/1);
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
+
+  scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[2]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+}
+
 TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
 {
   constexpr BlockHeight kBlock = 5;

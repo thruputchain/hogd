@@ -4,7 +4,6 @@
 #include <atomic>
 #include <barrier>
 #include <cstddef>
-#include <cstdlib>
 #include <limits>
 #include <new>
 #include <optional>
@@ -21,6 +20,7 @@
 #include "contract.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/test_support/alloc_fault.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
@@ -38,105 +38,6 @@
 #include "x23/cleanup.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
-
-// The sanitizer runtimes define the replaceable global allocation functions
-// themselves (libclang_rt.tsan_cxx / libclang_rt.asan_cxx, and gcc's libtsan /
-// libasan). clang links those runtimes with --whole-archive, so a translation
-// unit that also replaces operator new makes the link fail with a duplicate
-// symbol, which is what broke the TSAN build in #4130. Under a sanitizer that
-// owns the allocation functions we leave them alone and skip the one test that
-// needs the fault injection; the unsanitized jobs still run it.
-#ifdef __has_feature
-#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
-#define HOGD_SANITIZER_OWNS_OPERATOR_NEW 1
-#endif
-#endif
-#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
-#define HOGD_SANITIZER_OWNS_OPERATOR_NEW 1
-#endif
-#ifndef HOGD_SANITIZER_OWNS_OPERATOR_NEW
-#define HOGD_SANITIZER_OWNS_OPERATOR_NEW 0
-#endif
-
-#if !HOGD_SANITIZER_OWNS_OPERATOR_NEW
-
-// Thread-local allocation fault injection: while a ScopedAllocationFailure is
-// alive, the Nth allocation on this thread throws std::bad_alloc once (#3000).
-namespace {
-
-thread_local int t_allocation_failure_countdown = -1;
-
-bool
-should_fail_allocation() noexcept
-{
-  if (t_allocation_failure_countdown < 0) {
-    return false;
-  }
-  if (t_allocation_failure_countdown == 0) {
-    t_allocation_failure_countdown = -1;
-    return true;
-  }
-  t_allocation_failure_countdown--;
-  return false;
-}
-
-class ScopedAllocationFailure {
-public:
-  explicit ScopedAllocationFailure(int allocations_before_failure)
-  {
-    t_allocation_failure_countdown = allocations_before_failure;
-  }
-  ~ScopedAllocationFailure() { t_allocation_failure_countdown = -1; }
-
-  ScopedAllocationFailure(const ScopedAllocationFailure &) = delete;
-  ScopedAllocationFailure &operator=(const ScopedAllocationFailure &) = delete;
-};
-
-} // namespace
-
-void *
-operator new(std::size_t size)
-{
-  if (should_fail_allocation()) {
-    throw std::bad_alloc();
-  }
-  if (void *ptr = std::malloc(size == 0 ? 1 : size)) {
-    return ptr;
-  }
-  throw std::bad_alloc();
-}
-
-void *
-operator new[](std::size_t size)
-{
-  return ::operator new(size);
-}
-
-void
-operator delete(void *ptr) noexcept
-{
-  std::free(ptr);
-}
-
-void
-operator delete(void *ptr, std::size_t /*size*/) noexcept
-{
-  std::free(ptr);
-}
-
-void
-operator delete[](void *ptr) noexcept
-{
-  std::free(ptr);
-}
-
-void
-operator delete[](void *ptr, std::size_t /*size*/) noexcept
-{
-  std::free(ptr);
-}
-
-#endif // !HOGD_SANITIZER_OWNS_OPERATOR_NEW
 
 namespace hogd {
 
@@ -1603,7 +1504,7 @@ sweep_first_admission_allocation_faults(MakeChange make_change,
 
     bool threw = false;
     try {
-      ScopedAllocationFailure fail_nth_allocation(nth);
+      test::ScopedAllocationFailure fail_nth_allocation(nth);
       HogDbStatus<int128_t> res =
           lock.try_atomic_change_lock(nullptr, &change, ctx);
       if (res.has_value()) {

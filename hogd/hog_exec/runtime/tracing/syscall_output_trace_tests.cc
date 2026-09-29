@@ -532,8 +532,10 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
     body.sha256_update().inputs.index = index;
     body.sha256_update().inputs.buffer.append_range(buffer);
     body.sha256_update().inputs.reset = reset;
-    const GasAmount cost =
-        is_ok(status) ? GasCost::sha256_update(buffer.size()) : 0;
+    // A successful update bills its blocks plus the stream cost; a failed one
+    // still probed the stream table, so it bills that probe (#4218).
+    const GasAmount cost = is_ok(status) ? GasCost::sha256_update(buffer.size())
+                                         : kSHA256StreamCost;
     return step_entry(gas, cost, std::move(body), std::move(status));
   };
   auto finalize_entry = [&gas](uint32_t index, std::optional<SHA256Hash> hash,
@@ -545,8 +547,11 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
           SyscallSHA256FinalizeOutputs{.hash = hash.value()};
     }
     // A finalize that produced a hash compressed the padding block; one that
-    // errored did not, and bills only the crossing.
-    return step_entry(gas, hash.has_value() ? kSHA256HashBlockCost : 0,
+    // errored did not, but still probed the stream table, so it bills that
+    // probe (#4218).
+    return step_entry(gas,
+                      hash.has_value() ? kSHA256HashBlockCost
+                                       : kSHA256StreamCost,
                       std::move(body), std::move(status));
   };
   const auto invalid =
@@ -661,8 +666,10 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = src_index;
     body.sha256_copy().inputs.dst_index = dst_index;
-    const GasAmount cost = is_ok(status) ? kSHA256StreamCost : 0;
-    return step_entry(gas, cost, std::move(body), std::move(status));
+    // Success clones a stream; a miss still probed the table. Both pay the
+    // stream cost (#4218).
+    return step_entry(gas, kSHA256StreamCost, std::move(body),
+                      std::move(status));
   };
   auto finalize_entry = [&gas](uint32_t index, SHA256Hash hash,
                                HostFunctionStatusXdr status) {

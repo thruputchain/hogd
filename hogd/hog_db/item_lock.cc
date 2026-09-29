@@ -528,8 +528,9 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
 
   if (after->is_auth_data()) {
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    lock_contents_.emplace<PointerLock<AuthLock>>(
-        after->to_auth_data()->base_auth_data());
+    auto auth_data = after->to_auth_data();
+    lock_contents_.emplace<PointerLock<AuthLock>>(auth_data->base_auth_data(),
+                                                  auth_data->row_exists());
     // NOLINTEND(bugprone-unchecked-optional-access)
     return;
   }

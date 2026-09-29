@@ -1,3 +1,5 @@
+add_subdirectory(test_support)
+
 # create base module library
 add_library(
   base_objects OBJECT

@@ -331,7 +331,9 @@ run_load(const Config &config,
     if (Clock::now() >= drain_deadline)
       total.error = "block drain timeout";
   }
-  if (block_driver.transactions() != admitted)
+  // A worker that stopped early left the load unfinished, so the counts are
+  // expected to disagree; reporting that on top of its error only buries it.
+  if (total.error.empty() && block_driver.transactions() != admitted)
     total.error += "committed/admitted count mismatch; ";
   std::ranges::sort(total.latency_us);
   return {.samples = std::move(total),
