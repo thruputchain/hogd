@@ -126,6 +126,19 @@ tx_failed(const ExecResult &r)
   return !tx_succeeded(r);
 }
 
+SchedulerTransactionStatus
+transaction_status_for_exec(const ExecResult result)
+{
+  switch (result) {
+  case ExecResult::ExecResultMalformedTransaction:
+  case ExecResult::ExecResultTxValidationFailure:
+  case ExecResult::ExecResultFailedGasSponsorship:
+    return SchedulerTransactionStatus::SchedulerTransactionDropped;
+  default:
+    return SchedulerTransactionStatus::SchedulerTransactionRetry;
+  }
+}
+
 template<typename T>
 x23::DagDeps
 dag_deps_from_nodes(const x23::Vec<x23::DagNode<T>> &nodes)
@@ -456,6 +469,13 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           }
           else {
             (*outcomes)[original_idx] = outcome;
+            scheduler_->record_transaction_outcome(
+                (*tx_hashes)[i],
+                code == AuthErrorCode::kAuthFailed
+                    ? SchedulerTransactionStatus::SchedulerTransactionDropped
+                    : SchedulerTransactionStatus::SchedulerTransactionRetry,
+                SchedulerTransactionErrorSource::SchedulerTransactionErrorAuth,
+                static_cast<int32_t>(code));
             num_auth_failures++;
           }
         }
@@ -519,6 +539,12 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           else {
             (*outcomes)[(*original_indices)[i]] =
                 SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
+            scheduler_->record_transaction_outcome(
+                tx_hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+                SchedulerTransactionErrorSource::
+                    SchedulerTransactionErrorScheduler,
+                static_cast<int32_t>(
+                    SchedulerErrorCode::SchedulerErrorCapacity));
             num_discarded++;
           }
         }
@@ -899,7 +925,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::propose_batch(
     BlockID block_id, x23::span<const SignedTransaction> txs,
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-    x23::span<bool> ret_chunk, size_t executor_idx)
+    x23::span<ExecResult> ret_chunk, size_t executor_idx)
 {
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
@@ -913,8 +939,8 @@ MempoolCoordinatorRpc::propose_batch(
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
     CHECK(result.result() != ExecResult::ExecResultUnrecoverable);
-    ret_chunk[i] = tx_succeeded(result.result());
-    if (ret_chunk[i]) {
+    ret_chunk[i] = result.result();
+    if (tx_succeeded(ret_chunk[i])) {
       transaction_nominations.push_back(result.proposal_data());
     }
   }
@@ -928,7 +954,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
     BlockID block_id, x23::span<const SignedTransaction> txs,
     x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
-    x23::span<bool> ret)
+    x23::span<ExecResult> ret)
 {
   co_await default_coropoll().pool_.bg();
 
@@ -947,8 +973,8 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
     const ChunkRange &chunk = chunks[i];
     x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                 txs.begin() + chunk.end);
-    x23::span<bool> ret_chunk(ret.begin() + chunk.start,
-                              ret.begin() + chunk.end);
+    x23::span<ExecResult> ret_chunk(ret.begin() + chunk.start,
+                                    ret.begin() + chunk.end);
 
     // We multiplex the small chunks across multiple TCP connections and
     // multiple executors by setting the [executor_idx] to [i %
@@ -978,7 +1004,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::propose_batch_in_chunks(
     BlockID block_id, x23::span<SignedTransaction> txs,
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-    x23::span<bool> ret)
+    x23::span<ExecResult> ret)
 {
   // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
   // from a different coroutine. Each coroutine then further splits the chunk
@@ -1003,10 +1029,9 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     const ChunkRange &chunk = large_chunks[i];
     x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                 txs.begin() + chunk.end);
-    // The outcome of each tx ([true] for success and [false] for failure) is
-    // written into this span.
-    x23::span<bool> status_chunk(ret.begin() + chunk.start,
-                                 ret.begin() + chunk.end);
+    // The executor outcome for each tx is written into this span.
+    x23::span<ExecResult> status_chunk(ret.begin() + chunk.start,
+                                       ret.begin() + chunk.end);
 
     handles.push_back(multiplex_large_chunk_across_executors(
         block_id, tx_chunk, nomination_chunks[i], status_chunk));
@@ -1234,8 +1259,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           }
           const size_t start = state->scheduled_chunks[i].start;
           const size_t end = state->scheduled_chunks[i].end;
-          x23::span<bool> ret_span(cache.statuses.begin() + start,
-                                   cache.statuses.begin() + end);
+          x23::span<ExecResult> ret_span(cache.statuses.begin() + start,
+                                         cache.statuses.begin() + end);
           // [schedule()] appends transactions to the end of [txs]. We reserve
           // [txs] up front in [schedulercoord_propose_block()], so spans into
           // it do not become invalid when later schedule nodes append more txs.
@@ -1261,6 +1286,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
         [&, state, i]() -> x23::Async<void> {
           if (i == 0) {
             cache.failed_tx_hashes.clear();
+            cache.failed_tx_results.clear();
             CHECK(cache.result_tx_nominations.empty());
           }
 
@@ -1277,7 +1303,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
             // successful txs to in [cache.txs].
             for (size_t tx_idx = state->num_tx_outcomes_processed;
                  tx_idx < state->handle_end_indices[i]; tx_idx++) {
-              if (cache.statuses[tx_idx]) {
+              if (tx_succeeded(cache.statuses[tx_idx])) {
                 const TransactionHash &tx_hash = cache.tx_hashes[tx_idx];
                 cache.result_tx_hashes.push_back(tx_hash);
                 state->txset_hash_chunks[i].push_back(tx_hash);
@@ -1288,6 +1314,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
               }
               else {
                 cache.failed_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
+                cache.failed_tx_results.push_back(cache.statuses[tx_idx]);
               }
             }
             state->num_tx_outcomes_processed = state->handle_end_indices[i];
@@ -1944,12 +1971,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     }
     cache.result_tx_hashes = cache.tx_hashes;
     cache.result_tx_nominations.clear();
-    x23::span<bool> ceremony_statuses(cache.statuses.begin(), cache.txs.size());
-    std::ranges::fill(ceremony_statuses, false);
+    cache.failed_tx_hashes.clear();
+    cache.failed_tx_results.clear();
+    x23::span<ExecResult> ceremony_statuses(cache.statuses.begin(),
+                                            cache.txs.size());
+    std::ranges::fill(ceremony_statuses, ExecResult::ExecResultSystemError);
     co_await propose_batch_in_chunks(block_id, cache.txs,
                                      cache.result_tx_nominations,
                                      ceremony_statuses);
-    if (std::ranges::contains(ceremony_statuses, false) ||
+    if (std::ranges::any_of(ceremony_statuses, tx_failed) ||
         cache.result_tx_nominations.size() != cache.txs.size()) {
       co_await cleanup();
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
@@ -3138,6 +3168,36 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         reenqueue_size = return_to_runqueue.size();
         CHECK_PTR(remove_from_scheduler);
         remove_from_scheduler_size = remove_from_scheduler->size();
+        if (commit_plan.committed_nominated) {
+          for (const TransactionHash &hash :
+               nominated_block_cache_.result_tx_hashes) {
+            scheduler_->record_transaction_outcome(
+                hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+                0);
+          }
+          CHECK_EQ(nominated_block_cache_.failed_tx_hashes.size(),
+                   nominated_block_cache_.failed_tx_results.size());
+          for (size_t i = 0; i < nominated_block_cache_.failed_tx_hashes.size();
+               i++) {
+            const ExecResult result =
+                nominated_block_cache_.failed_tx_results[i];
+            scheduler_->record_transaction_outcome(
+                nominated_block_cache_.failed_tx_hashes[i],
+                transaction_status_for_exec(result),
+                SchedulerTransactionErrorSource::
+                    SchedulerTransactionErrorExecutor,
+                static_cast<int32_t>(result));
+          }
+        }
+        else {
+          for (const TransactionHash &hash : *remove_from_scheduler) {
+            scheduler_->record_transaction_outcome(
+                hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+                0);
+          }
+        }
         co_await scheduler_->remove_from_scheduler(
             x23::span<const TransactionHash>(*remove_from_scheduler));
         if (commit_plan.committed_nominated) {
@@ -3321,6 +3381,13 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
+      scheduler_->record_transaction_outcome(
+          tx_hashes[i],
+          code == AuthErrorCode::kAuthFailed
+              ? SchedulerTransactionStatus::SchedulerTransactionDropped
+              : SchedulerTransactionStatus::SchedulerTransactionRetry,
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorAuth,
+          static_cast<int32_t>(code));
       to_remove.push_back(tx_hashes[i]);
     }
   }

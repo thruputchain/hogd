@@ -424,6 +424,85 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
   return account_state.hog_age;
 }
 
+void
+Scheduler::prune_transaction_outcomes()
+{
+  const BlockHeight height = current_block();
+  std::lock_guard lock(transaction_outcomes_mutex_);
+  while (!transaction_outcomes_order_.empty() &&
+         height >= transaction_outcomes_order_.front().processed_height &&
+         height - transaction_outcomes_order_.front().processed_height >=
+             kTransactionOutcomeBlockLifetime) {
+    transaction_outcomes_.erase(transaction_outcomes_order_.front().tx_hash);
+    transaction_outcomes_order_.pop_front();
+  }
+}
+
+void
+Scheduler::record_transaction_outcome(
+    const TransactionHash &tx_hash, SchedulerTransactionStatus status,
+    SchedulerTransactionErrorSource error_source, int32_t error_code)
+{
+  prune_transaction_outcomes();
+  std::lock_guard lock(transaction_outcomes_mutex_);
+  if (auto it = transaction_outcomes_.find(tx_hash);
+      it != transaction_outcomes_.end()) {
+    transaction_outcomes_order_.erase(it->second);
+    transaction_outcomes_.erase(it);
+  }
+  while (transaction_outcomes_.size() >= kMaxTransactionOutcomes) {
+    transaction_outcomes_.erase(transaction_outcomes_order_.front().tx_hash);
+    transaction_outcomes_order_.pop_front();
+  }
+  transaction_outcomes_order_.push_back(TransactionOutcomeEntry{
+      .tx_hash = tx_hash,
+      .outcome =
+          SchedulerTransactionOutcome{
+              .status = status,
+              .error_source = error_source,
+              .error_code = error_code,
+          },
+      .processed_height = current_block(),
+  });
+  transaction_outcomes_[tx_hash] = std::prev(transaction_outcomes_order_.end());
+}
+
+void
+Scheduler::clear_transaction_outcome(const TransactionHash &tx_hash)
+{
+  std::lock_guard lock(transaction_outcomes_mutex_);
+  if (auto it = transaction_outcomes_.find(tx_hash);
+      it != transaction_outcomes_.end()) {
+    transaction_outcomes_order_.erase(it->second);
+    transaction_outcomes_.erase(it);
+  }
+}
+
+SchedulerTransactionOutcome
+Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
+{
+  if (find_tx(tx_hash)) {
+    return SchedulerTransactionOutcome{
+        .status = SchedulerTransactionStatus::SchedulerTransactionPending,
+        .error_source =
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+        .error_code = 0,
+    };
+  }
+  prune_transaction_outcomes();
+  std::lock_guard lock(transaction_outcomes_mutex_);
+  if (auto it = transaction_outcomes_.find(tx_hash);
+      it != transaction_outcomes_.end()) {
+    return it->second->outcome;
+  }
+  return SchedulerTransactionOutcome{
+      .status = SchedulerTransactionStatus::SchedulerTransactionNotFound,
+      .error_source =
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+      .error_code = 0,
+  };
+}
+
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
@@ -454,6 +533,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // perspective of anyone accessing the tx in [txs_].
     tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   }
+  clear_transaction_outcome(tx_hash);
   return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
@@ -513,6 +593,13 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
               outcomes[tx_idx] =
                   SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
+              scheduler.record_transaction_outcome(
+                  tx_hashes[tx_idx],
+                  SchedulerTransactionStatus::SchedulerTransactionRetry,
+                  SchedulerTransactionErrorSource::
+                      SchedulerTransactionErrorScheduler,
+                  static_cast<int32_t>(
+                      SchedulerErrorCode::SchedulerErrorHogAgeUnavailable));
               continue;
             }
             const TransactionHash &tx_hash = tx_hashes[tx_idx];
@@ -917,6 +1004,10 @@ Scheduler::account_is_ready(const ContractAddress &account,
   if (remove_expired_txs) {
     for (auto it = txs.begin(); it != lower_it; it++) {
       const TransactionHash &tx_hash = it->first.tx_hash;
+      record_transaction_outcome(
+          tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+          static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
       // [txs_.remove()] acquires a lock, so the subtraction from
       // [tx_cache_size_] happens before the tx is removed from [txs_] from the
       // perspective of anyone accessing the tx in [txs_].
@@ -1009,6 +1100,11 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
              it_remove++) {
           const TransactionHash &tx_hash = it_remove->first.tx_hash;
+          record_transaction_outcome(
+              tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+              SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorScheduler,
+              static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
           // [txs_.remove()] acquires a lock, so the subtraction from
           // [tx_cache_size_] happens before the tx is removed from [txs_] from
           // the perspective of anyone accessing the tx in [txs_].
@@ -1081,6 +1177,12 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // [tx_cache_size_] happens before the tx is removed from [txs_] from
           // the perspective of anyone accessing the tx in [txs_].
           tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
+          record_transaction_outcome(
+              tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+              SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorScheduler,
+              static_cast<int32_t>(
+                  SchedulerErrorCode::SchedulerErrorInsufficientHogs));
           CHECK_EQ(txs_.remove(tx_hash), 1UL);
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);

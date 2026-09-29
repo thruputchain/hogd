@@ -340,6 +340,29 @@ public:
     co_return ret;
   }
 
+  x23::Async<SchedulerTransactionOutcomeBatch>
+  schedcoord_lookup_transaction_outcomes(const TransactionHashBatch &tx_hashes)
+  {
+    SchedulerTransactionOutcomeBatch ret;
+    ret.reserve(tx_hashes.size());
+    if (!ready()) {
+      ret.resize(
+          tx_hashes.size(),
+          SchedulerTransactionOutcome{
+              .status =
+                  SchedulerTransactionStatus::SchedulerTransactionNotFound,
+              .error_source = SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorNone,
+              .error_code = 0,
+          });
+      co_return ret;
+    }
+    for (const TransactionHash &tx_hash : tx_hashes) {
+      ret.push_back(scheduler_->lookup_transaction_outcome(tx_hash));
+    }
+    co_return ret;
+  }
+
   // Hashes a txset this node built itself. Fatal if [hashes] repeats a
   // transaction hash.
   static SHA256Hash get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
@@ -452,10 +475,12 @@ private:
     x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
     SchedulerProposalResult proposal_result;
 
-    x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
+    x23::Vec<ExecResult> statuses =
+        x23::Vec<ExecResult>(kMaxBlockSize, ExecResult::ExecResultSystemError);
     x23::Vec<x23::XdrVec<NondeterministicProposalData>>
         transaction_nomination_chunks;
     x23::XdrVec<TransactionHash> failed_tx_hashes;
+    x23::XdrVec<ExecResult> failed_tx_results;
   };
   struct JointCommitResult {
     DbBlockResult db;
@@ -584,17 +609,17 @@ private:
   x23::Async<void> propose_batch(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-      x23::span<bool> ret_chunk, size_t executor_idx);
+      x23::span<ExecResult> ret_chunk, size_t executor_idx);
 
   x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
-      x23::span<bool> ret);
+      x23::span<ExecResult> ret);
 
   x23::Async<void> propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-      x23::span<bool> ret);
+      x23::span<ExecResult> ret);
 
   x23::Async<ExecResult>
   open_proposal_block(BlockID block_id, BlockExecutionContext block_execution,
