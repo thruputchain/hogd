@@ -17,6 +17,13 @@ def interrupt(signum, frame):
     raise KeyboardInterrupt
 
 
+def corpus_timeout(args):
+    # The client signs its whole corpus before the measured window opens, so
+    # the allowance has to scale with the corpus and not just the window. A
+    # millisecond per transaction is roughly twice what the bench hosts need.
+    return args.seconds + args.warmup + 180 + args.transactions // 1000
+
+
 def main():
     signal.signal(signal.SIGTERM, interrupt)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -78,7 +85,7 @@ def main():
                 str(args.connections), str(args.seconds), str(args.warmup),
                 str(args.transactions), str(args.block_ms),
             ], env=env, stdout=client_log, stderr=client_log, check=True,
-                timeout=args.seconds + args.warmup + 180)
+                timeout=corpus_timeout(args))
             result = json.loads((output / "result.json").read_text())
             admitted = sum(result[k] for k in
                            ("measuredSuccess", "warmupSuccess",
