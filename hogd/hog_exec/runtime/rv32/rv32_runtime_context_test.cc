@@ -1821,8 +1821,9 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
 
 TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
 {
-  constexpr std::array<std::string_view, 3> key_names = {
-      "rv32_delete_key_0", "rv32_delete_key_1", "rv32_delete_key_2"};
+  constexpr std::array<std::string_view, 3> key_names = {"rv32_delete_key_0",
+                                                         "rv32_delete_key_1",
+                                                         "rv32_delete_key_2"};
   constexpr uint32_t key_base_address = 256;
   constexpr uint32_t memory_bytes = 1024;
 
@@ -1834,20 +1835,18 @@ TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
     const uint32_t key_address =
         key_base_address + i * sizeof(StorageKeyContractData);
     std::ranges::copy(key, initial_memory.begin() + key_address);
-    append_syscall(program,
-                   {static_cast<int32_t>(SyscallNo::kDeleteObject),
-                    static_cast<int32_t>(key_address)});
+    append_syscall(program, {static_cast<int32_t>(SyscallNo::kDeleteObject),
+                             static_cast<int32_t>(key_address)});
   }
   append_syscall(program,
                  {static_cast<int32_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0});
 
   auto rv32_context = rv32::RuntimeContext(
-      {{kRv32ContractId,
-        rv32::RuntimeContractImage{
-            .program = make_program(program),
-            .initial_memory = std::move(initial_memory),
-            .memory_bytes = memory_bytes,
-        }}});
+      {{kRv32ContractId, rv32::RuntimeContractImage{
+                             .program = make_program(program),
+                             .initial_memory = std::move(initial_memory),
+                             .memory_bytes = memory_bytes,
+                         }}});
   auto rv32_contract = make_rv32_contract_xdr();
   install_contract(rv32_contract);
 
@@ -1879,8 +1878,8 @@ TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
     const AddressAndKey expected_addrkey =
         make_contract_data_addrkey_matching_static_key_sdk_macro(
             kRv32ContractAddress, key_name);
-    const auto write = std::ranges::find_if(
-        trace.storage_writes, [&](auto const &candidate) {
+    const auto write =
+        std::ranges::find_if(trace.storage_writes, [&](auto const &candidate) {
           return candidate.addrkey == expected_addrkey;
         });
     ASSERT_NE(write, trace.storage_writes.end());
