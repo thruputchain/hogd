@@ -5,7 +5,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
