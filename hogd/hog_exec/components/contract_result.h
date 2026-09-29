@@ -39,15 +39,17 @@ template<typename T, uint64_t Selector> struct ContractException {
   T exn;
 };
 
+// Preimage bytes must be the SDK's UTF-8 encoding regardless of the ordinary
+// execution character set, so the arguments and separators are u8 literals.
 inline uint64_t
-calculate_selector(std::string_view major_version, std::string_view crate,
-                   std::string_view type_name)
+calculate_selector(std::u8string_view major_version, std::u8string_view crate,
+                   std::u8string_view type_name)
 {
   x23::Buf buf;
   buf.append_range(major_version);
-  buf.append_range(std::string_view("::"));
+  buf.append_range(std::u8string_view(u8"::"));
   buf.append_range(crate);
-  buf.append_range(std::string_view("::"));
+  buf.append_range(std::u8string_view(u8"::"));
   buf.append_range(type_name);
   auto hash = sha256(buf);
   // First 8 digest bytes as big-endian u64 (matches contract SDK).
@@ -69,12 +71,9 @@ template<typename... T> struct ContractErrorType {
 public:
   ContractErrorType(ReturnBuffer &&abort_buffer)
   {
-    // Dispatch uses the charset-independent `kLibraryExceptionSelector`
-    // constant directly (see `LibraryException::kSelector`); the constant is
-    // validated against `calculate_selector` by a unit test rather than
-    // recomputed here. Recomputing from ordinary string literals on this hot,
-    // attacker-reachable abort-decode path would tie consensus behavior to the
-    // implementation-defined execution character set.
+    // Dispatch uses the fixed `kLibraryExceptionSelector` constant directly;
+    // it is validated against `calculate_selector` in contract_result_test.cc,
+    // not recomputed here (which would depend on the execution charset).
     uint64_t selector = 0;
     auto used_bytes =
         x23::deserialize_cxs_from(&selector, x23::BufViewEnd{abort_buffer});

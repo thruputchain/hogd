@@ -6,15 +6,12 @@ namespace hogd {
 
 namespace {
 
-// `kLibraryExceptionSelector` is the SHA256("1::sdk::LibraryExn") prefix that
-// the contract SDK derives for the `LibraryExn` selector. Consensus uses the
-// hard-coded constant directly, so validate it here (on the canonical UTF-8
-// build) instead of recomputing it on the runtime abort-decode path, where the
-// result would depend on the implementation-defined execution character set.
+// Validates the hard-coded `kLibraryExceptionSelector` against the SDK
+// derivation (charset-independent: `calculate_selector` uses u8 literals).
 TEST(ContractResultTest, LibraryExceptionSelectorMatchesDerivation)
 {
   EXPECT_EQ(kLibraryExceptionSelector,
-            calculate_selector("1", "sdk", "LibraryExn"));
+            calculate_selector(u8"1", u8"sdk", u8"LibraryExn"));
 }
 
 } // namespace
