@@ -664,8 +664,8 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
     body.sha256_copy().inputs.dst_index = dst_index;
     // Success clones a stream; a miss still probed the table. Both pay the
     // stream cost (#4218).
-    const GasAmount cost = kSHA256StreamCost;
-    return step_entry(gas, cost, std::move(body), std::move(status));
+    return step_entry(gas, kSHA256StreamCost, std::move(body),
+                      std::move(status));
   };
   auto finalize_entry = [&gas](uint32_t index, SHA256Hash hash,
                                HostFunctionStatusXdr status) {

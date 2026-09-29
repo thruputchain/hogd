@@ -203,9 +203,7 @@ TEST_F(Sha256IncrementalTest, UpdateChecksGasBeforeCreatingResettingOrAppending)
 }
 
 // A failed stream lookup still probes the table, so Finalize and Copy misses
-// pay the stream cost rather than being served for the price of the crossing.
-// The miss erases nothing, so a contract can repeat it against a full table
-// of colliding indices; each repeat pays the same probe (#4218).
+// pay the stream cost, not just the crossing (#4218).
 TEST_F(Sha256IncrementalTest, FailedStreamLookupsPayTheStreamCost)
 {
   auto context = make_hog_exec_context();
@@ -261,8 +259,8 @@ TEST_F(Sha256IncrementalTest, FailedStreamLookupsPayTheStreamCost)
 }
 
 // A single-slot table so a copy with a present source but a missing
-// destination is rejected for capacity -- the path that probes two slots
-// before failing.
+// destination is rejected for capacity, the path that probes two slots before
+// failing.
 class Sha256SingleBufferTest : public ::testing::Test,
                                public NativeContractTestFramework {
 public:
@@ -283,9 +281,8 @@ private:
   }
 };
 
-// A copy rejected because the table is full still probed both the (present)
-// source and the (missing) destination, so it pays the stream cost like any
-// other failed lookup, and the source stream is left intact (#4218).
+// A copy rejected because the table is full still probed both slots, so it
+// pays the stream cost like any other failed lookup (#4218).
 TEST_F(Sha256SingleBufferTest, FullTableCopyRejectionPaysAndKeepsSource)
 {
   auto context = make_hog_exec_context();
