@@ -1819,6 +1819,76 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
       << "lowered artifact did not return cleanly — check trace status above";
 }
 
+TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
+{
+  constexpr std::array<std::string_view, 3> kKeyNames = {"rv32_delete_key_0",
+                                                         "rv32_delete_key_1",
+                                                         "rv32_delete_key_2"};
+  constexpr uint32_t kKeyBaseAddress = 256;
+  constexpr uint32_t kMemoryBytes = 1024;
+
+  std::vector<uint8_t> initial_memory(kMemoryBytes);
+  std::vector<uint32_t> program;
+  for (size_t i = 0; i < kKeyNames.size(); ++i) {
+    const StorageKeyContractData key =
+        make_storage_key_matching_static_key_sdk_macro(kKeyNames[i]);
+    const uint32_t key_address =
+        kKeyBaseAddress + (i * sizeof(StorageKeyContractData));
+    std::ranges::copy(key, initial_memory.begin() + key_address);
+    append_syscall(program, {static_cast<int32_t>(SyscallNo::kDeleteObject),
+                             static_cast<int32_t>(key_address)});
+  }
+  append_syscall(program,
+                 {static_cast<int32_t>(SyscallNo::kReturn), 0, 0, 0, 0, 0});
+
+  auto rv32_context = rv32::RuntimeContext(
+      {{kRv32ContractId, rv32::RuntimeContractImage{
+                             .program = make_program(program),
+                             .initial_memory = std::move(initial_memory),
+                             .memory_bytes = kMemoryBytes,
+                         }}});
+  auto rv32_contract = make_rv32_contract_xdr();
+  install_contract(rv32_contract);
+
+  auto handler = make_new_system_call_handler(make_root_transaction(kParityGas),
+                                              rv32_context);
+  handler.enable_tracing();
+
+  const auto result = handler.root_invoke()();
+  ASSERT_TRUE(result.is_root_success());
+  ASSERT_NE(handler.get_trace(), nullptr);
+  auto const &trace = *handler.get_trace();
+  ASSERT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
+
+  ASSERT_EQ(trace.system_calls.size(), kKeyNames.size() + 1);
+  for (size_t i = 0; i < kKeyNames.size(); ++i) {
+    auto const &delete_trace = trace.system_calls[i];
+    EXPECT_EQ(delete_trace.body.syscall_number(), SyscallNo::kDeleteObject);
+    // The delete walks the frame stack, creates the first-touch item view, and
+    // installs the delete delta, so it pays the storage access on top of the
+    // crossing, as the storage-flags and NNInt syscalls do.
+    EXPECT_EQ(delete_trace.gas_remaining_at_start -
+                  delete_trace.gas_remaining_at_end,
+              kSyscallBaseCost + kStorageAccessCost)
+        << "DeleteObject key " << i << " did not charge kStorageAccessCost";
+  }
+
+  ASSERT_EQ(trace.storage_writes.size(), kKeyNames.size());
+  for (const std::string_view key_name : kKeyNames) {
+    const AddressAndKey expected_addrkey =
+        make_contract_data_addrkey_matching_static_key_sdk_macro(
+            kRv32ContractAddress, key_name);
+    const auto write =
+        std::ranges::find_if(trace.storage_writes, [&](auto const &candidate) {
+          return candidate.addrkey == expected_addrkey;
+        });
+    ASSERT_NE(write, trace.storage_writes.end());
+    EXPECT_EQ(write->delta.type(), StorageDeltaType::kDeltaTypeDelete);
+  }
+
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
 } // namespace
 } // namespace hogd
 
