@@ -155,11 +155,11 @@ struct GenRs {
 
     show_comment(d.comment, false);
 
-    if (!d.attrs.empty() && d.attrs != kLegacySerdeHex) {
+    if (!d.attrs.empty() && d.attrs != kSerdeArrays) {
       prtop("{}\n", d.attrs);
     }
 
-    if (get_opaque_array_size(d).has_value() || d.attrs == kLegacySerdeHex) {
+    if (get_opaque_array_size(d).has_value() || d.attrs == kSerdeArrays) {
       // Legacy markers and inferred byte arrays use the same gated adapter.
       prtop("{}", feature_attr("serde", "serde(with = "
                                         "\"xdr_common::serde_hex\")"));
@@ -346,7 +346,7 @@ struct GenRs {
 
   static constexpr string_view kRustBoxPtr = R"(#[rust(box_ptr)])";
   static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
-  static constexpr string_view kLegacySerdeHex =
+  static constexpr string_view kSerdeArrays =
       R"(#[serde(with = "serde_arrays::hex")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
@@ -408,13 +408,12 @@ GenRs::convert_to_newtype(const Definition &d)
     string comment = *remainder;
     string attrs;
 
-    if (optional<string> remainder =
-            substring_removed(comment, kLegacySerdeHex)) {
+    if (optional<string> remainder = substring_removed(comment, kSerdeArrays)) {
       comment = *remainder;
       if (!attrs.empty()) {
         attrs += "\n";
       }
-      attrs += kLegacySerdeHex;
+      attrs += kSerdeArrays;
     }
 
     auto visitor = NewtypeVisitor{.comment = comment, .attrs = attrs};
