@@ -4,6 +4,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "syscall_error.hh"
 #include "types.hh"
 #include "x23/async.h"
 
