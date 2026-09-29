@@ -603,6 +603,154 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMaxIndexBoundary)
   ASSERT_EQ(auth_data.public_keys[kMaxSigners - 1]->max_weight, Weight{5});
 }
 
+// The auth-data syscalls write exactly the field they name. When the first one
+// touches an address that has no auth row, HogDB builds the row from a
+// value-initialized AddressAuthData, so a field the transaction never wrote
+// commits at zero; nothing substitutes kDefaultNewAddressRequiredWeight for an
+// unwritten threshold. A row created by key registration alone therefore
+// commits with required_weight 0 and admits unsigned source-address claims
+// (AuthClaimTests.ZeroRequiredWeightAuthDataAcceptsUnsignedSourceClaim). The
+// syscalls act only on the current address, so only that address's own code
+// can put its row in this state; a contract that wants its keys to be required
+// writes a threshold, as BothAuthConfigSyscalls does.
+//
+// Reported as issue #3069 and confirmed working-as-intended; this test pins
+// that behavior.
+TEST_F(SyscallAuthConfigTest, KeyOnlyFirstRegistrationLeavesRequiredWeightZero)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto [public_key, _] = ed25519_keygen();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0,
+      [public_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        int32_t key_scheme = std::to_underlying(CryptographicScheme::Ed25519);
+        uint32_t key_weight = 5;
+        std::span<const std::byte> key_bytes(
+            reinterpret_cast<const std::byte *>(public_key.data()),
+            public_key.size());
+        auto status =
+            co_await ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                0, &key_scheme, key_bytes, &key_weight);
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to register key";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  ASSERT_FALSE(
+      lookup_storage_item_from_db(make_address_auth_data_addrkey(contract_addr))
+          .has_value());
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *context);
+
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(
+      make_address_auth_data_addrkey(contract_addr));
+  ASSERT_TRUE(item.has_value());
+  auto auth_data = item->auth_data();
+  ASSERT_TRUE(auth_data.public_keys[0]);
+  EXPECT_EQ(auth_data.public_keys[0]->key.ed25519(), public_key);
+  EXPECT_EQ(auth_data.public_keys[0]->max_weight, Weight{5});
+  EXPECT_EQ(auth_data.required_weight, Weight{0});
+}
+
+// The deletion form of ChangePublicKeyRegistration is a write like any other:
+// on an address with no auth row it creates one, every slot empty and the
+// threshold unwritten, so required_weight commits at 0 (see the test above).
+// The result is a present, keyless, zero-threshold row -- the configuration
+// genesis installs for the genesis root -- which admits unsigned
+// source-address claims and, being present, rules out kPubkeySignature claims
+// for the address.
+//
+// Reported on issue #3069 and confirmed working-as-intended; this test pins
+// that behavior.
+TEST_F(SyscallAuthConfigTest, DeletionOnlyFirstTouchCreatesEmptyZeroWeightRow)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto status =
+            co_await ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                0, static_cast<const int32_t *>(nullptr),
+                std::span<const std::byte>{},
+                static_cast<const uint32_t *>(nullptr));
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to delete key";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  ASSERT_FALSE(
+      lookup_storage_item_from_db(make_address_auth_data_addrkey(contract_addr))
+          .has_value());
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *context);
+
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(
+      make_address_auth_data_addrkey(contract_addr));
+  ASSERT_TRUE(item.has_value());
+  auto auth_data = item->auth_data();
+  for (size_t i = 0; i < auth_data.public_keys.size(); ++i) {
+    EXPECT_FALSE(auth_data.public_keys[i]) << "unexpected signer at slot " << i;
+  }
+  EXPECT_EQ(auth_data.required_weight, Weight{0});
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)
