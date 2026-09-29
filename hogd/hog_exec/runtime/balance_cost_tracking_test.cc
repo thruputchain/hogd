@@ -1702,12 +1702,8 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
                           ProposedTransaction{.signed_tx = handler_tx})());
 }
 
-// Regression for #4210: a child invoked with only two gas cannot pay a cold
-// native-token balance load (kDBRPCCost). It must fault before touching the
-// database instead of performing and caching the load for the capped child
-// allowance. So two starved reads of the same fresh address stay cold faults
-// -- the first never loads the key, so the second cannot run warm -- while a
-// funded read of a fresh address still succeeds and pays the full cold price.
+// Regression for #4210: an underfunded balance read must fault before loading,
+// so repeated starved reads stay cold faults while a funded read still pays.
 TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
 {
   constexpr static ContractAddress kCallerAddr = make_contract_address(214);
@@ -1788,9 +1784,7 @@ TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
   auto handler = make_new_system_call_handler(tx, *runtime_context);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
-  // Both starved reads faulted without loading the fresh address, so the
-  // repeat stayed a cold fault rather than a cheap warm return, and the parent
-  // paid only the capped child allowance -- never the kDBRPCCost cold price.
+  // Starved reads stay cold faults and pay only the capped allowance.
   for (size_t i = 0; i < 2; ++i) {
     EXPECT_EQ(statuses[i], InvocationFrameStatusCode::Fault);
     EXPECT_EQ(charges[i], kCappedCharge);

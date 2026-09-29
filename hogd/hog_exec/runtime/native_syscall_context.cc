@@ -15,17 +15,14 @@ namespace hogd {
 x23::Async<SystemStatus<SyscallStatus<int128_t>>>
 NativeSyscallContext::native_token_balance(ContractAddress const &address)
 {
-  // Prove the frame can pay for a cold database load before performing one.
-  // Otherwise a child invoked with only a couple of gas could force an unpriced
-  // first-touch balance read -- each retained in the transaction/block caches
-  // -- and repeat it across fresh addresses to amplify database work.
+  // Refuse the read unless the frame can pay for a cold load, so an underfunded
+  // child cannot force unpriced first-touch database work across fresh
+  // addresses.
   const GasAmount load_gas =
       handler_.peek_native_token_balance_load_gas(address);
   if (load_gas > gas_remaining()) {
-    consume_gas(load_gas); // saturate the meter; the frame faults OutOfGas
-    // A syscall-level error short-circuits the caller, which then reports a
-    // recoverable frame fault; the saturated meter makes invoke_impl upgrade
-    // that to OutOfGas.
+    // Saturate the meter so the caller's error becomes an OutOfGas fault.
+    consume_gas(load_gas);
     const SyscallStatus<int128_t> refused =
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     co_return refused;
@@ -35,9 +32,7 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   if (!status.has_value()) {
     co_return status.error();
   }
-  // The read did no more load work than the peek priced, and that was proven
-  // affordable above, so this only saturates the meter when it lands exactly at
-  // the limit -- which invoke_impl already reports as OutOfGas.
+  // Already proven affordable by the peek above.
   consume_gas(status->load_gas);
   co_return std::move(status->result);
 }

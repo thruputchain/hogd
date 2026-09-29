@@ -2177,12 +2177,8 @@ SystemCallHandler::peek_native_token_balance_load_gas(
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
-  // Mirror get_native_token_balance()'s branch structure: a read answered from
-  // the frame stack reaches no database, and a first touch already recorded in
-  // loaded_keys_ is served from the block snapshot cache, so both are free.
-  // Only a genuine cold first touch pays note_item_load()'s kDBRPCCost. This
-  // peeks -- it must not insert into loaded_keys_ -- so
-  // get_native_token_balance charges exactly what this reported.
+  // Mirrors get_native_token_balance()'s pricing but must not record the load:
+  // free unless this is a cold first touch, which pays kDBRPCCost.
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (unmodified_item->is_loaded()) {
       return 0;
