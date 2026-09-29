@@ -168,16 +168,20 @@ set_tests_properties(async corosync testlock signal rpc_dispatch rpc_client
   PROPERTIES TIMEOUT 60)
 set_tests_properties(event_edges PROPERTIES TIMEOUT 30 ENVIRONMENT "X23SERVER_TRACE=2")
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
-# threadpool gets the same budget as the stress tests above rather than
-# shutdown's 10s.  DestructionWakeupStress creates and destroys 10000
-# thread pools, and its cost tracks the host's CPU count (a pool
-# allocates one run queue per LLC bucket and always starts a qcbq
-# service thread), so on a big CI host under `ctest --parallel` it takes
-# a few seconds even without sanitizers -- 4.5s on the asyncio schedule
-# -- and runs past 10s under ASAN or TSAN.  It is checking for a lost
-# wakeup, which hangs rather than merely running slowly, so the larger
-# budget still catches what the test is for.
-set_tests_properties(threadpool PROPERTIES TIMEOUT 60)
+# threadpool needs more than the stress tests' 60s.  DestructionWakeupStress
+# creates and destroys 10000 thread pools, and its cost tracks the host's
+# CPU count (a pool allocates one run queue per LLC bucket and always
+# starts a qcbq service thread), so on a big CI host under
+# `ctest --parallel` it takes a few seconds even without sanitizers --
+# 4.5s on the asyncio schedule -- and runs past 10s under ASAN or TSAN.
+# The whole binary takes ~12s on a normal gcc-debug runner, but a slow
+# runner stretches the stress cases with it: on one that ran the rest of
+# the schedule 3x slower, DestructionWakeupStress alone took 33s and the
+# binary was killed at 60s with its last case still running (the main
+# run of #4222).  It is checking for a lost wakeup, which hangs rather
+# than merely running slowly, so the larger budget still catches what
+# the test is for.
+set_tests_properties(threadpool PROPERTIES TIMEOUT 180)
 endif()
 
 if(BENCHMARK_PATH)
