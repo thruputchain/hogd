@@ -21,11 +21,9 @@ OUTPUT_ROOT=$1
 BUILD_DIR=${BUILD_DIR:-release}
 SECONDS_MEASURED=${SCHEDGATEWAY_BENCH_SECONDS:-20}
 WARMUP_SECONDS=${SCHEDGATEWAY_BENCH_WARMUP:-2}
-# The client fails rather than replaying a nonce once its prepared corpus runs
-# out. Every connection is a synchronous caller draining the shared corpus at
-# its own rate, so the corpus has to grow with the width: four connections
-# admitted ~75000 transactions each over a 22 s run, which a flat 300000 only
-# just covered. Budget per connection instead, with room for twice that rate.
+# The client fails rather than replaying a nonce once its prepared corpus
+# runs out, and every connection drains it at its own rate, so the corpus
+# must scale with the width. Budget per connection, at ~2x the measured rate.
 TRANSACTIONS_PER_CONN=${SCHEDGATEWAY_BENCH_TRANSACTIONS_PER_CONN:-150000}
 
 rm -rf "$OUTPUT_ROOT"
