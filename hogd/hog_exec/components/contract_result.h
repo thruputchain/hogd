@@ -13,7 +13,6 @@
 #include <utility>
 #include <variant>
 
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/components/library_exception.hh"
@@ -70,8 +69,12 @@ template<typename... T> struct ContractErrorType {
 public:
   ContractErrorType(ReturnBuffer &&abort_buffer)
   {
-    CHECK_EQ(kLibraryExceptionSelector,
-             calculate_selector("1", "sdk", "LibraryExn"));
+    // Dispatch uses the charset-independent `kLibraryExceptionSelector`
+    // constant directly (see `LibraryException::kSelector`); the constant is
+    // validated against `calculate_selector` by a unit test rather than
+    // recomputed here. Recomputing from ordinary string literals on this hot,
+    // attacker-reachable abort-decode path would tie consensus behavior to the
+    // implementation-defined execution character set.
     uint64_t selector = 0;
     auto used_bytes =
         x23::deserialize_cxs_from(&selector, x23::BufViewEnd{abort_buffer});
