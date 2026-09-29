@@ -25,6 +25,7 @@
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/common/storage_output.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
 #include "retrocausal_queue.hh"
