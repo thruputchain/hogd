@@ -128,7 +128,8 @@ private:
 // Recycle released guest-memory buffers per thread. Each live invocation owns
 // its buffer, including nested invocations. The cap limits retained buffers;
 // deeper nesting allocates normally. Reserve the default memory size up front;
-// larger admitted images grow the buffer on first use.
+// larger images grow the buffer on first use and are dropped on release rather
+// than pooled (see release_memory_slot).
 inline constexpr size_t kMemorySlotPoolCap = 8;
 
 // Fixed capacity keeps pool construction and buffer release non-allocating.
@@ -159,8 +160,11 @@ acquire_memory_slot()
 inline void
 release_memory_slot(std::vector<uint8_t> &&slot) noexcept
 {
+  // Only pool default-sized buffers; a grown one would pin ceiling-sized memory
+  // per executor thread for the life of the pool.
   auto &pool = memory_slot_pool();
-  if (pool.count < kMemorySlotPoolCap) {
+  if (pool.count < kMemorySlotPoolCap &&
+      slot.capacity() <= kDefaultMaxMemoryBytes) {
     pool.slots[pool.count++] = std::move(slot);
   }
 }

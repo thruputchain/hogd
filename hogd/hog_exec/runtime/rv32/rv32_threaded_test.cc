@@ -549,6 +549,32 @@ TEST(Rv32Threaded, memorySlotDoubleMoveReleasesExactlyOnce)
   memory_slot_pool() = MemorySlotPool{};
 }
 
+// A ceiling-sized buffer (grown past the default reservation) must not be
+// pooled on release; a default-sized one still is.
+TEST(Rv32Threaded, oversizedMemorySlotIsNotRetainedInPool)
+{
+  memory_slot_pool() = MemorySlotPool{};
+
+  const std::vector<uint32_t> words = {addi(1, 0, 5)};
+  auto big_program =
+      threaded_from_words(words, /*total_memory_size=*/kMemoryCeilingBytes);
+  {
+    ThreadedMachine machine(*big_program, /*gas=*/100);
+    ASSERT_GE(machine.memory().size(), size_t{kMemoryCeilingBytes});
+  } // destructor releases the ceiling-sized buffer, which must not be pooled
+  EXPECT_EQ(memory_slot_pool().count, 0U);
+
+  // A default-sized buffer is still recycled.
+  auto small_program =
+      threaded_from_words(words, /*total_memory_size=*/kDefaultMaxMemoryBytes);
+  {
+    ThreadedMachine machine(*small_program, /*gas=*/100);
+  }
+  EXPECT_EQ(memory_slot_pool().count, 1U);
+
+  memory_slot_pool() = MemorySlotPool{};
+}
+
 TEST(Rv32Threaded, branchTakenSkipsInstruction)
 {
   using test_program::branch;
