@@ -169,6 +169,9 @@ stock_network_config()
                                  ConfigParamID::kConfigParamMaxRv32MemoryBytes,
                                  static_cast<uint32_t>(
                                      kDefaultMaxRv32MemoryBytes));
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+      static_cast<uint32_t>(kDefaultMaxSubtransactionOutputBytes));
   return config;
 }
 

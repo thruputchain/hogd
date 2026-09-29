@@ -45,6 +45,8 @@ struct NetworkConfigParams {
       static_cast<uint32_t>(kDefaultMaxRv32CodeBytes);
   uint32_t max_rv32_memory_bytes =
       static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes);
+  uint32_t max_subtransaction_output_bytes =
+      static_cast<uint32_t>(kDefaultMaxSubtransactionOutputBytes);
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -77,7 +79,7 @@ private:
 // The highest parameter id this build knows. A configuration states its ids
 // contiguously from zero, so this bounds a scan across all of them.
 inline constexpr ConfigParamID kHighestConfigParamID =
-    ConfigParamID::kConfigParamMaxRv32MemoryBytes;
+    ConfigParamID::kConfigParamMaxSubtransactionOutputBytes;
 
 // Wire name for `id`: --network-config, recorded overrides, genesis JSON.
 inline std::string_view
@@ -104,6 +106,8 @@ config_param_name(ConfigParamID id)
     return "max_rv32_code_bytes";
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     return "max_rv32_memory_bytes";
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return "max_subtransaction_output_bytes";
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -148,6 +152,8 @@ config_param_value(ConfigParam const &param)
     return param.max_rv32_code_bytes();
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     return param.max_rv32_memory_bytes();
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return param.max_subtransaction_output_bytes();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}",
         std::to_underlying(param.param()));
@@ -204,6 +210,9 @@ NetworkConfigParams::make_param(ConfigParamID id, uint32_t value)
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     out.max_rv32_memory_bytes() = value;
     break;
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    out.max_subtransaction_output_bytes() = value;
+    break;
   }
   return out;
 }
@@ -232,6 +241,8 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return max_rv32_code_bytes;
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     return max_rv32_memory_bytes;
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return max_subtransaction_output_bytes;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -279,7 +290,12 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
             .value_or(static_cast<uint32_t>(kDefaultMaxRv32CodeBytes))),
     max_rv32_memory_bytes(
         stated_param(config, ConfigParamID::kConfigParamMaxRv32MemoryBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes)))
+            .value_or(static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes))),
+    max_subtransaction_output_bytes(
+        stated_param(config,
+                     ConfigParamID::kConfigParamMaxSubtransactionOutputBytes)
+            .value_or(
+                static_cast<uint32_t>(kDefaultMaxSubtransactionOutputBytes)))
 {}
 
 inline void

@@ -42,6 +42,20 @@ namespace hogd {
 class PerTransactionDatabaseProxy;
 struct InvokeResult;
 
+// How a frame's attempt to push its writes to HogDb as a subtransaction came
+// out, short of a system error.
+enum class FrameLockResult {
+  // HogDb took the writes and granted their locks.
+  kAcquired,
+  // HogDb refused the locks. Depends on what else the block is running, so it
+  // is a nondeterministic outcome.
+  kConflict,
+  // The writes' storage output exceeded max_subtransaction_output_bytes, so
+  // they were dropped without being sent. Depends only on the writes, so it is
+  // a deterministic outcome.
+  kOutputLimitExceeded,
+};
+
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {
 public:
@@ -145,9 +159,14 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
-  [[nodiscard]] x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
+  // Pushes this frame's writes, plus whatever the caller already staged on
+  // `db_proxy`, as one subtransaction, unless their storage output exceeds
+  // `max_output_bytes`; then nothing is sent.
+  [[nodiscard]] x23::Async<SystemStatus<FrameLockResult>>
+  try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
-      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
+      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
+      uint64_t max_output_bytes);
 
   // Records a successful child TryInvoke against the depth cap. finish_frame
   // calls this once a child's success is settled in any execution mode, so
@@ -174,6 +193,14 @@ public:
   InvocationFrameOutput const &get_frame_output() const
   {
     return to_return_output_;
+  }
+
+  // Turns a frame that returned into one that faulted, dropping its events,
+  // for a failure found only once the frame had finished.
+  void fault_after_return()
+  {
+    to_return_output_ = InvocationFrameOutput(InvocationFrameStatusCode::Fault);
+    events_.clear();
   }
 
   void deploy_contract(ContractAddress const &addr,

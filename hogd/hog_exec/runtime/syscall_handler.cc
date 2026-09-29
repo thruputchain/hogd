@@ -203,6 +203,8 @@ SystemCallHandler::SystemCallHandler(
     source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
+    max_subtransaction_output_bytes_(snapshot_cache.get_network_config_params()
+                                         .max_subtransaction_output_bytes),
     execution_mode_data_(
         make_execution_mode_data(std::move(execution_mode_ctor))),
     contracts_to_deploy_(tx.contracts_to_deploy),
@@ -228,6 +230,8 @@ SystemCallHandler::SystemCallHandler(
         },
         db_proxy_, snapshot_cache.get_network_config_params()),
     source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
+    max_subtransaction_output_bytes_(snapshot_cache.get_network_config_params()
+                                         .max_subtransaction_output_bytes),
     execution_mode_data_(
         make_execution_mode_data(std::move(execution_mode_ctor))),
     contracts_to_deploy_(kEmptyVec), snapshot_cache_(snapshot_cache)
@@ -599,18 +603,24 @@ SystemCallHandler::try_commit_transaction()
   // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
   add_replay_nonce_delta();
 
-  auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations);
+  auto r = co_await last_frame.try_acquire_frame_locks(
+      db_proxy_, observations, max_subtransaction_output_bytes_);
   if (!r.has_value()) {
     co_return co_await abort_after_commit_failure(to_exec_result(
                                                       r.error().code()),
                                                   /*report_diagnostic=*/true);
   }
 
-  // check if any of the 2pc database operations failed
-  if (!r.value()) {
+  switch (r.value()) {
+  case FrameLockResult::kAcquired:
+    break;
+  case FrameLockResult::kConflict:
+    // check if any of the 2pc database operations failed
     co_return co_await abort_after_commit_failure(
         ExecResult::ExecResultTxNonDeterministicError,
         /*report_diagnostic=*/true);
+  case FrameLockResult::kOutputLimitExceeded:
+    co_return co_await commit_output_limit_exceeded(last_frame);
   }
 
   // Abort on a throw here rather than let it escape with the tx still open: a
@@ -686,6 +696,28 @@ SystemCallHandler::add_replay_nonce_delta()
 }
 
 x23::Async<ExecResult>
+SystemCallHandler::commit_output_limit_exceeded(InvocationFrame &last_frame)
+{
+  // The root frame's writes are more storage output than one subtransaction
+  // may carry. That depends only on what the transaction wrote, so every node
+  // reaches it, and it fails the transaction the way a root-frame fault does:
+  // included, with its body discarded and its side-records committed. The
+  // writes themselves were never sent.
+  //
+  // In proposal mode each successful TryInvoke pushed a savepoint holding part
+  // of the body; drop those too (a no-op in validation, which pushes none).
+  auto popped = co_await last_frame.mark_frame_as_failed(db_proxy_);
+  if (!popped.has_value()) {
+    co_return co_await abort_after_commit_failure(to_exec_result(
+                                                      popped.error().code()),
+                                                  /*report_diagnostic=*/false);
+  }
+  last_frame.fault_after_return();
+  co_return co_await commit_body_discarded(
+      ExecResult::ExecResultTxDeterministicError);
+}
+
+x23::Async<ExecResult>
 SystemCallHandler::commit_body_discarded(ExecResult success_result)
 {
   // In validation mode, RCQ observation deltas must reach HogDb so block-close
@@ -702,8 +734,7 @@ SystemCallHandler::commit_body_discarded(ExecResult success_result)
         StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
         delta.retrocausal_queue().observed_concurrent_entries = {
             entries.begin(), entries.end()};
-        db_proxy_.add_delta(addrkey, std::move(delta),
-                            std::to_underlying(StorageDeltaFlags::None));
+        db_proxy_.add_observation_delta(addrkey, std::move(delta));
       }
     }
   }

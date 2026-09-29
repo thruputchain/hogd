@@ -17,6 +17,7 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_sched.h"
 #include "hogd/hog_exec/common/limits.h"
+#include "hogd/hog_exec/common/storage_output.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/ramdb/db.h"
@@ -230,6 +231,25 @@ TEST_F(GenesisConfigValidationTest, BoundsRv32LimitsByVmCeilings)
             DbSchedResult::DbSchedResultError);
   EXPECT_EQ(load_with_rv32(ConfigParamID::kConfigParamMaxRv32MemoryBytes,
                            rv32::kMemoryCeilingBytes),
+            DbSchedResult::DbSchedResultOK);
+}
+
+// The subtransaction output limit runs from one delta, which every root commit
+// carries, up to what this build sends HogDb in one message.
+TEST_F(GenesisConfigValidationTest, BoundsSubtransactionOutputLimit)
+{
+  auto load_with_output_limit = [&](size_t value) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+        static_cast<uint32_t>(value));
+    return load(config, std::nullopt);
+  };
+  EXPECT_EQ(load_with_output_limit(kStorageOutputBytesPerDelta - 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_output_limit(kSubtransactionOutputCeilingBytes + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_output_limit(kSubtransactionOutputCeilingBytes),
             DbSchedResult::DbSchedResultOK);
 }
 
