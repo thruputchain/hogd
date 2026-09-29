@@ -650,12 +650,13 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   write_contract(contract);
   write_deployment(addr, contract);
 
+  // Every stored contract passed attachment verification, so one that no
+  // longer translates is a node fault: the lookup itself fails rather than
+  // reading as a present deployment.
   auto deployed =
       get_storage_snapshot_cache()->try_get_deployed_contract(addr)();
-  ASSERT_TRUE(deployed.has_value());
-  ASSERT_NE(deployed.value(), nullptr);
-  ASSERT_NE(deployed.value()->entry, nullptr);
-  EXPECT_FALSE(deployed.value()->entry->prepared.rv32.has_value());
+  ASSERT_FALSE(deployed.has_value());
+  EXPECT_EQ(deployed.error().code(), SystemErrorCode::Unrecoverable);
 
   auto result = invoke_deployed(addr, 10'000);
   ASSERT_FALSE(result.is_root_success());

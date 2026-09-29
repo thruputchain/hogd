@@ -256,9 +256,9 @@ Rv32Context::verify_contract(Contract const &contract,
   // artifact only runs the structural artifact checks, whereas Rv32Contract::-
   // create additionally builds the threaded program (instruction decode) and
   // the pre-instantiation image, which can reject inputs that parse cleanly.
-  // Rejecting non-translatable contracts at creation time is what makes the
-  // "not translatable" path in make_new_runtime unreachable for a deployed
-  // contract (so its Unrecoverable error is a true should-never-happen).
+  // Rejecting non-translatable contracts at creation time is what makes a
+  // stored contract that does not translate a node fault: the snapshot cache
+  // fails its lookup as Unrecoverable.
   //
   // The translation is handed back rather than discarded: it is the whole
   // product of verification, and the caller reuses it for a same-transaction
@@ -291,10 +291,9 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
 
   // Snapshot deployment: the back-pointer entry was translated eagerly when the
   // contract entered the cache. A present translation is the fast path (no
-  // resolve_contract round trip, no per-invocation translation); a null
-  // translation is the cached result for a non-translatable artifact, so fail
-  // here rather than re-resolving and re-translating (which would just fail
-  // again).
+  // resolve_contract round trip, no per-invocation translation). The cache
+  // never holds an rv32 entry without a translation (a stored contract that
+  // does not translate fails the lookup), so the check below is a guard.
   if (deployed_contract.entry != nullptr) {
     if (!deployed_contract.entry->prepared.rv32.has_value()) [[unlikely]] {
       error("Unrecoverable: rv32 contract is not translatable: {}",
