@@ -342,13 +342,10 @@ ExecutorContext::log_event_return(SystemStatus<void> err)
   if (!err.has_value()) {
     std::unique_lock lock(event_accumulate_mutex_);
     event_error_ = err.error().code();
-    // This runs inside an x23::Detached completion callback, where an escaping
-    // exception is fatal (trace_unhandled_exception is [[noreturn]]). The
-    // diagnostic allocates while formatting and can throw under memory
-    // pressure, so guard it and fall back to the no-allocation reporter, same
-    // as the SystemCallHandler ctor paths above. The counter must still be
-    // decremented below on this nonfatal path so finish_block can drain the
-    // stored event error.
+    // This runs in an x23::Detached callback, where an escaping exception is
+    // fatal, and formatting the diagnostic can throw under memory pressure.
+    // Guard it and fall back to the no-allocation reporter, same as the
+    // SystemCallHandler ctor paths above; the decrement below still runs.
     try {
       error("event error: {}", std::to_underlying(event_error_.value()));
     } catch (...) {
