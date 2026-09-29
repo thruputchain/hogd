@@ -65,7 +65,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       make_config_hash_preimage(model, stock_network_config(),
                                 native_default_wallet_hash()));
 
-  std::array<NetworkConfig, 13> variants;
+  std::array<NetworkConfig, 14> variants;
   variants.fill(stock_network_config());
   const NetworkConfigParams stock(stock_network_config().v0());
   NetworkConfigParams::set_param(variants[0],
@@ -108,6 +108,9 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   NetworkConfigParams::set_param(
       variants[12], ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
       stock.max_rv32_artifact_version - 1);
+  NetworkConfigParams::set_param(
+      variants[13], ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+      stock.max_subtransaction_output_bytes + 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
@@ -159,7 +162,7 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
                                  4);
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 16U);
+  EXPECT_EQ(config.v0().params.size(), 17U);
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);
@@ -266,6 +269,8 @@ TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
   EXPECT_EQ(defaults.max_rv32_code_bytes, 256_KiB);
   EXPECT_EQ(defaults.max_rv32_memory_bytes,
             static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
+  EXPECT_EQ(defaults.max_subtransaction_output_bytes,
+            static_cast<uint32_t>(kDefaultMaxSubtransactionOutputBytes));
 
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxRv32MemoryBytes,
