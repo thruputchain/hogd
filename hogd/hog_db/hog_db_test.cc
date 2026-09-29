@@ -257,6 +257,18 @@ max_inline_contract_code_size()
   return size;
 }
 
+// Registers an Ed25519 key filled with key_fill at slot public_key_id.
+AuthDataChangeSigner
+make_key_registration(uint32_t public_key_id, uint8_t key_fill)
+{
+  PublicKey key;
+  key.ed25519().fill(key_fill);
+  return AuthDataChangeSigner{.public_key_id = public_key_id,
+                              .public_key = x23::Ptr<PublicKeyConfig>(
+                                  new PublicKeyConfig{.key = key,
+                                                      .max_weight = 100})};
+}
+
 } // namespace
 
 TEST_F(HogDbTest, ContractCodeChunkedRoundtrip)
@@ -1334,6 +1346,116 @@ TEST_F(HogDbTest, DbHashDeltaAuthLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
   });
+}
+
+// A written threshold, zero included, replaces the new-row default (#3069).
+TEST_F(HogDbTest, NewAuthRowTakesDefaultRequiredWeightUnlessWritten)
+{
+  Address defaulted = make_address(kAddress + 16);
+  Address explicit_zero = make_address(kAddress + 17);
+  ASSERT_TRUE(db_.write_address_balance(defaulted, 10'000'000));
+  ASSERT_TRUE(db_.write_address_balance(explicit_zero, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs key_only{};
+    key_only.auth_data_change_signers.push_back(make_key_registration(0, 0x11));
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        defaulted, key_only, std::to_underlying(StorageDeltaFlags::None)));
+
+    AuthDataChangeArgs key_and_zero{};
+    key_and_zero.auth_data_change_signers.push_back(
+        make_key_registration(0, 0x12));
+    key_and_zero.new_required_weight = Weight{0};
+    ASSERT_TRUE(invoke_tx.request_auth_data(explicit_zero, key_and_zero,
+                                            std::to_underlying(
+                                                StorageDeltaFlags::None)));
+  });
+
+  auto defaulted_row = db_.read_address_auth_data(defaulted);
+  ASSERT_TRUE(defaulted_row.has_value());
+  EXPECT_TRUE(defaulted_row->public_keys[0]);
+  EXPECT_EQ(defaulted_row->required_weight,
+            Weight{kDefaultNewAddressRequiredWeight});
+
+  auto zero_row = db_.read_address_auth_data(explicit_zero);
+  ASSERT_TRUE(zero_row.has_value());
+  EXPECT_TRUE(zero_row->public_keys[0]);
+  EXPECT_EQ(zero_row->required_weight, Weight{0});
+}
+
+// Removing a key from an address with no auth row has nothing to write: no row
+// is created and no storage is charged (issue #3069).
+TEST_F(HogDbTest, KeyRemovalOnMissingAuthRowWritesNothing)
+{
+  Address addr = make_address(kAddress + 18);
+  constexpr int128_t kBalance = 10'000'000;
+  ASSERT_TRUE(db_.write_address_balance(addr, kBalance));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
+
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance.has_value());
+  EXPECT_EQ(*balance, kBalance);
+}
+
+// A removal that replaces this transaction's own registration on an address
+// with no auth row leaves nothing to write: no row and no storage charge.
+TEST_F(HogDbTest, KeyRegistrationThenRemovalOnMissingAuthRowWritesNothing)
+{
+  Address addr = make_address(kAddress + 19);
+  constexpr int128_t kBalance = 10'000'000;
+  ASSERT_TRUE(db_.write_address_balance(addr, kBalance));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs registration{};
+    registration.auth_data_change_signers.push_back(
+        make_key_registration(0, 0x13));
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, registration, std::to_underlying(StorageDeltaFlags::None)));
+
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
+
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance.has_value());
+  EXPECT_EQ(*balance, kBalance);
+}
+
+// The ExclusiveLock flag prices a removal on a missing row the same way: it
+// reserves nothing, so an address with no balance can still commit it.
+TEST_F(HogDbTest, ExclusiveKeyRemovalOnMissingAuthRowReservesNothing)
+{
+  Address addr = make_address(kAddress + 25);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
 }
 
 TEST_F(HogDbTest, DbHashDeltaBalanceLockMatchesFullStateHash)
