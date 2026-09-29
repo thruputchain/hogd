@@ -30,6 +30,10 @@ class AuthLock {
 public:
   using change_type = PointerItem<AuthDataItem>;
 
+  // A lock on an address whose committed row is base_auth_data.
+  AuthLock(AddressAuthData base_auth_data)
+    : AuthLock(std::move(base_auth_data), /*row_exists=*/true)
+  {}
   AuthLock(AddressAuthData base_auth_data, bool row_exists)
     : base_auth_data_(std::move(base_auth_data)), row_exists_(row_exists)
   {}
