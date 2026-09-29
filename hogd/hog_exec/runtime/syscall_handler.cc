@@ -267,11 +267,10 @@ SystemCallHandler::perform_initial_validation()
     warn("tx {}: attaches {} contracts; chain permits {}",
          show_byte_array(get_source_tx_hash()), contracts_to_deploy_.size(),
          permitted);
-    return reject_contract_attachment(
-        ContractRejectDiagnostic{.contract_index = permitted,
-                                 .code =
-                                     ContractRejectCode::ContractRejectTooMany},
-        0);
+    report_contract_rejection(ContractRejectDiagnostic{
+        .contract_index = permitted,
+        .code = ContractRejectCode::ContractRejectTooMany});
+    return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
   // The blob bound is the chain's (#2569): a configuration may raise it past
@@ -282,11 +281,10 @@ SystemCallHandler::perform_initial_validation()
       warn("tx {}: attached contract {} is {} bytes; chain permits {}",
            show_byte_array(get_source_tx_hash()), i,
            contract_blob_size(contracts_to_deploy_[i]), permitted);
-      return reject_contract_attachment(
-          ContractRejectDiagnostic{
-              .contract_index = static_cast<uint32_t>(i),
-              .code = ContractRejectCode::ContractRejectBlobTooLarge},
-          0);
+      report_contract_rejection(ContractRejectDiagnostic{
+          .contract_index = static_cast<uint32_t>(i),
+          .code = ContractRejectCode::ContractRejectBlobTooLarge});
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }
 
@@ -305,7 +303,8 @@ SystemCallHandler::perform_initial_validation()
       warn("tx {}: refusing attached contract {}: {}",
            show_byte_array(get_source_tx_hash()), res.error().contract_index,
            x23::show(res.error().code));
-      return reject_contract_attachment(res.error(), gas_consumed);
+      report_contract_rejection(res.error());
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, gas_consumed};
     }
     newly_created_contracts_ = std::move(*res);
 
@@ -1247,9 +1246,9 @@ SystemCallHandler::report_db_conflict_diagnostic() const
   report_tx_failure(std::move(cause));
 }
 
-std::pair<InvokeStatus<void>, GasAmount>
-SystemCallHandler::reject_contract_attachment(
-    ContractRejectDiagnostic const &rejection, GasAmount gas_consumed) const
+void
+SystemCallHandler::report_contract_rejection(
+    ContractRejectDiagnostic const &rejection) const
 {
   // Only a proposer has an author to tell: in validation the same rejection
   // means the proposer included a malformed transaction, and nobody is waiting
@@ -1259,7 +1258,6 @@ SystemCallHandler::reject_contract_attachment(
     cause.contract() = rejection;
     report_tx_failure(std::move(cause));
   }
-  return {InvokeError{InvokeErrorCode::ValidationFailure}, gas_consumed};
 }
 
 void
