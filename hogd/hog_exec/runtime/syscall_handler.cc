@@ -2085,20 +2085,45 @@ SystemCallHandler::retrocausal_queue_insert(
       queue_entry_from_span(queue_entry));
 }
 
-x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
+x23::Async<SystemStatus<StorageRead<QueueEntry>>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                              bool peek)
 {
+  using Read = StorageRead<QueueEntry>;
+
   const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
+  // Price the database load the read below is about to do, on this
+  // transaction's first touch of the key, so an RCQ read of cold storage costs
+  // the same host gas as a bytestring or NNInt read of it (see get_bytestring).
+  // Both DB-reaching states are billed: an unmodified key that is not yet
+  // loaded reaches the snapshot through ensure_loaded(), and a deleted key
+  // rebuilds a fully-consumed view from the snapshot in
+  // make_replaced_key_queue_item(). note_item_load() is per-key idempotent, so
+  // it charges kDBRPCCost only on the first touch; a queue already held in the
+  // frame answers without a load and is left at zero.
+  const GasAmount load_gas = [&]() -> GasAmount {
+    if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+      return unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+    }
+    if (item_view->get<DeletedItem>()) {
+      return note_item_load(item_key);
+    }
+    return 0;
+  }();
+
   if (peek) {
-    co_return co_await retrocausal_queue_peek_from_view(item_view, item_key,
-                                                        addrkey,
-                                                        snapshot_cache_,
-                                                        execution_mode_data_);
+    auto entry =
+        co_await retrocausal_queue_peek_from_view(item_view, item_key, addrkey,
+                                                  snapshot_cache_,
+                                                  execution_mode_data_);
+    if (!entry.has_value()) {
+      co_return entry.error();
+    }
+    co_return Read{std::move(entry.value()), load_gas};
   }
 
   // For unmodified keys, probe with a local item first. Only persist
@@ -2111,29 +2136,36 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
       co_return loaded.error();
     }
     if (committed_value_is_not_a_queue(*unmodified_item)) {
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      co_return Read{
+          SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+          load_gas};
     }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
-    if (entry.has_value() && entry.value().has_value()) {
+    if (!entry.has_value()) {
+      co_return entry.error();
+    }
+    if (entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
-        co_return set_status.error();
+        co_return Read{set_status.error(), load_gas};
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
-    co_return entry;
+    co_return Read{std::move(entry.value()), load_gas};
   }
 
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
     auto entry =
         co_await load_next_queue_entry(*queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
+    if (!entry.has_value()) {
+      co_return entry.error();
+    }
     item_view->sync_retrocausally_consumed(*queue_item);
-    co_return entry;
+    co_return Read{std::move(entry.value()), load_gas};
   }
 
   // Same treatment for deleted keys: a no-op consume should leave the
@@ -2149,18 +2181,22 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
-    if (entry.has_value() && entry.value().has_value()) {
+    if (!entry.has_value()) {
+      co_return entry.error();
+    }
+    if (entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
-        co_return set_status.error();
+        co_return Read{set_status.error(), load_gas};
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
-    co_return entry;
+    co_return Read{std::move(entry.value()), load_gas};
   }
 
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return Read{SyscallError{
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                 0};
 }
 
 // == Native token syscalls ==
