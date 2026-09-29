@@ -1,7 +1,6 @@
 #include "hogd/hog_exec/components/auth_token_registry.h"
 
 #include <cassert>
-#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -10,6 +9,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 
 namespace hogd {
 
@@ -40,7 +40,7 @@ AuthTokenRegistry::node_within_depth(AuthTokenNode const &root,
 std::optional<uint32_t>
 AuthTokenRegistry::register_auth_token(AuthToken auth_token)
 {
-  if (next_token_id_ == std::numeric_limits<uint32_t>::max()) {
+  if (next_token_id_ >= kMaxAuthTokensPerTransaction) {
     return std::nullopt;
   }
   uint32_t token_id = next_token_id_++;
@@ -75,8 +75,9 @@ AuthTokenRegistry::unwrap_auth_token(uint32_t token_id)
   auto new_token_id_start = next_token_id_;
   uint32_t new_token_id_count = child_nodes.size();
 
-  auto [_, overflow] = overflowing_add(next_token_id_, new_token_id_count);
-  if (overflow) {
+  auto [next_after_unwrap, overflow] =
+      overflowing_add(next_token_id_, new_token_id_count);
+  if (overflow || next_after_unwrap > kMaxAuthTokensPerTransaction) {
     return std::nullopt;
   }
 

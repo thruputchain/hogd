@@ -6,6 +6,7 @@
 #include "auth_token.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -199,6 +200,67 @@ TEST(AuthTokenRegistryTest, UnwrapAndRegisterShareOneMonotonicIdSpace)
   auto next_id = registry.register_auth_token(token_with_children({}));
   ASSERT_TRUE(next_id.has_value());
   ASSERT_EQ(next_id.value(), 4U);
+}
+
+// Registration is capped per transaction: past the cap register_auth_token
+// refuses rather than growing the registry without bound (#4197).
+TEST(AuthTokenRegistryTest, RegistrationIsCappedPerTransaction)
+{
+  AuthTokenRegistry registry;
+  auto leaf_token = [] {
+    return AuthToken{.mint_address = make_test_address(1),
+                     .expiry_height = 100,
+                     .root_node =
+                         AuthTokenNode{.consumer_address = make_test_address(2),
+                                       .payload = make_test_payload(0ULL),
+                                       .child_nodes = {}}};
+  };
+
+  for (uint32_t i = 0; i < kMaxAuthTokensPerTransaction; ++i) {
+    auto id = registry.register_auth_token(leaf_token());
+    ASSERT_TRUE(id.has_value());
+    ASSERT_EQ(id.value(), i);
+  }
+  ASSERT_FALSE(registry.register_auth_token(leaf_token()).has_value());
+}
+
+// unwrap_auth_token draws children from the same per-transaction budget: it
+// accepts an unwrap whose children exactly fill the budget and refuses one
+// whose children would overshoot it (#4197).
+TEST(AuthTokenRegistryTest, UnwrapRespectsPerTransactionCap)
+{
+  AuthTokenRegistry registry;
+
+  auto leaf = [](uint32_t index) {
+    return AuthTokenNode{.consumer_address = make_test_address(index),
+                         .payload = make_test_payload(index),
+                         .child_nodes = {}};
+  };
+  AuthToken parent =
+      AuthToken{.mint_address = make_test_address(1),
+                .expiry_height = 100,
+                .root_node =
+                    AuthTokenNode{.consumer_address = make_test_address(2),
+                                  .payload = make_test_payload(0ULL),
+                                  .child_nodes = {leaf(3), leaf(4)}}};
+
+  // Two 2-child parents (ids 0 and 1) draw children from the same budget.
+  auto first_id = registry.register_auth_token(parent);
+  ASSERT_TRUE(first_id.has_value());
+  auto second_id = registry.register_auth_token(parent);
+  ASSERT_TRUE(second_id.has_value());
+
+  // Spend the budget down to exactly two free creation slots.
+  for (uint32_t i = 2; i < kMaxAuthTokensPerTransaction - 2; ++i) {
+    ASSERT_TRUE(registry.register_auth_token(parent).has_value());
+  }
+
+  // Two slots for two children: unwrap fills the budget exactly and succeeds.
+  ASSERT_TRUE(registry.unwrap_auth_token(first_id.value()).has_value());
+
+  // Budget now full, so the second unwrap's two children would overshoot and it
+  // is refused.
+  ASSERT_FALSE(registry.unwrap_auth_token(second_id.value()).has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

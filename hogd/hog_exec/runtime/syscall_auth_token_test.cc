@@ -16,6 +16,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -165,6 +166,83 @@ TEST_F(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
   auto leaf_xdr = make_native_contract(2);
   write_contract(leaf_xdr);
   write_deployment(kLeafAddress, leaf_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kCallerAddress,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// Once a transaction hits the per-transaction auth-token cap, MintAuthToken
+// returns a recoverable InvalidSyscallInput to the contract rather than the
+// Unrecoverable that #4197's unbounded registry growth would eventually force.
+TEST_F(SyscallAuthTokenTest, MintReturnsErrorAtPerTransactionCap)
+{
+  constexpr ContractAddress kCallerAddress = make_contract_address(0);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        AuthTokenNode root_node{.consumer_address = kCallerAddress,
+                                .payload = x23::serialize(7U),
+                                .child_nodes = {}};
+        auto serialized_root = x23::serialize(root_node);
+        std::span<const std::byte> token_bytes{
+            reinterpret_cast<const std::byte *>(serialized_root.data()),
+            serialized_root.size()};
+
+        for (uint32_t i = 0; i < kMaxAuthTokensPerTransaction; ++i) {
+          uint32_t token_id = UINT32_MAX;
+          auto mint_res =
+              co_await ctx.syscall<SyscallNo::kMintAuthToken>(BlockHeight{1000},
+                                                              token_bytes,
+                                                              token_id);
+          if (!mint_res.has_value() ||
+              mint_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "MintAuthToken failed below the cap at " << i;
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        uint32_t token_id = UINT32_MAX;
+        auto capped_res =
+            co_await ctx.syscall<SyscallNo::kMintAuthToken>(BlockHeight{1000},
+                                                            token_bytes,
+                                                            token_id);
+        if (!capped_res.has_value() ||
+            capped_res.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          ADD_FAILURE() << "MintAuthToken past the cap did not return "
+                           "InvalidSyscallInput";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(0);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{

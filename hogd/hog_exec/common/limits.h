@@ -24,6 +24,14 @@ inline constexpr uint32_t kSavepointDepthCeiling =
 // kBulkRpcMaxMessageSize). Raising it changes which transactions abort.
 inline constexpr size_t kExecToDbMessageCap = 0x100'0000;
 
+// Cap on the auth tokens one transaction may create -- mints plus the children
+// an unwrap materializes. AuthTokenRegistry keeps every minted tree with no
+// erase path (a reverted child's mints stay put), so without this an
+// invoke/mint/revert loop grows registry memory until allocation fails and the
+// syscall is reported Unrecoverable (#4197). Deterministic in the transaction's
+// own syscalls, so every validator caps at the same point.
+inline constexpr uint32_t kMaxAuthTokensPerTransaction = 1000;
+
 // Ceiling on kConfigParamMaxContractSizeBytes, checked at genesis load. A
 // transaction body carries its attachments, so nothing above
 // kMaxBytesTransaction could reach the executor; hog_db stores rows up to it,
