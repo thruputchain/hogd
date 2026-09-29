@@ -690,7 +690,7 @@ TEST_F(Erc20PermitParityTest, IncreaseAllowanceSignedIsSpentByTransferFrom)
   EXPECT_EQ(results[4],
             aborted(erc20_abort(itc_erc20_permit::ERC20Error::TooLarge)));
   EXPECT_EQ(results[5], ok_amount(300));
-  // Approval for the increase, Transfer for the one transfer_from that landed.
+  // AllowanceChange for the increase, Transfer for the successful spend.
   EXPECT_EQ(native_events_.size(), 2U);
 }
 
@@ -714,8 +714,7 @@ TEST_F(Erc20PermitParityTest, OwnerIsMinterWhoeverSubmits)
   EXPECT_EQ(results[3], ok_amount(0));
 }
 
-// transfer_from_signed moves the whole grant in the one call and leaves no
-// allowance behind.
+// A signed transfer spends the requested amount without creating an allowance.
 TEST_F(Erc20PermitParityTest, TransferFromSignedMovesWithoutAllowance)
 {
   auto results = expect_parity({
@@ -798,23 +797,31 @@ TEST_F(Erc20PermitParityTest, GrantAboveInt128MaxIsTooLarge)
   EXPECT_EQ(results[2], ok());
 }
 
-// A grant naming its own minter as spender: a self-allowance is rejected as
-// adjust_allowance rejects it, while moving one's own tokens needs no
-// allowance and goes through.
+// A self-grant is an ordinary allowance; a signed transfer does not consume it.
 TEST_F(Erc20PermitParityTest, GrantToSelf)
 {
   auto results = expect_parity({
       permit_step<u8"increase_allowance_signed">(
           kOwner, {{.spender = kOwner, .amount = 5}}, SignedToken{}),
+      erc20_step<u8"allowance">(kOwner, kOwner, kOwner),
       permit_step<u8"transfer_from_signed">(kOwner,
                                             {{.spender = kOwner, .amount = 5}},
                                             SignedToken{}, kReceiver,
                                             make_amount(5)),
+      erc20_step<u8"allowance">(kOwner, kOwner, kOwner),
+      permit_step<u8"clear_allowance_signed">(
+          kThirdParty, {{.spender = kOwner, .amount = 0, .clear = true}},
+          SignedToken{}),
+      erc20_step<u8"allowance">(kOwner, kOwner, kOwner),
   });
-  ASSERT_EQ(results.size(), 2U);
-  EXPECT_EQ(results[0],
-            aborted(erc20_abort(itc_erc20_permit::ERC20Error::Internal)));
-  EXPECT_EQ(results[1], ok());
+  ASSERT_EQ(results.size(), 6U);
+  EXPECT_EQ(results[0], ok());
+  EXPECT_EQ(results[1], ok_amount(5));
+  EXPECT_EQ(results[2], ok());
+  EXPECT_EQ(results[3], ok_amount(5));
+  EXPECT_EQ(results[4], ok());
+  EXPECT_EQ(results[5], ok_amount(0));
+  EXPECT_EQ(native_events_.size(), 3U);
 }
 
 // A grant minted for another consumer reaches the token but cannot be consumed
@@ -1019,12 +1026,11 @@ TEST_F(Erc20PermitParityTest, ClearAllowanceSignedDeletesTheAllowance)
             aborted(erc20_abort(itc_erc20_permit::ERC20Error::TooLarge)));
   EXPECT_EQ(results[4], ok());
   EXPECT_EQ(results[5], ok_amount(7));
-  // Approval +500, Approval -500 for the clear, Approval +7.
+  // AllowanceChange deltas: +500, -500 for the clear, then +7.
   EXPECT_EQ(native_events_.size(), 3U);
 }
 
-// Clearing an allowance that was never granted succeeds and removes nothing;
-// clearing a self-allowance is Internal, as granting one is.
+// Clearing a missing allowance succeeds, including an owner/spender self-pair.
 TEST_F(Erc20PermitParityTest, ClearAllowanceSignedEdgeCases)
 {
   auto results = expect_parity({
@@ -1038,8 +1044,7 @@ TEST_F(Erc20PermitParityTest, ClearAllowanceSignedEdgeCases)
   });
   ASSERT_EQ(results.size(), 3U);
   EXPECT_EQ(results[0], ok());
-  EXPECT_EQ(results[1],
-            aborted(erc20_abort(itc_erc20_permit::ERC20Error::Internal)));
+  EXPECT_EQ(results[1], ok());
   EXPECT_EQ(results[2], ok_amount(0));
 }
 
@@ -1165,6 +1170,92 @@ TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceSignedRefundsTheEntry)
     for (auto const &outcome : legs.back()) {
       EXPECT_EQ(outcome.commit, ExecResult::ExecResultOK);
     }
+  }
+  for (size_t sc = 0; sc < scenarios.size(); ++sc) {
+    expect_outcomes_match(legs[0][sc], legs[1][sc]);
+  }
+}
+
+TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceRefundsTheEntryOnce)
+{
+  std::vector<std::vector<Step>> const scenarios{
+      {permit_step<u8"increase_allowance_signed">(
+          kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
+      {erc20_step<u8"clear_allowance">(kOwner, kSpender),
+       erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
+      {erc20_step<u8"clear_allowance">(kOwner, kSpender),
+       erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
+  };
+  std::vector<std::vector<LegOutcome>> legs;
+  for (auto token : {kNativeToken, kRv32Token}) {
+    SCOPED_TRACE(token == kNativeToken ? "native" : "rv32");
+    fund(token, kActorFunds);
+    std::vector<int128_t> balances;
+    legs.push_back(
+        run_recording_balance(token, scenarios, {{0}, {1}, {2}}, balances));
+    auto const &out = legs.back();
+    ASSERT_EQ(balances.size(), 4U);
+    ASSERT_EQ(out.size(), 3U);
+    EXPECT_EQ(balances[0] - balances[1], entry_cost());
+    EXPECT_EQ(balances[2], balances[0]);
+    EXPECT_EQ(balances[3], balances[2])
+        << "missing entry must not refund again";
+    for (auto const &outcome : out) {
+      EXPECT_EQ(outcome.commit, ExecResult::ExecResultOK);
+    }
+    ASSERT_EQ(out[0].records.size(), 1U);
+    EXPECT_EQ(out[0].records[0], ok());
+    for (size_t sc : {1U, 2U}) {
+      ASSERT_EQ(out[sc].records.size(), 2U);
+      EXPECT_EQ(out[sc].records[0], ok());
+      EXPECT_EQ(out[sc].records[1], ok_amount(0));
+    }
+  }
+  for (size_t sc = 0; sc < scenarios.size(); ++sc) {
+    expect_outcomes_match(legs[0][sc], legs[1][sc]);
+  }
+}
+
+TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceNetsStorageAcrossRecreation)
+{
+  std::vector<std::vector<Step>> const scenarios{
+      {permit_step<u8"increase_allowance_signed">(
+           kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{}),
+       erc20_step<u8"clear_allowance">(kOwner, kSpender),
+       erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
+      {permit_step<u8"increase_allowance_signed">(
+          kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
+      {erc20_step<u8"clear_allowance">(kOwner, kSpender),
+       permit_step<u8"increase_allowance_signed">(
+           kOwner, {{.spender = kSpender, .amount = 7}}, SignedToken{}),
+       erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
+  };
+  std::vector<std::vector<LegOutcome>> legs;
+  for (auto token : {kNativeToken, kRv32Token}) {
+    SCOPED_TRACE(token == kNativeToken ? "native" : "rv32");
+    fund(token, kActorFunds);
+    std::vector<int128_t> balances;
+    legs.push_back(
+        run_recording_balance(token, scenarios, {{0}, {1}, {2}}, balances));
+    auto const &out = legs.back();
+    ASSERT_EQ(balances.size(), 4U);
+    ASSERT_EQ(out.size(), 3U);
+    EXPECT_EQ(balances[1], balances[0]) << "create and clear leave no entry";
+    EXPECT_EQ(balances[1] - balances[2], entry_cost());
+    EXPECT_EQ(balances[3], balances[2]) << "clear and regrant retain one entry";
+    for (auto const &outcome : out) {
+      EXPECT_EQ(outcome.commit, ExecResult::ExecResultOK);
+    }
+    ASSERT_EQ(out[0].records.size(), 3U);
+    EXPECT_EQ(out[0].records[0], ok());
+    EXPECT_EQ(out[0].records[1], ok());
+    EXPECT_EQ(out[0].records[2], ok_amount(0));
+    ASSERT_EQ(out[1].records.size(), 1U);
+    EXPECT_EQ(out[1].records[0], ok());
+    ASSERT_EQ(out[2].records.size(), 3U);
+    EXPECT_EQ(out[2].records[0], ok());
+    EXPECT_EQ(out[2].records[1], ok());
+    EXPECT_EQ(out[2].records[2], ok_amount(7));
   }
   for (size_t sc = 0; sc < scenarios.size(); ++sc) {
     expect_outcomes_match(legs[0][sc], legs[1][sc]);

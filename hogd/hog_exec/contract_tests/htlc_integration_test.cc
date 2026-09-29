@@ -170,19 +170,19 @@ protected:
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    Calldata approve_calldata =
-        x23::serialize(kERC20ContractAddress,
-                       erc20_meta::entrypoint<u8"adjust_allowance">(),
-                       GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<u8"adjust_allowance">(
-                           kHTLCContractAddress, make_difference(amount)));
-    Ed25519Signature approve_sig =
-        ed25519_sign(wallet_secret_key_, approve_calldata).value();
+    Calldata allowance_calldata = x23::serialize(
+        kERC20ContractAddress, erc20_meta::entrypoint<u8"adjust_allowance">(),
+        GasAmount{UINT64_MAX},
+        erc20_meta::make_calldata<u8"adjust_allowance">(kHTLCContractAddress,
+                                                        make_difference(amount),
+                                                        false));
+    Ed25519Signature allowance_sig =
+        ed25519_sign(wallet_secret_key_, allowance_calldata).value();
 
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, approve_sig, approve_calldata),
+                UINT64_MAX, allowance_sig, allowance_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
