@@ -1821,19 +1821,19 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
 
 TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
 {
-  constexpr std::array<std::string_view, 3> key_names = {"rv32_delete_key_0",
+  constexpr std::array<std::string_view, 3> kKeyNames = {"rv32_delete_key_0",
                                                          "rv32_delete_key_1",
                                                          "rv32_delete_key_2"};
-  constexpr uint32_t key_base_address = 256;
-  constexpr uint32_t memory_bytes = 1024;
+  constexpr uint32_t kKeyBaseAddress = 256;
+  constexpr uint32_t kMemoryBytes = 1024;
 
-  std::vector<uint8_t> initial_memory(memory_bytes);
+  std::vector<uint8_t> initial_memory(kMemoryBytes);
   std::vector<uint32_t> program;
-  for (size_t i = 0; i < key_names.size(); ++i) {
+  for (size_t i = 0; i < kKeyNames.size(); ++i) {
     const StorageKeyContractData key =
-        make_storage_key_matching_static_key_sdk_macro(key_names[i]);
+        make_storage_key_matching_static_key_sdk_macro(kKeyNames[i]);
     const uint32_t key_address =
-        key_base_address + i * sizeof(StorageKeyContractData);
+        kKeyBaseAddress + (i * sizeof(StorageKeyContractData));
     std::ranges::copy(key, initial_memory.begin() + key_address);
     append_syscall(program, {static_cast<int32_t>(SyscallNo::kDeleteObject),
                              static_cast<int32_t>(key_address)});
@@ -1845,7 +1845,7 @@ TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
       {{kRv32ContractId, rv32::RuntimeContractImage{
                              .program = make_program(program),
                              .initial_memory = std::move(initial_memory),
-                             .memory_bytes = memory_bytes,
+                             .memory_bytes = kMemoryBytes,
                          }}});
   auto rv32_contract = make_rv32_contract_xdr();
   install_contract(rv32_contract);
@@ -1860,8 +1860,8 @@ TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
   auto const &trace = *handler.get_trace();
   ASSERT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
 
-  ASSERT_EQ(trace.system_calls.size(), key_names.size() + 1);
-  for (size_t i = 0; i < key_names.size(); ++i) {
+  ASSERT_EQ(trace.system_calls.size(), kKeyNames.size() + 1);
+  for (size_t i = 0; i < kKeyNames.size(); ++i) {
     auto const &delete_trace = trace.system_calls[i];
     EXPECT_EQ(delete_trace.body.syscall_number(), SyscallNo::kDeleteObject);
     // The delete walks the frame stack, creates the first-touch item view, and
@@ -1873,8 +1873,8 @@ TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
         << "DeleteObject key " << i << " did not charge kStorageAccessCost";
   }
 
-  ASSERT_EQ(trace.storage_writes.size(), key_names.size());
-  for (const std::string_view key_name : key_names) {
+  ASSERT_EQ(trace.storage_writes.size(), kKeyNames.size());
+  for (const std::string_view key_name : kKeyNames) {
     const AddressAndKey expected_addrkey =
         make_contract_data_addrkey_matching_static_key_sdk_macro(
             kRv32ContractAddress, key_name);
