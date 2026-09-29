@@ -29,8 +29,9 @@ CI_CONTROL_PORT=${CI_CONTROL_PORT:-$("./$BUILD_DIR/hogd/utils/get_port" kCIContr
 # its own checkout, whose path this job does not know.
 REMOTE_OUTPUT=/tmp/schedgateway_bench
 LOCAL_OUTPUT=schedgateway_bench_results
-# Covers two node startups, corpus signing, and both measured runs.
-WAIT_TIMEOUT_SEC=${SCHEDGATEWAY_BENCH_WAIT_TIMEOUT_SEC:-900}
+# Covers two node startups, corpus signing, and both measured runs. Signing
+# dominates, and the four-connection corpus is the bulk of it.
+WAIT_TIMEOUT_SEC=${SCHEDGATEWAY_BENCH_WAIT_TIMEOUT_SEC:-1200}
 
 case $COMMAND in
 start)
