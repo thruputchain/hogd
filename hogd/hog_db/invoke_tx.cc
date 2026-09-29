@@ -529,47 +529,25 @@ InvokeTX::request_auth_data(Address const &addr,
                             const AuthDataChangeArgs &auth_data_change,
                             StorageDeltaFlagSet flags)
 {
-  const ItemKey key = make_address_auth_data_item_key(addr);
   auto base_auth_data = block_.get().get_db().read_address_auth_data(addr);
-  bool creates_row = false;
-  if (!base_auth_data) {
-    if (base_auth_data.error() != HogDbCode::kNotFound) {
-      return base_auth_data.error();
-    }
-    // A new row requires kDefaultNewAddressRequiredWeight until the address
-    // writes its own threshold, so registering a key never leaves an address
-    // that anyone can originate from. An address opts into that by writing a
-    // zero threshold.
-    base_auth_data = AddressAuthData{
-        .required_weight = Weight{kDefaultNewAddressRequiredWeight}};
-    creates_row = true;
+  if (!base_auth_data && base_auth_data.error() != HogDbCode::kNotFound) {
+    return base_auth_data.error();
   }
 
-  AuthDataItem auth_data_item(std::move(base_auth_data.value()));
-  bool registers_key = false;
+  AuthDataItem auth_data_item = base_auth_data
+                                    ? AuthDataItem(std::move(*base_auth_data))
+                                    : AuthDataItem::for_missing_row();
   for (const auto &signer : auth_data_change.auth_data_change_signers) {
     if (signer.public_key_id >= kMaxSigners) {
       last_conflict_reason_ = DbConflictCode::CapacityExceeded;
       return HogDbError(HogDbCode::kConflict);
     }
-    registers_key = registers_key || signer.public_key != nullptr;
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
   }
   if (auth_data_change.new_required_weight) {
     auth_data_item.set_new_required_weight(
         *auth_data_change.new_required_weight);
   }
-
-  // Removing keys from an address with no row has nothing to write, so it
-  // creates no row: a present row would take the address off the
-  // kPubkeySignature path. The executor sends each subtransaction's cumulative
-  // delta, so a change this transaction already made to the row is still
-  // replaced below rather than skipped.
-  if (creates_row && !registers_key && !auth_data_change.new_required_weight &&
-      read_change(key) == nullptr) {
-    return {};
-  }
-
   auto change = ItemChange(std::move(auth_data_item));
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
     change.set_permanent_exclusive();
@@ -577,7 +555,8 @@ InvokeTX::request_auth_data(Address const &addr,
   // request_change can fail with kConflict (lock contention from another tx
   // in the same block) or kStaleBlock (a sibling block committed and changed
   // the auth base out from under us, detected in AuthDataItem::narrow()).
-  auto ret = request_change(key, std::move(change));
+  auto ret =
+      request_change(make_address_auth_data_item_key(addr), std::move(change));
   if (!ret) {
     CHECK(ret.error().code() == HogDbCode::kStaleBlock ||
           ret.error().code() == HogDbCode::kConflict);

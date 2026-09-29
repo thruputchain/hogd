@@ -376,9 +376,15 @@ namespace hogd {
 
 class AuthDataItem {
 public:
+  // A change to an address whose committed row is auth_data.
   AuthDataItem(AddressAuthData auth_data)
     : base_auth_data_(std::move(auth_data))
   {}
+
+  // A change to an address with no committed row. The row it creates requires
+  // kDefaultNewAddressRequiredWeight unless the change writes a threshold, and
+  // it is created only if the change registers a key or writes a threshold.
+  static AuthDataItem for_missing_row();
 
   void set_new_pk(uint32_t key_id, PublicKeyConfigOpt pk)
   {
@@ -390,6 +396,10 @@ public:
   HogDbStatus<bool> narrow(const AuthDataItem &auth_data_item) const;
 
   AddressAuthData const &base_auth_data() const { return base_auth_data_; }
+  bool row_exists() const { return row_exists_; }
+
+  // Whether committing this change leaves a row to write.
+  bool writes_row() const;
 
   size_t count_active_keys() const;
 
@@ -397,6 +407,7 @@ private:
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
   std::optional<Weight> required_weight_change_;
   AddressAuthData base_auth_data_;
+  bool row_exists_ = true;
 
   friend struct std::formatter<AuthDataItem>;
   friend class AuthLock;

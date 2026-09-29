@@ -1411,14 +1411,13 @@ TEST_F(HogDbTest, KeyRemovalOnMissingAuthRowWritesNothing)
   EXPECT_EQ(*balance, kBalance);
 }
 
-// The executor sends each subtransaction's cumulative auth delta, so a removal
-// that follows this transaction's own registration replaces it instead of
-// being skipped as a no-op. The key must not survive; the row the registration
-// created stays, keyless, at the default threshold.
-TEST_F(HogDbTest, KeyRemovalReplacesSameTxRegistrationOnMissingAuthRow)
+// A removal that replaces this transaction's own registration on an address
+// with no auth row leaves nothing to write: no row and no storage charge.
+TEST_F(HogDbTest, KeyRegistrationThenRemovalOnMissingAuthRowWritesNothing)
 {
   Address addr = make_address(kAddress + 19);
-  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+  constexpr int128_t kBalance = 10'000'000;
+  ASSERT_TRUE(db_.write_address_balance(addr, kBalance));
 
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
     AuthDataChangeArgs registration{};
@@ -1435,9 +1434,12 @@ TEST_F(HogDbTest, KeyRemovalReplacesSameTxRegistrationOnMissingAuthRow)
   });
 
   auto row = db_.read_address_auth_data(addr);
-  ASSERT_TRUE(row.has_value());
-  EXPECT_FALSE(row->public_keys[0]);
-  EXPECT_EQ(row->required_weight, Weight{kDefaultNewAddressRequiredWeight});
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
+
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance.has_value());
+  EXPECT_EQ(*balance, kBalance);
 }
 
 TEST_F(HogDbTest, DbHashDeltaBalanceLockMatchesFullStateHash)

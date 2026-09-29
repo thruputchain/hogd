@@ -10,8 +10,10 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -19,6 +21,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
 #include "syscall.hh"
@@ -730,6 +733,121 @@ TEST_F(SyscallAuthConfigTest, DeletionOnlyFirstTouchCreatesNoRow)
   EXPECT_FALSE(
       lookup_storage_item_from_db(make_address_auth_data_addrkey(contract_addr))
           .has_value());
+}
+
+// A key removal on an address with no auth row writes nothing, but it still
+// takes the address's auth lock like any other auth change, so a second auth
+// change to that address in the same block conflicts.
+TEST_F(SyscallAuthConfigTest, DeletionOnlyFirstTouchTakesAuthLock)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto [public_key, _] = ed25519_keygen();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      // Method 0: remove the key at slot 0
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto status =
+            co_await ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                0, static_cast<const int32_t *>(nullptr),
+                std::span<const std::byte>{},
+                static_cast<const uint32_t *>(nullptr));
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to delete key";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  fns.emplace(
+      // Method 1: register a key at slot 1
+      1,
+      [public_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        int32_t key_scheme = std::to_underlying(CryptographicScheme::Ed25519);
+        uint32_t key_weight = 5;
+        std::span<const std::byte> key_bytes(
+            reinterpret_cast<const std::byte *>(public_key.data()),
+            public_key.size());
+        auto status =
+            co_await ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                1, &key_scheme, key_bytes, &key_weight);
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to register key";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  ASSERT_FALSE(
+      lookup_storage_item_from_db(make_address_auth_data_addrkey(contract_addr))
+          .has_value());
+
+  auto make_tx = [&](Runtime::MethodID method) {
+    return SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = contract_addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+  };
+
+  auto removal = make_new_system_call_handler(make_tx(0), *context);
+  ASSERT_TRUE(removal.root_invoke()().is_root_success());
+  ASSERT_EQ(removal.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+  // Same block: the registration conflicts on the lock the removal holds.
+  auto registration = make_new_system_call_handler(make_tx(1), *context);
+  ASSERT_TRUE(registration.root_invoke()().is_root_success());
+  ASSERT_EQ(registration.try_commit_transaction()(),
+            ExecResult::ExecResultTxNonDeterministicError);
+  // Proposal mode: hog_db selects All in debug builds, First in release
+  // builds.
+  if constexpr (is_debug_build()) {
+    bool found_conflict = false;
+    for (auto const &c : registration.last_commit_conflict().conflicts()) {
+      if (c.code == DbConflictCode::ExclusiveLockDenied) {
+        found_conflict = true;
+      }
+    }
+    EXPECT_TRUE(found_conflict);
+  }
+  else {
+    EXPECT_EQ(registration.last_commit_conflict().first().code,
+              DbConflictCode::ExclusiveLockDenied);
+  }
+
+  advance_block();
+
+  // The removal wrote no row, and the registration never committed.
+  EXPECT_FALSE(
+      lookup_storage_item_from_db(make_address_auth_data_addrkey(contract_addr))
+          .has_value());
+
+  // With the lock released, the same registration commits in the next block.
+  auto retry = make_new_system_call_handler(make_tx(1), *context);
+  ASSERT_TRUE(retry.root_invoke()().is_root_success());
+  ASSERT_EQ(retry.try_commit_transaction()(), ExecResult::ExecResultOK);
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(
+      make_address_auth_data_addrkey(contract_addr));
+  ASSERT_TRUE(item.has_value());
+  EXPECT_TRUE(item->auth_data().public_keys[1]);
 }
 
 // The default threshold only fills in for one the transaction never wrote: an
