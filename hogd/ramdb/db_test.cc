@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <future>
 #include <limits>
@@ -21,13 +22,16 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/random_bytes.h"
+#include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
@@ -1420,6 +1424,68 @@ TEST(Loglet, CloneZeroesNextSlot)
   EXPECT_TRUE(std::ranges::all_of(next_slot, [](std::byte b) {
     return b == std::byte{0};
   }));
+}
+
+// A snapshot commit record whose LSN is tampered to UINT64_MAX must be rejected
+// as corruption. Its successor (hdr.lsn + 1) wraps to zero, so accepting it
+// once let recovery open at LSN zero, skip the snapshot contents, and mistake
+// the resulting empty database for fresh state (#4229).
+TEST_F(DatabaseTest, RecoveryRejectsSnapshotCommitLsnWrap)
+{
+  const std::string key = "existing-key";
+  const std::string value = "existing-value";
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(value))));
+
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  auto &[end_lsn, snapshot_future] = *snapshot;
+  ASSERT_EQ(end_lsn, 1);
+  ASSERT_TRUE(snapshot_future.get());
+  db_.reset();
+
+  // Drop the WAL so only the snapshot drives recovery.
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+
+  ErrnoStatus<struct stat> snapshot_stat = dir_.stat("0-1.snap");
+  ASSERT_TRUE(snapshot_stat);
+  {
+    ErrnoStatus<File> snapshot_file = dir_.openat("0-1.snap", O_RDWR);
+    ASSERT_TRUE(snapshot_file);
+    std::vector<std::byte> bytes(static_cast<size_t>(snapshot_stat->st_size));
+    ASSERT_TRUE(read_full(*snapshot_file, bytes));
+
+    // The commit record is the trailing ItemHeader plus its CRC32C. Rewrite the
+    // commit LSN to UINT64_MAX and recompute the same unkeyed checksum recovery
+    // verifies, so only the LSN is out of range.
+    const size_t commit_offset =
+        bytes.size() - sizeof(ItemHeader) - sizeof(uint32_t);
+    ItemHeader commit;
+    std::memcpy(&commit, bytes.data() + commit_offset, sizeof(commit));
+    ASSERT_EQ(commit.storage, ItemStorage::kCommit);
+    commit.lsn = std::numeric_limits<uint64_t>::max();
+    commit.clear_next();
+    std::memcpy(bytes.data() + commit_offset, &commit, sizeof(commit));
+
+    uint32_t crc =
+        crc32c_append(0,
+                      std::span<const std::byte>(bytes).first(commit_offset));
+    crc = crc32c_append(crc, byte_view(commit));
+    crc = cpu_to_le(crc);
+    std::memcpy(bytes.data() + commit_offset + sizeof(commit), &crc,
+                sizeof(crc));
+
+    ASSERT_TRUE(static_cast<bool>(
+        snapshot_file->lseek(0, SEEK_SET))); // NOLINT(misc-include-cleaner)
+    ASSERT_TRUE(write_full(*snapshot_file, bytes));
+    ASSERT_TRUE(snapshot_file->sync());
+  }
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
 }
 
 } // namespace hogd
