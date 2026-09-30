@@ -278,7 +278,16 @@ void
 DatabaseTest::wait_for_deletion(std::string_view path)
 {
   ElapsedTimer timer{};
-  constexpr double kTimeout = 2.0;
+  // Cleanup runs on the database's background worker, which polls once a
+  // second, so a healthy run returns from here within about a second and
+  // never approaches this ceiling. The ceiling is far above that on purpose:
+  // it is a wall-clock budget, and CI runners stall. A 10-second machine-wide
+  // freeze on a Namespace runner (C++ CI run 8068) blew through a 2-second
+  // deadline here while three unrelated tests stalled in the same window, so
+  // the budget is twice that stall. Only a genuine cleanup failure pays the
+  // full wait, and DiskCleanup's two calls at 20s stay well inside the
+  // tightest ctest --timeout the schedules use (100s).
+  constexpr double kTimeout = 20.0;
 
   while (timer.elapsed() < kTimeout) {
     ErrnoStatus<File> f = dir_.openat(path, O_RDONLY);
