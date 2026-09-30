@@ -83,9 +83,7 @@ StorageSnapshotCache::load_contract_entry(SHA256Hash hash)
       // Deployed under whatever bounds were in force then; the ceilings keep
       // it runnable after the chain lowers them. Every stored contract passed
       // attachment verification, so one that no longer translates is a node
-      // fault, never a contract's: fail the lookup rather than hand callers an
-      // entry that reads as present (a deploy would then report the address
-      // occupied) but cannot run. Not cached; a retry fails the same way.
+      // fault: fail the lookup instead of returning an unrunnable entry.
       auto translated = Rv32Contract::create(contract.rv32_contract(),
                                              rv32::Rv32Limits::ceiling());
       if (!translated.has_value()) [[unlikely]] {

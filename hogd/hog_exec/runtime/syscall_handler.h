@@ -621,10 +621,8 @@ private:
   // pinned tip, and the send runs in its own detached coroutine.
   void report_db_conflict_diagnostic() const;
 
-  // In proposal mode, fire-and-forgets `rejection` to the event server as
-  // this transaction's TxFailureDiagnostic (the same best-effort relay as
-  // report_db_conflict_diagnostic) so the author can learn why it was
-  // dropped. A no-op in validation: nobody is waiting on this hash.
+  // Proposal mode only: fire-and-forgets `rejection` as this transaction's
+  // TxFailureDiagnostic. In validation nobody is waiting on the hash.
   void
   report_contract_rejection(ContractRejectDiagnostic const &rejection) const;
 

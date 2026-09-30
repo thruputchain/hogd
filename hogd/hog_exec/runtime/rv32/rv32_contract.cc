@@ -252,19 +252,8 @@ Rv32Context::verify_contract(Contract const &contract,
   if (contract.contract_type() != ContractType::kRv32) {
     return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
   }
-  // Verify full translatability, not just artifact parsing: parse_threaded_-
-  // artifact only runs the structural artifact checks, whereas Rv32Contract::-
-  // create additionally builds the threaded program (instruction decode) and
-  // the pre-instantiation image, which can reject inputs that parse cleanly.
-  // Rejecting non-translatable contracts at creation time is what makes a
-  // stored contract that does not translate a node fault: the snapshot cache
-  // fails its lookup as Unrecoverable.
-  //
-  // The translation is handed back rather than discarded: it is the whole
-  // product of verification, and the caller reuses it for a same-transaction
-  // deployment instead of lowering the identical bytes a second time (#3536).
-  // Attachment uses the chain's bounds; a deployed contract runs under the
-  // VM's ceilings (StorageSnapshotCache).
+  // Verify by translating (parsing alone misses decode failures) under the
+  // chain's bounds, and hand the translation back for reuse (#3536).
   auto translated = Rv32Contract::create(
       contract.rv32_contract(),
       rv32::Rv32Limits{.max_code_bytes = params.max_rv32_code_bytes,
@@ -289,11 +278,8 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   }
   assert(syscall_handler != nullptr);
 
-  // Snapshot deployment: the back-pointer entry was translated eagerly when the
-  // contract entered the cache. A present translation is the fast path (no
-  // resolve_contract round trip, no per-invocation translation). The cache
-  // never holds an rv32 entry without a translation (a stored contract that
-  // does not translate fails the lookup), so the check below is a guard.
+  // Snapshot deployment: the cache translated the entry eagerly and never
+  // holds an rv32 entry without a translation, so this check is a guard.
   if (deployed_contract.entry != nullptr) {
     if (!deployed_contract.entry->prepared.rv32.has_value()) [[unlikely]] {
       error("Unrecoverable: rv32 contract is not translatable: {}",

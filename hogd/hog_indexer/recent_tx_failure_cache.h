@@ -16,10 +16,8 @@
 namespace hogd {
 
 // Short-lived, best-effort cache of transactions a proposer recently excluded:
-// tx hash -> TxFailureDiagnostic (attempt height plus the cause -- the first
-// conflicting op, or the refused contract attachment). Fed by best-effort
-// event-server pull notices;
-// consulted by get_transaction_info when a tx has no committed record.
+// tx hash -> TxFailureDiagnostic. Fed by event-server pull notices; consulted
+// by get_transaction_info when a tx has no committed record.
 //
 // Storage is a SynchronizedMap -- a sharded, per-bucket-locked hash table --
 // so concurrent reports and lookups from RPC threads contend only when they

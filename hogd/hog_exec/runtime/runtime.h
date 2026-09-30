@@ -63,10 +63,8 @@ public:
   // `out` is built in place: the caller supplies storage at whatever scope it
   // wants the preparation to live, and the context memoizes nothing. It is
   // written only on success; on rejection it is left as the caller had it.
-  //
-  // A rejection names why, so the executor can tell the author (it rides the
-  // proposer's TxFailureDiagnostic). A context that cannot run the contract's
-  // type at all reports ContractRejectNotDeployable.
+  // A rejection names why (ContractRejectNotDeployable for a type it can't
+  // run).
   virtual std::expected<void, ContractRejectCode>
   verify_contract(Contract const &contract, NetworkConfigParams const &params,
                   PreparedContract &out) const = 0;

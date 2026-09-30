@@ -29,10 +29,8 @@ public:
   // Borrows [contracts]: the returned set holds pointers into its elements,
   // so they must outlive the set (buffer-stealing moves of the enclosing
   // vector are fine; destroying the elements is not).
-  //
-  // On rejection, names the first attachment (in transaction order) that
-  // failed and why. Logging and reporting it are the caller's: only the
-  // caller knows the transaction and the execution mode.
+  // On rejection, names the first offending attachment; the caller logs and
+  // reports it.
   static std::pair<std::expected<NewContractSet, ContractRejectDiagnostic>,
                    GasAmount>
   make(NewContractBatch const &contracts, RuntimeContext &runtime_context,

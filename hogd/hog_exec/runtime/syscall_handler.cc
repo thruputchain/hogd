@@ -1250,9 +1250,6 @@ void
 SystemCallHandler::report_contract_rejection(
     ContractRejectDiagnostic const &rejection) const
 {
-  // Only a proposer has an author to tell: in validation the same rejection
-  // means the proposer included a malformed transaction, and nobody is waiting
-  // on this hash.
   if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
     TxFailureCause cause(TxFailureKind::TxFailureContractRejected);
     cause.contract() = rejection;

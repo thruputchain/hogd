@@ -40,9 +40,8 @@ NewContractSet::make(NewContractBatch const &contracts,
   hashes.reserve(contracts.size());
 
   // Cheap structural gates first, so a malformed attachment set is rejected
-  // before any (uncharged, see the TODO above) verification work runs. Both
-  // passes walk the attachments in transaction order, so the reported index
-  // is the first offending position.
+  // before any (uncharged, see the TODO above) verification work runs.
+  // Both passes walk transaction order: the reported index is the first one.
   for (size_t i = 0; i < contracts.size(); ++i) {
     auto const &contract = contracts[i];
     // Native contracts are registered at genesis, never deployed by a
