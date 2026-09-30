@@ -4,7 +4,6 @@
 #include <expected>
 #include <optional>
 #include <utility>
-#include <vector>
 
 #include "contract.hh"
 #include "db_conflict.hh"
@@ -38,12 +37,9 @@ NewContractSet::make(NewContractBatch const &contracts,
   NewContractSet new_contract_set;
   new_contract_set.new_contracts_.reserve(contracts.size());
   new_contract_set.new_contract_preparations_.reserve(contracts.size());
-  std::vector<SHA256Hash> hashes;
-  hashes.reserve(contracts.size());
 
   // Cheap structural gates first, so a malformed attachment set is rejected
   // before any (uncharged, see the TODO above) verification work runs.
-  // Both passes walk transaction order: the reported index is the first one.
   for (size_t i = 0; i < contracts.size(); ++i) {
     auto const &contract = contracts[i];
     // Native contracts are registered at genesis, never deployed by a
@@ -53,22 +49,23 @@ NewContractSet::make(NewContractBatch const &contracts,
     }
     // Rejected rather than deduplicated: two different transaction encodings
     // would otherwise have identical effect.
-    auto hash = sha256(contract);
-    if (!new_contract_set.new_contracts_.emplace(hash, &contract).second) {
+    if (!new_contract_set.new_contracts_.emplace(sha256(contract), &contract)
+             .second) {
       return reject(i, ContractRejectCode::ContractRejectDuplicate);
     }
-    hashes.push_back(hash);
   }
 
-  for (size_t i = 0; i < contracts.size(); ++i) {
+  for (auto const &[hash, contract] : new_contract_set.new_contracts_) {
     PreparedContract prepared_contract;
     // An unverifiable attachment makes the transaction malformed: the caller
     // rejects it as a ValidationFailure so it is dropped, never included in a
-    // block as a deterministic failure.
-    if (auto res = runtime_context.verify_contract(contracts[i], params,
+    // block as a deterministic failure. The map holds pointers into
+    // [contracts], so the offset is the attachment's index.
+    if (auto res = runtime_context.verify_contract(*contract, params,
                                                    prepared_contract);
         !res.has_value()) {
-      return reject(i, res.error());
+      return reject(static_cast<size_t>(contract - contracts.data()),
+                    res.error());
     }
     // rv32 is the only type that reaches here, and for rv32 verifying an
     // attachment *is* translating it, so a successful verification always
@@ -76,7 +73,7 @@ NewContractSet::make(NewContractBatch const &contracts,
     // same-transaction invocation from lowering the identical bytes again,
     // both passes outside transaction gas (#3536).
     CHECK(prepared_contract.rv32.has_value());
-    new_contract_set.new_contract_preparations_.emplace(hashes[i],
+    new_contract_set.new_contract_preparations_.emplace(hash,
                                                         std::move(
                                                             prepared_contract));
   }
