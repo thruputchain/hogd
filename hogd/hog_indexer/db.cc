@@ -44,7 +44,6 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/container/merkle/hex_array.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/key_format.h"
 #include "hogd/hog_indexer/status.h"
