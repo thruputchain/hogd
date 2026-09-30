@@ -454,11 +454,11 @@ TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
             IndexerBlockApplyOutcome::IndexerBlockContentConflict);
 }
 
-// Content binding -- the bodies and event logs against the header's roots --
-// is established by the event server when it publishes the record, not
-// recomputed here. Ingest rejects only what it can see locally: a block that
-// does not chain, one that is not the block its identity names, or batches
-// that do not pair up.
+// Ingest rebinds every block to its consensus identity before writing:
+// besides the locally visible faults -- a block that does not chain, one that
+// is not the block its identity names, or batches that do not pair up -- it
+// recomputes both roots over the pairs, so replacement bodies or event logs
+// carried under an authentic consensus identity are rejected.
 TEST_F(StrictIndexerTest, RejectsPrevHashIdentityAndPairingConflicts)
 {
   IndexerOutboxOrigin origin = make_origin();
@@ -491,6 +491,38 @@ TEST_F(StrictIndexerTest, RejectsPrevHashIdentityAndPairingConflicts)
   IndexerCommittedBlock unpaired = valid;
   unpaired.payload.tx_bodies.push_back(body);
   expect_conflict(unpaired);
+}
+
+// A same-process substitution of the content-addressed events file swaps in
+// well-formed replacement pairs while leaving the committed consensus value --
+// and therefore the block identity -- authentic. The pairs still count and
+// pair up, so only recomputing the roots catches it. Ingest must reject the
+// block and persist nothing.
+TEST_F(StrictIndexerTest, RejectsSubstitutedPairsUnderAuthenticIdentity)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const ProposedTransaction original_body = make_body(5, 0xE0);
+  const ProposedTransaction replacement_body = make_body(6, 0xE1);
+  IndexerCommittedBlock substituted =
+      make_block(1, origin.first_prev_hash,
+                 ProposedTransactionBatch{original_body});
+
+  // Replace the pairs but keep the authentic consensus value and identity.
+  substituted.payload.tx_bodies = ProposedTransactionBatch{replacement_body};
+  substituted.payload.event_logs =
+      TxEventLogBatch{make_log(replacement_body, 0xA0)};
+  ASSERT_EQ(substituted.identity.consensus_hash,
+            sha256(substituted.payload.consensus_value));
+
+  EXPECT_EQ(db_->apply_committed_block(origin, substituted)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockContentConflict);
+  EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
+  EXPECT_FALSE(
+      db_->get_tx_record(sha256(replacement_body.signed_tx.tx)).has_value());
+  EXPECT_FALSE(
+      db_->get_tx_record(sha256(original_body.signed_tx.tx)).has_value());
 }
 
 TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)

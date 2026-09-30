@@ -64,31 +64,6 @@ namespace hogd {
 
 namespace {
 
-// What ingest checks about a pulled block before applying it. The event
-// server established both consensus roots over the block's bodies when it
-// published the record, so ingest does not recompute them: it verifies that
-// the block is the one its identity names and that its two batches pair up.
-IndexerPayloadStatus<void>
-check_committed_block_shape(const IndexerCommittedBlock &block)
-{
-  if (block.payload.format_version != kIndexerOutboxFormatVersion) {
-    return std::unexpected(
-        std::format("unknown committed outbox format version {}",
-                    block.payload.format_version));
-  }
-  if (block.payload.consensus_value.proposal_header.block_height < 0) {
-    return std::unexpected("committed outbox height is negative");
-  }
-  if (block.payload.event_logs.size() != block.payload.tx_bodies.size()) {
-    return std::unexpected("event/body batch cardinalities differ");
-  }
-  if (block.identity.consensus_hash != sha256(block.payload.consensus_value)) {
-    return std::unexpected(
-        "committed block identity differs from canonical payload");
-  }
-  return {};
-}
-
 // True when there is nothing at [path] to open: no such path, or an empty
 // directory. A filesystem error reads as false, so an unreadable path is
 // left to [IndexDB::open] to refuse rather than treated as absent.
@@ -1252,7 +1227,14 @@ IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
     apply_validation_test_hook_();
   }
   try {
-    if (auto valid = check_committed_block_shape(block); !valid) {
+    // Recompute both roots over the pairs and confirm the identity names this
+    // consensus value before anything durable is written. The event server
+    // reads pairs from a mutable, content-addressed events file and skips root
+    // recomputation once it has established that file in-process, so a
+    // same-process substitution of well-formed replacement pairs can reach
+    // ingest under an authentic consensus identity. This fail-closed check at
+    // the durable-write boundary is what rebinds the pairs to the roots.
+    if (auto valid = co_await validate_indexer_committed_block(block); !valid) {
       co_return apply_failure(
           IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
     }
