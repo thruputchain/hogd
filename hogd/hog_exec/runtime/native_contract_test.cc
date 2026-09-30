@@ -57,9 +57,7 @@ constexpr BlockExecutionContext kTestBlockExecution{
     .block_timepoint = 1'700'000'000,
 };
 
-// The native wrapper charges a bytestring-read for decoding a method's calldata
-// before the body runs (#4236). A 4-byte kTxs u32 argument is a single block,
-// so every consumer invoked with one below pays this on top of its body.
+// Wrapper charges a bytestring-read to decode calldata (#4236); u32 = 1 block.
 constexpr GasAmount kU32ArgDecodeGas =
     kBytestringReadBlockCost * GasCost::bytestring_blocks(sizeof(uint32_t));
 
@@ -352,9 +350,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!invoke_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // The three consumer calls each pay kU32ArgDecodeGas to decode their
-        // u32; middle and entry are invoked with empty calldata, so decode
-        // nothing.
+        // Only the three consumer calls have calldata to decode.
         if (g !=
             100 + 200 + 150 + (3 * kU32ArgDecodeGas) + (4 * kSyscallBaseCost)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -408,10 +404,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
 {
-  // Verifies boundary gas accounting for native invokes: a child that consumes
-  // 255 gas in its body plus kU32ArgDecodeGas to decode its u32 arg fits when
-  // its limit clears that sum, while a limit one short is converted to
-  // OutOfGas/Deterministic and still charges the full child limit.
+  // Boundary gas accounting: a limit covering body + decode fits; one short
+  // becomes OutOfGas/Deterministic and still charges the full child limit.
 
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);
@@ -499,11 +493,8 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  // 255 body + kU32ArgDecodeGas for each child -- the one that fits and the one
-  // that is converted to OutOfGas and still charged its full limit -- plus the
-  // crossing each of the two invoke syscalls pays. The children's own limits
-  // are unaffected: the crossing is billed to the caller, outside the budget it
-  // hands down.
+  // Each child is charged its 255-gas body plus kU32ArgDecodeGas to decode its
+  // arg, plus the crossing each of the two invoke syscalls bills to the caller.
   ASSERT_EQ(res.gas_consumed_, (255 + kU32ArgDecodeGas) +
                                    (255 + kU32ArgDecodeGas) +
                                    (2 * kSyscallBaseCost));
@@ -647,11 +638,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
   ASSERT_TRUE(res.result_);
 }
 
-// Regression for #4236: the native wrapper CXS-decodes the whole calldata
-// before the method body runs, which is length-proportional host work. It must
-// charge for that decode up front, so the reported gas reflects it even when
-// the body consumes nothing, and a frame that cannot afford it faults with
-// OutOfGas -- charged its whole limit -- before the decode allocates anything.
+// Regression for #4236: decode is charged before the body runs.
 TEST_F(NativeContractTest, WrapperChargesForCalldataDecodeBeforeRunning)
 {
   constexpr static ContractAddress kAddress = test_contract_address(0);
@@ -672,9 +659,7 @@ TEST_F(NativeContractTest, WrapperChargesForCalldataDecodeBeforeRunning)
 
   x23::Vec<uint8_t, 4294967295> payload;
   payload.resize(2000, 0xAB);
-  // kTxs-serialize the payload the way the wrapper will deserialize it. A plain
-  // Vec<u8> cannot fail to encode, so take the Buf directly rather than through
-  // Serializer's optional (which the tidy checker flags on unwrap).
+  // Take the Buf directly; Serializer's optional trips the tidy unwrap check.
   Calldata calldata = x23::serialize(payload);
   const GasAmount decode_gas =
       kBytestringReadBlockCost * GasCost::bytestring_blocks(calldata.size());
@@ -723,12 +708,8 @@ TEST_F(NativeContractTest, WrapperChargesForCalldataDecodeBeforeRunning)
     EXPECT_EQ(res.gas_consumed_, decode_gas);
   }
 
-  // One gas short of the decode: the wrapper runs out of gas before touching
-  // the calldata, so the root frame faults (a decode that ran and then failed
-  // would instead abort with DecodingArgs, which reads as a root success) and
-  // is charged its whole limit rather than reporting zero. A root gas fault
-  // surfaces as a deterministic fault, not the raw OutOfGas the wrapper
-  // returns.
+  // One gas short: faults before decoding, charged its whole limit; a root gas
+  // fault reads as Deterministic.
   {
     auto res = invoke(decode_gas - 1);
     ASSERT_FALSE(res.result_);

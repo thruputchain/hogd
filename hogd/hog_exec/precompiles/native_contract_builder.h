@@ -230,14 +230,8 @@ public:
 
         auto const &calldata = ctx.handler().get_calldata();
 
-        // The decode below CXS-parses and allocates the whole calldata before
-        // the method body -- or even the wallet's auth / call-count checks --
-        // runs, which is length-proportional host work. Charge for it up front,
-        // mirroring the read a guest RV32 contract pays to pull its own
-        // calldata in, so a low-gas frame cannot force a large decode for free
-        // (#4236). A frame that cannot afford it faults with OutOfGas before
-        // any of that work happens. Priced like a bytestring read; the calldata
-        // is copied and walked once.
+        // Charge calldata decode up front (#4236) so a low-gas frame cannot
+        // parse a large payload for free; priced like a bytestring read.
         if (!ctx.consume_gas(kBytestringReadBlockCost *
                              GasCost::bytestring_blocks(calldata.size()))) {
           co_return InvokeError{InvokeErrorCode::OutOfGas};
