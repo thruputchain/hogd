@@ -775,30 +775,80 @@ TEST_F(Erc20PermitParityTest, TransferFromSignedBalanceBoundary)
 }
 
 // A negative amount, granted or requested, is NegativeAmount on both paths,
-// checked after the grant's own checks.
+// checked after the grant's own checks, and leaves the standing allowance and
+// both balances untouched. INT128_MIN is the extreme of the signed decoding
+// and the one value that cannot be negated, so it runs beside -1 on every
+// spending path, the base ERC20 ones included.
 TEST_F(Erc20PermitParityTest, NegativeAmountIsRejected)
 {
-  auto results = expect_parity({
-      permit_step<u8"increase_allowance_signed">(
-          kSpender, {{.spender = kSpender, .amount = -1}}, SignedToken{}),
-      permit_step<u8"transfer_from_signed">(
-          kSpender, {{.spender = kSpender, .amount = 10}}, SignedToken{},
-          kReceiver, make_amount(-1)),
-      permit_step<u8"transfer_from_signed">(
-          kSpender, {{.spender = kSpender, .amount = -1}}, SignedToken{},
-          kReceiver, make_amount(-1)),
-      permit_step<u8"increase_allowance_signed">(
-          kSpender, {{.spender = kSpender, .amount = kMaxAmount}},
-          SignedToken{}),
-  });
-  ASSERT_EQ(results.size(), 4U);
+  constexpr int128_t kMin = std::numeric_limits<int128_t>::min();
+  std::vector<Step> steps{permit_step<u8"increase_allowance_signed">(
+      kSpender, {{.spender = kSpender, .amount = 100}}, SignedToken{})};
+  for (int128_t amount : {int128_t{-1}, kMin}) {
+    steps.push_back(permit_step<u8"increase_allowance_signed">(
+        kSpender, {{.spender = kSpender, .amount = amount}}, SignedToken{}));
+    steps.push_back(permit_step<u8"transfer_from_signed">(
+        kSpender, {{.spender = kSpender, .amount = 10}}, SignedToken{},
+        kReceiver, make_amount(amount)));
+    steps.push_back(permit_step<u8"transfer_from_signed">(
+        kSpender, {{.spender = kSpender, .amount = amount}}, SignedToken{},
+        kReceiver, make_amount(amount)));
+    steps.push_back(erc20_step<u8"transfer_from">(kSpender, kOwner, kReceiver,
+                                                  make_amount(amount)));
+    steps.push_back(
+        erc20_step<u8"transfer">(kOwner, kReceiver, make_amount(amount)));
+  }
+  steps.push_back(erc20_step<u8"allowance">(kSpender, kOwner, kSpender));
+  steps.push_back(erc20_step<u8"get_balance_of">(kSpender, kOwner));
+  steps.push_back(erc20_step<u8"get_balance_of">(kSpender, kReceiver));
+  // INT128_MAX itself is a representable allowance.
+  steps.push_back(permit_step<u8"increase_allowance_signed">(
+      kThirdParty, {{.spender = kThirdParty, .amount = kMaxAmount}},
+      SignedToken{}));
+
+  auto results = expect_parity(steps);
+  ASSERT_EQ(results.size(), 15U);
+  EXPECT_EQ(results[0], ok());
   auto negative =
       aborted(erc20_abort(itc_erc20_permit::ERC20Error::NegativeAmount));
-  EXPECT_EQ(results[0], negative);
-  EXPECT_EQ(results[1], negative);
-  EXPECT_EQ(results[2], negative);
-  // INT128_MAX itself is a representable allowance.
-  EXPECT_EQ(results[3], ok());
+  for (std::size_t i = 1; i <= 10; ++i) {
+    EXPECT_EQ(results[i], negative) << "step " << i;
+  }
+  EXPECT_EQ(results[11], ok_amount(100));
+  EXPECT_EQ(results[12], ok_amount(kOwnerFunds));
+  EXPECT_EQ(results[13], ok_amount(0));
+  EXPECT_EQ(results[14], ok());
+  // Only the two increases emit; every rejected call publishes nothing.
+  EXPECT_EQ(native_events_.size(), 2U);
+}
+
+// 2^69 has a high word of 32: past the 31 that CXS encodes inline for a
+// signed integer, though within the 62 it would for an unsigned one, so it
+// pins the i128 Amount encoding that small values and INT128_MAX both miss.
+// A grant of that size roundtrips through the grant payload, the allowance
+// write and the allowance read, and spends like any other.
+TEST_F(Erc20PermitParityTest, AmountAboveTheSignedInlineRangeRoundtrips)
+{
+  constexpr int128_t kLarge = int128_t{1} << 69;
+  auto results = expect_parity({
+      permit_step<u8"increase_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = kLarge}}, SignedToken{}),
+      erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
+      erc20_step<u8"transfer_from">(kSpender, kOwner, kReceiver,
+                                    make_amount(10)),
+      erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
+      permit_step<u8"transfer_from_signed">(
+          kSpender, {{.spender = kSpender, .amount = kLarge}}, SignedToken{},
+          kReceiver, make_amount(20)),
+      erc20_step<u8"get_balance_of">(kSpender, kReceiver),
+  });
+  ASSERT_EQ(results.size(), 6U);
+  EXPECT_EQ(results[0], ok());
+  EXPECT_EQ(results[1], ok_amount(kLarge));
+  EXPECT_EQ(results[2], ok());
+  EXPECT_EQ(results[3], ok_amount(kLarge - 10));
+  EXPECT_EQ(results[4], ok());
+  EXPECT_EQ(results[5], ok_amount(30));
 }
 
 // A self-grant is an ordinary allowance; a signed transfer does not consume it.

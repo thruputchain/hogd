@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -1152,8 +1153,10 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
            int128_t{1},
            int128_t{2'000'000'000},
            int128_t{-1},
+           std::numeric_limits<int128_t>::min(),
        }) {
-    SCOPED_TRACE(static_cast<int64_t>(amount));
+    SCOPED_TRACE(static_cast<int64_t>(amount >> 64U));
+    SCOPED_TRACE(static_cast<uint64_t>(amount));
     auto calldata = wallet_meta::make_calldata<u8"deploy">(
         nonce, hash,
         std::tuple<int64_t, uint64_t>{static_cast<int64_t>(amount >> 64U),
@@ -1175,6 +1178,33 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
             SystemCallHandler::static_get_deploy_address(wallet, nonce, hash);
         EXPECT_TRUE(std::equal(target.begin(), target.end(), rec.begin() + 2));
         EXPECT_FALSE(lookup_deployment_from_db(target));
+      }
+    }
+    else if (amount < 0) {
+      // The wallet hands the negative amount to the token, which rejects it
+      // with NegativeAmount: the wallet reverts with CallAborted, deploys
+      // nothing and moves no tokens, identically on both wallets.
+      auto const expected = wallet_error_abort_bytes(WalletError::CallAborted);
+      for (auto const &[wallet, preimage] : {
+               std::pair{native_wallet_, native_preimage_},
+               std::pair{rv32_wallet_, rv32_preimage_},
+           }) {
+        SCOPED_TRACE(wallet == native_wallet_ ? "native" : "rv32");
+        auto rec = run_wallet_raw_tx(wallet, preimage, id,
+                                     {calldata.begin(), calldata.end()});
+        ASSERT_EQ(rec.size(), 2U + expected.size());
+        EXPECT_EQ(rec[1], static_cast<uint8_t>(
+                              ExecResult::ExecResultTxRootFrameReverted));
+        EXPECT_TRUE(
+            std::equal(expected.begin(), expected.end(), rec.begin() + 2));
+        auto target =
+            SystemCallHandler::static_get_deploy_address(wallet, nonce, hash);
+        EXPECT_FALSE(lookup_deployment_from_db(target));
+        EXPECT_FALSE(lookup_storage_item_from_db(
+            make_free_native_token_balance_addrkey(target)));
+        auto events = get_tx_event_log(last_tx_id_)();
+        ASSERT_TRUE(events.has_value());
+        EXPECT_TRUE(events->events.empty());
       }
     }
     else {
