@@ -66,6 +66,7 @@ NewContractSet::make(NewContractBatch const &contracts,
     if (res == InvokeErrorCode::Deterministic) {
       // Every context names the reason for a Deterministic rejection.
       CHECK(reason.has_value());
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       return reject(static_cast<size_t>(contract - contracts.data()), *reason);
     }
     // Anything else is a node fault, not the contract's: pass it through.
