@@ -97,8 +97,8 @@ make_test_nonce(uint64_t value)
   return sha256(value);
 }
 
-std::tuple<uint64_t, uint64_t>
-make_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }

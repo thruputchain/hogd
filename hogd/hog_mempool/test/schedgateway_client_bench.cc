@@ -184,7 +184,7 @@ make_transfer(const std::vector<Account> &accounts, size_t nonce,
       kNativeTokenContractAddress, token::entrypoint<u8"transfer">(),
       GasAmount{10'000'000},
       token::make_calldata<u8"transfer">(recipient.address,
-                                         std::tuple<uint64_t, uint64_t>{0, 1}));
+                                         std::tuple<int64_t, uint64_t>{0, 1}));
   AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
   claim.source_address_claim().allowed_keys = 1;
   claim.source_address_claim().required_weight = 1;

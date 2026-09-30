@@ -74,8 +74,8 @@ using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 using default_wallet::WalletCall;
 using wallet_calls_t = x23::Vec<WalletCall, 4294967295>;
 
-std::tuple<uint64_t, uint64_t>
-make_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }

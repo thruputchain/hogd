@@ -39,10 +39,10 @@ std::unique_ptr<NativeContract> make_native_token_contract();
 Topic const &native_token_transfer_event_signature();
 Topic const &native_token_allowance_change_event_signature();
 Topic const &native_token_mint_event_signature();
-Topic const &native_token_burn_event_signature();
+Topic const &native_token_allowance_delete_event_signature();
 
 // Event bodies not covered by the shared asset-event schema. Leading addresses
-// become topics; the signed amount or difference is the CXS payload.
+// become topics; the remaining fields are the CXS payload.
 struct NativeTokenAllowanceChangeEvent {
   ContractAddress owner_address;
   ContractAddress spender_address;
@@ -56,11 +56,13 @@ struct NativeTokenMintEvent {
   bool operator==(const NativeTokenMintEvent &) const noexcept = default;
 };
 
-struct NativeTokenBurnEvent {
-  ContractAddress from_address;
-  int128_xdr amount;
+struct NativeTokenAllowanceDeleteEvent {
+  ContractAddress owner_address;
+  ContractAddress spender_address;
+  int128_xdr removed;
 
-  bool operator==(const NativeTokenBurnEvent &) const noexcept = default;
+  bool
+  operator==(const NativeTokenAllowanceDeleteEvent &) const noexcept = default;
 };
 
 template<size_t I, x23::references<NativeTokenAllowanceChangeEvent> T>
@@ -86,14 +88,17 @@ get(T &&t)
     return (std::forward<T>(t).amount);
 }
 
-template<size_t I, x23::references<NativeTokenBurnEvent> T> requires (I < 2)
+template<size_t I, x23::references<NativeTokenAllowanceDeleteEvent> T>
+requires (I < 3)
 constexpr decltype(auto)
 get(T &&t)
 {
   if constexpr (I == 0)
-    return (std::forward<T>(t).from_address);
+    return (std::forward<T>(t).owner_address);
   if constexpr (I == 1)
-    return (std::forward<T>(t).amount);
+    return (std::forward<T>(t).spender_address);
+  if constexpr (I == 2)
+    return (std::forward<T>(t).removed);
 }
 
 } // namespace hogd
@@ -118,11 +123,11 @@ struct std::tuple_element<I, hogd::NativeTokenMintEvent> {
 };
 
 template<>
-struct std::tuple_size<hogd::NativeTokenBurnEvent>
-  : std::integral_constant<std::size_t, 2> {};
-template<std::size_t I> requires (I < 2)
-struct std::tuple_element<I, hogd::NativeTokenBurnEvent> {
-  using struct_type = hogd::NativeTokenBurnEvent;
+struct std::tuple_size<hogd::NativeTokenAllowanceDeleteEvent>
+  : std::integral_constant<std::size_t, 3> {};
+template<std::size_t I> requires (I < 3)
+struct std::tuple_element<I, hogd::NativeTokenAllowanceDeleteEvent> {
+  using struct_type = hogd::NativeTokenAllowanceDeleteEvent;
   using type = decltype(auto(get<I>(struct_type{})));
 };
 
@@ -146,12 +151,13 @@ template<> struct x23::xdr_meta<hogd::NativeTokenMintEvent> {
   };
 };
 
-template<> struct x23::xdr_meta<hogd::NativeTokenBurnEvent> {
+template<> struct x23::xdr_meta<hogd::NativeTokenAllowanceDeleteEvent> {
   static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
-  static constexpr const char *type_name = "NativeTokenBurnEvent";
-  static constexpr std::array<std::string_view, 2> field_names{
-      "from_address",
-      "amount",
+  static constexpr const char *type_name = "NativeTokenAllowanceDeleteEvent";
+  static constexpr std::array<std::string_view, 3> field_names{
+      "owner_address",
+      "spender_address",
+      "removed",
   };
 };
 // NOLINTEND(readability-identifier-naming)

@@ -5,12 +5,12 @@ use sdk::*;
 /// Funds the token contract's own rows (its balance row and the total-supply
 /// row): the faucet-root analog of the stock genesis ceremony's
 /// `token_funding` mint.
-const TOKEN_ROW_FUNDING: u128 = 1_000_000;
+const TOKEN_ROW_FUNDING: i128 = 1_000_000;
 /// Funds this contract's own rows (the bootstrap marker below): the analog of
 /// the stock ceremony's `root_funding` mint. A real chain sizes both of these
 /// to its storage cost model; these are comfortably above the default model's
 /// costs.
-const ROOT_ROW_FUNDING: u128 = 1_000_000;
+const ROOT_ROW_FUNDING: i128 = 1_000_000;
 
 /// Marks the chain as bootstrapped.
 ///
@@ -31,7 +31,7 @@ pub struct AirdropFaucetContract;
 
 #[contract]
 impl AirdropFaucet for AirdropFaucetContract {
-    fn claim(amount: u128) {
+    fn claim(amount: i128) {
         let receiver = get_caller();
         let token_address = sdk::precompiles::ADDRESS_PRECOMPILED_HOG_TOKEN;
         let token = ERC20Client::new(&token_address);

@@ -124,8 +124,8 @@ page_or_empty(TransactionRefPageResult result)
   return std::move(result.page());
 }
 
-std::tuple<uint64_t, uint64_t>
-make_erc20_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_erc20_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
@@ -3548,7 +3548,7 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
                        GasAmount{10'000'000},
                        erc20_meta::make_calldata<u8"transfer">(
                            created_wallet_address,
-                           make_erc20_amount(uint128_t{200'000'000})));
+                           make_erc20_amount(int128_t{200'000'000})));
     Transaction prefund_wallet_tx{
         .invocation =
             Invocation{.invoked_address = sponsor_wallet_address,

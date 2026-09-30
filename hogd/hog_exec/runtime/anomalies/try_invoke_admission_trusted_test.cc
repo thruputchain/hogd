@@ -111,9 +111,9 @@ protected:
   static constexpr Runtime::MethodID kChildWrite = 0;
   static constexpr Runtime::MethodID kChildDelete = 1;
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
-    return std::make_tuple(static_cast<uint64_t>(amount >> 64),
+    return std::make_tuple(static_cast<int64_t>(amount >> 64),
                            static_cast<uint64_t>(amount &
                                                  0xffffffffffffffffULL));
   }
@@ -230,7 +230,7 @@ TEST_F(TryInvokeAdmissionTrustedTest,
                              cost_model->get_balance_cost();
   ASSERT_GT(transfer_amount, 0);
   auto transfer_amount_xdr =
-      make_amount(static_cast<uint128_t>(transfer_amount));
+      make_amount(static_cast<int128_t>(transfer_amount));
 
   auto child = make_contract(make_child_write(kPayload));
   auto parent = make_contract([transfer_amount_xdr](NativeSyscallContext &ctx)

@@ -20,5 +20,5 @@ pub enum DripError {
 #[contract(client = Client, throws = DripError)]
 pub trait DripFaucet {
     /// Mint `amount` native tokens to the caller, consuming window budget.
-    fn claim(amount: u128);
+    fn claim(amount: i128);
 }

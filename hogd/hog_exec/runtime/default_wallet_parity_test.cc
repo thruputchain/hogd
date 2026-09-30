@@ -460,7 +460,7 @@ protected:
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
     return run_wallet_root_tx(client.make_invocation<u8"deploy">(
                                   UINT64_MAX, nonce, hash,
-                                  std::tuple<uint64_t, uint64_t>{0, 0},
+                                  std::tuple<int64_t, uint64_t>{0, 0},
                                   x23::Ptr<default_wallet::WalletInitCall>{}),
                               make_pubkey_claim(preimage));
   }
@@ -801,7 +801,7 @@ TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicateAcrossBlocks)
   nonce.fill(42);
   constexpr uint64_t kAmount = 10'000'000;
   auto calldata = wallet_meta::make_calldata<u8"deploy">(
-      nonce, hash, std::tuple<uint64_t, uint64_t>{0, kAmount},
+      nonce, hash, std::tuple<int64_t, uint64_t>{0, kAmount},
       x23::Ptr<default_wallet::WalletInitCall>{});
   std::vector<uint8_t> raw(calldata.begin(), calldata.end());
   auto id = wallet_meta::method_id<u8"deploy">();
@@ -924,7 +924,7 @@ TEST_F(DefaultWalletParityTest, SameBlockDuplicateDeployFundsTwice)
       auto record =
           run_wallet_root_tx(client.make_invocation<u8"deploy">(
                                  UINT64_MAX, nonce, hash,
-                                 std::tuple<uint64_t, uint64_t>{0, kAmount},
+                                 std::tuple<int64_t, uint64_t>{0, kAmount},
                                  x23::Ptr<default_wallet::WalletInitCall>{}),
                              make_pubkey_claim(preimage),
                              /*finish_block=*/false);
@@ -1020,7 +1020,7 @@ TEST_F(DefaultWalletParityTest, DeploymentInitializationCommitsOrRollsBack)
           wallet, uint32_t{0x1234}, uint32_t{mode == 3 ? 0U : mode});
       init.calldata.append_range(args);
       auto raw = wallet_meta::make_calldata<u8"deploy">(
-          nonce, hash, std::tuple<uint64_t, uint64_t>{0, amount},
+          nonce, hash, std::tuple<int64_t, uint64_t>{0, amount},
           x23::Ptr<default_wallet::WalletInitCall>{init});
       auto before = stored_balance(wallet);
       auto record = run_wallet_raw_tx(wallet, preimage,
@@ -1094,7 +1094,7 @@ TEST_F(DefaultWalletParityTest, DeploymentInitializesRv32CodeWithCallerGasLimit)
           mrt_meta::make_calldata<u8"test_basic_manual_revert">(mode == 1);
       init.calldata.append_range(args);
       auto raw = wallet_meta::make_calldata<u8"deploy">(
-          nonce, hash, std::tuple<uint64_t, uint64_t>{0, 10'000'000},
+          nonce, hash, std::tuple<int64_t, uint64_t>{0, 10'000'000},
           x23::Ptr<default_wallet::WalletInitCall>{init});
       auto record = run_wallet_raw_tx(wallet, preimage,
                                       wallet_meta::method_id<u8"deploy">(),
@@ -1148,19 +1148,18 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
   SHA256Hash nonce{};
   auto id = wallet_meta::method_id<u8"deploy">();
   for (auto amount : {
-           uint128_t{0},
-           uint128_t{1},
-           uint128_t{2'000'000'000},
-           uint128_t{1} << 127U,
+           int128_t{0},
+           int128_t{1},
+           int128_t{2'000'000'000},
+           int128_t{-1},
        }) {
-    SCOPED_TRACE(
-        std::get<1>(std::tuple<uint64_t, uint64_t>{amount >> 64U, amount}));
+    SCOPED_TRACE(static_cast<int64_t>(amount));
     auto calldata = wallet_meta::make_calldata<u8"deploy">(
         nonce, hash,
-        std::tuple<uint64_t, uint64_t>{amount >> 64U,
-                                       static_cast<uint64_t>(amount)},
+        std::tuple<int64_t, uint64_t>{static_cast<int64_t>(amount >> 64U),
+                                      static_cast<uint64_t>(amount)},
         x23::Ptr<default_wallet::WalletInitCall>{});
-    if (amount <= 1) {
+    if (amount == 0 || amount == 1) {
       // Execution returns the per-wallet address, then collateral validation
       // rejects the commit. Compare each return with its own derived address.
       for (auto const &[wallet, preimage] : {
@@ -1186,7 +1185,7 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
   SHA256Hash missing{};
   missing.fill(0xEE);
   auto calldata = wallet_meta::make_calldata<u8"deploy">(
-      nonce, missing, std::tuple<uint64_t, uint64_t>{0, 10'000'000},
+      nonce, missing, std::tuple<int64_t, uint64_t>{0, 10'000'000},
       x23::Ptr<default_wallet::WalletInitCall>{});
   expect_raw_parity(id, {calldata.begin(), calldata.end()});
   expect_raw_parity(id, {});
@@ -1275,7 +1274,7 @@ TEST_F(DefaultWalletParityTest, MalformedCalldataDeploy)
   SHA256Hash hash{};
   hash.fill(1);
   auto valid = wallet_meta::make_calldata<u8"deploy">(
-      nonce, hash, std::tuple<uint64_t, uint64_t>{0, 0},
+      nonce, hash, std::tuple<int64_t, uint64_t>{0, 0},
       x23::Ptr<default_wallet::WalletInitCall>{});
   std::vector<uint8_t> valid_bytes(valid.begin(), valid.end());
 

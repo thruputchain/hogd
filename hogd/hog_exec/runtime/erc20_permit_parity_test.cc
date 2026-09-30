@@ -87,25 +87,25 @@ using erc20_meta = ContractTraitMeta<itc_erc20_permit::ERC20>;
 // literal bytes the callee returned or aborted with (see append_invoke_record).
 using Record = std::vector<uint8_t>;
 
-std::tuple<uint64_t, uint64_t>
-make_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_amount(int128_t amount)
 {
-  return std::make_tuple(static_cast<uint64_t>(amount >> 64),
+  return std::make_tuple(static_cast<int64_t>(amount >> 64),
                          static_cast<uint64_t>(amount));
 }
 
 // One auth token the owner mints in a step.
 struct GrantSpec {
   ContractAddress spender;
-  uint128_t amount;
+  int128_t amount;
   // The consumer the token names; the token under test when unset.
   std::optional<ContractAddress> consumer = std::nullopt;
   // Replaces the CXS-encoded PermitGrant payload when set.
   std::optional<std::vector<uint8_t>> payload = std::nullopt;
   // Child tokens attached to the grant's node.
   uint32_t child_count = 0;
-  // Mint a ClearAllowanceGrant { spender } rather than a PermitGrant.
-  bool clear = false;
+  // Mint a DeleteAllowanceGrant { spender } rather than a PermitGrant.
+  bool deletion = false;
 };
 
 // One call to the token in a scenario.
@@ -213,9 +213,8 @@ protected:
   static constexpr ContractAddress kRv32Token = make_contract_address(206);
   static constexpr ContractAddress kNativeToken = kNativeTokenContractAddress;
 
-  static constexpr uint128_t kOwnerFunds = 1'000'000;
-  static constexpr uint128_t kMaxInt128 =
-      static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
+  static constexpr int128_t kOwnerFunds = 1'000'000;
+  static constexpr int128_t kMaxAmount = std::numeric_limits<int128_t>::max();
 
   static constexpr int32_t kDriverId = 60;
 
@@ -319,8 +318,8 @@ protected:
     }
     else {
       auto encoded =
-          spec.clear
-              ? x23::serialize_cxs(itc_erc20_permit::ClearAllowanceGrant{
+          spec.deletion
+              ? x23::serialize_cxs(itc_erc20_permit::DeleteAllowanceGrant{
                     .spender = spec.spender})
               : x23::serialize_cxs(itc_erc20_permit::PermitGrant{
                     .spender = spec.spender, .amount = to_xdr(spec.amount)});
@@ -656,7 +655,7 @@ protected:
   static Record ok() { return returned({}); }
 
   // The record of an ERC20 read returning Ok(amount).
-  static Record ok_amount(uint128_t amount)
+  static Record ok_amount(int128_t amount)
   {
     auto buf =
         Serializer<SerializationFormat::kCxs>::serialize(make_amount(amount));
@@ -775,26 +774,31 @@ TEST_F(Erc20PermitParityTest, TransferFromSignedBalanceBoundary)
   EXPECT_EQ(results[2], ok_amount(kOwnerFunds));
 }
 
-// A granted amount a signed delta cannot carry is TooLarge on both paths.
-TEST_F(Erc20PermitParityTest, GrantAboveInt128MaxIsTooLarge)
+// A negative amount, granted or requested, is NegativeAmount on both paths,
+// checked after the grant's own checks.
+TEST_F(Erc20PermitParityTest, NegativeAmountIsRejected)
 {
-  constexpr uint128_t kHuge = kMaxInt128 + 1;
   auto results = expect_parity({
       permit_step<u8"increase_allowance_signed">(
-          kSpender, {{.spender = kSpender, .amount = kHuge}}, SignedToken{}),
+          kSpender, {{.spender = kSpender, .amount = -1}}, SignedToken{}),
       permit_step<u8"transfer_from_signed">(
-          kSpender, {{.spender = kSpender, .amount = kHuge}}, SignedToken{},
-          kReceiver, make_amount(kHuge)),
+          kSpender, {{.spender = kSpender, .amount = 10}}, SignedToken{},
+          kReceiver, make_amount(-1)),
+      permit_step<u8"transfer_from_signed">(
+          kSpender, {{.spender = kSpender, .amount = -1}}, SignedToken{},
+          kReceiver, make_amount(-1)),
       permit_step<u8"increase_allowance_signed">(
-          kSpender, {{.spender = kSpender, .amount = kMaxInt128}},
+          kSpender, {{.spender = kSpender, .amount = kMaxAmount}},
           SignedToken{}),
   });
-  ASSERT_EQ(results.size(), 3U);
-  auto too_large = aborted(erc20_abort(itc_erc20_permit::ERC20Error::TooLarge));
-  EXPECT_EQ(results[0], too_large);
-  EXPECT_EQ(results[1], too_large);
+  ASSERT_EQ(results.size(), 4U);
+  auto negative =
+      aborted(erc20_abort(itc_erc20_permit::ERC20Error::NegativeAmount));
+  EXPECT_EQ(results[0], negative);
+  EXPECT_EQ(results[1], negative);
+  EXPECT_EQ(results[2], negative);
   // INT128_MAX itself is a representable allowance.
-  EXPECT_EQ(results[2], ok());
+  EXPECT_EQ(results[3], ok());
 }
 
 // A self-grant is an ordinary allowance; a signed transfer does not consume it.
@@ -809,8 +813,8 @@ TEST_F(Erc20PermitParityTest, GrantToSelf)
                                             SignedToken{}, kReceiver,
                                             make_amount(5)),
       erc20_step<u8"allowance">(kOwner, kOwner, kOwner),
-      permit_step<u8"clear_allowance_signed">(
-          kThirdParty, {{.spender = kOwner, .amount = 0, .clear = true}},
+      permit_step<u8"delete_allowance_signed">(
+          kThirdParty, {{.spender = kOwner, .amount = 0, .deletion = true}},
           SignedToken{}),
       erc20_step<u8"allowance">(kOwner, kOwner, kOwner),
   });
@@ -884,7 +888,7 @@ TEST_F(Erc20PermitParityTest, MalformedGrantsFailAtConsume)
 {
   auto valid = x23::serialize_cxs(
       itc_erc20_permit::PermitGrant{.spender = kSpender,
-                                    .amount = to_xdr(uint128_t{5})});
+                                    .amount = to_xdr(int128_t{5})});
   ASSERT_TRUE(valid.has_value());
   std::vector<uint8_t> trailing(valid->begin(), valid->end());
   trailing.push_back(0);
@@ -974,10 +978,9 @@ TEST_F(Erc20PermitParityTest, TransferFromSignedMovesUpToTheGrant)
 
 // Asking for more than the grant is ExceedsGrant, checked after the spender
 // (a stranger asking too much is still NotSpender) and before the amount's
-// range (an over-grant request above INT128_MAX is still ExceedsGrant).
+// sign (a request above a negative grant is still ExceedsGrant).
 TEST_F(Erc20PermitParityTest, TransferFromSignedRefusesMoreThanTheGrant)
 {
-  constexpr uint128_t kHuge = kMaxInt128 + 1;
   auto results = expect_parity({
       permit_step<u8"transfer_from_signed">(
           kSpender, {{.spender = kSpender, .amount = 10}}, SignedToken{},
@@ -986,8 +989,8 @@ TEST_F(Erc20PermitParityTest, TransferFromSignedRefusesMoreThanTheGrant)
           kThirdParty, {{.spender = kSpender, .amount = 10}}, SignedToken{},
           kReceiver, make_amount(11)),
       permit_step<u8"transfer_from_signed">(
-          kSpender, {{.spender = kSpender, .amount = kHuge}}, SignedToken{},
-          kReceiver, make_amount(kHuge + 1)),
+          kSpender, {{.spender = kSpender, .amount = -5}}, SignedToken{},
+          kReceiver, make_amount(-1)),
       erc20_step<u8"get_balance_of">(kSpender, kOwner),
   });
   ASSERT_EQ(results.size(), 4U);
@@ -1001,15 +1004,15 @@ TEST_F(Erc20PermitParityTest, TransferFromSignedRefusesMoreThanTheGrant)
   EXPECT_TRUE(native_events_.empty());
 }
 
-// A signed clear deletes the allowance, reporting the amount removed, and a
+// A signed delete removes the allowance, reporting the amount removed, and a
 // write later in the same transaction applies after it.
-TEST_F(Erc20PermitParityTest, ClearAllowanceSignedDeletesTheAllowance)
+TEST_F(Erc20PermitParityTest, DeleteAllowanceSignedRemovesTheAllowance)
 {
   auto results = expect_parity({
       permit_step<u8"increase_allowance_signed">(
           kSpender, {{.spender = kSpender, .amount = 500}}, SignedToken{}),
-      permit_step<u8"clear_allowance_signed">(
-          kSpender, {{.spender = kSpender, .amount = 0, .clear = true}},
+      permit_step<u8"delete_allowance_signed">(
+          kSpender, {{.spender = kSpender, .amount = 0, .deletion = true}},
           SignedToken{}),
       erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
       erc20_step<u8"transfer_from">(kSpender, kOwner, kReceiver,
@@ -1026,19 +1029,19 @@ TEST_F(Erc20PermitParityTest, ClearAllowanceSignedDeletesTheAllowance)
             aborted(erc20_abort(itc_erc20_permit::ERC20Error::TooLarge)));
   EXPECT_EQ(results[4], ok());
   EXPECT_EQ(results[5], ok_amount(7));
-  // AllowanceChange deltas: +500, -500 for the clear, then +7.
+  // AllowanceChange(+500), AllowanceDelete(500), then AllowanceChange(+7).
   EXPECT_EQ(native_events_.size(), 3U);
 }
 
-// Clearing a missing allowance succeeds, including an owner/spender self-pair.
-TEST_F(Erc20PermitParityTest, ClearAllowanceSignedEdgeCases)
+// Deleting a missing allowance succeeds, including an owner/spender self-pair.
+TEST_F(Erc20PermitParityTest, DeleteAllowanceSignedEdgeCases)
 {
   auto results = expect_parity({
-      permit_step<u8"clear_allowance_signed">(
-          kThirdParty, {{.spender = kSpender, .amount = 0, .clear = true}},
+      permit_step<u8"delete_allowance_signed">(
+          kThirdParty, {{.spender = kSpender, .amount = 0, .deletion = true}},
           SignedToken{}),
-      permit_step<u8"clear_allowance_signed">(
-          kOwner, {{.spender = kOwner, .amount = 0, .clear = true}},
+      permit_step<u8"delete_allowance_signed">(
+          kOwner, {{.spender = kOwner, .amount = 0, .deletion = true}},
           SignedToken{}),
       erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
   });
@@ -1053,13 +1056,13 @@ TEST_F(Erc20PermitParityTest, ClearAllowanceSignedEdgeCases)
 TEST_F(Erc20PermitParityTest, GrantRedeemedForTheWrongOperationFailsToDecode)
 {
   auto results = expect_parity({
-      permit_step<u8"clear_allowance_signed">(
+      permit_step<u8"delete_allowance_signed">(
           kSpender, {{.spender = kSpender, .amount = 5}}, SignedToken{}),
       permit_step<u8"increase_allowance_signed">(
-          kSpender, {{.spender = kSpender, .amount = 0, .clear = true}},
+          kSpender, {{.spender = kSpender, .amount = 0, .deletion = true}},
           SignedToken{}),
       permit_step<u8"transfer_from_signed">(
-          kSpender, {{.spender = kSpender, .amount = 0, .clear = true}},
+          kSpender, {{.spender = kSpender, .amount = 0, .deletion = true}},
           SignedToken{}, kReceiver, make_amount(0)),
       erc20_step<u8"allowance">(kSpender, kOwner, kSpender),
   });
@@ -1072,16 +1075,16 @@ TEST_F(Erc20PermitParityTest, GrantRedeemedForTheWrongOperationFailsToDecode)
   EXPECT_EQ(results[3], ok_amount(0));
 }
 
-// A clear and an increase of the same allowance cannot both land in one block:
+// A delete and an increase of the same allowance cannot both land in one block:
 // the later transaction fails at commit, on both backends.
-TEST_F(Erc20PermitParityTest, ClearConflictsWithAnIncreaseInTheSameBlock)
+TEST_F(Erc20PermitParityTest, DeleteConflictsWithAnIncreaseInTheSameBlock)
 {
   auto outcomes = expect_schedule_parity(
       {
           {permit_step<u8"increase_allowance_signed">(
               kSpender, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
-          {permit_step<u8"clear_allowance_signed">(
-              kSpender, {{.spender = kSpender, .amount = 0, .clear = true}},
+          {permit_step<u8"delete_allowance_signed">(
+              kSpender, {{.spender = kSpender, .amount = 0, .deletion = true}},
               SignedToken{})},
           {permit_step<u8"increase_allowance_signed">(
               kThirdParty, {{.spender = kSpender, .amount = 70}},
@@ -1093,7 +1096,7 @@ TEST_F(Erc20PermitParityTest, ClearConflictsWithAnIncreaseInTheSameBlock)
   EXPECT_EQ(outcomes[0].commit, ExecResult::ExecResultOK);
   EXPECT_EQ(outcomes[1].commit, ExecResult::ExecResultOK);
   EXPECT_NE(outcomes[2].commit, ExecResult::ExecResultOK)
-      << "the increase landed beside the clear";
+      << "the increase landed beside the delete";
   ASSERT_EQ(outcomes[3].records.size(), 1U);
   EXPECT_EQ(outcomes[3].records[0], ok_amount(0));
 }
@@ -1146,15 +1149,15 @@ protected:
   }
 };
 
-// Clearing an allowance refunds its entry's storage cost to the token
+// Deleting an allowance refunds its entry's storage cost to the token
 // contract, on both backends.
-TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceSignedRefundsTheEntry)
+TEST_F(Erc20PermitStorageRefundTest, DeleteAllowanceSignedRefundsTheEntry)
 {
   std::vector<std::vector<Step>> const scenarios{
       {permit_step<u8"increase_allowance_signed">(
           kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
-      {permit_step<u8"clear_allowance_signed">(
-          kOwner, {{.spender = kSpender, .amount = 0, .clear = true}},
+      {permit_step<u8"delete_allowance_signed">(
+          kOwner, {{.spender = kSpender, .amount = 0, .deletion = true}},
           SignedToken{})},
   };
   std::vector<std::vector<LegOutcome>> legs;
@@ -1176,14 +1179,14 @@ TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceSignedRefundsTheEntry)
   }
 }
 
-TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceRefundsTheEntryOnce)
+TEST_F(Erc20PermitStorageRefundTest, DeleteAllowanceRefundsTheEntryOnce)
 {
   std::vector<std::vector<Step>> const scenarios{
       {permit_step<u8"increase_allowance_signed">(
           kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
-      {erc20_step<u8"clear_allowance">(kOwner, kSpender),
+      {erc20_step<u8"delete_allowance">(kOwner, kSpender),
        erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
-      {erc20_step<u8"clear_allowance">(kOwner, kSpender),
+      {erc20_step<u8"delete_allowance">(kOwner, kSpender),
        erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
   };
   std::vector<std::vector<LegOutcome>> legs;
@@ -1216,16 +1219,16 @@ TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceRefundsTheEntryOnce)
   }
 }
 
-TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceNetsStorageAcrossRecreation)
+TEST_F(Erc20PermitStorageRefundTest, DeleteAllowanceNetsStorageAcrossRecreation)
 {
   std::vector<std::vector<Step>> const scenarios{
       {permit_step<u8"increase_allowance_signed">(
            kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{}),
-       erc20_step<u8"clear_allowance">(kOwner, kSpender),
+       erc20_step<u8"delete_allowance">(kOwner, kSpender),
        erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
       {permit_step<u8"increase_allowance_signed">(
           kOwner, {{.spender = kSpender, .amount = 500}}, SignedToken{})},
-      {erc20_step<u8"clear_allowance">(kOwner, kSpender),
+      {erc20_step<u8"delete_allowance">(kOwner, kSpender),
        permit_step<u8"increase_allowance_signed">(
            kOwner, {{.spender = kSpender, .amount = 7}}, SignedToken{}),
        erc20_step<u8"allowance">(kOwner, kOwner, kSpender)},
@@ -1240,9 +1243,10 @@ TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceNetsStorageAcrossRecreation)
     auto const &out = legs.back();
     ASSERT_EQ(balances.size(), 4U);
     ASSERT_EQ(out.size(), 3U);
-    EXPECT_EQ(balances[1], balances[0]) << "create and clear leave no entry";
+    EXPECT_EQ(balances[1], balances[0]) << "create and delete leave no entry";
     EXPECT_EQ(balances[1] - balances[2], entry_cost());
-    EXPECT_EQ(balances[3], balances[2]) << "clear and regrant retain one entry";
+    EXPECT_EQ(balances[3], balances[2])
+        << "delete and regrant retain one entry";
     for (auto const &outcome : out) {
       EXPECT_EQ(outcome.commit, ExecResult::ExecResultOK);
     }
@@ -1262,11 +1266,11 @@ TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceNetsStorageAcrossRecreation)
   }
 }
 
-// The refund is usable in the transaction that clears: with the token
+// The refund is usable in the transaction that deletes: with the token
 // contract unable to pay for a second entry, a new allowance fails alone but
-// commits after a clear in the same transaction. This is what the exclusive
+// commits after a delete in the same transaction. This is what the exclusive
 // lock on the deletion buys; an unlocked delete refunds only at commit.
-TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceSignedRefundIsUsableInTheTx)
+TEST_F(Erc20PermitStorageRefundTest, DeleteAllowanceSignedRefundIsUsableInTheTx)
 {
   std::vector<std::vector<Step>> const scenarios{
       {permit_step<u8"increase_allowance_signed">(
@@ -1274,8 +1278,8 @@ TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceSignedRefundIsUsableInTheTx)
       {permit_step<u8"increase_allowance_signed">(
           kOwner, {{.spender = kThirdParty, .amount = 70}}, SignedToken{})},
       {
-          permit_step<u8"clear_allowance_signed">(
-              kOwner, {{.spender = kSpender, .amount = 0, .clear = true}},
+          permit_step<u8"delete_allowance_signed">(
+              kOwner, {{.spender = kSpender, .amount = 0, .deletion = true}},
               SignedToken{}),
           permit_step<u8"increase_allowance_signed">(
               kOwner, {{.spender = kThirdParty, .amount = 70}}, SignedToken{}),
@@ -1315,7 +1319,7 @@ TEST_F(Erc20PermitStorageRefundTest, ClearAllowanceSignedRefundIsUsableInTheTx)
     EXPECT_EQ(balances[2], entry_cost() - 1);
 
     EXPECT_EQ(out[2].commit, ExecResult::ExecResultOK)
-        << "the clear's refund was not usable in its own transaction";
+        << "the delete's refund was not usable in its own transaction";
     ASSERT_EQ(out[2].records.size(), 4U);
     EXPECT_EQ(out[2].records[0], ok());
     EXPECT_EQ(out[2].records[1], ok());
