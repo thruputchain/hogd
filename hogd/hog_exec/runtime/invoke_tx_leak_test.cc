@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
@@ -53,9 +54,10 @@ namespace {
 
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*unused*/,
-                                  NetworkConfigParams const & /*params*/,
-                                  PreparedContract &out) const override
+  InvokeErrorCode verify_contract(
+      Contract const & /*unused*/, NetworkConfigParams const & /*params*/,
+      PreparedContract &out,
+      std::optional<ContractRejectCode> & /*rejection*/) const override
   {
     // Hand back a placeholder image, as a real rv32 verification would: an
     // accepted attachment must look prepared. Its contents are irrelevant --
@@ -66,7 +68,8 @@ public:
     placeholder.data.append_range(
         rv32::test_artifact::build_artifact({rv32::test_program::addi(0, 0, 0)},
                                             std::span<const uint8_t>{}));
-    out.rv32 = Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults());
+    out.rv32.emplace(
+        *Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults()));
     return InvokeErrorCode::None;
   }
 

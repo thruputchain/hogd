@@ -81,9 +81,17 @@ StorageSnapshotCache::load_contract_entry(SHA256Hash hash)
     PreparedContract prepared;
     if (contract.contract_type() == ContractType::kRv32) {
       // Deployed under whatever bounds were in force then; the ceilings keep
-      // it runnable after the chain lowers them.
-      prepared.rv32 = Rv32Contract::create(contract.rv32_contract(),
-                                           rv32::Rv32Limits::ceiling());
+      // it runnable after the chain lowers them. Every stored contract passed
+      // attachment verification, so one that no longer translates is a node
+      // fault: fail the lookup instead of returning an unrunnable entry.
+      auto translated = Rv32Contract::create(contract.rv32_contract(),
+                                             rv32::Rv32Limits::ceiling());
+      if (!translated.has_value()) [[unlikely]] {
+        error("Unrecoverable: stored rv32 contract {} does not translate",
+              show_byte_array(hash));
+        co_return SystemError{SystemErrorCode::Unrecoverable};
+      }
+      prepared.rv32.emplace(std::move(*translated));
     }
     entry.emplace(ContractCacheEntry{.contract = std::move(contract),
                                      .prepared = std::move(prepared)});

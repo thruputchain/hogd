@@ -42,11 +42,12 @@ public:
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 
-  InvokeErrorCode verify_contract(Contract const &contract,
-                                  NetworkConfigParams const &params,
-                                  PreparedContract &out) const override
+  InvokeErrorCode
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const override
   {
-    return base_context_->verify_contract(contract, params, out);
+    return base_context_->verify_contract(contract, params, out, rejection);
   }
   using RuntimeContext::verify_contract;
   ;

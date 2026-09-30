@@ -5,6 +5,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -14,6 +15,7 @@
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
@@ -22,6 +24,8 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
+#include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
@@ -646,12 +650,13 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   write_contract(contract);
   write_deployment(addr, contract);
 
+  // Every stored contract passed attachment verification, so one that no
+  // longer translates is a node fault: the lookup itself fails rather than
+  // reading as a present deployment.
   auto deployed =
       get_storage_snapshot_cache()->try_get_deployed_contract(addr)();
-  ASSERT_TRUE(deployed.has_value());
-  ASSERT_NE(deployed.value(), nullptr);
-  ASSERT_NE(deployed.value()->entry, nullptr);
-  EXPECT_FALSE(deployed.value()->entry->prepared.rv32.has_value());
+  ASSERT_FALSE(deployed.has_value());
+  EXPECT_EQ(deployed.error().code(), SystemErrorCode::Unrecoverable);
 
   auto result = invoke_deployed(addr, 10'000);
   ASSERT_FALSE(result.is_root_success());
@@ -732,15 +737,29 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
 
 namespace {
 
-InvokeErrorCode
+// Verifies `contract` under the protocol defaults: nullopt when it verifies,
+// otherwise the reason it was refused (always with Deterministic).
+std::optional<ContractRejectCode>
+verify_rejection(Contract const &contract)
+{
+  PreparedContract prepared;
+  std::optional<ContractRejectCode> rejection;
+  const InvokeErrorCode res =
+      Rv32Context{}.verify_contract(contract, NetworkConfigParams{}, prepared,
+                                    rejection);
+  EXPECT_EQ(res, rejection.has_value() ? InvokeErrorCode::Deterministic
+                                       : InvokeErrorCode::None);
+  return rejection;
+}
+
+std::optional<ContractRejectCode>
 verify_rv32_blob(std::vector<uint8_t> const &artifact)
 {
   ContractBlob blob;
   blob.data.append_range(artifact);
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
-  Rv32Context context;
-  return context.verify_contract(contract, NetworkConfigParams{});
+  return verify_rejection(contract);
 }
 
 } // namespace
@@ -748,8 +767,9 @@ verify_rv32_blob(std::vector<uint8_t> const &artifact)
 TEST(Rv32ContractTest, VerifyRejectsGarbageBlob)
 {
   EXPECT_EQ(verify_rv32_blob({0xde, 0xad, 0xbe, 0xef}),
-            InvokeErrorCode::Deterministic);
-  EXPECT_EQ(verify_rv32_blob({}), InvokeErrorCode::Deterministic);
+            ContractRejectCode::ContractRejectMalformedArtifact);
+  EXPECT_EQ(verify_rv32_blob({}),
+            ContractRejectCode::ContractRejectMalformedArtifact);
 }
 
 TEST(Rv32ContractTest, VerifyRejectsTruncatedArtifact)
@@ -757,10 +777,27 @@ TEST(Rv32ContractTest, VerifyRejectsTruncatedArtifact)
   std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
                                           std::vector<uint8_t>{0});
-  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::None);
+  EXPECT_EQ(verify_rv32_blob(artifact), std::nullopt);
 
   artifact.resize(artifact.size() / 2);
-  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(verify_rv32_blob(artifact),
+            ContractRejectCode::ContractRejectMalformedArtifact);
+}
+
+TEST(Rv32ContractTest, VerifyRejectsOtherGasSchedule)
+{
+  // An artifact stamped by a toolchain on a gas schedule the node doesn't
+  // accept.
+  std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
+                                          std::vector<uint8_t>{0});
+  const uint32_t other_version = rv32::kGasTableVersion + 1;
+  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+    artifact[rv32::kArtifactGasVersionOffset + i] =
+        static_cast<uint8_t>(other_version >> (i * 8));
+  }
+  EXPECT_EQ(verify_rv32_blob(artifact),
+            ContractRejectCode::ContractRejectGasScheduleMismatch);
 }
 
 TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
@@ -770,7 +807,8 @@ TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
   const std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact({0x00000053U},
                                           std::vector<uint8_t>{0});
-  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(verify_rv32_blob(artifact),
+            ContractRejectCode::ContractRejectInvalidProgram);
 
   ContractBlob blob;
   blob.data.append_range(artifact);
@@ -780,10 +818,8 @@ TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
 
 TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
 {
-  Contract contract(ContractType::kNative);
-  Rv32Context context;
-  EXPECT_EQ(context.verify_contract(contract, NetworkConfigParams{}),
-            InvokeErrorCode::Deterministic);
+  EXPECT_EQ(verify_rejection(Contract(ContractType::kNative)),
+            ContractRejectCode::ContractRejectNotDeployable);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

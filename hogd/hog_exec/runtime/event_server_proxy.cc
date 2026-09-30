@@ -129,13 +129,14 @@ PerTransactionEventServerProxy::emit_events(
                                                     tx_event_log, proposed_tx);
 }
 
-x23::Async<void>
+x23::Detached
 EventServerProxy::report_tx_failure(TransactionHash tx_hash,
                                     TxFailureDiagnostic diag)
 {
-  // Copy the client up front (before the first co_await, so it happens while
-  // the caller still owns the proxy): a fire-and-forget send then owns its own
-  // refcounted ClientRef and can safely outlive this proxy. Unlike
+  // Copy the client up front (the body runs synchronously in the caller until
+  // the first co_await, so this happens while the caller still owns the
+  // proxy): the detached send then owns its own refcounted ClientRef and can
+  // safely outlive this proxy. Unlike
   // emit_events, nothing drains these at finish_block, so the send must not
   // depend on `this`.
   client_t client = client_;

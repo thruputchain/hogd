@@ -15,6 +15,7 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
@@ -75,9 +76,10 @@ namespace {
 // working Runtime.
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*unused*/,
-                                  NetworkConfigParams const & /*params*/,
-                                  PreparedContract &out) const override
+  InvokeErrorCode verify_contract(
+      Contract const & /*unused*/, NetworkConfigParams const & /*params*/,
+      PreparedContract &out,
+      std::optional<ContractRejectCode> & /*rejection*/) const override
   {
     // Hand back a placeholder image, as a real rv32 verification would: an
     // accepted attachment must look prepared. Its contents are irrelevant --
@@ -88,7 +90,8 @@ public:
     placeholder.data.append_range(
         rv32::test_artifact::build_artifact({rv32::test_program::addi(0, 0, 0)},
                                             std::span<const uint8_t>{}));
-    out.rv32 = Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults());
+    out.rv32.emplace(
+        *Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults()));
     return InvokeErrorCode::None;
   }
 
@@ -735,11 +738,13 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 // deployment.
 TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
 {
+  // A real artifact, not placeholder bytes: the second deploy reads the
+  // committed contract back through the snapshot cache, which fails a stored
+  // contract that does not translate.
   Contract blob(ContractType::kRv32);
-  blob.rv32_contract().data.resize_uninitialized(64);
-  for (size_t i = 0; i < blob.rv32_contract().data.size(); ++i) {
-    blob.rv32_contract().data[i] = static_cast<uint8_t>((i * 3) + 1);
-  }
+  blob.rv32_contract().data.append_range(
+      rv32::test_artifact::build_artifact({rv32::test_program::addi(0, 0, 0)},
+                                          std::span<const uint8_t>{}));
   auto blob_hash = sha256(blob);
 
   constexpr static SHA256Hash kNonce = []() {
