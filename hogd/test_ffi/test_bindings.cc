@@ -940,6 +940,35 @@ pop_context()
   return kTestFFIErrorCodeNone;
 }
 
+// Publish a committed transaction's TxEventLog to the test event aggregator;
+// returns whether it was published. This runs past the commit point, so a
+// failure here is a harness failure, which the caller reports on the FFI
+// channel with result_code still carrying the commit decision (issue #2823).
+// One caveat: an allocation failure for emit_events()'s own coroutine frame
+// leaves the events in the frame, and a debug build's destructor then panics
+// on the close that follows.
+[[nodiscard]] bool
+emit_committed_events(SyscallHandlerContext &context) noexcept
+{
+  try {
+    auto events_res = context.to_handler().emit_events(ExecResult::ExecResultOK,
+                                                       ProposedTransaction{})();
+    if (events_res.has_value()) {
+      return true;
+    }
+    best_effort_log([&] {
+      error("try_commit_transaction: transaction committed, but its events "
+            "were not emitted: {}",
+            events_res.error());
+    });
+  } catch (std::exception const &e) {
+    log_error("try_commit_transaction: transaction committed, but emitting "
+              "its events threw: {}",
+              e);
+  }
+  return false;
+}
+
 ForeignTryCommitResult
 try_commit_transaction(void *syscall_handler) noexcept
 {
@@ -956,7 +985,7 @@ try_commit_transaction(void *syscall_handler) noexcept
 
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
 
-  // Hoisted before try{} so the catch block can free it if emit_events throws.
+  // Hoisted before try{} so the catch block can free it if a later step throws.
   FFIDataBuffer serialized_conflict = kNullBuffer;
 
   try {
@@ -1012,17 +1041,14 @@ try_commit_transaction(void *syscall_handler) noexcept
       }
     }
 
-    if (res == ExecResult::ExecResultOK) {
-      auto events_res =
-          context->to_handler().emit_events(ExecResult::ExecResultOK,
-                                            ProposedTransaction{})();
-      if (!events_res.has_value()) {
-        error("failed to emit events: {}", events_res.error());
-        return ForeignTryCommitResult{
-            .result_code = std::to_underlying(
-                SystemCallHandler::to_exec_result(events_res.error().code())),
-            .serialized_conflict = serialized_conflict};
-      }
+    // Past the commit point: an emission failure goes on the FFI channel, not
+    // result_code (issue #2823).
+    if (res == ExecResult::ExecResultOK && !emit_committed_events(*context)) {
+      hogd::free_ffi_data_buffer(serialized_conflict);
+      return ForeignTryCommitResult{.result_code = std::to_underlying(res),
+                                    .serialized_conflict = kNullBuffer,
+                                    .ffi_error_code =
+                                        kTestFFIErrorCodeUnrecoverableError};
     }
     return ForeignTryCommitResult{.result_code = std::to_underlying(res),
                                   .serialized_conflict = serialized_conflict};

@@ -144,13 +144,16 @@ struct ForeignHostFnResult {
 
 // Translation of try_commit_transaction result into an FFI-safe type.
 struct ForeignTryCommitResult {
-  int32_t result_code; // ExecResult
+  // ExecResult: the commit decision. A post-commit failure to publish the
+  // transaction's events surfaces as ffi_error_code instead; the write is
+  // durable and the handler must still be closed.
+  int32_t result_code;
 
   // XDR-serialized DbConflictResult two-phase-commit conflict diagnostic.
   // Always populated with the whole union (the kDbDiagnosticNone arm when there
   // was no conflict) so the caller always deserializes a well-formed,
-  // self-describing value. Null only if serialization itself failed. Must be
-  // freed with free_ffi_data_buffer().
+  // self-describing value. Null when ffi_error_code is set, or if
+  // serialization itself failed. Must be freed with free_ffi_data_buffer().
   struct FFIDataBuffer serialized_conflict;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
