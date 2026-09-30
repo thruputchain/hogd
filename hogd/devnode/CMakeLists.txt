@@ -3,7 +3,6 @@ add_library(
   block_driver.cc
   bootstrap_accounts.cc
   bootstrap_manifest.cc
-  dev_wallet_profile.cc
   hog_devnode_node.cc
   hog_devnode_tmp_dir.cc
   hosted_bootstrap_generator.cc

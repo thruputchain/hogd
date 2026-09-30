@@ -30,7 +30,6 @@
 #include "hogd/base/log.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_parse.h"
@@ -257,7 +256,6 @@ struct OptionSources {
   bool dev_accounts = false;
   bool dev_account_seed = false;
   bool dev_account_tokens = false;
-  bool dev_wallet_profile = false;
 };
 
 void
@@ -289,10 +287,8 @@ Options:
                                  [default: stdout]
   --contract-artifacts-dir <dir> Search this directory before default contract
                                  artifact locations. May be repeated.
-  --dev-wallet-profile <name>    Built-in dev wallet profile
-                                 [default: hog-devnode-default]
   --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
-                                 dev-account and wallet shorthand flags
+                                 dev-account shorthand flags
                                  conflict.
   --network-config <name=value>  Override a genesis execution parameter.
                                  Repeat for multiple parameters. Values are
@@ -430,10 +426,10 @@ reject_manifest_shorthand_conflicts(OptionSources const &sources, char *argv[])
     return;
   }
   if (sources.dev_accounts || sources.dev_account_seed ||
-      sources.dev_account_tokens || sources.dev_wallet_profile) {
-    hogd::arg_error("--bootstrap-manifest conflicts with dev-account and "
-                    "wallet shorthand flags",
-                    argv, usage);
+      sources.dev_account_tokens) {
+    hogd::arg_error(
+        "--bootstrap-manifest conflicts with dev-account shorthand flags", argv,
+        usage);
   }
 }
 
@@ -447,7 +443,6 @@ parse_args(int argc, char *argv[])
   std::optional<std::string> dev_accounts_value;
   std::optional<std::string> dev_account_seed_value;
   std::optional<std::string> dev_account_tokens_value;
-  std::optional<std::string> dev_wallet_profile_value;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -496,15 +491,6 @@ parse_args(int argc, char *argv[])
             usage);
       }
       options.contract_artifact_directories.push_back(std::move(dir));
-      continue;
-    }
-    if (arg == "--dev-wallet-profile" && i + 1 < argc) {
-      if (sources.dev_wallet_profile) {
-        hogd::arg_error("--dev-wallet-profile specified more than once", argv,
-                        usage);
-      }
-      sources.dev_wallet_profile = true;
-      dev_wallet_profile_value = argv[++i];
       continue;
     }
     if (arg == "--network-config" && i + 1 < argc) {
@@ -572,15 +558,6 @@ parse_args(int argc, char *argv[])
                       argv, usage);
     }
     options.bootstrap_config.user_storage_tokens = *tokens;
-  }
-  if (dev_wallet_profile_value.has_value()) {
-    if (dev_wallet_profile_value->empty()) {
-      hogd::arg_error("Invalid dev wallet profile: profile must not be empty",
-                      argv, usage);
-    }
-    hogd::resolve_dev_wallet_profile(*dev_wallet_profile_value);
-    options.bootstrap_config.dev_wallet_profile =
-        std::move(*dev_wallet_profile_value);
   }
   hogd::set_contract_artifact_directories(
       options.contract_artifact_directories);

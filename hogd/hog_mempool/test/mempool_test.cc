@@ -4014,6 +4014,14 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
                                uint32_t{1}),
                            allocation);
 
+  auto [raw_public_key, raw_secret_key] = ed25519_keygen();
+  PublicKey public_key(CryptographicScheme::Ed25519);
+  public_key.ed25519() = raw_public_key;
+  const auto native_account = pubkey_auth_address(
+      PubkeyAccountPreimage{.pubkey = public_key, .nonce = 0});
+  ASSERT_TRUE(native_account.has_value());
+  builder.add_account_allocation(*native_account, allocation);
+
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis =
       builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract,
@@ -4080,6 +4088,33 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   EXPECT_EQ(pending_unauthorized.get().outcome(),
             GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
 
+  // Direct credits and deployed fixtures share one atomic ceremony: a failed
+  // initializer must leave neither the account balance nor minted supply.
+  GenesisConfigurationBuilder failing_builder;
+  failing_builder.add_account_allocation(*native_account, allocation);
+  ContractEntrypointID missing_initializer{};
+  missing_initializer.fill(0xff);
+  failing_builder.add_distribution(fibonacci_contract, deployment_nonce,
+                                   missing_initializer, {}, allocation);
+  SignedTransactionBatch failing_txs;
+  failing_txs.append_range(
+      failing_builder.make_genesis_ceremony_transactions(cost_model));
+  const auto failed_ceremony =
+      coordinator_client.schedulercoord_commit_genesis_ceremony(
+          GenesisCeremonyRequest{
+              .expected_parent_height = 0,
+              .expected_parent_value_hash = sha256(parent.db_tip().value),
+              .context = ProposalContext{.protocol = 0},
+              .transactions = t_to_parallel_batch(failing_txs)(),
+          })();
+  EXPECT_EQ(failed_ceremony.outcome(),
+            GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+  EXPECT_FALSE(server.read_address_balance(*native_account).has_value());
+  EXPECT_FALSE(server
+                   .read_nnint128(ItemKey(kNativeTokenContractAddress,
+                                          kNativeTokenTotalSupplyKey))
+                   .has_value());
+
   ParallelSignedTransactionBatch parallel = t_to_parallel_batch(ceremony_txs)();
   GenesisCeremonyRequest request{
       .expected_parent_height = 0,
@@ -4113,6 +4148,19 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   ASSERT_TRUE(
       server.read_address_balance(kGenesisRootContractAddress).has_value());
   EXPECT_EQ(*server.read_address_balance(kGenesisRootContractAddress), 0);
+
+  auto native_balance = server.read_address_balance(*native_account);
+  ASSERT_TRUE(native_balance.has_value());
+  EXPECT_EQ(*native_balance, allocation - cost_model.get_balance_cost());
+  EXPECT_FALSE(server.read_address_metadata(*native_account).has_value());
+  EXPECT_FALSE(server.read_address_auth_data(*native_account).has_value());
+  const auto minted_supply = server.read_nnint128(
+      ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
+  ASSERT_TRUE(minted_supply.has_value());
+  const int128_t ceremony_funding = 2 * cost_model.get_balance_cost() +
+                                    cost_model.get_replay_cache_cost(1) +
+                                    cost_model.get_nnint_cost();
+  EXPECT_EQ(*minted_supply, 3 * allocation + ceremony_funding);
 
   GenesisCeremonyResult retry =
       coordinator_client.schedulercoord_commit_genesis_ceremony(
