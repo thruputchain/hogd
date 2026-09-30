@@ -4,7 +4,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -188,7 +187,7 @@ erc20_error(itc_erc20::ERC20Error code)
 // mirrors the same SDK primitive.
 x23::Async<InvokeStatus<bool>>
 adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
-                 ContractAddress spender, int128_t amount, bool exclusive)
+                 ContractAddress spender, int128_t amount)
 {
   auto allow_key_r = co_await allowance_key(ctx, owner, spender);
   if (!allow_key_r.has_value()) {
@@ -239,30 +238,33 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   if (*r2 != SyscallErrorCode::kSyscallErrorCodeNone) {
     co_return false;
   }
-  if (exclusive) {
-    auto lock = co_await ctx.syscall<SyscallNo::kSetStorageFlags>(
-        allow_key,
-        static_cast<StorageDeltaFlagSet>(StorageDeltaFlags::ExclusiveLock));
-    if (!lock) {
-      co_return NativeContractBuilder::host_fn_error_conversion(lock.error());
-    }
-    if (*lock != SyscallErrorCode::kSyscallErrorCodeNone) {
-      error("Unrecoverable: kSetStorageFlags after allowance write returned {}",
-            x23::show(*lock));
-      co_return InvokeError{InvokeErrorCode::Unrecoverable};
-    }
-  }
   co_return true;
 }
 
 // For now, the typedefs exported by a contract aren't added to the generated
-// spec, unfortunately
-using amount_t = std::tuple<uint64_t, uint64_t>;
+// spec, unfortunately. Amount and Difference are both i128; every entry point
+// taking an Amount rejects a negative one with ERC20Error::NegativeAmount, as
+// the reference's check_amount does.
+using amount_t = std::tuple<int64_t, uint64_t>;
 using difference_t = std::tuple<int64_t, uint64_t>;
 
-constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
+int128_t
+from_wire(std::tuple<int64_t, uint64_t> value)
+{
+  return int128_t{std::get<0>(value)} << 64 | std::get<1>(value);
+}
 
-using MintBurnStatus = InvokeStatus<Result<void, ERC20Exception>>;
+// Balances, allowances and supply are nonnegative by the time they are
+// returned; callers fault a negative reading before getting here.
+amount_t
+to_amount(int128_t value)
+{
+  CHECK(value >= 0);
+  return {static_cast<int64_t>(value >> 64),
+          static_cast<uint64_t>(value & 0xffffffffffffffffULL)};
+}
+
+using MintStatus = InvokeStatus<Result<void, ERC20Exception>>;
 
 // Mirror the reference's add_to_total_supply (the SDK's plain, non-strict
 // non_negative_int_inc): combine the increment with the in-transaction values
@@ -271,7 +273,7 @@ using MintBurnStatus = InvokeStatus<Result<void, ERC20Exception>>;
 // failure is an overflow of the accumulated in-tx add, which the SDK reports
 // by throwing LibraryExn::NonNegativeIntOverflow -- returned here as the
 // byte-identical library abort. Returns nullopt once the increment is staged.
-x23::Async<std::optional<MintBurnStatus>>
+x23::Async<std::optional<MintStatus>>
 add_to_total_supply(NativeSyscallContext &ctx, int128_t diff)
 {
   int128_t set_value{};
@@ -281,14 +283,14 @@ add_to_total_supply(NativeSyscallContext &ctx, int128_t diff)
       kNativeTokenTotalSupplyKey,
       /*load_from_snapshot=*/false, set_value, set_value_present, add_value);
   if (!get) {
-    co_return MintBurnStatus{
+    co_return MintStatus{
         NativeContractBuilder::host_fn_error_conversion(get.error())};
   }
   if (*get != SyscallErrorCode::kSyscallErrorCodeNone) {
-    co_return MintBurnStatus{InvokeError{InvokeErrorCode::Deterministic}};
+    co_return MintStatus{InvokeError{InvokeErrorCode::Deterministic}};
   }
   if (integer_add_overflow(add_value, diff)) {
-    co_return MintBurnStatus{
+    co_return MintStatus{
         {Result<void, ERC20Exception>::make_err(LibraryException{
             LibraryExn(LibraryExnKind::kLibraryExnNonNegativeIntOverflow)})}};
   }
@@ -296,11 +298,11 @@ add_to_total_supply(NativeSyscallContext &ctx, int128_t diff)
   auto set = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
       kNativeTokenTotalSupplyKey, set_ptr, add_value + diff);
   if (!set) {
-    co_return MintBurnStatus{
+    co_return MintStatus{
         NativeContractBuilder::host_fn_error_conversion(set.error())};
   }
   if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
-    co_return MintBurnStatus{InvokeError{InvokeErrorCode::Deterministic}};
+    co_return MintStatus{InvokeError{InvokeErrorCode::Deterministic}};
   }
   co_return std::nullopt;
 }
@@ -321,12 +323,10 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
     co_return co_await erc20_error(itc_erc20::ERC20Error::MustBeContractOwner);
   }
 
-  const uint128_t unsigned_amount =
-      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
-  if (unsigned_amount > kMaxInt128) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
+  const int128_t signed_amount = from_wire(amount);
+  if (signed_amount < 0) {
+    co_return co_await erc20_error(itc_erc20::ERC20Error::NegativeAmount);
   }
-  const int128_t signed_amount = unsigned_amount;
 
   // Strict credit, mirroring the reference's add_to_balance: reject at
   // invoke with TooLarge when the running balance (committed base + net
@@ -367,70 +367,6 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (auto emitted = co_await emit_event<2>(ctx, *event_buf, "mint");
-      !emitted) {
-    co_return emitted.error();
-  }
-  co_return Result<void, ERC20Exception>::make_ok();
-}
-
-x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
-burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
-{
-  if (!ctx.consume_gas(1)) {
-    co_return InvokeError{InvokeErrorCode::OutOfGas};
-  }
-  auto sender = co_await get_msg_sender(ctx);
-  if (!sender) {
-    co_return sender.error();
-  }
-  // The genesis root plays the reference's stored contract owner; any other
-  // caller gets the reference's rejection, byte-identically.
-  if (*sender != kGenesisRootContractAddress) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::MustBeContractOwner);
-  }
-
-  const uint128_t unsigned_amount =
-      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
-  if (unsigned_amount > kMaxInt128) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
-  }
-  const int128_t signed_amount = unsigned_amount;
-
-  // Match the reference ERC20's strict balance debit: reject before staging
-  // any state if the requested burn exceeds the owner's running balance.
-  auto owner_balance = co_await ctx.native_token_balance(owner);
-  if (!owner_balance) {
-    co_return owner_balance.error().to_invoke_error();
-  }
-  if (!owner_balance.value().has_value()) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  if (signed_amount > owner_balance.value().value()) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
-  }
-
-  auto debit = co_await ctx.modify_native_token_balance(owner, -signed_amount);
-  if (!debit) {
-    co_return debit.error().to_invoke_error();
-  }
-  if (!debit.value().has_value()) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-  }
-
-  // Reference order: the balance debit first, then the deferred supply
-  // decrement; a decrement past the committed supply is caught at commit.
-  if (auto supply_failure = co_await add_to_total_supply(ctx, -signed_amount)) {
-    co_return std::move(*supply_failure);
-  }
-
-  const NativeTokenBurnEvent event{.from_address = owner,
-                                   .amount = to_xdr(signed_amount)};
-  auto event_buf =
-      make_event_from_cxs_struct(native_token_burn_event_signature(), event);
-  if (!event_buf) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  if (auto emitted = co_await emit_event<2>(ctx, *event_buf, "burn");
       !emitted) {
     co_return emitted.error();
   }
@@ -506,22 +442,15 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
-  // For now, amount_t is a uint, so we do not need to check for negative
-  // amounts here. adding the assertion in case that changes
-  uint128_t amount_unsigned_int =
-      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
-
   auto owner = co_await get_msg_sender(ctx);
   if (!owner.has_value()) {
     co_return owner.error();
   }
 
-  // An amount above INT128_MAX cannot be represented as a signed balance delta;
-  // reject with TooLarge, matching the itc_erc20 reference's observable result.
-  if (amount_unsigned_int > kMaxInt128) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
+  const int128_t amount_signed_int = from_wire(amount);
+  if (amount_signed_int < 0) {
+    co_return co_await erc20_error(itc_erc20::ERC20Error::NegativeAmount);
   }
-  int128_t amount_signed_int = amount_unsigned_int;
 
   co_return co_await move_balance<Result<void, ERC20Exception>, ERC20Exception>(
       ctx, *owner, receiver, amount_signed_int, "transfer");
@@ -537,29 +466,24 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
-  uint128_t amount_unsigned_int =
-      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
-
   // get spender
   auto spender = co_await get_msg_sender(ctx);
   if (!spender.has_value()) {
     co_return spender.error();
   }
 
-  // An amount above INT128_MAX cannot be represented as a signed balance delta;
-  // reject with TooLarge, matching the itc_erc20 reference's observable result.
-  if (amount_unsigned_int > kMaxInt128) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
+  const int128_t amount_signed_int = from_wire(amount);
+  if (amount_signed_int < 0) {
+    co_return co_await erc20_error(itc_erc20::ERC20Error::NegativeAmount);
   }
-  int128_t amount_signed_int = amount_unsigned_int;
 
   // Order mirrors itc_erc20::transfer_from: the (strict) allowance debit
   // first when spending someone else's tokens, then the strict owner
   // debit, then the receiver credit. Any failure aborts the frame and
   // reverts the staged allowance debit.
   if (owner != *spender) {
-    auto allow_res = co_await adjust_allowance(ctx, owner, *spender,
-                                               -amount_signed_int, false);
+    auto allow_res =
+        co_await adjust_allowance(ctx, owner, *spender, -amount_signed_int);
     if (!allow_res.has_value()) {
       co_return allow_res.error();
     }
@@ -589,7 +513,7 @@ emit_allowance_change(NativeSyscallContext &ctx, ContractAddress const &owner,
 
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
-                      difference_t amount, bool exclusive)
+                      difference_t amount)
 {
   trace("native token adjust_allowance: spender {} amount {}",
         x23::show(spender), x23::show(amount));
@@ -602,11 +526,9 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
     co_return owner.error();
   }
 
-  int128_t amount_signed_int =
-      int128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
+  const int128_t amount_signed_int = from_wire(amount);
 
-  auto r = co_await adjust_allowance(ctx, *owner, spender, amount_signed_int,
-                                     exclusive);
+  auto r = co_await adjust_allowance(ctx, *owner, spender, amount_signed_int);
   if (!r.has_value()) {
     co_return r.error();
   }
@@ -660,14 +582,14 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   if (!remaining) {
     co_return remaining.error();
   }
-  auto value = static_cast<uint128_t>(*remaining);
-  co_return Result<amount_t, ERC20Exception>::make_ok(
-      std::make_tuple(value >> 64, value & 0xffffffffffffffffULL));
+  co_return Result<amount_t, ERC20Exception>::make_ok(to_amount(*remaining));
 }
 
+// Delete the allowance under an exclusive lock and emit AllowanceDeleteEvent
+// with the amount removed, as the reference's delete_allowance does.
 x23::Async<InvokeStatus<void>>
-clear_allowance(NativeSyscallContext &ctx, ContractAddress const &owner,
-                ContractAddress const &spender)
+delete_allowance(NativeSyscallContext &ctx, ContractAddress const &owner,
+                 ContractAddress const &spender)
 {
   auto key = co_await allowance_key(ctx, owner, spender);
   if (!key) {
@@ -695,16 +617,19 @@ clear_allowance(NativeSyscallContext &ctx, ContractAddress const &owner,
         x23::show(*locked));
     co_return InvokeError{InvokeErrorCode::Unrecoverable};
   }
-  if (auto event =
-          co_await emit_allowance_change(ctx, owner, spender, -*remaining);
-      !event) {
-    co_return event.error();
+  auto event = make_event_from_cxs_struct(
+      native_token_allowance_delete_event_signature(),
+      NativeTokenAllowanceDeleteEvent{.owner_address = owner,
+                                      .spender_address = spender,
+                                      .removed = to_xdr(*remaining)});
+  if (!event) {
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  co_return InvokeStatus<void>{};
+  co_return co_await emit_event<3>(ctx, *event, "allowance delete");
 }
 
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
-clear_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender)
+delete_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender)
 {
   if (!ctx.consume_gas(1)) {
     co_return InvokeError{InvokeErrorCode::OutOfGas};
@@ -713,8 +638,9 @@ clear_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender)
   if (!owner) {
     co_return owner.error();
   }
-  if (auto cleared = co_await clear_allowance(ctx, *owner, spender); !cleared) {
-    co_return cleared.error();
+  if (auto deleted = co_await delete_allowance(ctx, *owner, spender);
+      !deleted) {
+    co_return deleted.error();
   }
   co_return Result<void, ERC20Exception>::make_ok();
 }
@@ -795,17 +721,6 @@ consume_grant(NativeSyscallContext &ctx, SignedToken const &token)
       Consumed<Grant>{.grant = grant, .owner = minter}};
 }
 
-// `amount` as a signed delta, or nullopt when it exceeds INT128_MAX -- the
-// reference's amount_to_diff, which throws ERC20Error::TooLarge.
-std::optional<int128_t>
-signed_amount(uint128_t amount)
-{
-  if (amount > kMaxInt128) {
-    return std::nullopt;
-  }
-  return static_cast<int128_t>(amount);
-}
-
 x23::Async<InvokeStatus<PermitResult>>
 transfer_from_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token,
                           ContractAddress receiver, amount_t amount)
@@ -837,21 +752,19 @@ transfer_from_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token,
     co_return PermitResult::make_err(
         PermitException{itc_erc20_permit::ERC20PermitError::NotSpender});
   }
-  const uint128_t requested =
-      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
+  const int128_t requested = from_wire(amount);
   if (requested > from_xdr(grant.amount)) {
     co_return PermitResult::make_err(
         PermitException{itc_erc20_permit::ERC20PermitError::ExceedsGrant});
   }
-
-  auto diff = signed_amount(requested);
-  if (!diff) {
+  // The reference checks the amount's sign only after the grant checks.
+  if (requested < 0) {
     co_return PermitResult::make_err(
-        PermitErc20Exception{itc_erc20_permit::ERC20Error::TooLarge});
+        PermitErc20Exception{itc_erc20_permit::ERC20Error::NegativeAmount});
   }
 
   co_return co_await move_balance<PermitResult, PermitErc20Exception>(
-      ctx, owner, receiver, *diff, "transfer_from_signed");
+      ctx, owner, receiver, requested, "transfer_from_signed");
 }
 
 x23::Async<InvokeStatus<PermitResult>>
@@ -875,14 +788,13 @@ increase_allowance_signed_impl(NativeSyscallContext &ctx,
   auto const &[grant, owner] =
       std::get<Consumed<itc_erc20_permit::PermitGrant>>(*consumed);
 
-  auto diff = signed_amount(from_xdr(grant.amount));
-  if (!diff) {
+  const int128_t diff = from_xdr(grant.amount);
+  if (diff < 0) {
     co_return PermitResult::make_err(
-        PermitErc20Exception{itc_erc20_permit::ERC20Error::TooLarge});
+        PermitErc20Exception{itc_erc20_permit::ERC20Error::NegativeAmount});
   }
   // Adds to the allowance rather than setting it, as adjust_allowance does.
-  auto adjusted =
-      co_await adjust_allowance(ctx, owner, grant.spender, *diff, false);
+  auto adjusted = co_await adjust_allowance(ctx, owner, grant.spender, diff);
   if (!adjusted.has_value()) {
     co_return adjusted.error();
   }
@@ -892,7 +804,7 @@ increase_allowance_signed_impl(NativeSyscallContext &ctx,
   }
 
   if (auto err =
-          co_await emit_allowance_change(ctx, owner, grant.spender, *diff);
+          co_await emit_allowance_change(ctx, owner, grant.spender, diff);
       !err.has_value()) {
     co_return err.error();
   }
@@ -900,15 +812,16 @@ increase_allowance_signed_impl(NativeSyscallContext &ctx,
 }
 
 x23::Async<InvokeStatus<PermitResult>>
-clear_allowance_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token)
+delete_allowance_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token)
 {
-  trace("native token clear_allowance_signed: handle {}", grant_token.handle);
+  trace("native token delete_allowance_signed: handle {}", grant_token.handle);
   if (!ctx.consume_gas(1)) {
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
-  auto consumed = co_await consume_grant<itc_erc20_permit::ClearAllowanceGrant>(
-      ctx, grant_token);
+  auto consumed =
+      co_await consume_grant<itc_erc20_permit::DeleteAllowanceGrant>(
+          ctx, grant_token);
   if (!consumed.has_value()) {
     co_return consumed.error();
   }
@@ -916,11 +829,11 @@ clear_allowance_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token)
     co_return PermitResult::make_err(std::move(*exn));
   }
   auto const &[grant, owner] =
-      std::get<Consumed<itc_erc20_permit::ClearAllowanceGrant>>(*consumed);
+      std::get<Consumed<itc_erc20_permit::DeleteAllowanceGrant>>(*consumed);
 
-  if (auto cleared = co_await clear_allowance(ctx, owner, grant.spender);
-      !cleared) {
-    co_return cleared.error();
+  if (auto deleted = co_await delete_allowance(ctx, owner, grant.spender);
+      !deleted) {
+    co_return deleted.error();
   }
   co_return PermitResult::make_ok();
 }
@@ -977,10 +890,10 @@ native_token_mint_event_signature()
 }
 
 Topic const &
-native_token_burn_event_signature()
+native_token_allowance_delete_event_signature()
 {
-  static const Topic kSignature =
-      compute_event_signature(u8"0.1::groundhog-erc20-if::BurnEvent");
+  static const Topic kSignature = compute_event_signature(
+      u8"0.1::groundhog-erc20-if::AllowanceDeleteEvent");
   return kSignature;
 }
 
@@ -1005,12 +918,12 @@ make_native_token_contract()
   // adjust_allowance
   builder.add<itc_erc20::ERC20, u8"adjust_allowance">(adjust_allowance_impl);
 
-  builder.add<itc_erc20::ERC20, u8"clear_allowance">(clear_allowance_impl);
+  builder.add<itc_erc20::ERC20, u8"delete_allowance">(delete_allowance_impl);
 
   // Native account balances also support storage accounting; their database
   // path does not support deletion or exclusive locks.
-  builder.add<itc_erc20::ERC20, u8"clear_balance">(
-      kAlwaysErrorMethod<itc_erc20::ERC20, u8"clear_balance", 1>);
+  builder.add<itc_erc20::ERC20, u8"delete_balance">(
+      kAlwaysErrorMethod<itc_erc20::ERC20, u8"delete_balance", 1>);
 
   // get_balance_of
   builder.add<itc_erc20::ERC20, u8"get_balance_of">(
@@ -1028,10 +941,8 @@ make_native_token_contract()
         if (!balance.value().has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        assert(balance.value().value() >= 0);
-        uint128_t ubalance = balance.value().value();
         co_return Result<amount_t, ERC20Exception>::make_ok(
-            std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL));
+            to_amount(balance.value().value()));
       });
 
   // get_balance
@@ -1055,17 +966,12 @@ make_native_token_contract()
         if (!balance.value().has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        assert(balance.value().value() >= 0);
-        uint128_t ubalance = balance.value().value();
         co_return Result<amount_t, ERC20Exception>::make_ok(
-            std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL));
+            to_amount(balance.value().value()));
       });
 
   // mint
   builder.add<itc_erc20::ERC20, u8"mint">(mint_impl);
-
-  // burn
-  builder.add<itc_erc20::ERC20, u8"burn">(burn_impl);
 
   // total_supply
   builder.add<itc_erc20::ERC20, u8"total_supply">(
@@ -1086,7 +992,7 @@ make_native_token_contract()
           co_return NativeContractBuilder::host_fn_error_conversion(
               get.error());
         }
-        uint128_t total_supply;
+        int128_t total_supply;
         if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
           total_supply = 0;
         }
@@ -1100,8 +1006,7 @@ make_native_token_contract()
           total_supply = supply_base + supply_add;
         }
         co_return Result<amount_t, ERC20Exception>::make_ok(
-            std::make_tuple(total_supply >> 64,
-                            total_supply & 0xffffffffffffffffULL));
+            to_amount(total_supply));
       });
 
   // ERC20Permit
@@ -1109,8 +1014,8 @@ make_native_token_contract()
       transfer_from_signed_impl);
   builder.add<itc_erc20_permit::ERC20Permit, u8"increase_allowance_signed">(
       increase_allowance_signed_impl);
-  builder.add<itc_erc20_permit::ERC20Permit, u8"clear_allowance_signed">(
-      clear_allowance_signed_impl);
+  builder.add<itc_erc20_permit::ERC20Permit, u8"delete_allowance_signed">(
+      delete_allowance_signed_impl);
 
   assert(builder.check_methods<itc_erc20::ERC20>());
   assert(builder.check_methods<itc_erc20_permit::ERC20Permit>());

@@ -40,10 +40,10 @@
 namespace hogd {
 
 namespace {
-std::tuple<std::uint64_t, std::uint64_t>
-make_contract_u128(uint128_t value)
+std::tuple<std::int64_t, std::uint64_t>
+make_contract_i128(int128_t value)
 {
-  return {static_cast<std::uint64_t>(value >> 64),
+  return {static_cast<std::int64_t>(value >> 64),
           static_cast<std::uint64_t>(value)};
 }
 
@@ -265,7 +265,7 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
           .contract_hash = entry.contract_hash,
           .initializer = entry.entrypoint,
           .initializer_calldata = entry.calldata,
-          .allocation = to_xdr(static_cast<uint128_t>(entry.amount)),
+          .allocation = to_xdr(entry.amount),
       });
       // A transaction attaches contract code by hash. Attach each distinct
       // artifact only once within the transaction, even when many accounts use
@@ -285,8 +285,8 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
         .tx = Transaction{
             .invocation = client.make_invocation<u8"distribute">(
                 kDistributionGas, distributions,
-                make_contract_u128(root_funding),
-                make_contract_u128(token_funding)),
+                make_contract_i128(static_cast<int128_t>(root_funding)),
+                make_contract_i128(static_cast<int128_t>(token_funding))),
             .uniquifier =
                 {
                     .block_expiry_height =
