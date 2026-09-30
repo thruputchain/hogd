@@ -475,15 +475,13 @@ load_log_file(
           return DBError{DBCode::kCorruption};
         }
       }
-      // A snapshot writes exactly one commit record whose LSN is end_lsn - 1
-      // (see DiskWriter::init in Database::write_snapshot), so it must match
-      // the snapshot filename's end LSN. Checking this ties the recovery cursor
-      // to the advertised range and rejects a tampered commit LSN such as
-      // UINT64_MAX, whose successor wraps to zero and would otherwise skip the
-      // snapshot contents and recover an empty database as fresh state (#4229).
-      // The subtraction mirrors the writer's, so a degenerate end_lsn == 0
-      // snapshot (commit LSN UINT64_MAX, cursor back to 0) still validates.
-      else if (hdr.lsn != file.end_lsn_exclusive_ - 1) {
+      // A snapshot writes one commit record at end_lsn - 1, so require exactly
+      // that. This rejects a tampered LSN like UINT64_MAX whose successor wraps
+      // to zero and would skip replay, recovering an empty database as fresh
+      // state. A zero-ended snapshot is rejected outright: its cursor would
+      // wrap to zero too, and the writer never produces one (#4229).
+      else if (file.end_lsn_exclusive_ == 0 ||
+               hdr.lsn != file.end_lsn_exclusive_ - 1) {
         error("snapshot {} has commit for lsn {} but its filename range ends "
               "at lsn {}",
               file.path_, hdr.lsn, file.end_lsn_exclusive_);

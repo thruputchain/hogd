@@ -101,6 +101,42 @@ make_value(uint64_t seed, size_t len)
   return v;
 }
 
+// Rewrites the LSN in a snapshot's trailing commit record to new_lsn and
+// recomputes the same unkeyed CRC32C recovery verifies, so only the LSN is out
+// of range. Used to exercise recovery's snapshot commit-LSN validation.
+void
+tamper_snapshot_commit_lsn(Directory &dir, std::string_view path,
+                           uint64_t new_lsn)
+{
+  ErrnoStatus<struct stat> st = dir.stat(path);
+  ASSERT_TRUE(st);
+  ErrnoStatus<File> f = dir.openat(path, O_RDWR);
+  ASSERT_TRUE(f);
+  std::vector<std::byte> bytes(static_cast<size_t>(st->st_size));
+  ASSERT_TRUE(read_full(*f, bytes));
+
+  // The commit record is the trailing ItemHeader plus its CRC32C.
+  const size_t commit_offset =
+      bytes.size() - sizeof(ItemHeader) - sizeof(uint32_t);
+  ItemHeader commit;
+  std::memcpy(&commit, bytes.data() + commit_offset, sizeof(commit));
+  ASSERT_EQ(commit.storage, ItemStorage::kCommit);
+  commit.lsn = new_lsn;
+  commit.clear_next();
+  std::memcpy(bytes.data() + commit_offset, &commit, sizeof(commit));
+
+  uint32_t crc =
+      crc32c_append(0, std::span<const std::byte>(bytes).first(commit_offset));
+  crc = crc32c_append(crc, byte_view(commit));
+  crc = cpu_to_le(crc);
+  std::memcpy(bytes.data() + commit_offset + sizeof(commit), &crc, sizeof(crc));
+
+  ASSERT_TRUE(
+      static_cast<bool>(f->lseek(0, SEEK_SET))); // NOLINT(misc-include-cleaner)
+  ASSERT_TRUE(write_full(*f, bytes));
+  ASSERT_TRUE(f->sync());
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -1426,10 +1462,8 @@ TEST(Loglet, CloneZeroesNextSlot)
   }));
 }
 
-// A snapshot commit record whose LSN is tampered to UINT64_MAX must be rejected
-// as corruption. Its successor (hdr.lsn + 1) wraps to zero, so accepting it
-// once let recovery open at LSN zero, skip the snapshot contents, and mistake
-// the resulting empty database for fresh state (#4229).
+// Recovery must reject a snapshot commit LSN outside the filename range
+// (#4229).
 TEST_F(DatabaseTest, RecoveryRejectsSnapshotCommitLsnWrap)
 {
   const std::string key = "existing-key";
@@ -1444,42 +1478,44 @@ TEST_F(DatabaseTest, RecoveryRejectsSnapshotCommitLsnWrap)
   ASSERT_TRUE(snapshot_future.get());
   db_.reset();
 
-  // Drop the WAL so only the snapshot drives recovery.
+  // Drop the WAL so only the snapshot drives recovery, then rewrite its "0-1"
+  // commit LSN to UINT64_MAX. Its successor wraps to zero, and accepting it
+  // once let recovery open at LSN zero, skip the snapshot, and take the
+  // fresh-db path.
   ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+  ASSERT_NO_FATAL_FAILURE(
+      tamper_snapshot_commit_lsn(dir_, "0-1.snap",
+                                 std::numeric_limits<uint64_t>::max()));
 
-  ErrnoStatus<struct stat> snapshot_stat = dir_.stat("0-1.snap");
-  ASSERT_TRUE(snapshot_stat);
-  {
-    ErrnoStatus<File> snapshot_file = dir_.openat("0-1.snap", O_RDWR);
-    ASSERT_TRUE(snapshot_file);
-    std::vector<std::byte> bytes(static_cast<size_t>(snapshot_stat->st_size));
-    ASSERT_TRUE(read_full(*snapshot_file, bytes));
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+}
 
-    // The commit record is the trailing ItemHeader plus its CRC32C. Rewrite the
-    // commit LSN to UINT64_MAX and recompute the same unkeyed checksum recovery
-    // verifies, so only the LSN is out of range.
-    const size_t commit_offset =
-        bytes.size() - sizeof(ItemHeader) - sizeof(uint32_t);
-    ItemHeader commit;
-    std::memcpy(&commit, bytes.data() + commit_offset, sizeof(commit));
-    ASSERT_EQ(commit.storage, ItemStorage::kCommit);
-    commit.lsn = std::numeric_limits<uint64_t>::max();
-    commit.clear_next();
-    std::memcpy(bytes.data() + commit_offset, &commit, sizeof(commit));
+// A zero-ended snapshot ("0-0.snap") also wraps its cursor to zero: end_lsn - 1
+// is UINT64_MAX, matching a tampered commit LSN. The writer never emits one, so
+// recovery must reject it rather than accept the wrap (#4229).
+TEST_F(DatabaseTest, RecoveryRejectsZeroEndedSnapshot)
+{
+  const std::string key = "existing-key";
+  const std::string value = "existing-value";
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(value))));
 
-    uint32_t crc =
-        crc32c_append(0,
-                      std::span<const std::byte>(bytes).first(commit_offset));
-    crc = crc32c_append(crc, byte_view(commit));
-    crc = cpu_to_le(crc);
-    std::memcpy(bytes.data() + commit_offset + sizeof(commit), &crc,
-                sizeof(crc));
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_TRUE(std::get<1>(*snapshot).get());
+  db_.reset();
 
-    ASSERT_TRUE(static_cast<bool>(
-        snapshot_file->lseek(0, SEEK_SET))); // NOLINT(misc-include-cleaner)
-    ASSERT_TRUE(write_full(*snapshot_file, bytes));
-    ASSERT_TRUE(snapshot_file->sync());
-  }
+  // Rename the real snapshot to a canonical "0-0.snap" and set its commit LSN
+  // to the value the wrapped end_lsn (0 - 1) would carry.
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+  ASSERT_TRUE(static_cast<bool>(dir_.rename("0-1.snap", "0-0.snap")));
+  ASSERT_NO_FATAL_FAILURE(
+      tamper_snapshot_commit_lsn(dir_, "0-0.snap",
+                                 std::numeric_limits<uint64_t>::max()));
 
   const size_t heap_size =
       Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
