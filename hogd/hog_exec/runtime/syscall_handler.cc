@@ -1475,9 +1475,15 @@ SystemCallHandler::emit_events(ExecResult exec_result,
   auto events = (root_invoke_succeeded() && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
+  // Move the retained root output out rather than deep-copying it: this runs
+  // after pending_event_calls_ is incremented, and a copy of the
+  // attacker-influenced return buffer could throw bad_alloc before reaching the
+  // event proxy's exception containment, terminating hogexec (#4231). The move
+  // steals the heap buffer and cannot throw; nothing reads the frame output
+  // again after the event handoff.
   auto root_output =
       last_frame_.has_value()
-          ? last_frame_.value().get_frame_output()
+          ? last_frame_.value().extract_frame_output()
           : InvocationFrameOutput(InvocationFrameStatusCode::Fault);
   // gas_consumed is in the event trie leaf, so the events root commits to it.
   co_return co_await event_server_proxy_.emit_events(

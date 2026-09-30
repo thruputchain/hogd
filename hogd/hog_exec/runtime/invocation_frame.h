@@ -176,6 +176,17 @@ public:
     return to_return_output_;
   }
 
+  // Destructively move the retained frame output out of this frame. The
+  // post-commit event handoff is the sole consumer and never reads the output
+  // again, so moving avoids deep-copying the (attacker-influenced) return
+  // buffer -- a copy that could throw bad_alloc after the pending-event
+  // counter is incremented, escaping the event proxy's containment and
+  // terminating hogexec (#4231). Mirrors extract_events().
+  InvocationFrameOutput extract_frame_output()
+  {
+    return std::move(to_return_output_);
+  }
+
   void deploy_contract(ContractAddress const &addr,
                        DeployedContractHash const &hash)
   {
