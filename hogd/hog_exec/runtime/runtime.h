@@ -2,8 +2,8 @@
 
 #include <cstddef>
 #include <cstring>
-#include <expected>
 #include <memory>
+#include <optional>
 
 #include "contract.hh"
 #include "db_conflict.hh"
@@ -63,15 +63,15 @@ public:
   // `out` is built in place: the caller supplies storage at whatever scope it
   // wants the preparation to live, and the context memoizes nothing. It is
   // written only on success; on rejection it is left as the caller had it.
-  // A rejection names why (ContractRejectNotDeployable for a type it can't
-  // run). Rejections are for the contract's faults only: a node fault while
-  // verifying must CHECK, never be reported as a rejection.
-  virtual std::expected<void, ContractRejectCode>
+  // An invalid contract returns Deterministic and names why in `rejection`
+  // (ContractRejectNotDeployable for a type it can't run).
+  virtual InvokeErrorCode
   verify_contract(Contract const &contract, NetworkConfigParams const &params,
-                  PreparedContract &out) const = 0;
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const = 0;
 
   // Convenience for callers that only want the verdict and would discard the
-  // preparation and the reason: None on success, Deterministic on rejection.
+  // preparation and the reason.
   // Defined out-of-line so PreparedContract is complete where the discarded
   // instance is constructed and destroyed.
   //

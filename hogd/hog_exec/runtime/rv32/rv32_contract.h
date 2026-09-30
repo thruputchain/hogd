@@ -17,10 +17,6 @@ namespace hogd {
 
 class SystemCallHandler;
 
-// The wire reason for an artifact Rv32Contract::create refused. Coarser than
-// ArtifactError: the wire names what an author can act on, not every check.
-ContractRejectCode to_contract_reject_code(rv32::ArtifactError error);
-
 // A translated and ready-to-instantiate RV32 contract.
 class Rv32Contract {
 public:
@@ -69,9 +65,10 @@ private:
 // context itself holds no per-contract state.
 class Rv32Context final : public RuntimeContext {
 public:
-  std::expected<void, ContractRejectCode>
+  InvokeErrorCode
   verify_contract(Contract const &contract, NetworkConfigParams const &params,
-                  PreparedContract &out) const override;
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const override;
   using RuntimeContext::verify_contract;
 
   [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<Runtime>>>

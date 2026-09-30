@@ -1263,17 +1263,10 @@ SystemCallHandler::report_contract_rejection(
 void
 SystemCallHandler::report_tx_failure(TxFailureCause cause) const
 {
-  // Fire-and-forget: drive the async send in a detached coroutine so execution
-  // never waits on it (the same detached-await shape as the event server's own
-  // detached sends). report_tx_failure copies the client, so the send is
-  // self-contained and safe to outlive us.
-  const BlockHeight height = get_block_height();
-  [](x23::Async<void> send) -> x23::Detached {
-    co_await send;
-  }(event_server_proxy_.report_tx_failure(get_source_tx_hash(),
-                                          TxFailureDiagnostic{
-                                              .attempt_height = height,
-                                              .cause = std::move(cause)}));
+  event_server_proxy_.report_tx_failure(
+      get_source_tx_hash(),
+      TxFailureDiagnostic{.attempt_height = get_block_height(),
+                          .cause = std::move(cause)});
 }
 
 void

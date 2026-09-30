@@ -49,9 +49,9 @@ public:
              ProposedTransaction const &proposed_tx);
 
   // Best-effort report that [tx_hash] was excluded from the proposal (a 2pc
-  // conflict or a refused attachment); callers fire-and-forget it.
-  x23::Async<void> report_tx_failure(TransactionHash tx_hash,
-                                     TxFailureDiagnostic diag);
+  // conflict or a refused attachment). Sends detached; never fails.
+  x23::Detached report_tx_failure(TransactionHash tx_hash,
+                                  TxFailureDiagnostic diag);
 
 private:
   using client_t =
@@ -78,13 +78,11 @@ public:
   emit_events(TxEventLog const &tx_event_log,
               ProposedTransaction const &proposed_tx);
 
-  // Awaitable; see EventServerProxy::report_tx_failure. Callers
-  // fire-and-forget.
-  x23::Async<void> report_tx_failure(TransactionHash tx_hash,
-                                     TxFailureDiagnostic diag) const
+  // See EventServerProxy::report_tx_failure.
+  void report_tx_failure(TransactionHash tx_hash,
+                         TxFailureDiagnostic diag) const
   {
-    return event_server_proxy_.report_tx_failure(std::move(tx_hash),
-                                                 std::move(diag));
+    event_server_proxy_.report_tx_failure(std::move(tx_hash), std::move(diag));
   }
 
 private:

@@ -3,8 +3,8 @@
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
-#include <expected>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -171,24 +171,28 @@ RuntimeContext::RuntimeContext(
   : contracts_(std::move(contracts))
 {}
 
-std::expected<void, ContractRejectCode>
-RuntimeContext::verify_contract(Contract const &contract,
-                                NetworkConfigParams const & /*params*/,
-                                hogd::PreparedContract & /*out*/) const
+InvokeErrorCode
+RuntimeContext::verify_contract(
+    Contract const &contract, NetworkConfigParams const & /*params*/,
+    hogd::PreparedContract & /*out*/,
+    std::optional<ContractRejectCode> &rejection) const
 {
   // kMockTest images are prebuilt in contracts_; nothing to hand back.
   if (contract.contract_type() != ContractType::kMockTest) {
-    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
+    return InvokeErrorCode::Deterministic;
   }
   const int32_t contract_id = contract.mock_contract_id();
   auto it = contracts_.find(contract_id);
   if (it == contracts_.end()) {
-    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
+    return InvokeErrorCode::Deterministic;
   }
   if (!runtime_contract_image_is_valid(it->second)) {
-    return std::unexpected(ContractRejectCode::ContractRejectInvalidProgram);
+    rejection = ContractRejectCode::ContractRejectInvalidProgram;
+    return InvokeErrorCode::Deterministic;
   }
-  return {};
+  return InvokeErrorCode::None;
 }
 
 x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>

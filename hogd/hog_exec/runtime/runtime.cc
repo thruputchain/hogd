@@ -2,8 +2,10 @@
 #include "hogd/base/network_config_params.h"
 
 #include <exception>
+#include <optional>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -19,9 +21,8 @@ RuntimeContext::verify_contract(Contract const &contract,
                                 NetworkConfigParams const &params) const
 {
   PreparedContract discarded;
-  return verify_contract(contract, params, discarded).has_value()
-             ? InvokeErrorCode::None
-             : InvokeErrorCode::Deterministic;
+  std::optional<ContractRejectCode> rejection;
+  return verify_contract(contract, params, discarded, rejection);
 }
 
 x23::Async<InvokeResult>

@@ -2,7 +2,6 @@
 #include <span>
 
 #include <cstdint>
-#include <expected>
 #include <memory>
 #include <optional>
 #include <string>
@@ -55,10 +54,10 @@ namespace {
 
 class NoopRv32Context : public RuntimeContext {
 public:
-  std::expected<void, ContractRejectCode>
-  verify_contract(Contract const & /*unused*/,
-                  NetworkConfigParams const & /*params*/,
-                  PreparedContract &out) const override
+  InvokeErrorCode verify_contract(
+      Contract const & /*unused*/, NetworkConfigParams const & /*params*/,
+      PreparedContract &out,
+      std::optional<ContractRejectCode> & /*rejection*/) const override
   {
     // Hand back a placeholder image, as a real rv32 verification would: an
     // accepted attachment must look prepared. Its contents are irrelevant --
@@ -71,7 +70,7 @@ public:
                                             std::span<const uint8_t>{}));
     out.rv32.emplace(
         *Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults()));
-    return {};
+    return InvokeErrorCode::None;
   }
 
   x23::Async<SystemStatus<std::unique_ptr<Runtime>>>

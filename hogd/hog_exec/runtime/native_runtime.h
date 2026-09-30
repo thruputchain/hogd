@@ -110,17 +110,19 @@ public:
 
   // Native contracts are registered at genesis, not translated: there is
   // nothing to prepare, so `out` is left alone.
-  std::expected<void, ContractRejectCode>
+  InvokeErrorCode
   verify_contract(Contract const &contract,
                   NetworkConfigParams const & /*params*/,
-                  PreparedContract & /*out*/) const override
+                  PreparedContract & /*out*/,
+                  std::optional<ContractRejectCode> &rejection) const override
   {
     CHECK(contract.contract_type() == ContractType::kNative);
     if (contracts_.contains(
             std::to_underlying(contract.native_contract_id()))) {
-      return {};
+      return InvokeErrorCode::None;
     }
-    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
+    return InvokeErrorCode::Deterministic;
   }
   using RuntimeContext::verify_contract;
 

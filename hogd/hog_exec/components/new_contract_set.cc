@@ -1,7 +1,6 @@
 #include "new_contract_set.h"
 #include "hogd/base/network_config_params.h"
 
-#include <expected>
 #include <optional>
 #include <utility>
 
@@ -57,15 +56,23 @@ NewContractSet::make(NewContractBatch const &contracts,
 
   for (auto const &[hash, contract] : new_contract_set.new_contracts_) {
     PreparedContract prepared_contract;
-    // An unverifiable attachment makes the transaction malformed: the caller
-    // rejects it as a ValidationFailure so it is dropped, never included in a
-    // block as a deterministic failure. The map holds pointers into
-    // [contracts], so the offset is the attachment's index.
-    if (auto res = runtime_context.verify_contract(*contract, params,
-                                                   prepared_contract);
-        !res.has_value()) {
-      return reject(static_cast<size_t>(contract - contracts.data()),
-                    res.error());
+    std::optional<ContractRejectCode> reason;
+    auto res = runtime_context.verify_contract(*contract, params,
+                                               prepared_contract, reason);
+    // An invalid attachment makes the transaction malformed: reject it as a
+    // ValidationFailure so it is dropped, never included in a block as a
+    // deterministic failure. The map holds pointers into [contracts], so the
+    // offset is the attachment's index.
+    if (res == InvokeErrorCode::Deterministic) {
+      if (reason.has_value()) {
+        return reject(static_cast<size_t>(contract - contracts.data()),
+                      *reason);
+      }
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
+    }
+    // Anything else is a node fault, not the contract's: pass it through.
+    if (res != InvokeErrorCode::None) {
+      return {InvokeError{res}, 0};
     }
     // rv32 is the only type that reaches here, and for rv32 verifying an
     // attachment *is* translating it, so a successful verification always

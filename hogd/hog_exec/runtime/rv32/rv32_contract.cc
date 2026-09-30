@@ -39,43 +39,6 @@ static_assert(rv32::kDefaultMaxCodeBytes ==
 static_assert(rv32::kDefaultMaxMemoryBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
 
-ContractRejectCode
-to_contract_reject_code(rv32::ArtifactError error)
-{
-  using enum rv32::ArtifactError;
-  switch (error) {
-  case kTooSmall:
-  case kBadMagic:
-  case kBadHeaderSize:
-  case kInvalidSectionLayout:
-    return ContractRejectCode::ContractRejectMalformedArtifact;
-  case kUnsupportedFormatVersion:
-    return ContractRejectCode::ContractRejectUnsupportedFormat;
-  case kUnsupportedVmProfile:
-  case kUnsupportedFlags:
-  case kUnsupportedEntryAbi:
-  case kUnsupportedSyscallAbi:
-    return ContractRejectCode::ContractRejectUnsupportedAbi;
-  case kGasScheduleVersionMismatch:
-  case kGasScheduleDigestMismatch:
-    return ContractRejectCode::ContractRejectGasScheduleMismatch;
-  case kMemorySizeInvalid:
-    return ContractRejectCode::ContractRejectMemoryTooLarge;
-  case kCodeSizeInvalid:
-    return ContractRejectCode::ContractRejectCodeSizeInvalid;
-  case kInitialMemoryTooLarge:
-    return ContractRejectCode::ContractRejectInitialMemoryInvalid;
-  case kCodeDigestMismatch:
-  case kInitialMemoryDigestMismatch:
-    return ContractRejectCode::ContractRejectDigestMismatch;
-  case kInvalidProgram:
-    return ContractRejectCode::ContractRejectInvalidProgram;
-  }
-  // Every enumerator returns above; an out-of-range value is memory corruption.
-  CHECK(false);
-  return ContractRejectCode::ContractRejectMalformedArtifact;
-}
-
 std::expected<Rv32Contract, rv32::ArtifactError>
 Rv32Contract::create(ContractBlob const &contract_blob, rv32::Rv32Limits limits)
 {
@@ -244,13 +207,58 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
                      total_gas_consumed};
 }
 
-std::expected<void, ContractRejectCode>
+namespace {
+
+// The wire reason for an artifact Rv32Contract::create refused. Coarser than
+// ArtifactError: the wire names what an author can act on, not every check.
+ContractRejectCode
+to_contract_reject_code(rv32::ArtifactError error)
+{
+  using enum rv32::ArtifactError;
+  switch (error) {
+  case kTooSmall:
+  case kBadMagic:
+  case kBadHeaderSize:
+  case kInvalidSectionLayout:
+    return ContractRejectCode::ContractRejectMalformedArtifact;
+  case kUnsupportedFormatVersion:
+    return ContractRejectCode::ContractRejectUnsupportedFormat;
+  case kUnsupportedVmProfile:
+  case kUnsupportedFlags:
+  case kUnsupportedEntryAbi:
+  case kUnsupportedSyscallAbi:
+    return ContractRejectCode::ContractRejectUnsupportedAbi;
+  case kGasScheduleVersionMismatch:
+  case kGasScheduleDigestMismatch:
+    return ContractRejectCode::ContractRejectGasScheduleMismatch;
+  case kMemorySizeInvalid:
+    return ContractRejectCode::ContractRejectMemoryTooLarge;
+  case kCodeSizeInvalid:
+    return ContractRejectCode::ContractRejectCodeSizeInvalid;
+  case kInitialMemoryTooLarge:
+    return ContractRejectCode::ContractRejectInitialMemoryInvalid;
+  case kCodeDigestMismatch:
+  case kInitialMemoryDigestMismatch:
+    return ContractRejectCode::ContractRejectDigestMismatch;
+  case kInvalidProgram:
+    return ContractRejectCode::ContractRejectInvalidProgram;
+  }
+  // Every enumerator returns above; an out-of-range value is memory corruption.
+  CHECK(false);
+  return ContractRejectCode::ContractRejectMalformedArtifact;
+}
+
+} // namespace
+
+InvokeErrorCode
 Rv32Context::verify_contract(Contract const &contract,
                              NetworkConfigParams const &params,
-                             PreparedContract &out) const
+                             PreparedContract &out,
+                             std::optional<ContractRejectCode> &rejection) const
 {
   if (contract.contract_type() != ContractType::kRv32) {
-    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
+    return InvokeErrorCode::Deterministic;
   }
   // Verify by translating (parsing alone misses decode failures) under the
   // chain's bounds, and hand the translation back for reuse (#3536).
@@ -259,10 +267,11 @@ Rv32Context::verify_contract(Contract const &contract,
       rv32::Rv32Limits{.max_code_bytes = params.max_rv32_code_bytes,
                        .max_memory_bytes = params.max_rv32_memory_bytes});
   if (!translated.has_value()) {
-    return std::unexpected(to_contract_reject_code(translated.error()));
+    rejection = to_contract_reject_code(translated.error());
+    return InvokeErrorCode::Deterministic;
   }
   out.rv32.emplace(std::move(*translated));
-  return {};
+  return InvokeErrorCode::None;
 }
 
 x23::Async<SystemStatus<std::unique_ptr<Runtime>>>

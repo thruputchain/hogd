@@ -2,8 +2,8 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
-#include <expected>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -40,15 +40,16 @@ MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
                                                         syscall_handler);
 }
 
-std::expected<void, ContractRejectCode>
-MultiplexedContext::verify_contract(Contract const &contract,
-                                    NetworkConfigParams const &params,
-                                    PreparedContract &out) const
+InvokeErrorCode
+MultiplexedContext::verify_contract(
+    Contract const &contract, NetworkConfigParams const &params,
+    PreparedContract &out, std::optional<ContractRejectCode> &rejection) const
 {
   auto it = contexts_.find(contract.contract_type());
   if (it == contexts_.end()) {
-    return std::unexpected(ContractRejectCode::ContractRejectNotDeployable);
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
+    return InvokeErrorCode::Deterministic;
   }
-  return it->second.first->verify_contract(contract, params, out);
+  return it->second.first->verify_contract(contract, params, out, rejection);
 }
 } // namespace hogd

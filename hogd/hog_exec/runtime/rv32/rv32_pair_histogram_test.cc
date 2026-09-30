@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <expected>
 #include <map>
 #include <memory>
 #include <optional>
@@ -400,11 +399,12 @@ class TracingRv32Context final : public RuntimeContext {
 public:
   PairHistogram *active_histogram = nullptr;
 
-  std::expected<void, ContractRejectCode>
+  InvokeErrorCode
   verify_contract(Contract const &contract, NetworkConfigParams const &params,
-                  PreparedContract &out) const override
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const override
   {
-    return delegate_.verify_contract(contract, params, out);
+    return delegate_.verify_contract(contract, params, out, rejection);
   }
 
   x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
