@@ -103,7 +103,7 @@ make_value(uint64_t seed, size_t len)
 
 // Rewrites the LSN in a snapshot's trailing commit record to new_lsn and
 // recomputes the same unkeyed CRC32C recovery verifies, so only the LSN is out
-// of range. Used to exercise recovery's snapshot commit-LSN validation.
+// of range.
 void
 tamper_snapshot_commit_lsn(Directory &dir, std::string_view path,
                            uint64_t new_lsn)
@@ -1478,10 +1478,8 @@ TEST_F(DatabaseTest, RecoveryRejectsSnapshotCommitLsnWrap)
   ASSERT_TRUE(snapshot_future.get());
   db_.reset();
 
-  // Drop the WAL so only the snapshot drives recovery, then rewrite its "0-1"
-  // commit LSN to UINT64_MAX. Its successor wraps to zero, and accepting it
-  // once let recovery open at LSN zero, skip the snapshot, and take the
-  // fresh-db path.
+  // Drop the WAL so only the snapshot drives recovery, then set its commit LSN
+  // to UINT64_MAX so the successor wraps to zero.
   ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
   ASSERT_NO_FATAL_FAILURE(
       tamper_snapshot_commit_lsn(dir_, "0-1.snap",
@@ -1494,9 +1492,8 @@ TEST_F(DatabaseTest, RecoveryRejectsSnapshotCommitLsnWrap)
   EXPECT_EQ(checked.error(), DBCode::kCorruption);
 }
 
-// A zero-ended snapshot ("0-0.snap") also wraps its cursor to zero: end_lsn - 1
-// is UINT64_MAX, matching a tampered commit LSN. The writer never emits one, so
-// recovery must reject it rather than accept the wrap (#4229).
+// A canonical "0-0.snap" wraps its cursor to zero, so recovery must reject it
+// (#4229).
 TEST_F(DatabaseTest, RecoveryRejectsZeroEndedSnapshot)
 {
   const std::string key = "existing-key";
@@ -1509,8 +1506,8 @@ TEST_F(DatabaseTest, RecoveryRejectsZeroEndedSnapshot)
   ASSERT_TRUE(std::get<1>(*snapshot).get());
   db_.reset();
 
-  // Rename the real snapshot to a canonical "0-0.snap" and set its commit LSN
-  // to the value the wrapped end_lsn (0 - 1) would carry.
+  // Rename the real snapshot to "0-0.snap" and give it the commit LSN the
+  // wrapped end_lsn (0 - 1) would carry.
   ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
   ASSERT_TRUE(static_cast<bool>(dir_.rename("0-1.snap", "0-0.snap")));
   ASSERT_NO_FATAL_FAILURE(

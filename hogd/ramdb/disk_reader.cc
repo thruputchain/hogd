@@ -475,11 +475,8 @@ load_log_file(
           return DBError{DBCode::kCorruption};
         }
       }
-      // A snapshot writes one commit record at end_lsn - 1, so require exactly
-      // that. This rejects a tampered LSN like UINT64_MAX whose successor wraps
-      // to zero and would skip replay, recovering an empty database as fresh
-      // state. A zero-ended snapshot is rejected outright: its cursor would
-      // wrap to zero too, and the writer never produces one (#4229).
+      // A snapshot commits at end_lsn - 1; reject anything else, including a
+      // zero end_lsn whose successor would wrap to zero (#4229).
       else if (file.end_lsn_exclusive_ == 0 ||
                hdr.lsn != file.end_lsn_exclusive_ - 1) {
         error("snapshot {} has commit for lsn {} but its filename range ends "
