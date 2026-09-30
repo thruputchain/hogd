@@ -229,8 +229,7 @@ TEST_F(TryInvokeAdmissionTrustedTest,
   int128_t transfer_amount = cost_model->get_bytestring_cost(kPayload.size()) +
                              cost_model->get_balance_cost();
   ASSERT_GT(transfer_amount, 0);
-  auto transfer_amount_xdr =
-      make_amount(static_cast<int128_t>(transfer_amount));
+  auto transfer_amount_xdr = make_amount(transfer_amount);
 
   auto child = make_contract(make_child_write(kPayload));
   auto parent = make_contract([transfer_amount_xdr](NativeSyscallContext &ctx)

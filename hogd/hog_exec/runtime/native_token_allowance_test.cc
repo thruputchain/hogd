@@ -33,7 +33,6 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -1442,8 +1441,7 @@ TEST_F(NativeTokenAllowanceTest,
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto first = co_await client.invoke_opt<u8"transfer_from">(
-            ctx, kOwnerAddr, kReceiverAddr,
-            make_amount(static_cast<int128_t>(kTransferAmount)));
+            ctx, kOwnerAddr, kReceiverAddr, make_amount(kTransferAmount));
         if (!first.has_value() || !first.value().has_value() ||
             !first.value().value().has_value() ||
             !first.value().value().value().is_ok()) {
@@ -1452,8 +1450,7 @@ TEST_F(NativeTokenAllowanceTest,
         }
 
         auto second = co_await client.invoke_opt<u8"transfer_from">(
-            ctx, kOwnerAddr, kReceiverAddr,
-            make_amount(static_cast<int128_t>(kSecondTransferAmount)));
+            ctx, kOwnerAddr, kReceiverAddr, make_amount(kSecondTransferAmount));
         if (!second.has_value() || !second.value().has_value() ||
             !second.value().value().has_value() ||
             second.value().value().value().is_ok()) {

@@ -699,7 +699,7 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
-            kReceiverAddr, make_amount(static_cast<int128_t>(kTransferAmount)));
+            kReceiverAddr, make_amount(kTransferAmount));
         CopyableInvokeOutputs transfer_outputs{};
         auto r_transfer =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -818,8 +818,7 @@ TEST_F(BalanceCostTrackingTest,
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto first = co_await client.invoke_opt<u8"transfer">(
-            ctx, kReceiverAddr,
-            make_amount(static_cast<int128_t>(kFirstTransfer)));
+            ctx, kReceiverAddr, make_amount(kFirstTransfer));
         if (!first.has_value() || !first.value().has_value() ||
             !first.value().value().has_value() ||
             !first.value().value().value().is_ok()) {
@@ -828,8 +827,7 @@ TEST_F(BalanceCostTrackingTest,
         }
 
         auto second = co_await client.invoke_opt<u8"transfer">(
-            ctx, kReceiverAddr,
-            make_amount(static_cast<int128_t>(kSecondTransfer)));
+            ctx, kReceiverAddr, make_amount(kSecondTransfer));
         if (!second.has_value() || !second.value().has_value() ||
             !second.value().value().has_value() ||
             second.value().value().value().is_ok()) {
@@ -972,8 +970,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
 
         // (a) Transfer to fresh receiver; the amount covers its balance-cost.
         auto calldata_fwd = erc20_meta::make_calldata<u8"transfer">(
-            kReceiverAddr,
-            make_amount(static_cast<int128_t>(kTransferToReceiver)));
+            kReceiverAddr, make_amount(kTransferToReceiver));
         CopyableInvokeOutputs fwd_outputs{};
         auto r_fwd =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -1087,7 +1084,7 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
-            kReceiverAddr, make_amount(static_cast<int128_t>(kTransferAmount)));
+            kReceiverAddr, make_amount(kTransferAmount));
         auto r_transfer =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
@@ -1196,8 +1193,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
-            ctx, kReceiverAddr,
-            make_amount(static_cast<int128_t>(kTransferAmount)));
+            ctx, kReceiverAddr, make_amount(kTransferAmount));
 
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
@@ -1301,8 +1297,7 @@ TEST_F(BalanceCostTrackingTest,
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
-            ctx, kReceiverAddr,
-            make_amount(static_cast<int128_t>(kTransferAmount)));
+            ctx, kReceiverAddr, make_amount(kTransferAmount));
 
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
@@ -1515,8 +1510,7 @@ TEST_F(BalanceCostTrackingTest,
 
         // Transfer to the all-zero address. This is accepted, not rejected.
         auto r_transfer = co_await client.invoke_opt<u8"transfer">(
-            ctx, kZeroAddr,
-            make_amount(static_cast<int128_t>(kTransferAmount)));
+            ctx, kZeroAddr, make_amount(kTransferAmount));
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
             !r_transfer.value().value().value().is_ok()) {
