@@ -64,11 +64,9 @@ NewContractSet::make(NewContractBatch const &contracts,
     // deterministic failure. The map holds pointers into [contracts], so the
     // offset is the attachment's index.
     if (res == InvokeErrorCode::Deterministic) {
-      if (reason.has_value()) {
-        return reject(static_cast<size_t>(contract - contracts.data()),
-                      *reason);
-      }
-      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
+      // Every context names the reason for a Deterministic rejection.
+      CHECK(reason.has_value());
+      return reject(static_cast<size_t>(contract - contracts.data()), *reason);
     }
     // Anything else is a node fault, not the contract's: pass it through.
     if (res != InvokeErrorCode::None) {
