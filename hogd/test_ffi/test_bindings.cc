@@ -613,6 +613,14 @@ open_syscall_handler(void *db, void *rc,
     return kNullptrError;
   }
   try {
+    // Borrow before deserializing: the deserialize is caller-sized, and until
+    // the handler's guard registers nothing would hold the DB (issue #2667).
+    DBContext::Borrow entry_borrow(*db_context);
+    if (!entry_borrow.held()) {
+      log_lifecycle_transition_refusal("open_syscall_handler");
+      return make_ffi_result_type<OpenSyscallHandlerResult>(
+          kTestFFIErrorCodeUnrecoverableError);
+    }
     hogd::SignedTransaction stx;
     x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
     auto *out = static_cast<void *>(
@@ -654,6 +662,13 @@ open_mocked_syscall_handler(void *db, void *rc,
     return kNullptrError;
   }
   try {
+    // Borrow before deserializing; see open_syscall_handler() (issue #2667).
+    DBContext::Borrow entry_borrow(*db_context);
+    if (!entry_borrow.held()) {
+      log_lifecycle_transition_refusal("open_mocked_syscall_handler");
+      return make_ffi_result_type<OpenSyscallHandlerResult>(
+          kTestFFIErrorCodeUnrecoverableError);
+    }
     hogd::AuthClaim auth_claim_xdr;
     x23::deserialize(&auth_claim_xdr,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
