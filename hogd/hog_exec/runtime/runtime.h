@@ -64,7 +64,8 @@ public:
   // wants the preparation to live, and the context memoizes nothing. It is
   // written only on success; on rejection it is left as the caller had it.
   // A rejection names why (ContractRejectNotDeployable for a type it can't
-  // run).
+  // run). Rejections are for the contract's faults only: a node fault while
+  // verifying must CHECK, never be reported as a rejection.
   virtual std::expected<void, ContractRejectCode>
   verify_contract(Contract const &contract, NetworkConfigParams const &params,
                   PreparedContract &out) const = 0;

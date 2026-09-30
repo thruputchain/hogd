@@ -2,15 +2,18 @@
 #include "hogd/base/network_config_params.h"
 
 #include <expected>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "types.hh"
@@ -18,19 +21,18 @@
 namespace hogd {
 
 // TODO(geoff): gas cost calibration
-std::pair<std::expected<NewContractSet, ContractRejectDiagnostic>, GasAmount>
+std::pair<InvokeStatus<NewContractSet>, GasAmount>
 NewContractSet::make(NewContractBatch const &contracts,
                      RuntimeContext &runtime_context,
-                     NetworkConfigParams const &params)
+                     NetworkConfigParams const &params,
+                     std::optional<ContractRejectDiagnostic> &rejection)
 {
-  using result_t =
-      std::pair<std::expected<NewContractSet, ContractRejectDiagnostic>,
-                GasAmount>;
-  auto reject = [](size_t index, ContractRejectCode code) {
-    return result_t{std::unexpected(ContractRejectDiagnostic{
-                        .contract_index = static_cast<uint32_t>(index),
-                        .code = code}),
-                    0};
+  using result_t = std::pair<InvokeStatus<NewContractSet>, GasAmount>;
+  auto reject = [&rejection](size_t index, ContractRejectCode code) {
+    rejection =
+        ContractRejectDiagnostic{.contract_index = static_cast<uint32_t>(index),
+                                 .code = code};
+    return result_t{InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   };
 
   NewContractSet new_contract_set;

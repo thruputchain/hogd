@@ -296,15 +296,18 @@ SystemCallHandler::perform_initial_validation()
   // handler itself cannot rethrow -- and keep anything else terminating,
   // since it is a genuine bug.
   try {
+    std::optional<ContractRejectDiagnostic> rejection;
     auto [res, gas_consumed] =
         NewContractSet::make(contracts_to_deploy_, runtime_context_,
-                             config_params());
+                             config_params(), rejection);
     if (!res.has_value()) {
-      warn("tx {}: refusing attached contract {}: {}",
-           show_byte_array(get_source_tx_hash()), res.error().contract_index,
-           x23::show(res.error().code));
-      report_contract_rejection(res.error());
-      return {InvokeError{InvokeErrorCode::ValidationFailure}, gas_consumed};
+      if (rejection.has_value()) {
+        warn("tx {}: refusing attached contract {}: {}",
+             show_byte_array(get_source_tx_hash()), rejection->contract_index,
+             x23::show(rejection->code));
+        report_contract_rejection(*rejection);
+      }
+      return {res.error(), gas_consumed};
     }
     newly_created_contracts_ = std::move(*res);
 

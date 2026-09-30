@@ -1,6 +1,6 @@
 #pragma once
 
-#include <expected>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -29,20 +29,20 @@ public:
   // Borrows [contracts]: the returned set holds pointers into its elements,
   // so they must outlive the set (buffer-stealing moves of the enclosing
   // vector are fine; destroying the elements is not).
-  // On rejection, names the first offending attachment; the caller logs and
-  // reports it.
-  static std::pair<std::expected<NewContractSet, ContractRejectDiagnostic>,
-                   GasAmount>
+  // A refused attachment fails with ValidationFailure and names the first
+  // offender in `rejection`; the caller logs and reports it.
+  static std::pair<InvokeStatus<NewContractSet>, GasAmount>
   make(NewContractBatch const &contracts, RuntimeContext &runtime_context,
-       NetworkConfigParams const &params);
+       NetworkConfigParams const &params,
+       std::optional<ContractRejectDiagnostic> &rejection);
 
   // A temporary batch would leave the returned set holding dangling element
   // pointers before its first use. Deleted to make that a compile error at
   // the call site (same guard as SystemCallHandler's Transaction&& ctor).
-  static std::pair<std::expected<NewContractSet, ContractRejectDiagnostic>,
-                   GasAmount>
+  static std::pair<InvokeStatus<NewContractSet>, GasAmount>
   make(NewContractBatch &&contracts, RuntimeContext &runtime_context,
-       NetworkConfigParams const &params) = delete;
+       NetworkConfigParams const &params,
+       std::optional<ContractRejectDiagnostic> &rejection) = delete;
 
   BorrowedContractBatch borrow_contracts(
       std::unordered_set<SHA256Hash, SipHash24Hasher> const &hashes) const
