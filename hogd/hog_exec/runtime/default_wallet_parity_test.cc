@@ -1203,7 +1203,10 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
         EXPECT_FALSE(lookup_storage_item_from_db(
             make_free_native_token_balance_addrkey(target)));
         auto events = get_tx_event_log(last_tx_id_)();
-        ASSERT_TRUE(events.has_value());
+        if (!events.has_value()) {
+          ADD_FAILURE() << "expected included transaction event log";
+          return;
+        }
         EXPECT_TRUE(events->events.empty());
       }
     }

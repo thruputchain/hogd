@@ -24,6 +24,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
@@ -1394,7 +1395,10 @@ protected:
   {
     auto data =
         Serializer<SerializationFormat::kTxs>::serialize(owner, spender);
-    EXPECT_TRUE(data.has_value());
+    if (!data.has_value()) {
+      ADD_FAILURE() << "could not serialize the allowance key";
+      return 0;
+    }
     StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() = sha256(*data);
     return read_nnint(
