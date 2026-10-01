@@ -13,6 +13,31 @@ CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
+# The control server on hog4 splits the coordinator's streams into two files;
+# both are copied here, and [log_metric.sh] parses the stdout one.
+COORDINATOR_STDOUT_FILE=./coordinator_output.txt
+COORDINATOR_STDERR_FILE=./coordinator_stderr.txt
+# How much of the coordinator's output the failure path replays.
+COORDINATOR_TAIL_LINES=${COORDINATOR_TAIL_LINES:-200}
+
+# Replays what the coordinator said before the run gave up on it. Both files
+# are already local by the time anything below can fail, and nothing else ever
+# prints them: [log_metric.sh] consumes coordinator_output.txt only on the
+# success path, so without this a coordinator that exits non-zero leaves
+# nothing in the job log but "coordinator exit status 1".
+replay_coordinator_output() {
+  local file
+
+  for file in "$COORDINATOR_STDOUT_FILE" "$COORDINATOR_STDERR_FILE"; do
+    if [ ! -s "$file" ]; then
+      echo "===== no coordinator output in $file ====="
+      continue
+    fi
+    echo "===== last $COORDINATOR_TAIL_LINES lines of $file ====="
+    tail -n "$COORDINATOR_TAIL_LINES" "$file" || true
+    echo "===== end of $file ====="
+  done
+}
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -169,7 +194,18 @@ fi
 
 echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" "$COORDINATOR_STDOUT_FILE"
+# chuckd reports its benchmark results on stdout and everything else -- its
+# own logging, and whatever killed it -- on stderr, which the control server
+# writes to a separate file. Fetching only stdout above means a coordinator
+# that dies says nothing at all. This copy is diagnostics, so a host that
+# cannot produce it must not turn into a second failure on top of the first.
+coordinator_stderr_path=$(
+  ci_remote_run hog4 'ls -1t /tmp/hogd_stderr* 2>/dev/null | head -n 1'
+) || coordinator_stderr_path=""
+if [ -n "$coordinator_stderr_path" ]; then
+  scp hog4:"$coordinator_stderr_path" "$COORDINATOR_STDERR_FILE" || true
+fi
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the
@@ -177,10 +213,12 @@ if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # signal-terminated status is a crash rather than a reported error, so name
   # the signal instead of leaving a bare number in the log.
   echo "mempool $(ci_describe_exit_status "$mempool_status")" >&2
+  replay_coordinator_output
   exit "$mempool_status"
 fi
 if [[ $coordinator_status -ne 0 ]]; then
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
+  replay_coordinator_output
   exit "$coordinator_status"
 fi
 
@@ -188,4 +226,4 @@ echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
 
 echo 'log integration metrics'
-./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
+./scripts/log_metric.sh nightly_integration_mempool "$COORDINATOR_STDOUT_FILE"
