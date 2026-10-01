@@ -12,6 +12,7 @@
 #include <system_error>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -381,12 +382,12 @@ TEST(HogEventProcess, ReconnectsAfterMempoolDropsLinkDuringRegistration)
   registration.clear();
   x23::Defer cleanup([&registration] { registration.clear(); });
 
-  // No canonical tip yet, so prepare_event answers NotReady and hog-event
-  // stays in its registration poll, which is where the link gets cut.
+  // No canonical tip is published yet, so prepare_event would answer NotReady
+  // and hog-event stays in its registration poll.
 
   // hog-event reconnects to the --mempool-addr it was given, so the mempool
-  // has to come back on the same port. A kernel-assigned one is up for grabs
-  // the moment the first server releases it, so reserve a fixed one.
+  // has to come back on the same port, and a kernel-assigned one is up for
+  // grabs the moment the first listener closes.
   ReservedEventPorts mempool_reserved = reserve_event_ports();
   const std::uint16_t mempool_port = mempool_reserved.ports[0];
   const std::string mempool_addr =
@@ -402,29 +403,32 @@ TEST(HogEventProcess, ReconnectsAfterMempoolDropsLinkDuringRegistration)
   mempool_reserved.holders.clear();
   reserved.holders.clear();
 
-  std::optional<RpcServer<MempoolEventRpc>> mempool_event;
-  mempool_event.emplace();
-  ASSERT_EQ(mempool_event->start_server(
-                x23::HostPort{"127.0.0.1", mempool_port}),
-            mempool_port);
-
+  // A bare listener rather than an RpcServer, so the link is cut at a known
+  // point: accept() returns only once hog-event has connected, and the read
+  // only once it has sent a prepare_event call. Closing both then leaves that
+  // call in flight, which is the EOF hog-event used to die on. Tearing down an
+  // RpcServer instead races the retry loop's sleep, and a drop that lands
+  // before hog-event has connected proves nothing.
+  x23::UniqueFd listener = listen_loopback(mempool_port);
   DaemonProcess event =
       DaemonProcess::start(HOG_EVENT_BINARY,
                            event_args(mempool_addr, work_dir.directory(),
                                       event_exec_port, event_indexer_port,
                                       event_mempool_port, event_metrics_port));
-  // The last listener is published just before registration begins.
-  event.wait_until_log_contains("PORT event.mempool=");
+  {
+    x23::UniqueFd registering(accept(listener.get(), nullptr, nullptr));
+    ASSERT_TRUE(static_cast<bool>(registering));
+    std::array<char, 64> call{};
+    ASSERT_GT(::read(registering.get(), call.data(), call.size()), 0);
+  }
+  listener.reset();
 
-  // ~RpcServer poisons the connections it accepted, so the in-flight
-  // prepare_event call ends in EOF. Nothing listens on the port until the
-  // mempool is back, so the reconnect attempts are refused and retried rather
-  // than landing on a stray socket.
-  mempool_event.reset();
+  // Nothing listens on the port until the mempool is back, so the reconnects
+  // are refused and retried rather than landing on a stray socket.
   event.wait_until_log_contains("lost its connection");
 
-  mempool_event.emplace();
-  ASSERT_EQ(mempool_event->start_server(
+  RpcServer<MempoolEventRpc> mempool_event;
+  ASSERT_EQ(mempool_event.start_server(
                 x23::HostPort{"127.0.0.1", mempool_port}),
             mempool_port);
 
