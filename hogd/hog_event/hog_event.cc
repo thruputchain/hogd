@@ -120,14 +120,8 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
     }
   };
   // A mempool that goes away mid-registration is a dependency delay, not a
-  // fatal error: docs/component-failure-model.md requires peers to tolerate
-  // start order through registration and retry. The srpc client reports a
-  // closed link by throwing [x23::XdrException] ("EOF waiting for result of
-  // SchedEvent1::schedevent_prepare_event"), and a reconnect that fails for
-  // anything but a refused connection throws [std::system_error]. Neither was
-  // caught, so hog-event aborted with a bare "terminate called" that named no
-  // peer and left nothing to retry. Reconnect and resume the handshake
-  // instead; both prepare and activate are idempotent for an unchanged card.
+  // fatal error: reconnect and resume. Prepare and activate are both
+  // idempotent for an unchanged card.
   std::optional<decltype(connect_to_event_sched_server(mempool_address))>
       client;
   while (true) {

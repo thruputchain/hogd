@@ -182,10 +182,8 @@ if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
 fi
 if [[ $coordinator_status -ne 0 ]]; then
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
-  # The coordinator drives genesis, so its log is the first place to look when
-  # the chain never starts. Until now it was only published to metrics history,
-  # which a failed run never reaches, leaving the bare status above as the only
-  # thing CI printed about it.
+  # Print the coordinator log tail; it is the first place to look when the
+  # chain never starts.
   echo "===== last $COORDINATOR_LOG_TAIL_LINES lines of coordinator output ====="
   tail -n "$COORDINATOR_LOG_TAIL_LINES" ./coordinator_output.txt || true
   exit "$coordinator_status"

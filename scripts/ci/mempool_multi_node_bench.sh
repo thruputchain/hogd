@@ -492,10 +492,8 @@ done
 
 echo 'wait for coordinator-driven event activation'
 for node in "${NODE_IDS[@]}"; do
-  # Activation is driven by the coordinator loading genesis, so a timeout here
-  # usually means the coordinator never got that far. The event's own log only
-  # shows it still waiting, so replay the coordinator and the mempool it
-  # registers with as well: the reason lives in one of those two.
+  # On timeout, replay the coordinator and mempool logs: the reason is usually
+  # there, not in the event log.
   if ! wait_control_log_line "node${node}_event" \
     'event initialization complete.'; then
     replay_control_log_for_label "node${node}_chuckd"

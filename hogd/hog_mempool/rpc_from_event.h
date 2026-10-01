@@ -39,11 +39,9 @@ public:
     EventPrepareResult result =
         Registration::registration().prepare_event(card);
     if (result.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
-      // hog-event polls this once a second until the mempool has a canonical
-      // tip at a real height, so a chain that never reaches genesis logs here
-      // for the whole wait. Unthrottled that is one line per second -- enough
-      // to fill the log tail CI replays when a benchmark fails, pushing out
-      // every other diagnostic. Say what is still missing, and say it rarely.
+      // hog-event polls this every second until a canonical tip exists, so
+      // throttle it: unthrottled, a chain that never reaches genesis floods
+      // the log for the whole wait.
       info_every_n_sec(30.0F, "event server preparing registration: waiting "
                               "for a canonical tip at a real height");
       return result;
