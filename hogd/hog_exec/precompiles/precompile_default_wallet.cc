@@ -282,7 +282,7 @@ make_native_default_wallet_contract()
       // The builder requires owned arguments for its deserialized tuple.
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       [](NativeSyscallContext &ctx, SHA256Hash nonce, SHA256Hash contract_hash,
-         std::tuple<uint64_t, uint64_t> amount,
+         std::tuple<int64_t, uint64_t> amount,
          x23::Ptr<default_wallet::WalletInitCall> initializer)
           -> x23::Async<InvokeStatus<deploy_result_t>> {
         auto auth_err = co_await check_root_pubkey_auth(ctx);
@@ -293,9 +293,7 @@ make_native_default_wallet_contract()
           co_return deploy_result_t::make_err(WalletException{**auth_err});
         }
 
-        const uint128_t funding_amount =
-            uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
-        if (funding_amount != 0) {
+        if (amount != std::tuple<int64_t, uint64_t>{}) {
           ContractAddress target{};
           auto r = co_await ctx.syscall<SyscallNo::kGetDeployAddress>(
               static_cast<ContractAddress const *>(nullptr), nonce,

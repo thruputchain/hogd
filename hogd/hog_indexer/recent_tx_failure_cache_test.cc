@@ -25,7 +25,7 @@ make_diag(BlockHeight attempt_height, DbConflictCode code)
 {
   TxFailureDiagnostic diag;
   diag.attempt_height = attempt_height;
-  diag.conflict.code = code;
+  diag.cause.conflict().code = code;
   return diag;
 }
 
@@ -41,7 +41,7 @@ TEST(RecentTxFailureCacheTest, ReportThenLookup)
   ASSERT_TRUE(found.has_value());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(found->attempt_height, 100);
-  EXPECT_EQ(found->conflict.code, DbConflictCode::ValueMismatch);
+  EXPECT_EQ(found->cause.conflict().code, DbConflictCode::ValueMismatch);
   // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_FALSE(cache.lookup(make_hash(0x02)).has_value());
 }
@@ -59,7 +59,7 @@ TEST(RecentTxFailureCacheTest, LatestAttemptWins)
   ASSERT_TRUE(found.has_value());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(found->attempt_height, 12);
-  EXPECT_EQ(found->conflict.code, DbConflictCode::Overflow);
+  EXPECT_EQ(found->cause.conflict().code, DbConflictCode::Overflow);
   // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_EQ(cache.size(), 1);
 }
@@ -107,7 +107,7 @@ TEST(RecentTxFailureCacheTest, SameHeightReReportUpdatesPayloadAndExpiresOnce)
   ASSERT_TRUE(found.has_value());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(found->attempt_height, 100);
-  EXPECT_EQ(found->conflict.code, DbConflictCode::Overflow);
+  EXPECT_EQ(found->cause.conflict().code, DbConflictCode::Overflow);
   // NOLINTEND(bugprone-unchecked-optional-access)
   EXPECT_EQ(cache.size(), 1);
 

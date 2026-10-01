@@ -22,9 +22,7 @@
 #include <thread>
 #include <utility>
 
-#include "address_auth.hh"
 #include "auth_card.hh"
-#include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -44,7 +42,6 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/hog_auth/auth_server.h"
@@ -116,30 +113,6 @@ withhold_indexer_pull_for_test()
   return value != nullptr && std::string_view(value) == "1";
 }
 
-void
-validate_bootstrap_account_auth_data(BootstrapAccountMetadata const &account,
-                                     AddressAuthData const &auth_data)
-{
-  if (auth_data.required_weight != Weight{1}) {
-    throw std::runtime_error("bootstrap account auth data required weight "
-                             "does not match persisted metadata");
-  }
-  if (auth_data.public_keys[0] == nullptr) {
-    throw std::runtime_error(
-        "bootstrap account auth data is missing public key "
-        "from persisted metadata");
-  }
-  if (auth_data.public_keys[0]->max_weight != Weight{1}) {
-    throw std::runtime_error("bootstrap account auth data public key weight "
-                             "does not match persisted metadata");
-  }
-  if (auth_data.public_keys[0]->key.scheme() != CryptographicScheme::Ed25519 ||
-      auth_data.public_keys[0]->key.ed25519() != account.public_key) {
-    throw std::runtime_error("bootstrap account public key does not match "
-                             "persisted metadata");
-  }
-}
-
 template<typename T>
 T
 require_io(ErrnoStatus<T> status, std::string_view operation)
@@ -171,10 +144,9 @@ build_data_dir_metadata_json(LocalBootstrapConfig const &config)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{2});
+    w.field("schemaVersion", std::int64_t{3});
     w.field("kind", "hog-devnode-data");
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
-      w.field("devWalletProfile", config.dev_wallet_profile);
       w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
       w.field("devAccounts",
               static_cast<std::int64_t>(config.user_account_count));
@@ -316,14 +288,15 @@ parse_data_dir_metadata(std::string_view bytes)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", "root");
-  if (schema_version == 1) {
+  if (schema_version == 1 || schema_version == 2) {
     throw std::runtime_error(
-        "hog-devnode data metadata schemaVersion 1 uses the legacy bootstrap "
-        "layout; reinitialize the data dir");
+        "hog-devnode data metadata uses legacy bootstrap accounts; use the "
+        "original "
+        "runtime for this data directory or choose a new data directory");
   }
-  if (schema_version != 2) {
+  if (schema_version != 3) {
     throw std::runtime_error(std::format(
-        "unsupported hog-devnode data metadata schemaVersion {}, expected 2",
+        "unsupported hog-devnode data metadata schemaVersion {}, expected 3",
         schema_version));
   }
   require_string_value(require_string_field(*parsed, "kind", "root"),
@@ -368,9 +341,6 @@ parse_data_dir_metadata(std::string_view bytes)
       .seed = std::string(require_string_field(config_json, "devAccountSeed",
                                                "bootstrapConfig")),
       .user_storage_tokens = *user_storage_tokens,
-      .dev_wallet_profile =
-          std::string(require_string_field(config_json, "devWalletProfile",
-                                           "bootstrapConfig")),
   };
   if (const auto *overrides = config_json.find("networkConfigOverrides")) {
     if (overrides->type() != json::Value::Type::kObject) {
@@ -391,11 +361,6 @@ parse_data_dir_metadata(std::string_view bytes)
     throw std::runtime_error(
         "hog-devnode data metadata devAccountSeed must not be empty");
   }
-  if (config.dev_wallet_profile.empty()) {
-    throw std::runtime_error(
-        "hog-devnode data metadata devWalletProfile must not be empty");
-  }
-  resolve_dev_wallet_profile(config.dev_wallet_profile);
   return config;
 }
 
@@ -428,10 +393,6 @@ require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
         "overrides; reuse the original overrides or choose a fresh data "
         "directory");
   }
-  if (persisted.dev_wallet_profile != requested.dev_wallet_profile) {
-    fail("--dev-wallet-profile", persisted.dev_wallet_profile,
-         requested.dev_wallet_profile);
-  }
 }
 
 void
@@ -449,6 +410,28 @@ preflight_data_dir_metadata(
       throw std::runtime_error(std::format(
           "could not inspect hog-devnode data dir metadata '{}': {}",
           path.string(), ec.message()));
+    }
+    // Directory setup runs before this preflight. Empty subsystem directories
+    // are a fresh skeleton; any persisted file requires compatible metadata.
+    for (const auto *name : {"ramdb", "events", "indexer"}) {
+      const auto subsystem = *data_dir / name;
+      if (!std::filesystem::exists(subsystem, ec)) {
+        if (ec) {
+          throw std::runtime_error(
+              std::format("could not inspect data directory: {}",
+                          ec.message()));
+        }
+        continue;
+      }
+      for (const auto &entry :
+           std::filesystem::recursive_directory_iterator(subsystem)) {
+        if (!entry.is_directory()) {
+          throw std::runtime_error(
+              "hog-devnode data directory has persisted state but no bootstrap "
+              "metadata; "
+              "use the original runtime or choose a new data directory");
+        }
+      }
     }
     return;
   }
@@ -929,7 +912,7 @@ HogDevnodeNode::validate_recovered_data_dir(
     }
     throw std::runtime_error(
         "hog-devnode data dir has committed chain state but no bootstrap "
-        "metadata; reinitialize the data dir");
+        "metadata; use the original runtime or choose a new data directory");
   }
 
   LocalBootstrapConfig persisted_config =
@@ -1055,14 +1038,11 @@ void
 HogDevnodeNode::refresh_bootstrap_account_balances()
 {
   for (BootstrapAccountMetadata &account : bootstrap_accounts_) {
-    HogDbStatus<AddressAuthData> auth_data =
-        ctx_->get_db().read_address_auth_data(account.address);
-    if (!auth_data.has_value()) {
+    if (account.address !=
+        derive_bootstrap_account_address(account.public_key)) {
       throw std::runtime_error(
-          "bootstrap account metadata does not match recovered chain: missing "
-          "auth data");
+          "bootstrap account address does not match derived native account");
     }
-    validate_bootstrap_account_auth_data(account, *auth_data);
 
     HogDbStatus<int128_t> balance =
         ctx_->get_db().read_address_balance(account.address);

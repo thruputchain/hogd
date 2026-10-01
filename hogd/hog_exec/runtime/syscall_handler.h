@@ -621,6 +621,15 @@ private:
   // pinned tip, and the send runs in its own detached coroutine.
   void report_db_conflict_diagnostic() const;
 
+  // Proposal mode only: fire-and-forgets `rejection` as this transaction's
+  // TxFailureDiagnostic. In validation nobody is waiting on the hash.
+  void
+  report_contract_rejection(ContractRejectDiagnostic const &rejection) const;
+
+  // Sends `cause` for this transaction at the executing block height. Never
+  // fails and never suspends.
+  void report_tx_failure(TxFailureCause cause) const;
+
   BlockExecutionMode get_block_execution_mode() const
   {
     if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {

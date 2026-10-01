@@ -34,6 +34,23 @@ default:
   void;
 };
 
+// The generated accessors for a union name the union itself, so a union
+// whose XDR name collides with one of the generator's template parameters
+// used to produce a header that would not compile.
+union U switch (bool big) {
+case FALSE:
+  int i;
+case TRUE:
+  hyper h;
+};
+
+union I switch (bool big) {
+case FALSE:
+  int i;
+case TRUE:
+  hyper h;
+};
+
 program sample {
   version sample_v1 {
     void ping(void) = 0;

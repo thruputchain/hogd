@@ -203,6 +203,8 @@ TEST_F(ViewTest, BasicViewReturnsOkWithCorrectOutput)
       std::as_bytes(std::span(buf.data(), buf.size())), false);
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(*decoded, 55U);
+  EXPECT_GT(result.result().gas_consumed, 0U);
+  EXPECT_LT(result.result().gas_consumed, UINT64_MAX);
 }
 
 TEST_F(ViewTest, ViewGasExhaustion)
@@ -214,6 +216,38 @@ TEST_F(ViewTest, ViewGasExhaustion)
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
   EXPECT_EQ(result.result().output.status_code(),
             InvocationFrameStatusCode::Fault);
+  // An out-of-gas fault charges the whole limit.
+  EXPECT_EQ(result.result().gas_consumed, 1U);
+}
+
+// The reported figure is the invocation's cost, not an echo of its limit: a
+// different sufficient limit reports the same figure, and a limit below it
+// runs out of gas.
+TEST_F(ViewTest, ViewGasConsumedIsIndependentOfLimit)
+{
+  ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
+
+  auto measured = run_view(
+      make_query(client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U)));
+  ASSERT_EQ(measured.status(), TransactionViewStatus::Ok);
+  ASSERT_EQ(measured.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  GasAmount gas = measured.result().gas_consumed;
+  ASSERT_GT(gas, 0U);
+
+  auto roomy =
+      run_view(make_query(client.make_invocation<u8"fibonacci">(gas * 2, 10U)));
+  ASSERT_EQ(roomy.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(roomy.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(roomy.result().gas_consumed, gas);
+
+  auto short_by_one =
+      run_view(make_query(client.make_invocation<u8"fibonacci">(gas - 1, 10U)));
+  ASSERT_EQ(short_by_one.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(short_by_one.result().output.status_code(),
+            InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(short_by_one.result().gas_consumed, gas - 1);
 }
 
 TEST_F(ViewTest, ViewWithMsgSender)

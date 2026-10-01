@@ -64,13 +64,22 @@ block_explorer_init(const std::string &indexer_server_addr,
     info("block_height = {}", tx_info.height);
   }
   else if (tx_info_res.outcome() == TxInfoOutcome::TxInfoRecentFailure) {
-    // Best-effort diagnostic for a tx that failed nondeterministically at
-    // proposal time and never committed (expires after a few blocks).
+    // Best-effort diagnostic for a tx a proposer excluded and that never
+    // committed (expires after a few blocks).
     const TxFailureDiagnostic &diag = tx_info_res.recent_failure();
-    info("tx recently failed (nondeterministic conflict; not committed):");
+    info("tx recently excluded from a proposal (not committed):");
     info("hash = {}", *tx_hash_raw);
     info("attempted at block_height = {}", diag.attempt_height);
-    info("conflict code = {}", x23::show(diag.conflict.code));
+    switch (diag.cause.kind()) {
+    case TxFailureKind::TxFailureDbConflict:
+      info("conflict code = {}", x23::show(diag.cause.conflict().code));
+      break;
+    case TxFailureKind::TxFailureContractRejected:
+      info("refused attached contract {}: {}",
+           diag.cause.contract().contract_index,
+           x23::show(diag.cause.contract().code));
+      break;
+    }
   }
   else {
     info("could not find tx (hash = {}).", *tx_hash_raw);

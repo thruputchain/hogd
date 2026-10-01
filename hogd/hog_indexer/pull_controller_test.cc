@@ -268,7 +268,7 @@ public:
     block_ = std::move(*block);
     std::ranges::fill(notice_.tx_hash, 0x51);
     notice_.diagnostic.attempt_height = 0;
-    notice_.diagnostic.conflict.code = DbConflictCode::ValueMismatch;
+    notice_.diagnostic.cause.conflict().code = DbConflictCode::ValueMismatch;
   }
 
   x23::Async<EventIndexerPullResult>
@@ -440,7 +440,8 @@ TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
   auto diagnostic = failures.lookup(event_server.impl()->failure_hash());
   ASSERT_TRUE(diagnostic.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by ASSERT.
-  EXPECT_EQ(diagnostic.value().conflict.code, DbConflictCode::ValueMismatch);
+  EXPECT_EQ(diagnostic.value().cause.conflict().code,
+            DbConflictCode::ValueMismatch);
 }
 
 TEST(IndexerPullController,

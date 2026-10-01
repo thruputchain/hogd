@@ -446,6 +446,7 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
     ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayOk);
     result.payload().height = height;
     result.payload().output = std::move(raw.result().output);
+    result.payload().gas_consumed = raw.result().gas_consumed;
     result.payload().events = std::move(raw.result().events);
     return result;
   }

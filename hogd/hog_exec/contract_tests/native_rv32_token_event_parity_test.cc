@@ -78,11 +78,10 @@ public:
   // runs). The transfer amounts must exceed the native token's one-time
   // balance-creation cost (deducted from the recipient's credited balance, so a
   // tiny transfer would underflow and abort the commit non-deterministically).
-  constexpr static uint128_t kMintAmount = 10'000'000;
-  constexpr static uint128_t kTransferAmount = 500'000;
+  constexpr static int128_t kMintAmount = 10'000'000;
+  constexpr static int128_t kTransferAmount = 500'000;
   constexpr static int128_t kAllowanceAmount = 400'000;
-  constexpr static uint128_t kTransferFromAmount = 200'000;
-  constexpr static uint128_t kBurnAmount = 300'000;
+  constexpr static int128_t kTransferFromAmount = 200'000;
 
   // Wrapper method IDs.
   constexpr static Runtime::MethodID kMethodTransfer = 0;
@@ -92,12 +91,11 @@ public:
   constexpr static Runtime::MethodID kMethodMint = 4;
   constexpr static Runtime::MethodID kMethodNettedNegativeAllowanceChange = 5;
   constexpr static Runtime::MethodID kMethodInitializeGenesisRoot = 6;
-  constexpr static Runtime::MethodID kMethodBurn = 7;
-  constexpr static Runtime::MethodID kMethodClearAllowance = 8;
+  constexpr static Runtime::MethodID kMethodDeleteAllowance = 7;
 
   constexpr static int32_t kWrapperNativeId = 40;
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
@@ -216,7 +214,7 @@ protected:
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
           co_return co_await call_ok<u8"adjust_allowance">(
-              ctx, target, kSpender, make_difference(kAllowanceAmount), false);
+              ctx, target, kSpender, make_difference(kAllowanceAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodTransferFrom,
@@ -245,13 +243,6 @@ protected:
           co_return co_await call_ok<u8"initialize">(
               ctx, target, kGenesisRootContractAddress);
         });
-    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        kMethodBurn,
-        [](NativeSyscallContext &ctx,
-           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
-          co_return co_await call_ok<u8"burn">(ctx, target, kAlice,
-                                               make_amount(kBurnAmount));
-        });
     // The netting sequence from hogd#1918: decrement a fresh (Alice, Spender)
     // allowance and then, as a sibling call in the same transaction, increment
     // it straight back. The decrement must be rejected outright -- if it were
@@ -263,19 +254,19 @@ protected:
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
           auto rejected = co_await call_expect_err<u8"adjust_allowance">(
               ctx, target, itc_erc20::ERC20Error::TooLarge, kSpender,
-              make_difference(-kAllowanceAmount), false);
+              make_difference(-kAllowanceAmount));
           if (!rejected.has_value()) {
             co_return rejected.error();
           }
           co_return co_await call_ok<u8"adjust_allowance">(
-              ctx, target, kSpender, make_difference(kAllowanceAmount), false);
+              ctx, target, kSpender, make_difference(kAllowanceAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        kMethodClearAllowance,
+        kMethodDeleteAllowance,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
-          co_return co_await call_ok<u8"clear_allowance">(ctx, target,
-                                                          kSpender);
+          co_return co_await call_ok<u8"delete_allowance">(ctx, target,
+                                                           kSpender);
         });
     auto wrapper_contract = builder.build();
 
@@ -300,7 +291,7 @@ protected:
 
     // Deploy the wrapper at the Alice and Spender addresses so that the
     // msg_sender seen by the token equals the acting party, and at the genesis
-    // root address so mint/burn pass the native token's owner gate (the test
+    // root address so mint passes the native token's owner gate (the test
     // genesis is empty, so nothing else occupies that address).
     auto wrapper_xdr = make_native_contract(kWrapperNativeId);
     write_contract(wrapper_xdr);
@@ -310,7 +301,7 @@ protected:
 
     // Fund Alice (native balance for the native-token transfers + storage +
     // replay cache for the txs she roots), Spender (replay cache), and the
-    // genesis root (replay cache for the mint/burn txs it roots).
+    // genesis root (replay cache for the mint txs it roots).
     setup_grant_storage_token(kAlice, 50'000'000);
     setup_grant_storage_token(kSpender, 10'000'000);
     setup_grant_storage_token(kGenesisRootContractAddress, 10'000'000);
@@ -430,26 +421,21 @@ TEST_F(NativeRv32TokenEventParityTest,
                       "transfer_from");
 }
 
-// Mint and burn events: a supply change is its own event on
-// groundhog-erc20-if, not a Transfer from or to the zero address, so a mint
-// emits Mint(receiver) and a burn emits Burn(owner), each with two topics,
-// byte-identically on the rv32 itc_erc20 and the native precompile (modulo
-// the emitting contract address). Both run from the genesis root address: the
-// native token's mint/burn are gated on it, and the rv32 token is initialized
-// with it as owner so the same caller passes both gates.
-TEST_F(NativeRv32TokenEventParityTest, MintBurnEventsMatchRv32AndNative)
+// Mint events: a supply change is its own event on groundhog-erc20-if, not a
+// Transfer from the zero address, so a mint emits Mint(receiver) with two
+// topics, byte-identically on the rv32 itc_erc20 and the native precompile
+// (modulo the emitting contract address). Both run from the genesis root
+// address: the native token's mint is gated on it, and the rv32 token is
+// initialized with it as owner so the same caller passes both gates.
+TEST_F(NativeRv32TokenEventParityTest, MintEventsMatchRv32AndNative)
 {
   // --- rv32 itc_erc20: initialize with the genesis root as owner. ---
   run_setup(kMethodInitializeGenesisRoot, kAlice, kRv32Token);
   auto rv32_mint = run_op(kMethodMint, kGenesisRootContractAddress, kRv32Token);
-  auto rv32_burn = run_op(kMethodBurn, kGenesisRootContractAddress, kRv32Token);
 
-  // --- native token: the mint also creates the supply key the burn needs. ---
   ContractAddress const native_token = kNativeTokenContractAddress;
   auto native_mint =
       run_op(kMethodMint, kGenesisRootContractAddress, native_token);
-  auto native_burn =
-      run_op(kMethodBurn, kGenesisRootContractAddress, native_token);
 
   // Sanity: the events really were emitted by the two different contracts.
   ASSERT_TRUE(rv32_mint.has_value());
@@ -458,29 +444,15 @@ TEST_F(NativeRv32TokenEventParityTest, MintBurnEventsMatchRv32AndNative)
   EXPECT_EQ(native_mint->contract_address, native_token);
 
   expect_events_match(rv32_mint, native_mint, 2U, "mint");
-  expect_events_match(rv32_burn, native_burn, 2U, "burn");
 
-  // Non-vacuity: mint and burn events differ (distinct signature topics and
-  // distinct amounts), so the two matches above pin two distinct payloads.
-  ASSERT_TRUE(rv32_burn.has_value());
-  ASSERT_TRUE(native_burn.has_value());
-  EXPECT_NE(rv32_mint->serialized_event, rv32_burn->serialized_event);
-
-  // ...and neither is a Transfer wearing a different address: a mint carries
-  // the Mint signature and a burn the Burn signature, which is the whole
-  // point of the interface change.
-  auto signature_topic = [](TxEmittedEvent const &ev) {
-    Topic topic{};
-    EXPECT_GE(ev.serialized_event.size(), sizeof(Topic));
-    if (ev.serialized_event.size() >= sizeof(Topic)) {
-      std::memcpy(topic.data(), ev.serialized_event.data(), sizeof(Topic));
-    }
-    return topic;
-  };
-  EXPECT_EQ(signature_topic(*native_mint), native_token_mint_event_signature());
-  EXPECT_EQ(signature_topic(*native_burn), native_token_burn_event_signature());
-  EXPECT_NE(signature_topic(*native_mint),
-            native_token_transfer_event_signature());
+  // ...and it is not a Transfer wearing a different address: a mint carries
+  // the Mint signature.
+  Topic topic{};
+  ASSERT_GE(native_mint->serialized_event.size(), sizeof(Topic));
+  std::memcpy(topic.data(), native_mint->serialized_event.data(),
+              sizeof(Topic));
+  EXPECT_EQ(topic, native_token_mint_event_signature());
+  EXPECT_NE(topic, native_token_transfer_event_signature());
 }
 
 // hogd#1918: a rejected decrement must not publish an event even if a later
@@ -518,7 +490,7 @@ TEST_F(NativeRv32TokenEventParityTest,
                       "native netted vs plain");
 }
 
-TEST_F(NativeRv32TokenEventParityTest, ClearAllowanceEventsMatchRv32AndNative)
+TEST_F(NativeRv32TokenEventParityTest, DeleteAllowanceEventsMatchRv32AndNative)
 {
   run_setup(kMethodInitialize, kAlice, kRv32Token);
   run_setup(kMethodMint, kAlice, kRv32Token);
@@ -527,32 +499,31 @@ TEST_F(NativeRv32TokenEventParityTest, ClearAllowanceEventsMatchRv32AndNative)
     run_op(kMethodTransferFrom, kSpender, token);
   }
 
-  auto rv32_clear = run_op(kMethodClearAllowance, kAlice, kRv32Token);
-  auto native_clear =
-      run_op(kMethodClearAllowance, kAlice, kNativeTokenContractAddress);
-  expect_events_match(rv32_clear, native_clear, 3U,
-                      "clear remaining allowance");
-  ASSERT_TRUE(native_clear);
+  auto rv32_delete = run_op(kMethodDeleteAllowance, kAlice, kRv32Token);
+  auto native_delete =
+      run_op(kMethodDeleteAllowance, kAlice, kNativeTokenContractAddress);
+  expect_events_match(rv32_delete, native_delete, 3U,
+                      "delete remaining allowance");
+  ASSERT_TRUE(native_delete);
   auto expected = make_event_from_cxs_struct(
-      native_token_allowance_change_event_signature(),
-      NativeTokenAllowanceChangeEvent{
-          .owner_address = kAlice,
-          .spender_address = kSpender,
-          .difference = to_xdr(-(kAllowanceAmount -
-                                 static_cast<int128_t>(kTransferFromAmount)))});
+      native_token_allowance_delete_event_signature(),
+      NativeTokenAllowanceDeleteEvent{.owner_address = kAlice,
+                                      .spender_address = kSpender,
+                                      .removed = to_xdr(kAllowanceAmount -
+                                                        kTransferFromAmount)});
   ASSERT_TRUE(expected);
-  EXPECT_TRUE(std::ranges::equal(native_clear->serialized_event, *expected));
+  EXPECT_TRUE(std::ranges::equal(native_delete->serialized_event, *expected));
 
-  auto rv32_empty = run_op(kMethodClearAllowance, kAlice, kRv32Token);
+  auto rv32_empty = run_op(kMethodDeleteAllowance, kAlice, kRv32Token);
   auto native_empty =
-      run_op(kMethodClearAllowance, kAlice, kNativeTokenContractAddress);
-  expect_events_match(rv32_empty, native_empty, 3U, "clear missing allowance");
+      run_op(kMethodDeleteAllowance, kAlice, kNativeTokenContractAddress);
+  expect_events_match(rv32_empty, native_empty, 3U, "delete missing allowance");
   ASSERT_TRUE(native_empty);
   auto expected_empty = make_event_from_cxs_struct(
-      native_token_allowance_change_event_signature(),
-      NativeTokenAllowanceChangeEvent{.owner_address = kAlice,
+      native_token_allowance_delete_event_signature(),
+      NativeTokenAllowanceDeleteEvent{.owner_address = kAlice,
                                       .spender_address = kSpender,
-                                      .difference = to_xdr(int128_t{0})});
+                                      .removed = to_xdr(int128_t{0})});
   ASSERT_TRUE(expected_empty);
   EXPECT_TRUE(
       std::ranges::equal(native_empty->serialized_event, *expected_empty));

@@ -203,7 +203,7 @@ protected:
   }
 
   CapturedRecord run_deploy_tx(
-      SHA256Hash const &nonce, SHA256Hash const &hash, uint128_t amount = 0,
+      SHA256Hash const &nonce, SHA256Hash const &hash, int128_t amount = 0,
       std::optional<AuthClaim> claim = std::nullopt,
       x23::Ptr<default_wallet::WalletInitCall> const &initializer = {})
   {
@@ -211,8 +211,8 @@ protected:
     return run_wallet_root_tx(
         client.make_invocation<u8"deploy">(
             UINT64_MAX, nonce, hash,
-            std::tuple<uint64_t, uint64_t>{amount >> 64U,
-                                           static_cast<uint64_t>(amount)},
+            std::tuple<int64_t, uint64_t>{static_cast<int64_t>(amount >> 64U),
+                                          static_cast<uint64_t>(amount)},
             initializer),
         claim ? *claim : make_pubkey_claim(preimage_));
   }

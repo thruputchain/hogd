@@ -22,7 +22,7 @@ class PackageValidatorTest(unittest.TestCase):
                 path.chmod(0o755)
             contracts = build / "built_contracts"
             contracts.mkdir()
-            for name in ("dev_wallet.rv32a", "genesis_root.rv32a"):
+            for name in ("genesis_root.rv32a",):
                 (contracts / name).write_text("contract")
             output = root / "assets"
             subprocess.run(["bash", str(SCRIPT), str(build), str(output), "release", "x86_64", "znver5"], check=True)
@@ -30,9 +30,13 @@ class PackageValidatorTest(unittest.TestCase):
             with tarfile.open(next(output.iterdir())) as archive:
                 self.assertIn("hog-db", archive.getnames())
                 self.assertIn("contracts/genesis_root.rv32a", archive.getnames())
+                self.assertNotIn("contracts/dev_wallet.rv32a", archive.getnames())
             subprocess.run(["bash", str(SCRIPT), str(build), str(output), "release", "x86_64"], check=True)
             self.assertTrue((output / "hog-devnode-linux-x86_64.tar.gz").is_file())
             self.assertTrue((output / "hogd-validator-linux-x86_64.tar.gz").is_file())
+            with tarfile.open(output / "hog-devnode-linux-x86_64.tar.gz") as archive:
+                self.assertIn("contracts/genesis_root.rv32a", archive.getnames())
+                self.assertNotIn("contracts/dev_wallet.rv32a", archive.getnames())
 
     def test_unsupported_profiles_fail_before_packaging(self):
         for flavor, architecture, cpu in (("release", "arm64", "znver5"),

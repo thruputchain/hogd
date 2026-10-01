@@ -143,7 +143,7 @@ protected:
 
   uint64_t nonce_ = 0;
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
@@ -273,8 +273,7 @@ protected:
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"adjust_allowance">(
                            kPaymentChannelAddress,
-                           make_difference(static_cast<int128_t>(amount)),
-                           false));
+                           make_difference(static_cast<int128_t>(amount))));
     Ed25519Signature allowance_sig =
         ed25519_sign(secret_key, allowance_calldata).value();
 
@@ -590,7 +589,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -651,7 +650,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -713,7 +712,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -765,7 +764,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -818,7 +817,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -874,7 +873,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -934,7 +933,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress,
-                           make_amount(uint128_t{deposit_b * 2})));
+                           make_amount(int128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -987,7 +986,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress,
-                           make_amount(uint128_t{deposit_b * 2})));
+                           make_amount(int128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 

@@ -4,10 +4,12 @@
 
 #include <cassert>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -170,17 +172,24 @@ RuntimeContext::RuntimeContext(
 {}
 
 InvokeErrorCode
-RuntimeContext::verify_contract(Contract const &contract,
-                                NetworkConfigParams const & /*params*/,
-                                hogd::PreparedContract & /*out*/) const
+RuntimeContext::verify_contract(
+    Contract const &contract, NetworkConfigParams const & /*params*/,
+    hogd::PreparedContract & /*out*/,
+    std::optional<ContractRejectCode> &rejection) const
 {
   // kMockTest images are prebuilt in contracts_; nothing to hand back.
   if (contract.contract_type() != ContractType::kMockTest) {
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
     return InvokeErrorCode::Deterministic;
   }
   const int32_t contract_id = contract.mock_contract_id();
   auto it = contracts_.find(contract_id);
-  if (it == contracts_.end() || !runtime_contract_image_is_valid(it->second)) {
+  if (it == contracts_.end()) {
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
+    return InvokeErrorCode::Deterministic;
+  }
+  if (!runtime_contract_image_is_valid(it->second)) {
+    rejection = ContractRejectCode::ContractRejectInvalidProgram;
     return InvokeErrorCode::Deterministic;
   }
   return InvokeErrorCode::None;

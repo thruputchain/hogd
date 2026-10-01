@@ -62,7 +62,7 @@ public:
 protected:
   void SetUp() override {}
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
@@ -2777,7 +2777,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
         auto res = balance_result.ok();
         uint128_t balance_unsigned_int =
-            uint128_t{std::get<0>(res)} << 64 | uint128_t{std::get<1>(res)};
+            static_cast<uint128_t>(std::get<0>(res)) << 64 |
+            uint128_t{std::get<1>(res)};
 
         if (balance_unsigned_int != replay_reserve) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
