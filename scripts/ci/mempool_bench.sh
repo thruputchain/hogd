@@ -129,7 +129,11 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-coordinator_launch=$($CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+# The launch output carries the control server's log paths for the coordinator,
+# which [replay_coordinator_output] needs, so capture it rather than let it
+# stream. Replay it on the way out either way: a [start] that fails has an
+# error of its own to report, and the capture is the only copy of it.
+if ! coordinator_launch=$($CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
   --stack \
@@ -151,7 +155,10 @@ coordinator_launch=$($CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path ./$BUILD_DIR/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400 2>&1)
+  --scp-control-addr 127.0.0.1:4400 2>&1); then
+  printf '%s\n' "$coordinator_launch"
+  false
+fi
 printf '%s\n' "$coordinator_launch"
 COORDINATOR_STDOUT_PATH=$(printf '%s\n' "$coordinator_launch" |
   sed -n 's/^CONTROL_STDOUT_PATH=//p' | tail -n 1)
