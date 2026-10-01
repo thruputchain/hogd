@@ -1741,14 +1741,14 @@ TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
           }
         }
 
-        // The view is loaded from the first read onward, so the warm reads do
-        // identical work and must cost the same.
-        EXPECT_EQ(read_costs[1], read_costs[2])
-            << "warm balance read cost is not stable";
-        // The charge under test: a warm read pays the Invoke crossing plus the
-        // flat storage-access cost (the EXPECT message carries the rest).
-        EXPECT_GE(read_costs[1], kSyscallBaseCost + kStorageAccessCost)
-            << "warm balance read omitted the storage-access charge";
+        // A warm read pays exactly the Invoke crossing, the method's one gas
+        // unit, and a single flat access charge (no load_gas once warm). The
+        // exact check catches both an omitted charge and a double charge.
+        static constexpr GasAmount kWarmReadCost =
+            kSyscallBaseCost + 1 + kStorageAccessCost;
+        EXPECT_EQ(read_costs[1], kWarmReadCost)
+            << "warm balance read is not priced at crossing + method + access";
+        EXPECT_EQ(read_costs[2], kWarmReadCost);
         co_return InvokeStatus<void>{};
       });
   auto caller_contract = std::make_unique<NativeContract>(std::move(fns));
