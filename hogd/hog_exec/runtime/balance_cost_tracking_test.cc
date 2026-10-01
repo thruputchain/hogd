@@ -1696,11 +1696,8 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
                           ProposedTransaction{.signed_tx = handler_tx})());
 }
 
-// Regression for #4270: a warm native-token balance read charged only its
-// load_gas, which drops to zero once the balance view is loaded, so repeat
-// get_balance_of calls skipped the flat kStorageAccessCost that every other
-// storage read pays for its frame lookup/copy/merge work. Measured on warm
-// reads, where load_gas is zero and the access charge is all that remains.
+// Regression for #4270: warm native-token balance reads skipped the flat
+// kStorageAccessCost once the view was loaded and load_gas dropped to zero.
 TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
 {
   constexpr static ContractAddress kCallerAddr = make_contract_address(183);
@@ -1716,9 +1713,8 @@ TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
         auto calldata =
             erc20_meta::make_calldata<u8"get_balance_of">(kCallerAddr);
 
-        // The first read loads the balance view into the frame stack; the two
-        // that follow find it already loaded and so pay no load_gas. They must
-        // still pay the flat access cost.
+        // The first read loads the view; reads 2 and 3 are warm (no load_gas)
+        // but still owe the flat access cost.
         std::array<GasAmount, 3> read_costs{};
         for (size_t i = 0; i < read_costs.size(); ++i) {
           CopyableInvokeInputs inputs{
@@ -1750,8 +1746,7 @@ TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
         EXPECT_EQ(read_costs[1], read_costs[2])
             << "warm balance read cost is not stable";
         // The charge under test: a warm read pays the Invoke crossing plus the
-        // flat storage-access cost. Without it the read would pay only
-        // kSyscallBaseCost and the native method's gas unit.
+        // flat storage-access cost (the EXPECT message carries the rest).
         EXPECT_GE(read_costs[1], kSyscallBaseCost + kStorageAccessCost)
             << "warm balance read omitted the storage-access charge";
         co_return InvokeStatus<void>{};

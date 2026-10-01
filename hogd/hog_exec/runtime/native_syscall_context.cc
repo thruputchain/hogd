@@ -18,10 +18,8 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   if (!status.has_value()) {
     co_return status.error();
   }
-  // Charge the flat access cost on top of any load, as ordinary storage reads
-  // (syscall_NonnegativeIntGet_inner) and the sibling write helper below do.
-  // Without it a warm read, whose load_gas drops to zero once the view is
-  // loaded, underpays for the frame lookup/copy/merge work it still does.
+  // Match ordinary storage reads and the sibling write helper: charge the flat
+  // access cost on top of load_gas, which is zero once the view is loaded.
   consume_gas(kStorageAccessCost + status->load_gas);
   co_return std::move(status->result);
 }
