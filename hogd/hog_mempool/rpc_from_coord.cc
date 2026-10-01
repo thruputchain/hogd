@@ -1211,20 +1211,18 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   nodes.txset_insert_chunks.reserve(kNumSchedulerIterations);
   nodes.serialize_chunks.reserve(kNumSchedulerIterations * 3);
 
-  nodes.nomination_cleanup =
-      dag.cleanup("rollback scheduler nomination",
-                  [&, state]() -> x23::Async<void> {
-                    scheduler_->reenqueue_txs(cache.tx_hashes.begin(),
-                                              cache.tx_hashes.end());
-                    {
-                      x23::CoroGuard scheduler_guard;
-                      co_await scheduler_guard(scheduler_->global_lock_);
-                      co_await scheduler_->abandon_pending_nomination(
-                          cache.block_id);
-                    }
-                    cache.block_id = 0;
-                    co_return;
-                  });
+  nodes.nomination_cleanup = dag.cleanup(
+      "rollback scheduler nomination", [&, state]() -> x23::Async<void> {
+        scheduler_->reenqueue_txs(cache.tx_hashes.begin(),
+                                  cache.tx_hashes.end());
+        {
+          x23::CoroGuard scheduler_guard;
+          co_await scheduler_guard(scheduler_->global_lock_);
+          co_await scheduler_->abandon_pending_nomination(cache.block_id);
+        }
+        cache.block_id = 0;
+        co_return;
+      });
   const x23::DagCleanup nomination_cleanup = nodes.nomination_cleanup;
 
   nodes.start_nomination =
