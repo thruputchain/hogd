@@ -1768,14 +1768,11 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }
 
-// The stock config takes its values from the protocol defaults; only the
-// departures listed in stock_network_config() may differ.
-TEST(HogDevnode, StockNetworkConfigIsTheDefaultsPlusItsDepartures)
+// The stock config takes its values from the protocol defaults rather than
+// restating them, so a default change reaches dev and test chains.
+TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaults)
 {
-  NetworkConfig expected = NetworkConfigParams::stated_defaults();
-  NetworkConfigParams::set_param(
-      expected, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256);
-  EXPECT_EQ(stock_network_config(), expected);
+  EXPECT_EQ(stock_network_config(), NetworkConfigParams::stated_defaults());
 }
 
 TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
