@@ -156,10 +156,9 @@ public:
   PerTransactionDatabaseProxy &
   operator=(const PerTransactionDatabaseProxy &) = delete;
 
-  void reserve(size_t delta_count)
-  {
-    current_subtransaction_batch_.reserve(delta_count);
-  }
+  // Pre-reserves the staging batch, clamped to at most one push worth of
+  // deltas (see the .cc).
+  void reserve(size_t delta_count);
 
   // Stages a delta and folds its footprint bound into the running total.
   void add_delta(AddressAndKey addrkey, StorageDelta delta,

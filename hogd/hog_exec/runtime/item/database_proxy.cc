@@ -470,6 +470,12 @@ static_assert(kMessageOverhead < kExecToDbMessageCap);
 constexpr size_t kMaxSubtransactionPushFootprint =
     kExecToDbMessageCap - kMessageOverhead;
 
+// Most deltas a within-cap push can hold: each costs at least kPerDeltaFraming.
+// Bounds how far the staging batch pre-reserves, so a frame that accumulated an
+// aggregate far larger than one push still reserves for only one push.
+constexpr size_t kMaxDeltasPerSubtransactionPush =
+    kMaxSubtransactionPushFootprint / kPerDeltaFraming;
+
 // Coherence guard: the largest possible single delta must itself fit one push,
 // so the per-key/per-tx entry caps can't be raised to a value no push could
 // ever carry (which would auto-reject every max-footprint tx). Every
@@ -619,6 +625,15 @@ DatabaseProxy::close_viewing_snapshot(BlockID block_id)
     report_rpc_failure("close_viewing_snapshot", e);
     co_return SystemError{SystemErrorCode::Unrecoverable};
   }
+}
+
+void
+PerTransactionDatabaseProxy::reserve(size_t delta_count)
+{
+  // Never pre-reserve for more than one push: the batch is rejected (and
+  // staging stops) once it exceeds the cap.
+  current_subtransaction_batch_.reserve(
+      std::min(delta_count, kMaxDeltasPerSubtransactionPush));
 }
 
 void
