@@ -1867,9 +1867,11 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
   // A queue delete tears down one block row per unconsumed historical block at
   // block close (cleanup_on_deletion), after gas is settled, so bill it here.
   // Read the committed snapshot (what cleanup consults) so the count is right
-  // regardless of how this transaction already touched the key, and pay for the
-  // read as the other snapshot-reading syscalls do.
-  GasAmount body_gas = kStorageAccessCost + note_item_load(item_key);
+  // regardless of how this transaction already touched the key. The read does
+  // not go through note_item_load: a delete must not count as a load of the
+  // key, or it would mask the first real load that follows a reverted delete
+  // (see RevertTest.DeleteMasksLoadUntilFrameReverts).
+  GasAmount body_gas = kStorageAccessCost;
   auto snapshot = co_await snapshot_cache_.try_get_snapshot_item(item_key);
   if (!snapshot.has_value()) {
     co_return snapshot.error();

@@ -2623,12 +2623,11 @@ TEST_P(RCQDeleteTest, RepeatedDeleteDoesNotRebillHistoryCleanup)
     }
   }
   ASSERT_EQ(delete_gas.size(), 2U);
-  // The first delete prices the kHistory-block teardown and the committed-load
-  // read; the second finds the key already loaded and already billed, so it
-  // drops both the load cost and the per-block cost.
+  // The first delete prices the kHistory-block teardown; the second finds the
+  // key already billed, so it drops the per-block cost and only pays the flat
+  // access.
   EXPECT_GT(delete_gas[0], delete_gas[1]);
-  EXPECT_EQ(delete_gas[0] - delete_gas[1],
-            kDBRPCCost + (kStorageAccessCost * kHistory));
+  EXPECT_EQ(delete_gas[0] - delete_gas[1], kStorageAccessCost * kHistory);
 }
 
 // Verifies that when an RCQ with entries in past blocks is deleted and
