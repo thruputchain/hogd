@@ -45,9 +45,11 @@ constexpr static uint64_t kSyscallBaseCost = 50;
 // call, which is inside the fit's own residual.
 constexpr static uint64_t kSHA256HashBlockCost = 22;
 
-// Per-call stream-table cost for SHA256Update and SHA256Copy, on top of
-// compression blocks. Charged every call to cover stream creation and lookup,
-// which are O(log n) in the live stream count (std::map; see hash_buffers.h).
+// Per-call stream-table cost for SHA256Update and SHA256Copy, in addition to
+// compression blocks. Charge every call, including repeat touches, to cover
+// stream creation without making this component depend on slot occupancy.
+// Creation cost was flat over the measured occupancies through 32768 streams;
+// max_sha256_buffers is configurable, so larger tables remain unmeasured.
 constexpr static uint64_t kSHA256StreamCost = 26;
 
 // ed25519, which this schedule prices for the first time. The curve arithmetic

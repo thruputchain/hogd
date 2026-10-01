@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <span>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -61,7 +62,10 @@ HashBuffers::copy(uint32_t src_index, uint32_t dst_index)
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
-    streams_.emplace(dst_index, src->second);
+    // Copy to a local first: emplace may rehash, which would invalidate the
+    // src iterator mid-construction.
+    Stream copied = src->second;
+    streams_.emplace(dst_index, std::move(copied));
   }
   else {
     dst->second = src->second;
