@@ -20,7 +20,7 @@ target_link_libraries(
   metrics
   GTest::gtest_main
 )
-gtest_discover_tests(health_test)
+hogd_discover_tests(health_test)
 
 add_executable(
   histogram_test
@@ -31,7 +31,7 @@ target_link_libraries(
   metrics
   GTest::gtest_main
 )
-gtest_discover_tests(histogram_test)
+hogd_discover_tests(histogram_test)
 
 add_executable(
   summary_test
@@ -42,7 +42,7 @@ target_link_libraries(
   metrics
   GTest::gtest_main
 )
-gtest_discover_tests(summary_test)
+hogd_discover_tests(summary_test)
 
 add_executable(
   metrics_test
@@ -53,4 +53,4 @@ target_link_libraries(
   metrics
   GTest::gtest_main
 )
-gtest_discover_tests(metrics_test)
+hogd_discover_tests(metrics_test)

@@ -60,7 +60,9 @@ syscall_SHA256Update_inner(SystemCallHandler &handler,
 
   auto r = handler.sha256_update(input_index, input_buffer, input_reset);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table, so charge for the probe
+    // (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
 
   if (auto *stats = handler.get_transaction_stats()) {
@@ -84,7 +86,9 @@ syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
 {
   auto r = handler.sha256_copy(input_src_index, input_dst_index);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table, so charge for the probe
+    // (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
 
   // Cloning a stream compresses nothing, so the stream is the whole cost.
@@ -98,7 +102,9 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
 {
   auto r = handler.sha256_finalize(input_index);
   if (!r.has_value()) {
-    return {r.error().code(), WrappedGasAmount{0}};
+    // A failed lookup still probed the stream table, so charge for the probe
+    // (#4218).
+    return {r.error().code(), WrappedGasAmount{kSHA256StreamCost}};
   }
   output_output = *r;
   if (auto *trace_data =
@@ -116,7 +122,8 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
 // public key
 // Returns: Status code indicating if verification succeeded and gas cost
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_VerifySignature_inner(int32_t input_scheme,
+syscall_VerifySignature_inner(WrappedGasAmount remaining_gas,
+                              int32_t input_scheme,
                               std::span<const std::byte> input_signature,
                               std::span<const std::byte> input_public_key,
                               std::span<const std::byte> input_message)
@@ -134,11 +141,16 @@ syscall_VerifySignature_inner(int32_t input_scheme,
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
+    // Reserve the length-priced cost before running the verifier, so a low-gas
+    // frame cannot get the curve work for the price of the crossing (#4172).
+    const WrappedGasAmount gas{GasCost::verify_signature(input_message.size())};
+    if (remaining_gas.get() <= gas.get()) {
+      return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
+    }
     // Charged whether or not verification succeeds: ed25519 only exits early
     // when the encoded point fails to decompress, which the attacker choosing
     // the signature controls, so a free failure path sells verification for
     // the price of the crossing.
-    const WrappedGasAmount gas{GasCost::verify_signature(input_message.size())};
     if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         input_signature.subspan<0, sizeof(Ed25519Signature)>(),
                         input_message)) {

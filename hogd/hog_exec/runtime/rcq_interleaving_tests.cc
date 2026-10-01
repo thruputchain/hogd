@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -18,6 +19,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -27,7 +29,8 @@
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
-#include "storage_item.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -69,10 +72,11 @@ protected:
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
-            auto res = co_await ctx.handler().retrocausal_queue_insert(
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
                 key, std::as_bytes(std::span(&val, 1)));
             if (!res.has_value())
-              co_return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
           }
           co_return InvokeStatus<void>{};
         });
@@ -82,10 +86,13 @@ protected:
           uint8_t count = cd.empty() ? 1 : cd[0];
           auto key = make_storage_key("rcq0");
           for (uint8_t i = 0; i < count; i++) {
+            RuntimeMemoryLength entry_len = 0;
             auto res =
-                co_await ctx.handler().retrocausal_queue_consume(key, false);
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    key, false, std::span<std::byte>{}, entry_len);
             if (!res.has_value())
-              co_return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
           }
           co_return InvokeStatus<void>{};
         });
@@ -93,10 +100,10 @@ protected:
     fns.emplace(
         2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq0");
-          auto res = co_await ctx.handler().delete_object(
-              key, std::to_underlying(StorageDeltaFlags::None));
+          auto res = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
           if (!res.has_value())
-            co_return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
           co_return InvokeStatus<void>{};
         });
     // method 3: set bytestring (type change from RCQ)
@@ -104,11 +111,11 @@ protected:
         3, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
-          auto res = co_await ctx.handler().set_bytestring(
-              key, std::as_bytes(std::span(cd)),
-              std::to_underlying(StorageDeltaFlags::None));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span(cd)));
           if (!res.has_value())
-            co_return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
           co_return InvokeStatus<void>{};
         });
     // method 4: delete + recreate (delete then insert)
@@ -116,17 +123,18 @@ protected:
         4, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
-          auto del = co_await ctx.handler().delete_object(
-              key, std::to_underlying(StorageDeltaFlags::None));
+          auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
           if (!del.has_value())
-            co_return del.error().to_invoke_error();
-          if (!del.value().has_value())
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                del.error());
+          if (del.value() != SyscallErrorCode::kSyscallErrorCodeNone)
             co_return InvokeError{InvokeErrorCode::Deterministic};
           for (uint8_t val : cd) {
-            auto ins = co_await ctx.handler().retrocausal_queue_insert(
+            auto ins = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
                 key, std::as_bytes(std::span(&val, 1)));
             if (!ins.has_value())
-              co_return ins.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  ins.error());
           }
           co_return InvokeStatus<void>{};
         });

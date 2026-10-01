@@ -32,7 +32,6 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "invoke_args.hh"
@@ -656,9 +655,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         auto bstring = make_bytestring("bad");
         // comment this set_bytestring to verify that the test framework
         // does, in fact, throw errors if you get_bytestring from the snapshot
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), kBadKey, std::as_bytes(std::span(bstring)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            kBadKey, std::as_bytes(std::span(bstring)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -666,12 +664,16 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
         // This would have failed if the bytestring was not loaded lazily:
         // we're getting the bytestring from the prior write, not the snapshot
-        auto r2 = co_await ctx.handler().get_bytestring(kBadKey);
-        if (!r2.has_value() || !r2.value().result.has_value()) {
+        Bytestring read_back;
+        read_back.resize(bstring.size());
+        RuntimeMemoryLength written_len = 0;
+        auto r2 = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+            kBadKey, std::as_writable_bytes(std::span(read_back)), written_len);
+        if (!r2.has_value() ||
+            r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        assert(r2.value().result.value());
-        if (*r2.value().result.value() != bstring) {
+        if (written_len != bstring.size() || read_back != bstring) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};
@@ -761,35 +763,40 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // get_nnint() with force_load_from_snapshot=false from clean state
           // should not query db
-          auto r0 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r0.has_value() || !r0.value().result.has_value() ||
-              r0.value().result.value().first.has_value()) {
+          int128_t current_set = 0;
+          bool current_set_opt = false;
+          int128_t current_add = 0;
+          auto r0 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              kBadKey, false, current_set, current_set_opt, current_add);
+          if (!r0.has_value() ||
+              r0.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              current_set_opt) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // add ops shouldn't query db
-          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
-              ctx.handler(), kBadKey, nullptr, 100,
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kBadKey, static_cast<int128_t const *>(nullptr), int128_t{100});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto [r2, _gas2] = co_await syscall_NonnegativeIntSetAdd_inner(
-              ctx.handler(), kBadKey, nullptr, -200,
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kBadKey, static_cast<int128_t const *>(nullptr), int128_t{-200});
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // assert that get_nnint() without a load doesn't query db
-          auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r3.has_value() || !r3.value().result.has_value()) {
+          auto r3 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              kBadKey, false, current_set, current_set_opt, current_add);
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r3.value().result.value().first.has_value()) {
+          if (current_set_opt) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
@@ -798,9 +805,8 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           int128_t set_value = 100;
-          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
-              ctx.handler(), kBadKey, &set_value, 200,
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kBadKey, &set_value, int128_t{200});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -808,21 +814,28 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           // assert that get_nnint() after a set doesn't query db, even with
           // force_load_from_snapshot=true
-          auto r2 = co_await ctx.handler().get_nnint(kBadKey, true);
-          if (!r2.has_value() || !r2.value().result.has_value()) {
+          int128_t current_set = 0;
+          bool current_set_opt = false;
+          int128_t current_add = 0;
+          auto r2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              kBadKey, true, current_set, current_set_opt, current_add);
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!r2.value().result.value().first.has_value()) {
+          if (!current_set_opt) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // get_nnint() after a set with force_load_from_snapshot=false should
           // co_return the set value if it exists
-          auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
-          if (!r3.has_value() || !r3.value().result.has_value()) {
+          auto r3 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              kBadKey, false, current_set, current_set_opt, current_add);
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!r3.value().result.value().first.has_value()) {
+          if (!current_set_opt) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1005,9 +1018,8 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto data = make_bytestring("child_write");
         constexpr StorageKeyContractData kKey{};
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), kKey, std::as_bytes(std::span(data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            kKey, std::as_bytes(std::span(data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1070,9 +1082,8 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto value = make_bytestring("12345678"); // 8 bytes
-        auto [set_res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), kKey, std::as_bytes(std::span(value)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto set_res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            kKey, std::as_bytes(std::span(value)));
         if (!set_res.has_value() ||
             set_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "BytestringSet failed";

@@ -37,7 +37,7 @@ target_link_libraries(hog_indexer_test
     hog_event
     gtest
 )
-gtest_discover_tests(hog_indexer_test)
+hogd_discover_tests(hog_indexer_test)
 
 if(BUILD_BENCHMARKS)
     # Benchmark executable

@@ -257,6 +257,18 @@ max_inline_contract_code_size()
   return size;
 }
 
+// Registers an Ed25519 key filled with key_fill at slot public_key_id.
+AuthDataChangeSigner
+make_key_registration(uint32_t public_key_id, uint8_t key_fill)
+{
+  PublicKey key;
+  key.ed25519().fill(key_fill);
+  return AuthDataChangeSigner{.public_key_id = public_key_id,
+                              .public_key = x23::Ptr<PublicKeyConfig>(
+                                  new PublicKeyConfig{.key = key,
+                                                      .max_weight = 100})};
+}
+
 } // namespace
 
 TEST_F(HogDbTest, ContractCodeChunkedRoundtrip)
@@ -910,6 +922,78 @@ TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
   EXPECT_TRUE(std::ranges::equal(*stored, kValue));
 }
 
+// A redundant refund must leave add-capacity for later txs (#4096). Before the
+// fix the transfer below was rejected with BoundsExceeded.
+TEST_F(HogDbTest, DuplicateBytestringRefundLeavesAddCapacityForLaterTransfer)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr std::array<std::byte, 1> kValue{std::byte{0x42}};
+
+  Address addr = make_address(kAddress + 77383);
+  Address funder_addr = make_address(kAddress + 77384);
+  ItemKey key = make_item_key(addr, 1);
+  const int128_t item_cost = cost_model_.get_bytestring_cost(kValue.size());
+
+  // addr's headroom equals the transfer exactly, so one bytestring cost of
+  // capacity taken by the refund is enough to break it.
+  const int128_t transfer = 8 * item_cost;
+  const int128_t initial_balance =
+      std::numeric_limits<int128_t>::max() - transfer;
+
+  ASSERT_TRUE(db_.write_address_balance(addr, initial_balance));
+  ASSERT_TRUE(db_.write_address_balance(funder_addr, transfer));
+
+  BlockHeight height = 1;
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, height,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
+
+  // Two same-value writers of a previously absent row: each reserves the full
+  // bytestring cost, the first materializes it, the second is refunded.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX first(block_tx);
+  ASSERT_TRUE(first.request_bytes(key, std::span(kValue), kNoFlags));
+  ASSERT_TRUE(first.sync_balance_locks());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX duplicate(block_tx);
+  ASSERT_TRUE(duplicate.request_bytes(key, std::span(kValue), kNoFlags));
+  ASSERT_TRUE(duplicate.sync_balance_locks());
+
+  ASSERT_TRUE(first.commit());
+  ASSERT_TRUE(duplicate.commit());
+
+  // A later tx in the same block credits addr with its whole remaining
+  // headroom, against the balance lock the refund above already finalized.
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX transfer_tx(block_tx);
+  ASSERT_TRUE(
+      transfer_tx.request_nnint128(make_address_balance_item_key(funder_addr),
+                                   -transfer, kNoFlags));
+  ASSERT_TRUE(transfer_tx.request_nnint128(make_address_balance_item_key(addr),
+                                           transfer, kNoFlags));
+  ASSERT_TRUE(transfer_tx.sync_balance_locks())
+      << "the refund stranded add-capacity on the recipient's balance lock";
+  ASSERT_TRUE(transfer_tx.commit());
+
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
+  ASSERT_TRUE(block_tx.get().commit());
+
+  // Charged for exactly one materialized row, and credited the full transfer.
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance);
+  EXPECT_EQ(initial_balance - item_cost + transfer, *balance);
+
+  auto funder_balance = db_.read_address_balance(funder_addr);
+  ASSERT_TRUE(funder_balance);
+  EXPECT_EQ(0, *funder_balance);
+
+  auto stored = db_.read_bytes(key);
+  ASSERT_TRUE(stored);
+  EXPECT_TRUE(std::ranges::equal(*stored, kValue));
+}
+
 TEST_F(HogDbTest, NewBalanceHogAgeIsAllZeroes)
 {
   Address sender_addr = make_address(kAddress);
@@ -1262,6 +1346,116 @@ TEST_F(HogDbTest, DbHashDeltaAuthLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
   });
+}
+
+// A written threshold, zero included, replaces the new-row default (#3069).
+TEST_F(HogDbTest, NewAuthRowTakesDefaultRequiredWeightUnlessWritten)
+{
+  Address defaulted = make_address(kAddress + 16);
+  Address explicit_zero = make_address(kAddress + 17);
+  ASSERT_TRUE(db_.write_address_balance(defaulted, 10'000'000));
+  ASSERT_TRUE(db_.write_address_balance(explicit_zero, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs key_only{};
+    key_only.auth_data_change_signers.push_back(make_key_registration(0, 0x11));
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        defaulted, key_only, std::to_underlying(StorageDeltaFlags::None)));
+
+    AuthDataChangeArgs key_and_zero{};
+    key_and_zero.auth_data_change_signers.push_back(
+        make_key_registration(0, 0x12));
+    key_and_zero.new_required_weight = Weight{0};
+    ASSERT_TRUE(invoke_tx.request_auth_data(explicit_zero, key_and_zero,
+                                            std::to_underlying(
+                                                StorageDeltaFlags::None)));
+  });
+
+  auto defaulted_row = db_.read_address_auth_data(defaulted);
+  ASSERT_TRUE(defaulted_row.has_value());
+  EXPECT_TRUE(defaulted_row->public_keys[0]);
+  EXPECT_EQ(defaulted_row->required_weight,
+            Weight{kDefaultNewAddressRequiredWeight});
+
+  auto zero_row = db_.read_address_auth_data(explicit_zero);
+  ASSERT_TRUE(zero_row.has_value());
+  EXPECT_TRUE(zero_row->public_keys[0]);
+  EXPECT_EQ(zero_row->required_weight, Weight{0});
+}
+
+// Removing a key from an address with no auth row has nothing to write: no row
+// is created and no storage is charged (issue #3069).
+TEST_F(HogDbTest, KeyRemovalOnMissingAuthRowWritesNothing)
+{
+  Address addr = make_address(kAddress + 18);
+  constexpr int128_t kBalance = 10'000'000;
+  ASSERT_TRUE(db_.write_address_balance(addr, kBalance));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
+
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance.has_value());
+  EXPECT_EQ(*balance, kBalance);
+}
+
+// A removal that replaces this transaction's own registration on an address
+// with no auth row leaves nothing to write: no row and no storage charge.
+TEST_F(HogDbTest, KeyRegistrationThenRemovalOnMissingAuthRowWritesNothing)
+{
+  Address addr = make_address(kAddress + 19);
+  constexpr int128_t kBalance = 10'000'000;
+  ASSERT_TRUE(db_.write_address_balance(addr, kBalance));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs registration{};
+    registration.auth_data_change_signers.push_back(
+        make_key_registration(0, 0x13));
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, registration, std::to_underlying(StorageDeltaFlags::None)));
+
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
+
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance.has_value());
+  EXPECT_EQ(*balance, kBalance);
+}
+
+// The ExclusiveLock flag prices a removal on a missing row the same way: it
+// reserves nothing, so an address with no balance can still commit it.
+TEST_F(HogDbTest, ExclusiveKeyRemovalOnMissingAuthRowReservesNothing)
+{
+  Address addr = make_address(kAddress + 25);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
 }
 
 TEST_F(HogDbTest, DbHashDeltaBalanceLockMatchesFullStateHash)
@@ -2510,7 +2704,7 @@ TEST_F(HogDbTest, ReplayCacheGCRefundsCommittedNetStorageDecrease)
     EXPECT_EQ(HogDbCode::kConflict, sync_result.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
-    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
+    EXPECT_EQ(DbConflictCode::InsufficientFunds,
               *invoke_tx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
     EXPECT_EQ(failed_addr, conflict_addr.get_raw());
@@ -2581,7 +2775,7 @@ TEST_F(HogDbTest, SyncBalanceLocksReportsAllBalanceConflicts)
   std::set<ContractAddress> expected_addrs{addr_a.get_raw(), addr_b.get_raw()};
   std::set<ContractAddress> actual_addrs;
   for (auto const &c : conflicts) {
-    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded, c.reason);
+    EXPECT_EQ(DbConflictCode::InsufficientFunds, c.reason);
     actual_addrs.insert(c.addr);
   }
   EXPECT_EQ(expected_addrs, actual_addrs);
@@ -2969,6 +3163,48 @@ TEST_F(HogDbTest, RCQInsertAndCurrentBlockConsumeSameBlock)
         rcq_key, std::move(delta),
         std::to_underlying(StorageDeltaFlags::None)));
   });
+}
+
+// Duplicate inserts with a single same-block consume must leave the surplus
+// copies behind.
+TEST_F(HogDbTest, RCQPartialDuplicateCurrentBlockConsume)
+{
+  Address addr = make_address(kAddress + 36);
+  ItemKey rcq_key = make_key(kAddress + 36, 1);
+  setup_contract_address(addr);
+
+  // Insert 0x07 three times, interleaved with other values in an order that is
+  // neither sorted nor consumed-entries-first, then consume a single 0x07.
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    RetrocausalQueueDelta delta;
+    delta.insert.added_entries.push_back(QueueEntry{0x09});
+    delta.insert.added_entries.push_back(QueueEntry{0x07});
+    delta.insert.added_entries.push_back(QueueEntry{0x07});
+    delta.insert.added_entries.push_back(QueueEntry{0x01});
+    delta.insert.added_entries.push_back(QueueEntry{0x07});
+    delta.consume.emplace();
+    delta.consume->past_block_consume.max_fully_consumed_block_number = 0;
+    delta.consume->past_block_consume.partial_consumed_number = 0;
+    delta.consume->current_block_consumed.push_back(QueueEntry{0x07});
+    ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
+        rcq_key, std::move(delta),
+        std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto block_result = db_.read_retrocausal_queue_block(rcq_key, 1);
+  ASSERT_TRUE(block_result.has_value());
+
+  // One 0x07 was consumed and two remain; blocks are stored sorted.
+  const std::vector<QueueEntry> expected{QueueEntry{0x01}, QueueEntry{0x07},
+                                         QueueEntry{0x07}, QueueEntry{0x09}};
+  ASSERT_EQ(block_result->entries.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(block_result->entries[i], expected[i]) << "entry " << i;
+  }
+
+  auto meta_result = db_.read_retrocausal_queue_metadata(rcq_key);
+  ASSERT_TRUE(meta_result.has_value());
+  EXPECT_EQ(meta_result->live_entries, expected.size());
 }
 
 // BugHunt: RCQ consume all past blocks AND all current block entries.
@@ -3893,8 +4129,7 @@ TEST_F(HogDbTest, BytestringConflictRecordsDbConflictReason)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictValueMismatch,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::ValueMismatch, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
@@ -3902,7 +4137,7 @@ TEST_F(HogDbTest, BytestringConflictRecordsDbConflictReason)
 }
 
 // Regression test for #2759: requesting a different item type than what is
-// already locked at a key must record kDbConflictTypeMismatch.
+// already locked at a key must record TypeMismatch.
 TEST_F(HogDbTest, ConflictReasonTypeMismatch)
 {
   Address addr = make_address(kAddress + 303);
@@ -3929,8 +4164,7 @@ TEST_F(HogDbTest, ConflictReasonTypeMismatch)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictTypeMismatch,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::TypeMismatch, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
@@ -3938,7 +4172,7 @@ TEST_F(HogDbTest, ConflictReasonTypeMismatch)
 }
 
 // Regression test for #2759: consuming the same uniquifier twice in the same
-// block must record kDbConflictReplayProtection.
+// block must record ReplayProtection.
 TEST_F(HogDbTest, ConflictReasonReplayProtection)
 {
   Address addr = make_address(kAddress + 304);
@@ -3964,8 +4198,7 @@ TEST_F(HogDbTest, ConflictReasonReplayProtection)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictReplayProtection,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::ReplayProtection, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
@@ -3974,7 +4207,7 @@ TEST_F(HogDbTest, ConflictReasonReplayProtection)
 
 // Regression test for #2759: setting ExclusiveLock on a balance key is
 // rejected directly by InvokeTX (before reaching any lock) and must record
-// kDbConflictExclusiveLock.
+// ExclusiveLockDenied.
 TEST_F(HogDbTest, ConflictReasonExclusiveLockBalanceFlag)
 {
   Address addr = make_address(kAddress + 305);
@@ -3994,7 +4227,7 @@ TEST_F(HogDbTest, ConflictReasonExclusiveLockBalanceFlag)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(invoke_tx.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
+  EXPECT_EQ(DbConflictCode::ExclusiveLockDenied,
             *invoke_tx.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
@@ -4081,8 +4314,7 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
     EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_TRUE(itx.last_conflict_reason().has_value());
-    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
-              *itx.last_conflict_reason());
+    EXPECT_EQ(DbConflictCode::BoundsExceeded, *itx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
 
     // The explicit set-add form of the same delta is rejected identically.
@@ -4130,8 +4362,7 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnFreshKeyRejectedAtReservation)
   EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
-            *itx.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::BoundsExceeded, *itx.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   // The rejection is independent of the flag: the non-exclusive form fails
@@ -4227,8 +4458,7 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnBytestringRejectedAtReservation)
     EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_TRUE(itx.last_conflict_reason().has_value());
-    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
-              *itx.last_conflict_reason());
+    EXPECT_EQ(DbConflictCode::BoundsExceeded, *itx.last_conflict_reason());
     // NOLINTEND(bugprone-unchecked-optional-access)
 
     itx.abort();
@@ -4287,8 +4517,7 @@ TEST_F(HogDbTest, ExclusiveDeployBlocksConcurrentDeploy)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::ExclusiveLockDenied, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   itx_b.abort();
@@ -4356,8 +4585,7 @@ TEST_F(HogDbTest, ExclusiveDeployStaysLockedAfterCommitAndPersists)
   EXPECT_EQ(HogDbCode::kConflict, r.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
-  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
-            *itx_b.last_conflict_reason());
+  EXPECT_EQ(DbConflictCode::ExclusiveLockDenied, *itx_b.last_conflict_reason());
   // NOLINTEND(bugprone-unchecked-optional-access)
   itx_b.abort();
 

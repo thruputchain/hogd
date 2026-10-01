@@ -8,11 +8,17 @@ block gets the one it runs under.
 The parameters themselves are documented where they are declared. What is not
 visible from any one file is the path they travel.
 
-`GenesisConfiguration::network_config` sets what block 0 runs under. The
-protocol names no value for any parameter, so whoever creates a chain chooses:
+`GenesisConfiguration::network_config` sets what block 0 runs under. Whoever
+creates a chain chooses its explicitly stated parameters:
 `GenesisConfigurationBuilder::build` takes the configuration as an argument,
 and `stock_network_config()` holds the values this repository's own dev and
 test chains use.
+
+Fresh `hog-devnode` chains (including those started by `groundhog node`) use
+256 KiB for RV32 code and 512 KiB for the complete contract artifact, including
+its header and initial memory, without network-config overrides. These are
+also the protocol defaults for omitted parameters. Configurations that state
+explicit values retain them.
 
 From there it rides the `DbTip`, exactly as `default_wallet` does:
 

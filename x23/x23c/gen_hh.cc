@@ -543,13 +543,17 @@ Gen::show_type(const UnionBody &b, string t)
     prtop(";\n");
   }
   top_ += '\n';
-  prtop("template<size_t I> requires (I <= {})\n", num_non_void);
+  // The template parameters below are spelled with an __xdr_ prefix
+  // because the generated bodies also name the union itself: a union
+  // called I or U would otherwise be shadowed by its own accessors.
+  prtop("template<size_t __xdr_I> requires (__xdr_I <= {})\n", num_non_void);
   prtop("static constexpr auto __xdr_union_fieldptr();\n\n");
-  prtop("template<x23::is_xdr_union T> friend struct x23::union_ops;\n\n", t);
-  prtop("template<std::size_t I, x23::references<{}> U>"
-        " requires (I <= {})\n",
+  prtop(
+      "template<x23::is_xdr_union __xdr_U> friend struct x23::union_ops;\n\n");
+  prtop("template<std::size_t __xdr_I, x23::references<{}> __xdr_Self>"
+        " requires (__xdr_I <= {})\n",
         t, num_non_void);
-  prtop("friend constexpr decltype(auto) get(U &&);\n");
+  prtop("friend constexpr decltype(auto) get(__xdr_Self &&);\n");
 
   bottom_ += '\n';
 
@@ -619,16 +623,17 @@ struct x23::xdr_meta<struct {0}> {{
 
   bottom_ += "  }\n}\n";
 
-  bottom_ += std::format(R"(template<std::size_t I> requires (I <= {0})
+  bottom_ += std::format(R"(template<std::size_t __xdr_I>
+requires (__xdr_I <= {0})
 constexpr auto
 {1}::__xdr_union_fieldptr()
 {{
-  if constexpr (I == 0)
+  if constexpr (__xdr_I == 0)
     return &{2}::__xdr_union_field_{3};)",
                          num_non_void, scope(false), t, b.switch_id);
   for (const auto &info : aiv)
     bottom_ += std::format(R"(
-  else if constexpr (I == {0})
+  else if constexpr (__xdr_I == {0})
     return &{1}::__xdr_union_field_{2};)",
                            info.variant_index, t, info.arm->decl.id);
   bottom_ += "\n}\n"s;
@@ -679,16 +684,16 @@ constexpr struct {1} &
   ops::set_discriminant(*this, d);
   return *this;
 }}
-template<size_t I, x23::references<struct {1}> U>
-requires (I <= {4})
+template<size_t __xdr_I, x23::references<struct {1}> __xdr_Self>
+requires (__xdr_I <= {4})
 constexpr inline decltype(auto)
-get(U &&u)
+get(__xdr_Self &&u)
 {{
   using ops = x23::union_ops<struct {1}>;
-  if constexpr (I == 0)
+  if constexpr (__xdr_I == 0)
     return ops::get_discriminant(u);
   else
-    return ops::get<I>(std::forward<U>(u));
+    return ops::get<__xdr_I>(std::forward<__xdr_Self>(u));
 }}
 constexpr bool
 operator==(const struct {1} &a, const struct {1} &b) noexcept

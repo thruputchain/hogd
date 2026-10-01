@@ -4,16 +4,8 @@
 #include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 
-// Standalone exercise of the portable RV32IM ISA core. This translation unit is
-// linked against rv32_isa_core ONLY -- no rv32_vm, no OpenSSL, no hogd runtime
-// (see CMakeLists.txt). It therefore serves two purposes:
-//   1. a smoke test that decode + execute + the register/memory model + gas +
-//      trap handling work in isolation, with no artifact/consensus/host layer;
-//   2. a mechanical guardrail for the core's hogd-free boundary -- if the ISA
-//      core ever starts referencing a symbol from outside rv32/, this
-//      executable fails to link.
-// Keep the dependencies here minimal on purpose; do not pull in rv32_vm,
-// artifact, dispatch, or syscall headers.
+// Standalone decode/execute tests. Linking only rv32_isa_core also checks that
+// the core does not acquire dependencies on the artifact or runtime layers.
 
 namespace hogd::rv32 {
 namespace {

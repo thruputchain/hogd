@@ -291,18 +291,18 @@ TEST_F(TraceShapeTest, Sha256WrapperTraceIsExact)
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
-      99'902, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'811, tx.tx.invocation.calldata));
+      99'896, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'805, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kSHA256);
     body.sha256().inputs.input.append_range(input);
     body.sha256().outputs = SyscallSHA256Outputs{.hash = expected_hash};
-    expected.push_back(make_entry(99'616,
-                                  99'616 - GasCost::sha256_hash(input.size()) -
+    expected.push_back(make_entry(99'606,
+                                  99'606 - GasCost::sha256_hash(input.size()) -
                                       kSyscallBaseCost,
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'358, expected_hash));
+  expected.push_back(return_entry(99'336, expected_hash));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
@@ -338,11 +338,11 @@ TEST_F(TraceShapeTest, Sha256RepeatedMultiMethodDispatchTraceIsExact)
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(output.return_buffer().empty());
 
-  const std::array<GasAmount, kRepeat> sha256_gas = {99'546, 99'460, 99'374};
+  const std::array<GasAmount, kRepeat> sha256_gas = {99'534, 99'448, 99'362};
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
-      99'885, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'794, tx.tx.invocation.calldata));
+      99'879, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'788, tx.tx.invocation.calldata));
   for (const GasAmount gas : sha256_gas) {
     SyscallTraceBody body(SyscallNo::kSHA256);
     body.sha256().inputs.input.append_range(input);
@@ -352,7 +352,7 @@ TEST_F(TraceShapeTest, Sha256RepeatedMultiMethodDispatchTraceIsExact)
                    gas - GasCost::sha256_hash(input.size()) - kSyscallBaseCost,
                    std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'233, {}));
+  expected.push_back(return_entry(99'211, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
@@ -402,15 +402,14 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
-      99'839, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'748, tx.tx.invocation.calldata));
+      99'832, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'741, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    body.bytestring_set().inputs.flags = 0;
-    expected.push_back(make_entry(99'588,
-                                  99'588 - kSyscallBaseCost -
+    expected.push_back(make_entry(99'579,
+                                  99'579 - kSyscallBaseCost -
                                       GasCost::bytestring_set(value.size()),
                                   std::move(body), ok_status()));
   }
@@ -418,10 +417,10 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
     SyscallTraceBody body(SyscallNo::kLogEvent);
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
-    expected.push_back(make_entry(99'364, 99'364 - kSyscallBaseCost,
+    expected.push_back(make_entry(99'355, 99'355 - kSyscallBaseCost,
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'240, {}));
+  expected.push_back(return_entry(99'218, {}));
 
   ASSERT_EQ(trace.system_calls, expected) << x23::show(trace.system_calls);
 
@@ -459,12 +458,12 @@ TEST_F(TraceShapeTest, InvalidSyscallFallbackTraceIsExact)
   // The SDK skips GetCalldataLen for a fixed-size (u64) calldata layout, and
   // the invalid syscall is traced under its raw out-of-range discriminant.
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'928, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(99'924, tx.tx.invocation.calldata));
   expected.push_back(
-      make_entry(99'771, 99'771 - kNoSyscallCost - kSyscallBaseCost,
+      make_entry(99'765, 99'765 - kNoSyscallCost - kSyscallBaseCost,
                  SyscallTraceBody(static_cast<SyscallNo>(kSyscallCount)),
                  error_status(SyscallErrorCode::kSyscallErrorCodeNoSyscall)));
-  expected.push_back(return_entry(99'679, {}));
+  expected.push_back(return_entry(99'665, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -523,16 +522,16 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
   const Calldata &inner_calldata = inner.calldata;
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'896, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(99'892, tx.tx.invocation.calldata));
   {
-    constexpr std::array<GasAmount, 6> kKeyGas = {99'793, 99'706, 99'614,
-                                                  99'527, 99'440, 99'324};
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'787, 99'700, 99'608,
+                                                  99'521, 99'434, 99'318};
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'063, storage_key, 32, true));
+  expected.push_back(bytestring_get_len_entry(99'049, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(61'545, storage_key,
+      bytestring_get_entry(61'531, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -552,18 +551,18 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
         .calldata = {},
     };
     child.invocation.calldata = inner_calldata;
-    child.system_calls.push_back(get_calldata_entry(49'896, inner_calldata));
-    child.system_calls.push_back(return_entry(49'442, inner_calldata));
+    child.system_calls.push_back(get_calldata_entry(49'892, inner_calldata));
+    child.system_calls.push_back(return_entry(49'412, inner_calldata));
     child.status = InvocationFrameOutput(InvocationFrameStatusCode::Return);
     child.status.return_buffer().append_range(inner_calldata);
     body.invoke().outputs =
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The kInvoke entry's gas delta is the child frame's total consumption.
     expected.push_back(
-        make_entry(61'193, 60'535, std::move(body), ok_status()));
+        make_entry(61'177, 60'489, std::move(body), ok_status()));
   }
-  expected.push_back(get_returned_buffer_entry(60'492, inner_calldata));
-  expected.push_back(return_entry(60'264, {}));
+  expected.push_back(get_returned_buffer_entry(60'446, inner_calldata));
+  expected.push_back(return_entry(60'206, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -617,16 +616,16 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
   const Calldata &inner_calldata = inner.calldata;
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'864, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(99'860, tx.tx.invocation.calldata));
   {
-    constexpr std::array<GasAmount, 6> kKeyGas = {99'761, 99'674, 99'582,
-                                                  99'495, 99'408, 99'292};
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'755, 99'668, 99'576,
+                                                  99'489, 99'402, 99'286};
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'032, storage_key, 32, true));
+  expected.push_back(bytestring_get_len_entry(99'018, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(61'514, storage_key,
+      bytestring_get_entry(61'500, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -646,15 +645,15 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
         .calldata = {},
     };
     child.invocation.calldata = inner_calldata;
-    child.system_calls.push_back(get_calldata_entry(896, inner_calldata));
+    child.system_calls.push_back(get_calldata_entry(892, inner_calldata));
     child.status = InvocationFrameOutput(InvocationFrameStatusCode::Fault);
     body.invoke().outputs =
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The out-of-gas child consumes its entire 1000-gas limit.
     expected.push_back(
-        make_entry(61'165, 60'115, std::move(body), ok_status()));
+        make_entry(61'149, 60'099, std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(60'000, {}));
+  expected.push_back(return_entry(59'974, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -692,21 +691,21 @@ TEST_F(TraceShapeTest, ManualRevertAbortTraceIsExact)
   const std::string_view value_str = "state_before_revert";
   const std::vector<uint8_t> value(value_str.begin(), value_str.end());
 
+  // The fixture's initializer entrypoint adds 16 gas to dispatcher execution.
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
-      99'854, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'763, tx.tx.invocation.calldata));
+      99'831, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'740, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    body.bytestring_set().inputs.flags = 0;
-    expected.push_back(make_entry(99'545,
-                                  99'545 - kSyscallBaseCost -
+    expected.push_back(make_entry(99'518,
+                                  99'518 - kSyscallBaseCost -
                                       GasCost::bytestring_set(value.size()),
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'185, abort_buffer, /*revert_frame=*/true));
+  expected.push_back(return_entry(99'145, abort_buffer, /*revert_frame=*/true));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -745,8 +744,8 @@ TEST_F(TraceShapeTest, VerifySignatureTraceIsExact)
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
-      99'902, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'811, tx.tx.invocation.calldata));
+      99'896, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'805, tx.tx.invocation.calldata));
   {
     // Signature verification is priced per SHA-512 block over R || A ||
     // message, on top of the crossing.
@@ -757,13 +756,13 @@ TEST_F(TraceShapeTest, VerifySignatureTraceIsExact)
     body.verify_signature().inputs.public_key.append_range(public_key);
     body.verify_signature().inputs.message.append_range(message);
     expected.push_back(
-        make_entry(99'608,
-                   99'608 - GasCost::verify_signature(message.size()) -
+        make_entry(99'600,
+                   99'600 - GasCost::verify_signature(message.size()) -
                        kSyscallBaseCost,
                    std::move(body), ok_status()));
   }
   const std::vector<uint8_t> true_cxs = {0x01};
-  expected.push_back(return_entry(81'559, true_cxs));
+  expected.push_back(return_entry(81'539, true_cxs));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

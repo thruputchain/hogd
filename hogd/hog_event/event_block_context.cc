@@ -335,12 +335,12 @@ EventBlockContext::finish_file_write()
   }
 
   auto ts3 = x23::fastclock::now();
-  info("time to write events: {} ns total bytes at end: {}", ts3 - ts,
+  info("time to write events: {} ns total bytes at end: {}", (ts3 - ts).count(),
        total_bytes);
 
   sync_file(g);
   auto ts4 = x23::fastclock::now();
-  info("time to sync {} ns,", ts4 - ts3);
+  info("time to sync {} ns,", (ts4 - ts3).count());
 }
 
 x23::Async<void>
@@ -353,7 +353,7 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   auto ts4 = x23::fastclock::now();
   publish_file(g, hash);
   auto ts5 = x23::fastclock::now();
-  info("time to publish file: {} ns", ts5 - ts4);
+  info("time to publish file: {} ns", (ts5 - ts4).count());
   auto directory = Directory::open(work_directory_, /*create=*/false);
   if (!directory) {
     panic("failed to open events directory after rename: {}",

@@ -237,10 +237,10 @@ IndexerPullController::run(const std::stop_token &stop)
             pulled.block.identity;
         const std::size_t pulled_event_logs =
             pulled.block.payload.event_logs.size();
-        const auto apply_start_ns = x23::fastclock::get_ns();
+        const auto apply_start = x23::fastclock::now();
         IndexerBlockApplyResult applied =
             db_.apply_committed_block(pulled.origin, std::move(pulled.block))();
-        const auto apply_end_ns = x23::fastclock::get_ns();
+        const auto apply_end = x23::fastclock::now();
         if (applied.outcome() !=
                 IndexerBlockApplyOutcome::IndexerBlockApplied &&
             applied.outcome() !=
@@ -266,8 +266,8 @@ IndexerPullController::run(const std::stop_token &stop)
             IndexerBlockApplyOutcome::IndexerBlockApplied) {
           info("applied committed block {} ({} event logs) in {} ns ({:.3f} s)",
                static_cast<std::int64_t>(pulled_height), pulled_event_logs,
-               apply_end_ns - apply_start_ns,
-               static_cast<double>(apply_end_ns - apply_start_ns) / 1e9);
+               (apply_end - apply_start).count(),
+               static_cast<double>((apply_end - apply_start).count()) / 1e9);
         }
         else {
           info("skipped duplicate committed block {}",

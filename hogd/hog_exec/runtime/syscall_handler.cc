@@ -264,18 +264,26 @@ SystemCallHandler::perform_initial_validation()
   // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
       contracts_to_deploy_.size() > permitted) {
-    error("Transaction attaches {} contracts; chain permits {}",
-          contracts_to_deploy_.size(), permitted);
+    warn("tx {}: attaches {} contracts; chain permits {}",
+         show_byte_array(get_source_tx_hash()), contracts_to_deploy_.size(),
+         permitted);
+    report_contract_rejection(ContractRejectDiagnostic{
+        .contract_index = permitted,
+        .code = ContractRejectCode::ContractRejectTooMany});
     return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
   // The blob bound is the chain's (#2569): a configuration may raise it past
   // the default, and hog_db stores whatever a loadable genesis admits.
-  for (auto const &contract : contracts_to_deploy_) {
+  for (size_t i = 0; i < contracts_to_deploy_.size(); ++i) {
     if (const uint32_t permitted = config_params().max_contract_size_bytes;
-        contract_blob_size(contract) > permitted) {
-      error("Transaction attaches a {}-byte contract; chain permits {}",
-            contract_blob_size(contract), permitted);
+        contract_blob_size(contracts_to_deploy_[i]) > permitted) {
+      warn("tx {}: attached contract {} is {} bytes; chain permits {}",
+           show_byte_array(get_source_tx_hash()), i,
+           contract_blob_size(contracts_to_deploy_[i]), permitted);
+      report_contract_rejection(ContractRejectDiagnostic{
+          .contract_index = static_cast<uint32_t>(i),
+          .code = ContractRejectCode::ContractRejectBlobTooLarge});
       return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }
@@ -288,10 +296,17 @@ SystemCallHandler::perform_initial_validation()
   // handler itself cannot rethrow -- and keep anything else terminating,
   // since it is a genuine bug.
   try {
+    std::optional<ContractRejectDiagnostic> rejection;
     auto [res, gas_consumed] =
         NewContractSet::make(contracts_to_deploy_, runtime_context_,
-                             config_params());
+                             config_params(), rejection);
     if (!res.has_value()) {
+      if (rejection.has_value()) {
+        warn("tx {}: refusing attached contract {}: {}",
+             show_byte_array(get_source_tx_hash()), rejection->contract_index,
+             x23::show(rejection->code));
+        report_contract_rejection(*rejection);
+      }
       return {res.error(), gas_consumed};
     }
     newly_created_contracts_ = std::move(*res);
@@ -1229,15 +1244,29 @@ SystemCallHandler::report_db_conflict_diagnostic() const
     first = conflict.conflicts().data();
   }
 
-  // Fire-and-forget: drive the async send in a detached coroutine so execution
-  // never waits on it (the same detached-await shape as the event server's own
-  // detached sends). report_tx_failure copies the client, so the send is
-  // self-contained and safe to outlive us.
-  const BlockHeight height = get_block_height();
-  [](x23::Async<void> send)
-      -> x23::Detached { co_await send; }(event_server_proxy_.report_tx_failure(
-          get_source_tx_hash(),
-          TxFailureDiagnostic{.attempt_height = height, .conflict = *first}));
+  TxFailureCause cause(TxFailureKind::TxFailureDbConflict);
+  cause.conflict() = *first;
+  report_tx_failure(std::move(cause));
+}
+
+void
+SystemCallHandler::report_contract_rejection(
+    ContractRejectDiagnostic const &rejection) const
+{
+  if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+    TxFailureCause cause(TxFailureKind::TxFailureContractRejected);
+    cause.contract() = rejection;
+    report_tx_failure(std::move(cause));
+  }
+}
+
+void
+SystemCallHandler::report_tx_failure(TxFailureCause cause) const
+{
+  event_server_proxy_.report_tx_failure(
+      get_source_tx_hash(),
+      TxFailureDiagnostic{.attempt_height = get_block_height(),
+                          .cause = std::move(cause)});
 }
 
 void
@@ -1668,16 +1697,9 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
-                                  std::span<const std::byte> input_bytestring,
-                                  StorageDeltaFlagSet input_flags)
+                                  std::span<const std::byte> input_bytestring)
 {
   CHECK(!is_read_only());
-
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
-          input_flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
 
   if (input_bytestring.size() > config_params().max_bytestring_len) {
     co_return SyscallError{
@@ -1697,7 +1719,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                 input_bytestring.size());
   }
 
-  co_return item_view->set(BytestringItem(std::move(new_string)), input_flags);
+  co_return item_view->set(BytestringItem(std::move(new_string)));
 }
 
 GasAmount
@@ -1813,16 +1835,9 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
-                             const int128_t &add_value,
-                             StorageDeltaFlagSet input_flags)
+                             const int128_t &add_value)
 {
   CHECK(!is_read_only());
-
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
-          input_flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
@@ -1831,30 +1846,57 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  co_return item_view->set(NNIntItem{.base_value_ =
-                                         set_value.has_value()
-                                             ? std::optional<int128_xdr>(
-                                                   to_xdr(*set_value))
-                                             : std::nullopt,
-                                     .add_value_ = to_xdr(add_value)},
-                           input_flags);
+  co_return item_view->set(
+      NNIntItem{.base_value_ =
+                    set_value.has_value()
+                        ? std::optional<int128_xdr>(to_xdr(*set_value))
+                        : std::nullopt,
+                .add_value_ = to_xdr(add_value)});
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
-SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
-                                 StorageDeltaFlagSet flags)
+SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
+{
+  CHECK(!is_read_only());
+
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  co_return item_view->set(DeletedItem{});
+}
+
+SyscallStatus<void>
+SystemCallHandler::set_storage_flags(StorageKeyContractData const &storage_key,
+                                     StorageDeltaFlagSet flags)
 {
   CHECK(!is_read_only());
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  co_return item_view->set(DeletedItem{}, flags);
+  return item_view->set_flags(flags);
+}
+
+StorageDeltaFlagSet
+SystemCallHandler::get_storage_flags(StorageKeyContractData const &storage_key)
+{
+  auto const *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  return item_view->flags();
+}
+
+void
+SystemCallHandler::clear_storage_flags(
+    StorageKeyContractData const &storage_key)
+{
+  CHECK(!is_read_only());
+
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  item_view->clear_flags();
 }
 
 namespace {
@@ -1886,17 +1928,14 @@ get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
   co_return co_await base_item.get_retrocausally_consumed_entries(count);
 }
 
-// An RCQ access to a DeletedItem key resolves against a fully-consumed view
-// of the snapshot's queue: the tx-local delete hides every entry, but the
-// retrocausally-consumed count already recorded on the view must be carried
-// forward. Loads the snapshot base item fresh (the DeletedItem holds none)
-// and builds that view.
+// Fully-consumed view of the snapshot's queue for a key this transaction
+// replaced, keeping the consumed count so no entry is consumed twice.
 x23::Async<SystemStatus<RetrocausalQueueItem>>
-make_deleted_key_queue_item(FrameItemKey const &item_key,
-                            AddressAndKey const &addrkey,
-                            uint32_t retrocausally_consumed_count,
-                            StorageSnapshotCache &snapshot_cache,
-                            ExecutionModeData &execution_mode_data)
+make_replaced_key_queue_item(FrameItemKey const &item_key,
+                             AddressAndKey const &addrkey,
+                             uint32_t retrocausally_consumed_count,
+                             StorageSnapshotCache &snapshot_cache,
+                             ExecutionModeData &execution_mode_data)
 {
   UnmodifiedItem unmodified_item;
   auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
@@ -1938,23 +1977,21 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     co_return item_view->get<RetrocausalQueueItem>();
   }
 
-  if (item_view->get<DeletedItem>()) {
-    auto new_item = co_await make_deleted_key_queue_item(
-        item_key, addrkey, item_view->get_retrocausally_consumed_count(),
-        snapshot_cache, execution_mode_data);
-    if (!new_item.has_value()) {
-      co_return new_item.error();
-    }
-
-    auto set_status = item_view->set(new_item.value());
-    if (!set_status.has_value()) {
-      co_return set_status.error();
-    }
-    co_return item_view->get<RetrocausalQueueItem>();
+  // The frame holds a deleted or other-typed value. An insert is a write and
+  // replaces whatever the key held, as it would a committed value, so start a
+  // fresh queue over a fully-consumed view of the snapshot.
+  auto new_item = co_await make_replaced_key_queue_item(
+      item_key, addrkey, item_view->get_retrocausally_consumed_count(),
+      snapshot_cache, execution_mode_data);
+  if (!new_item.has_value()) {
+    co_return new_item.error();
   }
 
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  auto set_status = item_view->set(new_item.value());
+  if (!set_status.has_value()) {
+    co_return set_status.error();
+  }
+  co_return item_view->get<RetrocausalQueueItem>();
 }
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
@@ -1993,6 +2030,16 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
+// A read never converts a key, so a non-queue base is wrong-type input
+// rather than an empty queue.
+bool
+committed_value_is_not_a_queue(UnmodifiedItem const &unmodified_item)
+{
+  CHECK(unmodified_item.is_loaded());
+  auto type = unmodified_item.base_item().type();
+  return type.has_value() && *type != ItemViewType::kRetrocausalQueue;
+}
+
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 retrocausal_queue_peek_from_view(ItemView *item_view,
                                  FrameItemKey const &item_key,
@@ -2011,14 +2058,17 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
         !loaded.has_value()) {
       co_return loaded.error();
     }
-
+    if (committed_value_is_not_a_queue(*unmodified_item)) {
+      co_return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     co_return co_await load_next_queue_entry(queue_item, execution_mode_data,
                                              /*advance_cursor=*/false);
   }
 
   if (item_view->get<DeletedItem>()) {
-    auto queue_item = co_await make_deleted_key_queue_item(
+    auto queue_item = co_await make_replaced_key_queue_item(
         item_key, addrkey, item_view->get_retrocausally_consumed_count(),
         snapshot_cache, execution_mode_data);
     if (!queue_item.has_value()) {
@@ -2089,6 +2139,10 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
         !loaded.has_value()) {
       co_return loaded.error();
     }
+    if (committed_value_is_not_a_queue(*unmodified_item)) {
+      co_return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
@@ -2114,7 +2168,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   // Same treatment for deleted keys: a no-op consume should leave the
   // key deleted rather than converting it to an empty RCQ.
   if (item_view->get<DeletedItem>()) {
-    auto queue_item_res = co_await make_deleted_key_queue_item(
+    auto queue_item_res = co_await make_replaced_key_queue_item(
         item_key, addrkey, item_view->get_retrocausally_consumed_count(),
         snapshot_cache_, execution_mode_data_);
     if (!queue_item_res.has_value()) {

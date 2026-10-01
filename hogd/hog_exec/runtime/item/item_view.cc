@@ -475,9 +475,11 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   if (validation_data.observation_cap_exceeded()) {
     return SystemStatus<const QueueEntry *>{nullptr};
   }
-  auto bit_res = validation_data.consume_nondeterministic_bit();
+  auto bit_res =
+      validation_data.consume_queue_entry_presence_bit(addrkey, index);
   if (!bit_res.has_value()) {
-    // Bit stream exhausted: a malformed proposal.
+    // Bit stream exhausted, or an absent bit for a position this replay
+    // already holds an entry for (#1946): a malformed proposal.
     return SystemStatus<const QueueEntry *>{
         SystemError{SystemErrorCode::ValidationFailure}};
   }

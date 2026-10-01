@@ -14,7 +14,7 @@
 
 // Operand/result vectors adapted from selected upstream riscv-tests RV32UI
 // wrappers, their included RV64UI bodies, and RV32UM assembly tests. See
-// docs/rv32/riscv-tests-license.md.
+// riscv-tests-license.md in this directory.
 // NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers)
 
 namespace hogd::rv32 {

@@ -342,7 +342,15 @@ ExecutorContext::log_event_return(SystemStatus<void> err)
   if (!err.has_value()) {
     std::unique_lock lock(event_accumulate_mutex_);
     event_error_ = err.error().code();
-    error("event error: {}", std::to_underlying(event_error_.value()));
+    // This runs in an x23::Detached callback, where an escaping exception is
+    // fatal, and formatting the diagnostic can throw under memory pressure.
+    // Guard it and fall back to the no-allocation reporter, same as the
+    // SystemCallHandler ctor paths above; the decrement below still runs.
+    try {
+      error("event error: {}", std::to_underlying(event_error_.value()));
+    } catch (...) {
+      report_dropped_log("event error diagnostic");
+    }
   }
   // Use release ordering to ensure all event RPC operations (including
   // server-side add_event/write_event) are visible before the decrement.

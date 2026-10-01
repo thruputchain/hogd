@@ -448,10 +448,16 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // into the scheduler again. This can happen if the tx was originally added
   // to the scheduler, then removed during nomination by [schedule()], and a
   // different validated block was committed instead.
-  const auto [tx_ptr, txs_lock] =
+  const auto [tx_ptr, txs_lock, inserted] =
       txs_.find_or_insert(tx_hash,
                           std::make_shared<TxValue>(TxValue{.tx = tx}));
   CHECK_PTR(tx_ptr);
+  if (inserted) {
+    // [txs_.find_or_insert()] acquires a lock, so the increment to
+    // [tx_cache_size_] happens after the tx is added to [txs_] from the
+    // perspective of anyone accessing the tx in [txs_].
+    tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
+  }
   return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
@@ -920,6 +926,10 @@ Scheduler::account_is_ready(const ContractAddress &account,
   if (remove_expired_txs) {
     for (auto it = txs.begin(); it != lower_it; it++) {
       const TransactionHash &tx_hash = it->first.tx_hash;
+      // [txs_.remove()] acquires a lock, so the subtraction from
+      // [tx_cache_size_] happens before the tx is removed from [txs_] from the
+      // perspective of anyone accessing the tx in [txs_].
+      tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
       CHECK_EQ(txs_.remove(tx_hash), 1UL);
     }
     size_t to_remove = std::distance(txs.begin(), lower_it);
@@ -1008,6 +1018,10 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
              it_remove++) {
           const TransactionHash &tx_hash = it_remove->first.tx_hash;
+          // [txs_.remove()] acquires a lock, so the subtraction from
+          // [tx_cache_size_] happens before the tx is removed from [txs_] from
+          // the perspective of anyone accessing the tx in [txs_].
+          tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
           CHECK_EQ(txs_.remove(tx_hash), 1UL);
         }
         size_t to_remove = std::distance(txs_to_schedule.begin(), it);
@@ -1071,6 +1085,11 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // concurrent resubmit cannot restore only the runqueue entry. The
           // runqueue's shared_ptr keeps [tx] alive while the cache entry is
           // removed.
+          //
+          // [txs_.remove()] acquires a lock, so the subtraction from
+          // [tx_cache_size_] happens before the tx is removed from [txs_] from
+          // the perspective of anyone accessing the tx in [txs_].
+          tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
           CHECK_EQ(txs_.remove(tx_hash), 1UL);
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
@@ -1192,6 +1211,11 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               }
               // Keep the account locked until the cache entry is gone, so a
               // concurrent resubmit cannot restore only the runqueue entry.
+              //
+              // [txs_.remove()] acquires a lock, so the subtraction from
+              // [tx_cache_size_] happens before the tx is removed from [txs_]
+              // from the perspective of anyone accessing the tx in [txs_].
+              scheduler.tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
               CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
             }
           }

@@ -19,9 +19,9 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
@@ -71,9 +71,8 @@ TEST_P(RevertTest, RootFrameReverts)
       [str_hello,
        key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Write the bytestring to storage
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key, std::as_bytes(std::span(str_hello)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(str_hello)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE()
@@ -260,9 +259,8 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   fns_2.emplace(0,
                 [str_hello, key1, addr_3](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key1, std::as_bytes(std::span(str_hello)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      key1, std::as_bytes(std::span(str_hello)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -293,11 +291,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                 });
   fns_2.emplace(
       1, [key1](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto res = co_await ctx.handler().get_bytestring(key1);
+        RuntimeMemoryLength written_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+            key1, std::span<std::byte>{}, written_len);
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().result.has_value()) {
+        if (res.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test1 should be "
                            "absent after revert";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -313,9 +313,8 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   fns_3.emplace(0,
                 [str_world, key2](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), key2, std::as_bytes(std::span(str_world)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      key2, std::as_bytes(std::span(str_world)));
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE()
@@ -327,11 +326,13 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                 });
   fns_3.emplace(
       1, [key2](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto res = co_await ctx.handler().get_bytestring(key2);
+        RuntimeMemoryLength written_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+            key2, std::span<std::byte>{}, written_len);
         if (!res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (res.value().result.has_value()) {
+        if (res.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test2 should be "
                            "absent after revert";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -442,9 +443,9 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
         std::array<std::byte, 128> restored_auth_token_ids{};
         RuntimeMemoryLength restored_auth_token_ids_written_len = 0;
 
-        auto [res, _gas] = syscall_GetReturnedBuffer_inner(
-            ctx.handler(), std::as_writable_bytes(std::span(buffer)),
-            written_len, std::span(restored_auth_token_ids),
+        auto res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
+            std::as_writable_bytes(std::span(buffer)), written_len,
+            std::span(restored_auth_token_ids),
             restored_auth_token_ids_written_len);
         if (!res.has_value()) {
           ADD_FAILURE()
@@ -574,9 +575,8 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
       [abort_payload, kConflictKey](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto child_data = make_bytestring("child_state");
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), kConflictKey, std::as_bytes(std::span(child_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            kConflictKey, std::as_bytes(std::span(child_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -684,9 +684,8 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
       0,
       [kWriteKey](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto data = make_bytestring("written");
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), kWriteKey, std::as_bytes(std::span(data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            kWriteKey, std::as_bytes(std::span(data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -919,9 +918,9 @@ TEST_P(RevertTest, DeleteMasksLoadUntilFrameReverts)
   // Method 0: delete, read behind the delete, revert.
   fns_1.emplace(
       0, [key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto del = co_await ctx.handler().delete_object(
-            key, std::to_underlying(StorageDeltaFlags::None));
-        if (!del.has_value() || !del.value().has_value()) {
+        auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
+        if (!del.has_value() ||
+            del.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "DeleteMasksLoadUntilFrameReverts: delete failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }

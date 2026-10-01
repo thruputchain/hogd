@@ -15,10 +15,9 @@
 
 namespace hogd {
 
-// Short-lived, best-effort cache of recently observed nondeterministic
-// transaction failures: tx hash -> TxFailureDiagnostic (attempt height plus
-// the first conflicting op). Fed by best-effort event-server pull notices;
-// consulted by get_transaction_info when a tx has no committed record.
+// Short-lived, best-effort cache of transactions a proposer recently excluded:
+// tx hash -> TxFailureDiagnostic. Fed by event-server pull notices; consulted
+// by get_transaction_info when a tx has no committed record.
 //
 // Storage is a SynchronizedMap -- a sharded, per-bucket-locked hash table --
 // so concurrent reports and lookups from RPC threads contend only when they
@@ -45,7 +44,7 @@ public:
   // accepted entry still expires within slack + expiry_delta blocks of
   // ingest progress, so the cache always self-heals.
   static constexpr BlockHeight kMaxAttemptHeightSlack = BlockHeight{1} << 20;
-  // This cache is tiny (only nondeterministic failures, expiring in a few
+  // This cache is tiny (only excluded transactions, expiring in a few
   // blocks) and low-QPS, and prune() scans every shard each block -- so a
   // modest fixed shard count beats SynchronizedMap's default (hundreds to
   // thousands of shards, sized to core count), which would tax every prune

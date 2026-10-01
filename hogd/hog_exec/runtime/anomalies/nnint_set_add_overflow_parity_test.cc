@@ -92,8 +92,9 @@ public:
           int128_t add = cd[2];
           int128_t const *set =
               mode == Mode::kExplicit ? &explicit_set_ : nullptr;
-          auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-              key, set, add, std::to_underlying(StorageDeltaFlags::None));
+          auto res =
+              co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(key, set,
+                                                                     add);
           if (!res.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -172,12 +173,12 @@ public:
         return false;
       }
       return std::ranges::any_of(conflict.conflicts(), [](auto const &c) {
-        return c.code == DbConflictCode::kDbConflictOverflow;
+        return c.code == DbConflictCode::Overflow;
       });
     }
     else {
       return conflict.level() == DbDiagnosticLevel::kDbDiagnosticFirst &&
-             conflict.first().code == DbConflictCode::kDbConflictOverflow;
+             conflict.first().code == DbConflictCode::Overflow;
     }
   }
 

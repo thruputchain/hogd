@@ -116,6 +116,27 @@ public:
     }
     return count;
   }
+
+  static size_t tombstone_count(ConcurrentSet<uint128_t> &s)
+  {
+    size_t count = 0;
+    for (size_t level = 0; level < s.levels(); ++level) {
+      const size_t level_capacity =
+          ConcurrentSet<uint128_t>::entries_for_level(level);
+      for (size_t i = 0; i < level_capacity; ++i) {
+        if (s.get_level(level)[i].load(std::memory_order_relaxed) ==
+            kTombstone) {
+          ++count;
+        }
+      }
+    }
+    return count;
+  }
+
+  static size_t capacity(ConcurrentSet<uint128_t> &s)
+  {
+    return s.capacity_.load(std::memory_order_relaxed);
+  }
 };
 
 TEST(ConcurrentSet, Basic)
@@ -169,6 +190,31 @@ TEST(ConcurrentSet, Erase)
   ASSERT_EQ(InsertResult::kInserted, s.try_insert(1));
   ASSERT_EQ(InsertResult::kAlreadyPresent, s.try_insert(1));
   ASSERT_EQ(s.size(), 1);
+}
+
+// Pins tolerated behavior (#4107): insert/erase churn on one value accumulates
+// tombstones and grows capacity while the live size stays at one, because erase
+// leaves a tombstone that try_insert never reclaims and try_resize grows from
+// the lifetime insert count. The conflict set backing the replay cache is
+// per-block and discarded at close, so the growth is bounded and intended.
+TEST(ConcurrentSet, InsertEraseChurnAccumulatesTombstones)
+{
+  ConcurrentSet<uint128_t> s;
+  const uint128_t value = (uint128_t{7} << 64) | uint128_t{42};
+
+  constexpr size_t kCycles = 64;
+  for (size_t i = 0; i < kCycles; ++i) {
+    ASSERT_EQ(InsertResult::kInserted, s.try_insert(value));
+    ASSERT_EQ(s.size(), 1);
+    ASSERT_TRUE(s.erase(value));
+    ASSERT_EQ(s.size(), 0);
+  }
+
+  // Live size never exceeded one, yet every abort left a tombstone behind and
+  // the table grew well past its initial capacity.
+  EXPECT_GE(ConcurrentSetHelper::tombstone_count(s), kCycles);
+  EXPECT_GT(ConcurrentSetHelper::capacity(s),
+            ConcurrentSetHelper::kInitialCapacity);
 }
 
 TEST(ConcurrentSet, FullLevel0)

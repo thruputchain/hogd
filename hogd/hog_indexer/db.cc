@@ -763,7 +763,7 @@ IndexDB::consume_events(BlockHeight block_height,
     legacy_ingest_test_hook_();
   }
 
-  auto start_ts = x23::fastclock::get_ns();
+  auto start_ts = x23::fastclock::now();
 
   // Parallelism configuration
   static constexpr size_t kNumTxIndexChunks = 8;
@@ -1013,9 +1013,10 @@ IndexDB::consume_events(BlockHeight block_height,
   record_height(static_cast<int64_t>(block_height), ingest_guard);
   legacy_mode_ = true;
 
-  auto end_ts = x23::fastclock::get_ns();
-  info("consume_events time: {} ns ({:.3f} s)", end_ts - start_ts,
-       (end_ts - start_ts) / 1'000'000'000.0);
+  auto end_ts = x23::fastclock::now();
+  auto elapsed_ns = (end_ts - start_ts).count();
+  info("consume_events time: {} ns ({:.3f} s)", elapsed_ns,
+       elapsed_ns / 1'000'000'000.0);
 
   return {};
 }
@@ -1934,6 +1935,44 @@ private:
   bool has_current_ = false;
 };
 
+// Resolves a query's anchor to the block height a scan starts from, or
+// nullopt when the anchor/order combination selects nothing and the
+// caller returns an empty page.  A height below the retained range
+// starts an ascending scan at oldest_block() and leaves a descending one
+// nothing to visit, per protocol/indexer.x's oldest_block contract;
+// rejecting it here also keeps the signed height from wrapping to
+// all-0xFF in the seek key.
+std::optional<BlockHeight>
+resolve_anchor_block(BlockAnchor const &anchor, IterationOrder order,
+                     BlockHeight max_serve_block)
+{
+  switch (anchor.kind()) {
+  case BlockAnchorKind::AnchorAtBeginning:
+    // Nothing to iterate toward below the oldest retained block.
+    if (order == IterationOrder::IterationOrderDescending) {
+      return std::nullopt;
+    }
+    return IndexDB::oldest_block();
+  case BlockAnchorKind::AnchorAtEnd:
+    // Nothing to iterate toward above the highest indexed block.
+    if (order == IterationOrder::IterationOrderAscending) {
+      return std::nullopt;
+    }
+    return max_serve_block;
+  case BlockAnchorKind::AnchorAtHeight:
+    if (anchor.height() < IndexDB::oldest_block()) {
+      if (order == IterationOrder::IterationOrderDescending) {
+        return std::nullopt;
+      }
+      return IndexDB::oldest_block();
+    }
+    return anchor.height();
+  }
+  // Discriminant outside the enum.  No `default:` label, so -Wswitch
+  // still flags a BlockAnchorKind added without a case above.
+  return std::nullopt;
+}
+
 } // namespace
 
 IndexerStatus<EventPage>
@@ -2001,37 +2040,12 @@ IndexDB::get_events(EventQuery const &query) const
     if (!is_valid_iteration_order(order)) {
       return page;
     }
-    switch (query.anchor.kind()) {
-    case BlockAnchorKind::AnchorAtBeginning:
-      if (order == IterationOrder::IterationOrderDescending) {
-        // Nonsense combination — nothing to iterate toward below
-        // the oldest retained block.
-        return page;
-      }
-      anchor_block = oldest_block();
-      break;
-    case BlockAnchorKind::AnchorAtEnd:
-      if (order == IterationOrder::IterationOrderAscending) {
-        // Nonsense combination — nothing to iterate toward above
-        // the highest indexed block.
-        return page;
-      }
-      anchor_block = max_serve_block;
-      break;
-    case BlockAnchorKind::AnchorAtHeight:
-      anchor_block = query.anchor.height();
-      if (anchor_block < oldest_block()) {
-        if (order == IterationOrder::IterationOrderDescending) {
-          // Everything at or below the anchor is outside the
-          // retained range — empty page, per protocol/indexer.x's
-          // oldest_block contract.  Validating here also keeps the
-          // signed height from wrapping to all-0xFF in the seek key.
-          return page;
-        }
-        anchor_block = oldest_block();
-      }
-      break;
+    auto const resolved =
+        resolve_anchor_block(query.anchor, order, max_serve_block);
+    if (!resolved) {
+      return page;
     }
+    anchor_block = *resolved;
   }
   // Descending scans seek from the anchor downward; clamp the start
   // to the watermark so pending rows are never visited.  Ascending
@@ -2242,29 +2256,12 @@ IndexDB::get_transactions(TransactionQuery const &query) const
     if (!is_valid_iteration_order(order)) {
       return page;
     }
-    switch (query.anchor.kind()) {
-    case BlockAnchorKind::AnchorAtBeginning:
-      if (order == IterationOrder::IterationOrderDescending) {
-        return page;
-      }
-      anchor_block = oldest_block();
-      break;
-    case BlockAnchorKind::AnchorAtEnd:
-      if (order == IterationOrder::IterationOrderAscending) {
-        return page;
-      }
-      anchor_block = max_serve_block;
-      break;
-    case BlockAnchorKind::AnchorAtHeight:
-      anchor_block = query.anchor.height();
-      if (anchor_block < oldest_block()) {
-        if (order == IterationOrder::IterationOrderDescending) {
-          return page;
-        }
-        anchor_block = oldest_block();
-      }
-      break;
+    auto const resolved =
+        resolve_anchor_block(query.anchor, order, max_serve_block);
+    if (!resolved) {
+      return page;
     }
+    anchor_block = *resolved;
   }
   if (order == IterationOrder::IterationOrderDescending &&
       anchor_block > max_serve_block) {
@@ -2421,29 +2418,12 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     if (!is_valid_iteration_order(order)) {
       return page;
     }
-    switch (query.anchor.kind()) {
-    case BlockAnchorKind::AnchorAtBeginning:
-      if (order == IterationOrder::IterationOrderDescending) {
-        return page;
-      }
-      anchor_block = oldest_block();
-      break;
-    case BlockAnchorKind::AnchorAtEnd:
-      if (order == IterationOrder::IterationOrderAscending) {
-        return page;
-      }
-      anchor_block = max_serve_block;
-      break;
-    case BlockAnchorKind::AnchorAtHeight:
-      anchor_block = query.anchor.height();
-      if (anchor_block < oldest_block()) {
-        if (order == IterationOrder::IterationOrderDescending) {
-          return page;
-        }
-        anchor_block = oldest_block();
-      }
-      break;
+    auto const resolved =
+        resolve_anchor_block(query.anchor, order, max_serve_block);
+    if (!resolved) {
+      return page;
     }
+    anchor_block = *resolved;
   }
   if (order == IterationOrder::IterationOrderDescending &&
       anchor_block > max_serve_block) {

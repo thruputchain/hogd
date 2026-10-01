@@ -3,10 +3,12 @@
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
@@ -39,14 +41,15 @@ MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
 }
 
 InvokeErrorCode
-MultiplexedContext::verify_contract(Contract const &contract,
-                                    NetworkConfigParams const &params,
-                                    PreparedContract &out) const
+MultiplexedContext::verify_contract(
+    Contract const &contract, NetworkConfigParams const &params,
+    PreparedContract &out, std::optional<ContractRejectCode> &rejection) const
 {
   auto it = contexts_.find(contract.contract_type());
   if (it == contexts_.end()) {
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
     return InvokeErrorCode::Deterministic;
   }
-  return it->second.first->verify_contract(contract, params, out);
+  return it->second.first->verify_contract(contract, params, out, rejection);
 }
 } // namespace hogd

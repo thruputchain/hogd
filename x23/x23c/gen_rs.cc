@@ -155,14 +155,10 @@ struct GenRs {
 
     show_comment(d.comment, false);
 
-    if (!d.attrs.empty()) {
-      prtop("{}\n", d.attrs);
-    }
-
     if (get_opaque_array_size(d).has_value()) {
       // type is a byte array
       prtop("{}", feature_attr("serde", "serde(with = "
-                                        "\"serde_arrays::hex\")"));
+                                        "\"xdr_common::serde_hex\")"));
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -346,8 +342,6 @@ struct GenRs {
 
   static constexpr string_view kRustBoxPtr = R"(#[rust(box_ptr)])";
   static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
-  static constexpr string_view kSerdeArrays =
-      R"(#[serde(with = "serde_arrays::hex")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
   static constexpr string_view kConstWriteXDR = R"(#[rust(ConstWriteXDR)])";
@@ -374,7 +368,6 @@ GenRs::convert_to_newtype(const Definition &d)
 {
   struct NewtypeVisitor {
     string comment;
-    string attrs;
 
     // Convert a typedef to a struct with a single field
     Definition operator()(const Typedef &d)
@@ -384,7 +377,6 @@ GenRs::convert_to_newtype(const Definition &d)
           .id = "inner", // or can leave nameless for a tuple-struct
           .qual = d.qual,
           .bound = d.bound,
-          .attrs = attrs,
           .is_private = true,
       };
 
@@ -405,18 +397,7 @@ GenRs::convert_to_newtype(const Definition &d)
   };
 
   if (optional<string> remainder = substring_removed(d.comment, kRustNewtype)) {
-    string comment = *remainder;
-    string attrs;
-
-    if (optional<string> remainder = substring_removed(comment, kSerdeArrays)) {
-      comment = *remainder;
-      if (!attrs.empty()) {
-        attrs += "\n";
-      }
-      attrs += kSerdeArrays;
-    }
-
-    auto visitor = NewtypeVisitor{.comment = comment, .attrs = attrs};
+    auto visitor = NewtypeVisitor{.comment = *remainder};
     return visit(visitor, d);
   }
 
@@ -1359,9 +1340,8 @@ use core::ops::{{Deref, DerefMut}};
 
   preamble +=
       std::format(R"(
-{0}{1})",
-                  gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"),
-                  gs.cfg("serde", "use ::serde_arrays;"));
+{0})",
+                  gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"));
 
   return preamble + gs.top_ + R"(
 //

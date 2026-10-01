@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -47,6 +48,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 //
 // End-to-end faucet scenarios on a chain whose genesis ROOT contract is a
@@ -73,8 +75,8 @@ using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 using default_wallet::WalletCall;
 using wallet_calls_t = x23::Vec<WalletCall, 4294967295>;
 
-std::tuple<uint64_t, uint64_t>
-make_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
@@ -197,7 +199,7 @@ protected:
     return call;
   }
 
-  static WalletCall airdrop_claim_call(uint128_t amount)
+  static WalletCall airdrop_claim_call(int128_t amount)
   {
     return make_wallet_call(kGenesisRootContractAddress,
                             airdrop_meta::method_id<u8"claim">(),
@@ -205,7 +207,7 @@ protected:
                                 make_amount(amount)));
   }
 
-  static WalletCall drip_claim_call(uint128_t amount)
+  static WalletCall drip_claim_call(int128_t amount)
   {
     return make_wallet_call(kGenesisRootContractAddress,
                             drip_meta::method_id<u8"claim">(),
@@ -374,11 +376,13 @@ TEST_F(FaucetScenarioTest, AirdropBootstrapsPubkeyAccountsFromZero)
             static_cast<int128_t>(kAliceAmount + kBobAmount +
                                   kBootstrapFunding));
 
-  // An amount above INT128_MAX is rejected by the native token itself; the
-  // wallet reports the aborted call and nothing is minted.
+  // A negative amount, down to INT128_MIN, is rejected by the native token
+  // itself (NegativeAmount); the wallet reports the aborted call and nothing
+  // is minted.
   auto greedy = make_preimage(4);
   auto greedy_out =
-      run_claim_tx(greedy, airdrop_claim_call(uint128_t{1} << 127));
+      run_claim_tx(greedy,
+                   airdrop_claim_call(std::numeric_limits<int128_t>::min()));
   EXPECT_EQ(greedy_out.status, InvocationFrameStatusCode::Abort);
   EXPECT_EQ(wallet_error_of(greedy_out.buffer),
             std::optional(default_wallet::WalletError::CallAborted));
@@ -549,6 +553,58 @@ TEST_F(FaucetScenarioTest, DripFaucetEnforcesWindowBudgetAcrossCallers)
   EXPECT_EQ(read_total_supply(), 200);
 }
 
+// A negative drip claim passes the faucet's own budget check (a negative
+// amount never exceeds what remains) and stages a capacity change before the
+// native token rejects the mint with NegativeAmount. The abort must discard
+// that staged change: after Alice takes 60 of the 100-unit window, a
+// claim(-50) or claim(INT128_MIN) leaves exactly 40 claimable, not 90.
+TEST_F(FaucetScenarioTest, DripFaucetNegativeClaimLeavesBudgetUnchanged)
+{
+  make_ctx();
+  auto faucet = drip_meta::load_rv32();
+  ASSERT_TRUE(faucet);
+  run_faucet_genesis(faucet, StorageCostModel(StorageCostModelXdr{
+                                 .ext = ExtensionPoint(0),
+                                 .base_data_item_cost = 0,
+                                 .bytestring_cost_per_byte = 0,
+                                 .base_contract_deployment_cost = 0,
+                                 .contract_deployment_cost_per_byte = 0,
+                                 .auth_per_key_cost = 0,
+                                 .rcq_cost_per_entry = 0,
+                                 .replay_cache_cost_per_entry = 0,
+                                 .balance_cost = 0,
+                             }));
+
+  auto alice = make_preimage(1);
+  auto bob = make_preimage(2);
+  auto carol = make_preimage(3);
+
+  auto a1 = run_claim_tx(alice, drip_claim_call(60));
+  ASSERT_EQ(a1.commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(read_total_supply(), 60);
+
+  for (int128_t amount :
+       {int128_t{-50}, std::numeric_limits<int128_t>::min()}) {
+    auto negative = run_claim_tx(bob, drip_claim_call(amount));
+    EXPECT_EQ(negative.status, InvocationFrameStatusCode::Abort);
+    EXPECT_EQ(wallet_error_of(negative.buffer),
+              std::optional(default_wallet::WalletError::CallAborted));
+    EXPECT_EQ(read_balance(account_address(bob)), 0);
+    EXPECT_EQ(read_total_supply(), 60);
+  }
+
+  // Exactly 40 remain: a claim of 40 fits, and one more token does not.
+  auto c1 = run_claim_tx(carol, drip_claim_call(40));
+  EXPECT_EQ(c1.status, InvocationFrameStatusCode::Return);
+  EXPECT_EQ(c1.commit, ExecResult::ExecResultOK);
+  EXPECT_EQ(read_balance(account_address(carol)), 40);
+  auto c2 = run_claim_tx(carol, drip_claim_call(1));
+  EXPECT_EQ(c2.status, InvocationFrameStatusCode::Abort);
+  EXPECT_EQ(wallet_error_of(c2.buffer),
+            std::optional(default_wallet::WalletError::CallAborted));
+  EXPECT_EQ(read_total_supply(), 100);
+}
+
 // The full bootstrap loop: a pubkey account funds itself from the airdrop,
 // deploys a contract through the default wallet with those funds, and that
 // contract then claims from the faucet for itself -- three ways of acquiring
@@ -596,8 +652,9 @@ TEST_F(FaucetScenarioTest, AirdropFundsWalletDeployedContractCaller)
   ContractTraitClient<default_wallet::DefaultWallet> wallet_client(
       account_address(alice));
   auto deploy_out = run_account_invocation_no_advance(
-      alice, wallet_client.make_invocation<u8"deploy">(UINT64_MAX, nonce,
-                                                       sha256(*caller_obj)));
+      alice, wallet_client.make_invocation<u8"deploy">(
+                 UINT64_MAX, nonce, sha256(*caller_obj), make_amount(0),
+                 x23::Ptr<default_wallet::WalletInitCall>{}));
   advance_block();
   ASSERT_EQ(deploy_out.status, InvocationFrameStatusCode::Return);
   ASSERT_EQ(deploy_out.commit, ExecResult::ExecResultOK);

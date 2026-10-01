@@ -12,7 +12,7 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.17.5"
+EXPECTED_VERSION="groundhog 0.19.0"
 ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
 ACTUAL_RELEASE_VERSION="${ACTUAL_VERSION%% (*}"
 if [ "${ACTUAL_RELEASE_VERSION}" != "${EXPECTED_VERSION}" ]; then

@@ -1,5 +1,6 @@
 #include "hogd/hog_db/item_lock/auth_lock.h"
 
+#include <algorithm>
 #include <cassert>
 #include <mutex>
 
@@ -47,6 +48,23 @@ AuthLock::build_result(BlockHeight block_height) const
   return result;
 }
 
+bool
+AuthLock::writes_row() const
+{
+  if (row_exists_ || required_weight_change_.has_value()) {
+    return true;
+  }
+  return std::ranges::any_of(pk_changes_, [](auto const &change) {
+    return change.has_value() && *change != nullptr;
+  });
+}
+
+int128_t
+AuthLock::committed_cost(const StorageCostModel &cost_model) const
+{
+  return writes_row() ? cost_model.get_auth_data_cost(count_active_keys()) : 0;
+}
+
 size_t
 AuthLock::count_active_keys() const
 {
@@ -75,14 +93,16 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
 
   std::unique_lock<x23::TestLock> ul(lock_);
   if (locked_ && before == nullptr) {
-    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
+    return ctx.conflict(DbConflictCode::ExclusiveLockDenied);
   }
   assert(before == nullptr ||
-         before->get()->base_auth_data() == base_auth_data_);
+         (before->get()->row_exists() == row_exists_ &&
+          before->get()->base_auth_data() == base_auth_data_));
 
   if (after != nullptr) {
-    if (after->get()->base_auth_data() != base_auth_data_) {
-      return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
+    if (after->get()->row_exists() != row_exists_ ||
+        after->get()->base_auth_data() != base_auth_data_) {
+      return ctx.conflict(DbConflictCode::ValueMismatch);
     }
     locked_ = true;
   }
@@ -107,7 +127,8 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
     }
   }
 
-  return ctx.cost_model->get_auth_data_cost(keys);
+  bool writes = after != nullptr ? after->get()->writes_row() : row_exists_;
+  return writes ? ctx.cost_model->get_auth_data_cost(keys) : 0;
 }
 
 int128_t
@@ -124,8 +145,7 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   // did_finalize/snapshot logic out of the type-specific locks and into the
   // base ItemLock.
   int128_t previous_cost =
-      did_finalize ? snapshot_cost
-                   : ctx.cost_model->get_auth_data_cost(count_active_keys());
+      did_finalize ? snapshot_cost : committed_cost(*ctx.cost_model);
 
   for (size_t i = 0; i < kMaxSigners; ++i) {
 
@@ -139,7 +159,7 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   if (after_item.required_weight_change_.has_value()) {
     required_weight_change_ = after_item.required_weight_change_;
   }
-  int128_t new_cost = ctx.cost_model->get_auth_data_cost(count_active_keys());
+  int128_t new_cost = committed_cost(*ctx.cost_model);
   return new_cost - previous_cost;
 }
 
@@ -148,6 +168,9 @@ AuthLock::stage_committed_changes(const LockContext &ctx,
                                   ChangeSet &changes) const
 {
   CHECK(ctx.key.is_address_auth_data());
+  if (!writes_row()) {
+    return {};
+  }
   auto auth = build_result(ctx.block_height);
   auto key = make_address_key(ctx.key.get_address(), Prefix::kAddressAuthData);
   auto serialized = x23::serialize(auth);

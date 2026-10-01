@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -403,12 +404,33 @@ public:
     propose_batch_result_test_hook_ = std::move(hook);
   }
 
+  // Runs immediately before/after the submission auth RPC, with commit
+  // unlocked.
+  void set_submission_auth_test_hook(
+      std::function<x23::Async<void>(BlockHeight,
+                                     const SignedTransactionBatch &, bool)>
+          hook)
+  {
+    submission_auth_test_hook_ = std::move(hook);
+  }
+
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
   }
 
 private:
+  struct SubmissionAuth {
+    std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
+        accounts;
+    std::unordered_set<ContractAddress, SipHash24Hasher> dirty;
+  };
+
+  // Returns with [commit_guard] held, so results stay valid through admission.
+  x23::Async<AuthErrorCodeBatch>
+  verify_submission(const SignedTransactionBatch &txs,
+                    x23::CoroGuard &commit_guard);
+
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   submit_unvetted(ParallelSignedTransactionBatch batch,
                   bool malformed_is_protocol_error);
@@ -743,6 +765,9 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
+  std::function<x23::Async<void>(BlockHeight, const SignedTransactionBatch &,
+                                 bool)>
+      submission_auth_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
@@ -753,11 +778,11 @@ private:
   // validated concurrently, [validated_block_cache_] could be accessed in
   // parallel without this lock.
   x23::CoroLock validated_block_cache_lock_;
-  // Ensures that a commit does not occur while txs are being verified. Txs
-  // are verified against a certain block height, so if they race with a block
-  // commit, we could add txs to the scheduler that are no longer verified as
-  // of the last committed block.
+  // Serializes commits, auth-data updates, and final submission admission.
   x23::CoroLock commit_lock_;
+  // Protected by [commit_lock_]. Weak pointers also handle failed or canceled
+  // authentication without requiring asynchronous cleanup.
+  std::vector<std::weak_ptr<SubmissionAuth>> submission_auth_;
   // [num_validations_in_progress_] is a gate: values > 0 are active
   // validations, 0 means validation is open, and -1 means commit has closed
   // validation admission.

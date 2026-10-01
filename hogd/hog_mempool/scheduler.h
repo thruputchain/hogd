@@ -197,7 +197,10 @@ public:
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
-  size_t tx_cache_size() { return txs_.size(); }
+  size_t tx_cache_size()
+  {
+    return tx_cache_size_.load(std::memory_order_relaxed);
+  }
 
   // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age
   // updates.
@@ -330,6 +333,7 @@ private:
   //    now be less than 0.
   // 4. [add_txs()] increments [size_].
   std::atomic<ssize_t> size_ = 0;
+  std::atomic<ssize_t> tx_cache_size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
 
   // The RPC client that the scheduler uses to talk to the database. The

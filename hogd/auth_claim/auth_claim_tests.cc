@@ -806,6 +806,53 @@ TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
             AuthVerifyErrorCode::kSignatureVerificationFailed);
 }
 
+// A present `AddressAuthData` row whose `required_weight` is zero authorizes a
+// source-address claim that carries no signatures: zero accumulated weight
+// meets a zero threshold. This is how an address makes itself publicly
+// originatable -- anyone may submit a transaction from it, and the address's
+// own contract code decides what that transaction may do. Genesis depends on
+// it: the genesis root's row has no keys and `required_weight = 0`, and the
+// ceremony transactions reach it with an unsigned default claim.
+//
+// Only the address can set this: a new row defaults to
+// kDefaultNewAddressRequiredWeight unless it writes a zero threshold (#3069).
+TEST_F(AuthClaimTests, ZeroRequiredWeightAuthDataAcceptsUnsignedSourceClaim)
+{
+  AuthClaim claim = make_claim(/*allowed_keys=*/0, /*required_weight=*/0);
+  auto tx = make_transaction(claim);
+  SignedTransaction stx{.tx = tx, .signatures = {}};
+
+  // A row with a registered key whose address wrote a zero threshold.
+  auto [pk, _] = make_key_pair();
+  AddressAuthData keyed_zero_row{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk, .max_weight = 5})},
+      .required_weight = 0,
+  };
+  // A keyless zero-threshold row, as genesis installs for the genesis root.
+  AddressAuthData empty_row{};
+  ASSERT_EQ(empty_row.required_weight, Weight{0});
+
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
+  EXPECT_TRUE(
+      lightweight_validate_auth_claims(stx, &keyed_zero_row).has_value());
+  EXPECT_TRUE(verify_auth(stx, &keyed_zero_row, kTestNetworkHash).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, &empty_row).has_value());
+  EXPECT_TRUE(verify_auth(stx, &empty_row, kTestNetworkHash).has_value());
+
+  // Without a row there is no zero threshold to meet.
+  auto missing_row = verify_auth(stx, nullptr, kTestNetworkHash);
+  EXPECT_FALSE(missing_row.has_value());
+  EXPECT_EQ(missing_row.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
+
+  // Once the address writes a nonzero threshold, the unsigned claim fails.
+  keyed_zero_row.required_weight = 1;
+  auto with_threshold = verify_auth(stx, &keyed_zero_row, kTestNetworkHash);
+  EXPECT_FALSE(with_threshold.has_value());
+  EXPECT_EQ(with_threshold.error().code(),
+            AuthVerifyErrorCode::kAuthDataMismatch);
+}
+
 } // namespace hogd
 
 // NOLINTEND(bugprone-unchecked-optional-access)

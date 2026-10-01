@@ -90,10 +90,10 @@ public:
   // Called on the runner thread once [eventsched_commit_block] has returned
   // for [height]. Heights must be recorded before the indexer can serve
   // them, which commit ordering guarantees.
-  void record_commit(BlockHeight height, uint64_t commit_ns)
+  void record_commit(BlockHeight height, x23::fastclock::time_point commit)
   {
     const std::lock_guard g(mtx_);
-    pending_.emplace(height, commit_ns);
+    pending_.emplace(height, commit);
   }
 
   // Blocks until the indexer's watermark covers every recorded height.
@@ -136,7 +136,7 @@ public:
   // without depending on the surrounding benchmark output.
   void report(std::string_view label)
   {
-    std::vector<uint64_t> samples;
+    std::vector<int64_t> samples;
     size_t missed = 0;
     {
       const std::lock_guard g(mtx_);
@@ -207,29 +207,29 @@ private:
   // reported value is one that actually occurred rather than an interpolation
   // between two blocks. For N = 10, p90 is the 9th sample, not the maximum.
   // Callers guarantee [sorted] is non-empty.
-  static uint64_t quantile(const std::vector<uint64_t> &sorted, double q)
+  static int64_t quantile(const std::vector<int64_t> &sorted, double q)
   {
     const auto rank =
         static_cast<size_t>(std::ceil(q * static_cast<double>(sorted.size())));
     return sorted[std::clamp<size_t>(rank, 1, sorted.size()) - 1];
   }
 
-  static uint64_t mean(const std::vector<uint64_t> &samples)
+  static int64_t mean(const std::vector<int64_t> &samples)
   {
     // Accumulate in double: the sum of a long run of nanosecond samples is
     // nowhere near overflowing, but the division is the only thing wanted.
     double total = 0;
-    for (uint64_t sample : samples) {
+    for (int64_t sample : samples) {
       total += static_cast<double>(sample);
     }
-    return static_cast<uint64_t>(total / static_cast<double>(samples.size()));
+    return static_cast<int64_t>(total / static_cast<double>(samples.size()));
   }
 
   void poll(const std::stop_token &stop)
   {
     while (!stop.stop_requested()) {
       const BlockHeight watermark = read_watermark();
-      const uint64_t now = x23::fastclock::get_ns();
+      const auto now = x23::fastclock::now();
       {
         const std::lock_guard g(mtx_);
         // [pending_] is ordered, so this walks exactly the heights this
@@ -237,7 +237,7 @@ private:
         bool observed_any = false;
         for (auto it = pending_.begin();
              it != pending_.end() && it->first <= watermark;) {
-          const uint64_t latency_ns = now - it->second;
+          const int64_t latency_ns = (now - it->second).count();
           observed_.push_back(latency_ns);
           per_height_.emplace(it->first, latency_ns);
           it = pending_.erase(it);
@@ -285,9 +285,9 @@ private:
   std::mutex mtx_;
   std::condition_variable drained_;
   // Committed but not yet observed as servable, oldest height first.
-  std::map<BlockHeight, uint64_t> pending_;
-  std::map<BlockHeight, uint64_t> per_height_;
-  std::vector<uint64_t> observed_;
+  std::map<BlockHeight, x23::fastclock::time_point> pending_;
+  std::map<BlockHeight, int64_t> per_height_;
+  std::vector<int64_t> observed_;
 
   std::mutex wait_mtx_;
   std::condition_variable_any wake_;

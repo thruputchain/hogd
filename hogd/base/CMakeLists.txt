@@ -1,3 +1,5 @@
+add_subdirectory(test_support)
+
 # create base module library
 add_library(
   base_objects OBJECT
@@ -58,4 +60,4 @@ target_link_libraries(
   hogd
   GTest::gtest
 )
-gtest_discover_tests(base_test)
+hogd_discover_tests(base_test)

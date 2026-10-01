@@ -1,0 +1,30 @@
+[package]
+name = "itc_erc20_permit"
+description = "itc_erc20 plus the ERC20Permit interface: the RV32 reference for the native token's permit surface"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+edition.workspace = true
+
+[dependencies]
+sdk = { workspace = true }
+groundhog-erc20-if = { workspace = true }
+groundhog-erc20-permit-if = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[features]
+entrypoints = []
+dev = ["sdk/dev", "groundhog-erc20-if/dev", "groundhog-erc20-permit-if/dev"]
+
+[[bin]]
+name = "itc_erc20_permit"
+path = "src/main.rs"
+required-features = ["entrypoints"]

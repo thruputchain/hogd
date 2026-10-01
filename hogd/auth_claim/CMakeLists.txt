@@ -26,4 +26,4 @@ target_link_libraries(
     hogd
     GTest::gtest
 )
-gtest_discover_tests(auth_claim_tests)
+hogd_discover_tests(auth_claim_tests)

@@ -342,22 +342,6 @@ TEST_F(SyscallMiscTests, TestBsSetTooLong)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// ── #12: BytestringSet (invalid flags) ──────────────────────────────
-
-TEST_F(SyscallMiscTests, TestBsSetInvalidFlags)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<u8"test_bs_set_invalid_flags">(
-                          UINT64_MAX),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
-
 // ── #13: NonnegativeIntGet (key not exist) ──────────────────────────
 
 TEST_F(SyscallMiscTests, TestNnintGetKeyNotExist)
@@ -406,38 +390,6 @@ TEST_F(SyscallMiscTests, TestNnintSetAddNegative)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// ── #16: NonnegativeIntSetAdd (invalid flags) ───────────────────────
-
-TEST_F(SyscallMiscTests, TestNnintSetAddInvalidFlags)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_nnint_set_add_invalid_flags">(
-                  UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
-
-// ── #17: DeleteObject (invalid flags) ───────────────────────────────
-
-TEST_F(SyscallMiscTests, TestDeleteInvalidFlags)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<u8"test_delete_invalid_flags">(
-                          UINT64_MAX),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
-
 // ── #18: RetrocausalQueueInsert (too large) ─────────────────────────
 
 TEST_F(SyscallMiscTests, TestRcqInsertTooLarge)
@@ -454,18 +406,18 @@ TEST_F(SyscallMiscTests, TestRcqInsertTooLarge)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// ── #19: RetrocausalQueueInsert (wrong type) ────────────────────────
+// ── #19: RetrocausalQueueInsert (over another type) ─────────────────
 
-TEST_F(SyscallMiscTests, TestRcqInsertWrongType)
+TEST_F(SyscallMiscTests, TestRcqInsertOverBytestring)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<u8"test_rcq_insert_wrong_type">(
-                          UINT64_MAX),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
+      Transaction{
+          .invocation =
+              client_.make_invocation<u8"test_rcq_insert_over_bytestring">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }

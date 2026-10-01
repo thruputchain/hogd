@@ -1502,7 +1502,7 @@ make_mocked_handler(void *db, void *rc)
 // Helper: open a mock invocation frame
 TestFFIErrorCode
 open_frame(void *syscall_handler, Invocation const &invocation,
-           int32_t flags = 0)
+           InvokeFlagSet flags = 0)
 {
   auto serialized = x23::serialize(invocation);
   FFISerializedInvocation ffi = {
@@ -4280,7 +4280,7 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
     bool found_replay = false;
     for (auto const &c : conflict.conflicts()) {
-      if (c.code == DbConflictCode::kDbConflictReplayProtection) {
+      if (c.code == DbConflictCode::ReplayProtection) {
         found_replay = true;
       }
     }

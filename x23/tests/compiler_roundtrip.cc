@@ -40,4 +40,21 @@ main()
   assert(bytes.size() == 4);
   deserialize(&decoded, bytes);
   assert(decoded == reply);
+
+  // Unions named after the generator's own template parameters.
+  U u;
+  u.big(true);
+  u.h() = std::int64_t(1) << 33;
+  U u_decoded;
+  deserialize(&u_decoded, serialize(u));
+  assert(u_decoded == u);
+  assert(get<2>(u_decoded) == u.h());
+
+  I i;
+  i.big(false);
+  i.i() = 23;
+  I i_decoded;
+  deserialize(&i_decoded, serialize(i));
+  assert(i_decoded == i);
+  assert(get<1>(i_decoded) == 23);
 }

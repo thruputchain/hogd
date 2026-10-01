@@ -35,6 +35,7 @@ add_library(runtime_objects OBJECT
   syscall_nnint.cc
   syscall_rcq.cc
   syscall_stats.cc
+  syscall_storage_flags.cc
   transaction_stats.cc
 )
 
@@ -88,6 +89,7 @@ add_library(runtime_test_objects OBJECT
   deserialize_test.cc
   empty_test.cc
   erc20_parity_test.cc
+  erc20_permit_parity_test.cc
   event_test.cc
   faucet_scenario_test.cc
   fibonacci_test.cc
@@ -123,6 +125,7 @@ add_library(runtime_test_objects OBJECT
   selective_deployment_test.cc
   serialize_roundtrip_test.cc
   sha2_in_contract_test.cc
+  storage_flags_test.cc
   syscall_auth_config_test.cc
   syscall_auth_token_test.cc
   syscall_block_data_test.cc
@@ -193,7 +196,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(runtime_test)
+hogd_discover_tests(runtime_test)
 
 # Standalone binary (no run_hog_exec_tests / init_hog_exec_metrics in main) so the
 # uninitialized-metrics guard in launch_log_worker can be tested.
@@ -207,7 +210,7 @@ target_link_libraries(
   runtime
   GTest::gtest
 )
-gtest_discover_tests(hog_exec_metrics_test)
+hogd_discover_tests(hog_exec_metrics_test)
 
 add_executable(
   rv32_syscall_entry_bridge_test
@@ -230,7 +233,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(rv32_syscall_entry_bridge_test
+hogd_discover_tests(rv32_syscall_entry_bridge_test
                      TEST_PREFIX rv32.entry.)
 
 if(BUILD_BENCHMARKS)
@@ -355,7 +358,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(rv32_runtime_context_test
+hogd_discover_tests(rv32_runtime_context_test
                      TEST_PREFIX rv32.runtime.)
 
 add_executable(
@@ -380,7 +383,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_upstream_artifact_test
   TEST_PREFIX rv32.upstream.
   NO_PRETTY_VALUES
@@ -407,7 +410,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(rv32_contract_test TEST_PREFIX rv32.contract.)
+hogd_discover_tests(rv32_contract_test TEST_PREFIX rv32.contract.)
 
 add_dependencies(
   rv32_contract_test
@@ -415,9 +418,8 @@ add_dependencies(
   all_contract_headers # for built_contracts/fibonacci.h
 )
 
-# Offline analysis tool (not part of the main build): dynamic instruction-pair
-# histogram for the rv32 interpreter. Traces real contracts to find fusion
-# candidates. Same dependency set as rv32_contract_test.
+# Trace contracts on the canonical interpreter to report instruction-pair
+# histograms for fusion analysis. Shares rv32_contract_test's dependencies.
 add_executable(
   rv32_pair_histogram_test
   rv32/rv32_pair_histogram_test.cc
@@ -439,7 +441,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(rv32_pair_histogram_test TEST_PREFIX rv32.pairhist.)
+hogd_discover_tests(rv32_pair_histogram_test TEST_PREFIX rv32.pairhist.)
 
 add_dependencies(
   rv32_pair_histogram_test

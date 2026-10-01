@@ -314,10 +314,10 @@ public:
     }
   }
 
+  // Replaces the pending write. The view's storage flags are left as they
+  // are: only set_flags() changes them.
   template<typename ItemType>
-  [[nodiscard]] SyscallStatus<void>
-  set(ItemType const &type,
-      StorageDeltaFlagSet flags = std::to_underlying(StorageDeltaFlags::None))
+  [[nodiscard]] SyscallStatus<void> set(ItemType const &type)
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       if (auto validate_result = type.validate(); !validate_result) {
@@ -340,9 +340,34 @@ public:
     // as normal as possible" when running in a try_invoke/queue loop)
 
     delta_args_.emplace<ItemType>(type);
-    flags_ = flags;
     return {};
   }
+
+  // Whether this view holds a write: a value, a deletion, or a queue change.
+  // A view that has only been read (UnmodifiedItem) does not.
+  bool has_pending_write() const
+  {
+    return !std::holds_alternative<UnmodifiedItem>(delta_args_);
+  }
+
+  // The storage flags every delta from this view carries. None until
+  // set_flags() adds some.
+  StorageDeltaFlagSet flags() const { return flags_; }
+
+  // Adds flags (a bitwise OR). Flags attach to a pending write, so this fails
+  // on a view that has not been written.
+  [[nodiscard]] SyscallStatus<void> set_flags(StorageDeltaFlagSet flags)
+  {
+    if (!has_pending_write()) {
+      return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
+    flags_ |= flags; // NOLINT(bugprone-signed-bitwise)
+    return {};
+  }
+
+  // Removes every flag. A view without a pending write has none to remove.
+  void clear_flags() { flags_ = std::to_underlying(StorageDeltaFlags::None); }
 
   std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
   get_delta(std::span<QueueEntry const> observed_entries = {}) const;

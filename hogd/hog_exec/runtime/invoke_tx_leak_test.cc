@@ -9,12 +9,14 @@
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
@@ -30,6 +32,8 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -50,9 +54,10 @@ namespace {
 
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*unused*/,
-                                  NetworkConfigParams const & /*params*/,
-                                  PreparedContract &out) const override
+  InvokeErrorCode verify_contract(
+      Contract const & /*unused*/, NetworkConfigParams const & /*params*/,
+      PreparedContract &out,
+      std::optional<ContractRejectCode> & /*rejection*/) const override
   {
     // Hand back a placeholder image, as a real rv32 verification would: an
     // accepted attachment must look prepared. Its contents are irrelevant --
@@ -63,7 +68,8 @@ public:
     placeholder.data.append_range(
         rv32::test_artifact::build_artifact({rv32::test_program::addi(0, 0, 0)},
                                             std::span<const uint8_t>{}));
-    out.rv32 = Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults());
+    out.rv32.emplace(
+        *Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults()));
     return InvokeErrorCode::None;
   }
 
@@ -110,11 +116,13 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   fns.emplace(0,
               [contract_hash](
                   NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto r = co_await ctx.handler().deploy_contract(kDeployNonce,
-                                                                contract_hash);
+                ContractAddress deployed{};
+                auto r = co_await ctx.syscall<SyscallNo::kDeployContract>(
+                    kDeployNonce, contract_hash, deployed);
                 if (!r.has_value())
-                  co_return r.error().to_invoke_error();
-                if (!r.value().has_value())
+                  co_return NativeContractBuilder::host_fn_error_conversion(
+                      r.error());
+                if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone)
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 co_return InvokeStatus<void>{};
               });

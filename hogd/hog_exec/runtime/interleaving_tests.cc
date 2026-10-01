@@ -24,6 +24,8 @@
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -56,11 +58,11 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
         0,
         [](NativeSyscallContext &ctx, int64_t set_amount,
            int64_t add_amount) -> x23::Async<InvokeStatus<void>> {
-          auto r =
-              co_await ctx.handler().set_nnint(kKey, set_amount, add_amount,
-                                               std::to_underlying(
-                                                   StorageDeltaFlags::None));
-          if (!r.has_value() || !r.value().has_value()) {
+          const int128_t set_value = set_amount;
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kKey, &set_value, int128_t{add_amount});
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
@@ -68,9 +70,11 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     // reset contract state
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          auto r = co_await ctx.handler().set_nnint(
-              kKey, 35, 0, std::to_underlying(StorageDeltaFlags::None));
-          if (!r.has_value() || !r.value().has_value()) {
+          const int128_t set_value = 35;
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kKey, &set_value, int128_t{0});
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};

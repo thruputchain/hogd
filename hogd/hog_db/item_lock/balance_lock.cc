@@ -47,7 +47,7 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
     if (after != nullptr) {
       int128_t delta_after = after->delta();
       if (delta_after < get_storage_cost_of_committed_value(ctx.cost_model)) {
-        return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+        return ctx.conflict(DbConflictCode::InsufficientFunds);
       }
     }
   }
@@ -63,13 +63,19 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
   // subtraction in the same non-overflowing domain NNInt128 relies on.
   int128_t snapshot = snapshot_value.value_or(0);
   auto [committed, committed_overflow] = overflowing_add(snapshot, delta_after);
-  if (committed_overflow || committed < 0) {
-    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+  if (committed_overflow) {
+    return ctx.conflict(DbConflictCode::Overflow);
+  }
+  if (committed < 0) {
+    return ctx.conflict(DbConflictCode::InsufficientFunds);
   }
 
+  // Reservation fails when this block's debits exhaust the balance as of the
+  // block's start (add-capacity exhaustion is unreachable under the supply
+  // bound), so it is a funds shortfall rather than a generic bounds failure.
   if (!delta_bounds_.try_reserve_delta(delta_before, delta_after, add_before,
                                        add_after, sub_before, sub_after)) {
-    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+    return ctx.conflict(DbConflictCode::InsufficientFunds);
   }
 
   return 0;

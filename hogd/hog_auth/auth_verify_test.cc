@@ -395,6 +395,60 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
   }
 }
 
+// Admission through the auth server for the behavior
+// AuthClaimTests.ZeroRequiredWeightAuthDataAcceptsUnsignedSourceClaim pins: a
+// present row with required_weight 0 is cached like any other and admits an
+// unsigned source-address claim, while a row with threshold 1 and a missing row
+// reject it. Genesis ceremony transactions reach the genesis root this way.
+//
+// Reported on issue #3069 and confirmed working-as-intended; this test pins
+// that behavior.
+TEST_F(AuthVerifyTest, ZeroRequiredWeightAuthDataAdmitsUnsignedSourceClaim)
+{
+  ContractAddress zero_weight_address = make_test_address(11);
+  ContractAddress one_weight_address = make_test_address(12);
+  ContractAddress missing_address = make_test_address(13);
+
+  AddressAuthData zero_weight_auth_data{};
+  AddressAuthData one_weight_auth_data{};
+  one_weight_auth_data.required_weight = 1;
+
+  mock_db().set(zero_weight_address, zero_weight_auth_data);
+  mock_db().set(one_weight_address, one_weight_auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  auto make_unsigned_stx = [](ContractAddress const &address) {
+    SignedTransaction stx{};
+    stx.tx.invocation.invoked_address = address;
+    stx.tx.auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData);
+    stx.tx.auth_claim.source_address_claim().allowed_keys = 0;
+    stx.tx.auth_claim.source_address_claim().required_weight = 0;
+    return stx;
+  };
+  SignedTransaction zero_weight_stx = make_unsigned_stx(zero_weight_address);
+  SignedTransaction one_weight_stx = make_unsigned_stx(one_weight_address);
+  SignedTransaction missing_stx = make_unsigned_stx(missing_address);
+
+  x23::Vec<SignedTransaction> stx_vec{zero_weight_stx, one_weight_stx,
+                                      missing_stx};
+  x23::span<SignedTransaction> stx_span(stx_vec);
+  auto result = auth_server().verify_transactions(0, stx_span)();
+  ASSERT_EQ(result.size(), 3);
+  EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(result[1], AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
+
+  EXPECT_EQ(auth_server().verify_batch(0, {zero_weight_stx})(),
+            AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(auth_server().verify_batch(0, {one_weight_stx})(),
+            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(0, {missing_stx})(),
+            AuthErrorCode::kAuthFailed);
+}
+
 } // namespace hogd
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -241,6 +241,20 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...)>
   }
 };
 
+// needs_gas without needs_context (e.g. VerifySignature): the body gets the
+// available gas but no handler.
+template<typename Ret, typename... Args>
+requires (is_syscall_arg_param<Args> && ...)
+struct SyscallTypes<Ret (*)(WrappedGasAmount, Args...)>
+  : public SyscallTypeParams<Ret, Args...> {
+  constexpr static std::tuple<WrappedGasAmount>
+  extra_args(SystemCallHandler & /*unused*/,
+             WrappedGasAmount total_available_gas)
+  {
+    return {total_available_gas};
+  }
+};
+
 template<typename Ret, typename... Args>
 requires (is_syscall_arg_param<Args> && ...)
 struct SyscallTypes<Ret (*)(Args...)> : public SyscallTypeParams<Ret, Args...> {

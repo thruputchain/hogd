@@ -78,6 +78,7 @@ endif()
 # Build hog_db_test executable
 add_executable(
   hog_db_test
+  $<TARGET_OBJECTS:alloc_fault_test_support>
   auth_subscription_test.cc
   background_commit_worker_test.cc
   db_tip_serving_test.cc
@@ -106,6 +107,6 @@ target_link_libraries(
   GTest::gtest_main
 )
 add_dependencies(hog_db_test all_riscv_contracts)
-gtest_discover_tests(
+hogd_discover_tests(
   hog_db_test
 )

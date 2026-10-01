@@ -2,6 +2,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "types.hh"
 #include "x23/async.h"
@@ -19,6 +20,16 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   }
   consume_gas(status->load_gas);
   co_return std::move(status->result);
+}
+
+x23::Async<SystemStatus<SyscallStatus<void>>>
+NativeSyscallContext::modify_native_token_balance(
+    ContractAddress const &address, int128_t amount)
+{
+  // Priced as the equivalent kNonnegativeIntSetAdd, charged up front so this
+  // stays a plain forwarder. No load_gas: the write never reaches the database.
+  consume_gas(kStorageAccessCost);
+  return handler_.modify_native_token_balance(address, amount);
 }
 
 } // namespace hogd

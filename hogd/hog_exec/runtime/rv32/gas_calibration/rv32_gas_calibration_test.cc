@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -9,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hogd/hog_exec/runtime/rv32/arch_trace.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/kernel.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/lowering_audit.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
@@ -16,6 +19,7 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/syscall_kernel.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/workloads.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
+#include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
@@ -108,6 +112,205 @@ TEST(Rv32GasCalibrationKernel, TargetSlotsEncodeTheRequestedOpcode)
           << " but the spec asked for " << op_name(spec.target);
     }
   }
+}
+
+TEST(Rv32GasCalibrationKernel, JalTargetsRetireEverySlotWithAndWithoutLink)
+{
+  HaltHost host;
+  for (const auto context :
+       {OperandContext::kIndependent, OperandContext::kNoLink}) {
+    for (const bool saturated : {false, true}) {
+      for (const uint32_t slots : {64U, 512U, 2048U}) {
+        KernelSpec spec;
+        spec.target = Op::kJal;
+        spec.context = context;
+        spec.body_slots = slots;
+        spec.trip_count = kTestTripCount;
+        spec.saturated = saturated;
+        spec.target_slots = max_target_slots(slots, spec);
+        const auto kernel = build_kernel(spec);
+        ASSERT_TRUE(kernel.has_value());
+        const auto decoded = ThreadedProgram::create(kernel->code);
+        ASSERT_TRUE(decoded.has_value());
+        for (const uint32_t pc : kernel->target_slot_pcs) {
+          const auto instruction =
+              decoded->instruction_at(pc / kInstructionBytes);
+          ASSERT_TRUE(instruction.has_value());
+          EXPECT_EQ(instruction->op, Op::kJal);
+          EXPECT_EQ(instruction->imm, int32_t{kInstructionBytes});
+          if (context == OperandContext::kNoLink) {
+            EXPECT_EQ(instruction->rd, 0);
+          }
+          else {
+            EXPECT_GE(instruction->rd, kDataBankBase);
+            EXPECT_LT(instruction->rd, kDataBankBase + kDataBankSize);
+          }
+        }
+        for (const bool fuse : {false, true}) {
+          const auto audit = audit_kernel(*kernel, spec, fuse);
+          EXPECT_TRUE(audit.clean());
+          EXPECT_EQ(audit.body_runs, spec.target_slots + 1);
+          auto pre = ThreadedMachinePreInstantiation::create(
+              kernel->code, kernel->initial_memory, 0, kernel->memory_bytes,
+              /*trace=*/false, kMaxRunGas, fuse);
+          ASSERT_TRUE(pre.has_value());
+          ThreadedMachine machine(*pre, kGasLimit);
+          const RunOutcome outcome = run_once(machine, host);
+          EXPECT_EQ(outcome.result, StepResult::kHalted);
+          EXPECT_EQ(outcome.trap, Trap::kNone);
+          EXPECT_EQ(outcome.gas_consumed, kernel->scheduled_gas);
+        }
+      }
+    }
+  }
+  // Adding a timing kernel must not silently change the fusion fingerprint.
+  EXPECT_FALSE(canonical_instruction_word(Op::kJal, kDataBankBase).has_value());
+}
+
+TEST(Rv32GasCalibrationJump, ExecutesTheDeclaredPathAndTargetDependencies)
+{
+  HaltHost host;
+  for (const Op op : {Op::kJal, Op::kJalr}) {
+    for (const auto context :
+         {OperandContext::kIndependent, OperandContext::kNoLink,
+          OperandContext::kChain, OperandContext::kTargetChase}) {
+      if (op == Op::kJal && (context == OperandContext::kChain ||
+                             context == OperandContext::kTargetChase)) {
+        continue;
+      }
+      for (const auto layout : {JumpLayout::kSequential, JumpLayout::kReverse,
+                                JumpLayout::kShuffled}) {
+        for (const uint32_t seed : {1U, 42U, 12345U}) {
+          JumpSpec spec{.target = op,
+                        .context = context,
+                        .layout = layout,
+                        .nodes = 16,
+                        .stride_words = 7,
+                        .seed = seed,
+                        .trip_count = 2};
+          SCOPED_TRACE(op_name(op) + "/" + jump_context_name(spec));
+          const auto built = build_jump_kernel(spec);
+          ASSERT_TRUE(built.has_value());
+          const auto &k = built->kernel;
+          auto decoded = Program::create(k.code);
+          ASSERT_TRUE(decoded.has_value());
+          auto program = std::make_shared<Program>(std::move(*decoded));
+          Machine oracle(program, k.memory_bytes, kGasLimit);
+          std::ranges::copy(k.initial_memory, oracle.memory().begin());
+          std::vector<uint32_t> expected;
+          for (uint32_t pc = 0; pc < built->loop_pc; pc += kInstructionBytes) {
+            expected.push_back(pc);
+          }
+          for (uint32_t trip = 0; trip < spec.trip_count; ++trip) {
+            expected.insert(expected.end(), built->iteration_pcs.begin(),
+                            built->iteration_pcs.end() -
+                                (trip + 1 == spec.trip_count ? 1 : 0));
+          }
+          expected.push_back(built->exit_pc);
+          const auto trace = trace_execution(oracle, host, expected.size());
+          ASSERT_EQ(trace.final_result, StepResult::kHalted);
+          ASSERT_EQ(trace.steps.size(), expected.size());
+          EXPECT_EQ(trace.steps.size(), k.dynamic_instructions);
+          EXPECT_EQ(kGasLimit - oracle.gas_remaining(), k.scheduled_gas);
+          std::set<uint32_t> sites;
+          std::set<uint32_t> destinations;
+          size_t targets = 0;
+          uint32_t last_link = 0;
+          bool forward = false;
+          bool backward = false;
+          for (size_t i = 0; i < trace.steps.size(); ++i) {
+            const auto &step = trace.steps[i];
+            const uint32_t pc = step.state_before.pc;
+            EXPECT_EQ(pc, expected[i]);
+            if (std::ranges::find(k.target_slot_pcs, pc) ==
+                k.target_slot_pcs.end()) {
+              continue;
+            }
+            const auto &instruction = program->instruction_at_aligned_pc(pc);
+            EXPECT_EQ(instruction.op, op);
+            if (context == OperandContext::kChain) {
+              EXPECT_EQ(instruction.rd, kChainReg);
+              EXPECT_EQ(instruction.rs1, kChainReg);
+              if (targets % spec.nodes != 0) {
+                EXPECT_EQ(step.state_before.regs[kChainReg], last_link);
+              }
+              last_link = pc + kInstructionBytes;
+            }
+            ++targets;
+            sites.insert(pc);
+            destinations.insert(step.state.pc);
+            forward |= step.state.pc > pc + kInstructionBytes;
+            backward |= step.state.pc < pc;
+          }
+          EXPECT_EQ(targets, size_t{k.target_units} * spec.trip_count);
+          if (context == OperandContext::kTargetChase) {
+            EXPECT_EQ(sites.size(), 1U);
+            EXPECT_EQ(destinations.size(), spec.nodes + 1);
+          }
+          else if (layout != JumpLayout::kSequential) {
+            EXPECT_TRUE(forward);
+            EXPECT_TRUE(backward);
+            EXPECT_EQ(sites.size(), spec.nodes);
+          }
+          for (const bool fuse : {false, true}) {
+            auto pre =
+                ThreadedMachinePreInstantiation::create(k.code,
+                                                        k.initial_memory, 0,
+                                                        k.memory_bytes, true,
+                                                        kMaxRunGas, fuse);
+            ASSERT_TRUE(pre.has_value());
+            ThreadedMachine machine(*pre, kGasLimit);
+            TraceObserver observer;
+            ASSERT_EQ(machine.run(host, observer), StepResult::kHalted);
+            ASSERT_EQ(observer.trace().steps.size(), expected.size());
+            for (size_t i = 0; i < expected.size(); ++i) {
+              EXPECT_EQ(observer.trace().steps[i].state_before.pc, expected[i]);
+            }
+            EXPECT_EQ(kGasLimit - machine.gas_remaining(), k.scheduled_gas);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(Rv32GasCalibrationJump, LargeFootprintsAndUnrepresentableSpecs)
+{
+  HaltHost host;
+  for (const auto context :
+       {OperandContext::kIndependent, OperandContext::kTargetChase}) {
+    JumpSpec spec{.target = context == OperandContext::kTargetChase ? Op::kJalr
+                                                                    : Op::kJal,
+                  .context = context,
+                  .layout = JumpLayout::kShuffled,
+                  .nodes = 512,
+                  .stride_words = 16,
+                  .seed = 42,
+                  .trip_count = 4};
+    const auto built = build_jump_kernel(spec);
+    ASSERT_TRUE(built.has_value());
+    const auto &k = built->kernel;
+    for (const bool fuse : {false, true}) {
+      auto pre =
+          ThreadedMachinePreInstantiation::create(k.code, k.initial_memory, 0,
+                                                  k.memory_bytes, false,
+                                                  kMaxRunGas, fuse);
+      ASSERT_TRUE(pre.has_value());
+      ThreadedMachine machine(*pre, kGasLimit);
+      const auto outcome = run_once(machine, host);
+      EXPECT_EQ(outcome.result, StepResult::kHalted);
+      EXPECT_EQ(outcome.gas_consumed, k.scheduled_gas);
+    }
+  }
+  JumpSpec invalid{.target = Op::kJalr,
+                   .context = OperandContext::kChain,
+                   .nodes = 4096};
+  EXPECT_EQ(build_jump_kernel(invalid).error(),
+            KernelError::kTargetImmediateOutOfRange);
+  invalid.target = Op::kJal;
+  invalid.context = OperandContext::kIndependent;
+  invalid.nodes = UINT32_MAX;
+  EXPECT_EQ(build_jump_kernel(invalid).error(), KernelError::kCodeTooLarge);
 }
 
 TEST(Rv32GasCalibrationKernel, FullRangeVisitsAllBanksAndCacheLines)
@@ -244,30 +447,12 @@ TEST(Rv32GasCalibrationKernel, PlacementPhaseMovesWorkWithoutChangingIt)
       << "phase never changed placement, so it cannot average layout bias";
 }
 
-// The strongest single check in the harness: running a kernel must consume
-// exactly the gas the schedule says its instruction sequence costs. That pins
-// the retired instruction count, the loop trip count, and the absence of any
-// trap or early exit in one assertion -- if a kernel silently ran a different
-// number of instructions than the harness credits it with, every ns-per
-// instruction derived from it would be wrong by that ratio.
-// A saturated body must really be all target, and must run.
-//
-// The saturated measurement divides a kernel's time by its instruction count
-// and calls the result the per-instruction cost of a program made of that
-// opcode. That claim rests on two things the harness controls: every interior
-// slot actually holds the target, and the kernel actually executes all of it.
-// Check both against the production decoder and the engine's own gas
-// accounting, for every opcode that can be saturated.
+// Check saturated bodies against the production decoder and exact gas
+// consumption: every interior slot must contain its target and execute.
 TEST(Rv32GasCalibrationKernel, NoBodySlotEncodesAnImmediateItCannotReach)
 {
-  // Every body-slot encoder masks its immediate to the field width, so an
-  // out-of-range offset does not fail -- it encodes a different instruction
-  // that runs and halts cleanly. That is how the loop back edge truncated
-  // silently; JALR has the same shape, because its base register is fixed at
-  // the body midpoint and the immediate carries the whole per-slot offset.
-  //
-  // Build every target at every body size the harness allows. A kernel must
-  // either come out correct or be refused by name -- never come out wrong.
+  // Encoders mask excess immediate bits. Exercise every allowed size so a
+  // truncated branch/JALR offset cannot silently time a shorter program.
   HaltHost host;
   size_t refused = 0;
   for (const uint32_t body_slots : {8U, 64U, 512U, 1024U, 2048U, 8192U}) {
@@ -305,13 +490,8 @@ TEST(Rv32GasCalibrationKernel, NoBodySlotEncodesAnImmediateItCannotReach)
 
 TEST(Rv32GasCalibrationKernel, SaturatedPairsTileWithoutOverlapping)
 {
-  // A saturated pair body has to be the pair repeated -- sw lw sw lw -- not a
-  // run of stores. Each substitution occupies two slots, so placing a head at
-  // every interior slot makes each pair's first instruction land on the
-  // previous pair's second: the body collapses to all-first-component with a
-  // single tail at the end, and it audits clean because sw;sw is not a fusion
-  // rule. The pair's cost would then be measured on a program that contains
-  // essentially none of the interaction the row exists to measure.
+  // Pairs must tile two slots at a time. A head placed in every slot
+  // overwrites preceding tails and can still pass the fusion audit.
   for (const PairKind pair :
        {PairKind::kStoreLoadForward, PairKind::kStoreLoadDistinct}) {
     KernelSpec spec;
@@ -413,15 +593,8 @@ TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
   EXPECT_LE(fused, 3U);
 }
 
-// A kernel must run all of its body, at every body size the harness allows.
-//
-// This is what a silently-truncated loop breaks. The old backwards branch
-// overflowed its 13-bit immediate past 1024 slots and the encoder truncated
-// rather than refused: at 2048 slots the kernel reported a clean halt having
-// burned 2107 of 16443 credited gas, every opcode priced at the baseline, and
-// the sweep looked reproducible because it had stopped measuring. Comparing
-// consumed against credited gas catches that in one assertion, so size the
-// bodies past the old cliff.
+// Exercise bodies beyond a B-type branch's reach. A truncated back edge can
+// still halt cleanly; exact gas consumption detects the shortened execution.
 TEST(Rv32GasCalibrationKernel, RunsTheWholeBodyAtEveryBodySize)
 {
   HaltHost host;
@@ -486,9 +659,7 @@ TEST(Rv32GasCalibrationKernel, RunsExactlyTheWorkItIsCreditedWith)
   }
 }
 
-// The measurement assumes each body slot is one dispatch of one instruction.
-// The threaded lowering fuses nine patterns, so that assumption is a property
-// of the generated code, not a given.
+// Check that substitution kernels do not trigger production fusion rules.
 TEST(Rv32GasCalibrationKernel, SweepBodiesLowerWithoutFusion)
 {
   for (const KernelSpec &spec : representative_specs()) {
@@ -650,13 +821,8 @@ TEST(Rv32GasCalibrationProvenance, CalibrationOperandsDoNotFuse)
          "any of them fire, its slope is not a per-instruction cost";
 }
 
-// A pair substitution has to keep every property a single-opcode one has:
-// its two slots land inside the interior, pairs never touch each other (the
-// trailing load of one beside the leading store of the next would fuse), and
-// the lowering leaves all of it alone. The cap and the placement span are
-// computed in two different files, and when they disagreed by one the densest
-// kernel did exactly that and the audit caught it -- so the cap is asserted
-// here rather than trusted.
+// Check pair placement and the shared capacity calculation. Adjacent
+// substitutions can fuse across their boundary and invalidate the timing.
 TEST(Rv32GasCalibrationKernel, PairsStayApartAndUnfused)
 {
   for (const PairKind kind :
@@ -699,16 +865,8 @@ TEST(Rv32GasCalibrationKernel, PairsStayApartAndUnfused)
   }
 }
 
-// pair_components must name the opcodes the kernel actually places.
-//
-// Every consumer that reasons about a pair in terms of its parts trusts this:
-// the gas it is credited with, and the worst-case ceiling its interaction is
-// checked against. Both of those used to be written as a literal SW + LW,
-// which was correct until auipc;jalr arrived and silently inherited a bound
-// belonging to two opcodes it does not contain. The four opcodes involved all
-// cost the same gas today, so the accounting test could not see the error --
-// only decoding the body can. Assert it against the same decoder the engine
-// uses, so a new PairKind cannot be added without this being right.
+// Decode pair components independently of gas accounting. Equal gas costs
+// could otherwise hide a bound attributed to the wrong opcode pair.
 TEST(Rv32GasCalibrationKernel, PairComponentsMatchTheEmittedBody)
 {
   for (const PairKind kind :
@@ -791,15 +949,8 @@ TEST(Rv32GasCalibrationKernel, PairKernelsRunTheWorkTheyAreCreditedWith)
   }
 }
 
-// ---------------------------------------------------------------------------
-// Syscall seam kernels.
-//
-// The seam measurement's denominator is a count of host calls, and nothing
-// about a wrong count looks wrong: a body that placed fewer ecalls than it was
-// asked for still runs, still halts, and still produces a confident ns/call --
-// for a call rate it never achieved. So the properties the estimator rests on
-// are asserted here: the calls are placed, they are all reached, the lowering
-// leaves them alone, and each one really is its own straight-line run.
+// Check seam call placement, executed count, and lowered run boundaries;
+// timing alone cannot detect an incorrect per-call denominator.
 
 constexpr uint32_t kSyscallTestBodySlots = 64;
 constexpr uint32_t kSyscallTestTripCount = 4;
@@ -1118,7 +1269,7 @@ TEST(Rv32GasCalibrationFit, MedianHandlesEvenAndOddCounts)
 TEST(Rv32GasCalibrationKernel, RejectsSpecsItCannotRepresent)
 {
   KernelSpec spec;
-  spec.target = Op::kJal; // needs a per-slot rewritten target
+  spec.target = Op::kEbreak; // terminates instead of executing the whole body
   spec.body_slots = kTestBodySlots;
   spec.trip_count = kTestTripCount;
   EXPECT_FALSE(build_kernel(spec).has_value());

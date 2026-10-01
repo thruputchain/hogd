@@ -27,7 +27,6 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
@@ -485,12 +484,19 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
-          auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span(calldata)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto flags_res = co_await ctx.syscall<SyscallNo::kSetStorageFlags>(
+              key, StorageDeltaFlagSet{
+                       std::to_underlying(StorageDeltaFlags::ExclusiveLock)});
+          if (!flags_res.has_value() ||
+              flags_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to set storage flags";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};

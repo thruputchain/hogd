@@ -25,7 +25,7 @@ NewContractLock::try_atomic_change_lock(const NewContractData *before,
   assert(before == nullptr || before->new_contract() == contract_);
 
   if (after != nullptr && after->new_contract() != contract_) {
-    return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
+    return ctx.conflict(DbConflictCode::ValueMismatch);
   }
 
   // pay on contract deployment, not contract create
