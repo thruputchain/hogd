@@ -17,13 +17,11 @@
 #include <vector>
 
 #include "address_auth.hh"
-#include "auth_token.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/genesis_root.h"
 #include "built_contracts/genesis_root.hh"
 #include "contract.hh"
 #include "genesis.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -33,7 +31,6 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "precompiles.hh"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
