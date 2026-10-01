@@ -50,10 +50,8 @@ make_stx(ContractAddress const &addr, uint32_t calldata_bytes)
       .signatures = {},
   };
   stx.tx.invocation.calldata.resize_uninitialized(calldata_bytes);
-  // An empty calldata's data() is null and memset() is declared __nonnull, so
-  // the zero-byte call a caller asking for no calldata would make copies
-  // nothing yet is still undefined, and the ubsan build (which runs with
-  // -fno-sanitize-recover=all) exits on it (issue #4267).
+  // memset() is __nonnull and calldata.data() is null when empty, which ubsan
+  // rejects even for a zero-byte copy (issue #4267).
   if (calldata_bytes > 0) {
     std::memset(stx.tx.invocation.calldata.data(), 0x5a, calldata_bytes);
   }
