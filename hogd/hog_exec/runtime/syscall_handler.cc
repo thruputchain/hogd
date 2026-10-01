@@ -1867,15 +1867,19 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
   // A queue delete tears down one block row per unconsumed historical block at
   // block close (cleanup_on_deletion), after gas is settled, so bill it here.
   // Read the committed snapshot (what cleanup consults) so the count is right
-  // regardless of how this transaction already touched the key.
-  GasAmount body_gas = kStorageAccessCost;
+  // regardless of how this transaction already touched the key, and pay for the
+  // read as the other snapshot-reading syscalls do.
+  GasAmount body_gas = kStorageAccessCost + note_item_load(item_key);
   auto snapshot = co_await snapshot_cache_.try_get_snapshot_item(item_key);
   if (!snapshot.has_value()) {
     co_return snapshot.error();
   }
+  // Charge the per-block teardown once per key: block close cleans the rows up
+  // a single time no matter how often the key is deleted or replaced.
   if (const SnapshotStorageItem *committed = snapshot.value();
       committed != nullptr &&
-      committed->type() == ItemViewType::kRetrocausalQueue) {
+      committed->type() == ItemViewType::kRetrocausalQueue &&
+      rcq_teardown_charged_.insert(item_key)) {
     auto const &meta = committed->retrocausal_queue_metadata();
     const uint64_t live_blocks =
         meta.max_live_block_num -

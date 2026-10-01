@@ -532,6 +532,12 @@ private:
   // note_item_load().
   FlatKeySet<FrameItemKey> loaded_keys_;
 
+  // Keys whose committed retrocausal-queue history cleanup a delete in this
+  // transaction has already been billed for. Block close tears those rows down
+  // once however many times the key is deleted or replaced, so delete_object
+  // charges the per-block cost only on the first such delete.
+  FlatKeySet<FrameItemKey> rcq_teardown_charged_;
+
   inline static bool debug_force_commit_abort_{false};
 
   // Record that this transaction is loading [key], and return what that load
