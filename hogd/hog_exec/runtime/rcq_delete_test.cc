@@ -951,7 +951,7 @@ protected:
           co_return InvokeStatus<void>{};
         });
 
-    // Method 46: delete_twice — delete the same key twice in one transaction.
+    // Method 46 (delete_twice): delete the same key twice in one transaction.
     builder.add<SerializationFormat::kTxs>(
         46, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           for (int i = 0; i < 2; ++i) {

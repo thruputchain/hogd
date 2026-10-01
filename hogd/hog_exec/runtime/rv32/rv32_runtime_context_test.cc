@@ -1864,11 +1864,9 @@ TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
   for (size_t i = 0; i < kKeyNames.size(); ++i) {
     auto const &delete_trace = trace.system_calls[i];
     EXPECT_EQ(delete_trace.body.syscall_number(), SyscallNo::kDeleteObject);
-    // The delete walks the frame stack, creates the first-touch item view, and
-    // installs the delete delta, so it pays the storage access on top of the
-    // crossing, as the storage-flags and NNInt syscalls do. A delete of a
-    // non-queue key reads no retrocausal-queue history, so it adds nothing
-    // beyond that.
+    // The delete pays the storage access on top of the crossing (frame walk,
+    // first-touch view, delete delta); a non-queue key has no retrocausal-queue
+    // history to add to that.
     EXPECT_EQ(delete_trace.gas_remaining_at_start -
                   delete_trace.gas_remaining_at_end,
               kSyscallBaseCost + kStorageAccessCost)
