@@ -447,10 +447,8 @@ done
 echo 'wait for coordinator-driven event activation'
 for node in "${NODE_IDS[@]}"; do
   # The event reports this only once the coordinator has loaded genesis, so a
-  # timeout here is usually the coordinator having died rather than the event
-  # having stalled. [wait_control_log_line] replays the event's log, which says
-  # only that it is still politely retrying; name the coordinator too, then let
-  # the failure through so the error trace still reports this line.
+  # timeout here usually means the coordinator died, not the event. Replay its
+  # log too, then [false] so the error trace still reports this line.
   wait_control_log_line "node${node}_event" 'event initialization complete.' || {
     replay_control_log_for_label "node${node}_chuckd"
     false

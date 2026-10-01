@@ -22,7 +22,7 @@ kill_stale_processes() {
 
 # Replays the tail of the coordinator's captured stdout and stderr. Best
 # effort: a host that has gone away must not replace the failure being
-# reported with a failure of its own.
+# reported with one of its own.
 replay_coordinator_output() {
   local quoted_paths
 
@@ -129,10 +129,8 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-# The launch output carries the control server's log paths for the coordinator,
-# which [replay_coordinator_output] needs, so capture it rather than let it
-# stream. Replay it on the way out either way: a [start] that fails has an
-# error of its own to report, and the capture is the only copy of it.
+# Capture the launch output: it carries the coordinator's log paths, and is the
+# only copy of what [start] said if [start] itself fails.
 if ! coordinator_launch=$($CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
@@ -166,11 +164,9 @@ COORDINATOR_STDERR_PATH=$(printf '%s\n' "$coordinator_launch" |
   sed -n 's/^CONTROL_STDERR_PATH=//p' | tail -n 1)
 
 echo 'make sure procs are running'
-# [control_cli start] returns as soon as the coordinator is spawned, so one
-# that dies during startup is first noticed here -- and [expect_running]
-# reports only that it is gone and with what status. The reason is in the
-# output the control server captured for it, which the copy at the end of this
-# script never reaches once this check aborts the run, so replay it here.
+# [expect_running] reports only that the coordinator is gone and with what
+# status, and the copy at the end of this script is never reached once this
+# check aborts the run, so replay its captured output here.
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running || {
   replay_coordinator_output
   false

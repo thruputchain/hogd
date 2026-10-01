@@ -102,13 +102,10 @@ public:
   }
 
 private:
-  // The event server retries [schedevent_prepare_event] about once a second
-  // until the coordinator has loaded genesis, which can take minutes. A line
-  // per attempt pushes every other line out of the bounded log tail that CI
-  // replays for a failed benchmark -- a run that times out waiting for the
-  // event replays a tail holding nothing but this message, and whatever did
-  // fail is no longer in it. Report the first attempt, and after that only a
-  // change of outcome.
+  // The event server retries this about once a second until the coordinator
+  // has loaded genesis, and a line per attempt fills the bounded log tail that
+  // CI replays for a failed benchmark. Report the first attempt and, after
+  // that, only a change of outcome.
   static void report_prepare_attempt(EventPrepareOutcome outcome)
   {
     static std::mutex reported_mutex;
