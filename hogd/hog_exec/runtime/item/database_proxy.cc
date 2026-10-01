@@ -470,9 +470,8 @@ static_assert(kMessageOverhead < kExecToDbMessageCap);
 constexpr size_t kMaxSubtransactionPushFootprint =
     kExecToDbMessageCap - kMessageOverhead;
 
-// Most deltas a within-cap push can hold: each costs at least kPerDeltaFraming.
-// Bounds how far the staging batch pre-reserves, so a frame that accumulated an
-// aggregate far larger than one push still reserves for only one push.
+// Max deltas a within-cap push can hold (each costs >= kPerDeltaFraming); caps
+// how far the staging batch pre-reserves.
 constexpr size_t kMaxDeltasPerSubtransactionPush =
     kMaxSubtransactionPushFootprint / kPerDeltaFraming;
 

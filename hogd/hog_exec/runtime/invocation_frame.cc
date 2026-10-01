@@ -186,9 +186,8 @@ InvocationFrame::try_acquire_frame_locks(
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
 
-  // Stop staging deltas once the batch already exceeds the push cap; the push
-  // below rejects it anyway, so there is no point copying the rest of a
-  // retained aggregate a contract can grow far past one push.
+  // Stop staging once the batch exceeds the push cap; the push below rejects it
+  // anyway.
   bool exceeds_cap = false;
   for (auto const &[key, item_view] : modified_items_) {
     const AddressAndKey addrkey = key.to_address_and_key();
@@ -214,7 +213,7 @@ InvocationFrame::try_acquire_frame_locks(
     }
   }
 
-  // Skipped for the same reason when over the cap.
+  // Also skipped when the batch is already over the cap.
   if (!exceeds_cap) {
     for (auto const &[addrkey, entries] : observations) {
       if (!entries.empty() &&

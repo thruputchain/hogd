@@ -1952,10 +1952,11 @@ TEST_P(DirectBytestringTest, SubtransactionFootprintTrackedIncrementally)
       << "an empty batch is within the message cap";
 
   // Each delta is ~1 KiB; adding max-size bytestrings across distinct keys
-  // crosses the 16 MiB cap well before all 16000 would be staged.
+  // crosses the 16 MiB cap well before this many would be staged.
+  constexpr int kMaxAttempts = 16000;
   bool crossed = false;
   int added = 0;
-  for (int i = 0; i < 16000 && !crossed; ++i) {
+  for (int i = 0; i < kMaxAttempts && !crossed; ++i) {
     tx.add_delta(make_addrkey(contract_addr, "spray" + std::to_string(i)),
                  make_bytestring_delta(max_value),
                  std::to_underlying(StorageDeltaFlags::None));
@@ -1963,7 +1964,7 @@ TEST_P(DirectBytestringTest, SubtransactionFootprintTrackedIncrementally)
     crossed = tx.current_subtransaction_exceeds_cap();
   }
   EXPECT_TRUE(crossed) << "the staged footprint must report the cap crossing";
-  EXPECT_LT(added, 16000)
+  EXPECT_LT(added, kMaxAttempts)
       << "the crossing must be reported before the whole aggregate is staged";
 
   auto r = tx.try_push_current_subtransaction()();
