@@ -438,6 +438,14 @@ jobs:
       - name: Build GCC Release
         run: ./scripts/build.sh -d build/gcc_release -t Release -c gcc
 
+      # EXCLUDE_FROM_ALL targets are not covered by the build above, so a
+      # break in them only surfaces in the scheduled jobs that build them.
+      # Compiling them here is incremental against the same build directory.
+      - name: Build Excluded Bench Targets
+        run: |
+          ./scripts/build.sh -d build/gcc_release -t Release -c gcc \
+            schedgateway_client_bench
+
       - name: Show ccache stats
         if: always()
         run: ccache -s
