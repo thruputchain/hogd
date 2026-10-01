@@ -584,12 +584,9 @@ TEST_F(IndexerOutboxTest, RecognizedNamespaceIncludesCandidatesAndOrigins)
   EXPECT_FALSE(*store.recognized_namespace_empty());
 }
 
-// A committed file's roots are recomputed on its first load and then skipped
-// only for the exact bytes they were recomputed over: the established root is
-// bound to that file's digest. Replacing the events file on disk -- the data
-// directory tampering model -- breaks the digest, so even the store that
-// published the record revalidates on the next load and refuses pairs that no
-// longer match the header, in the live process and in one opened afterwards.
+// An established root is bound to its events-file digest, so a replaced events
+// file is revalidated and rejected, in the live process and in one reopened.
+// An unchanged file reloads through the digest-match fast path.
 TEST_F(IndexerOutboxTest, ReplacedEventsFileIsRejectedUnderEstablishedRoot)
 {
   const ProposedTransaction body = make_body(1);
@@ -607,6 +604,12 @@ TEST_F(IndexerOutboxTest, ReplacedEventsFileIsRejectedUnderEstablishedRoot)
     ASSERT_TRUE(genuine.has_value()) << genuine.error();
     ASSERT_EQ(genuine->tx_bodies.size(), 1U);
     EXPECT_EQ(x23::serialize(genuine->tx_bodies[0]), x23::serialize(body));
+
+    // Reloading the unchanged file succeeds through the digest-match fast path.
+    auto reloaded = store.load_committed(1)();
+    ASSERT_TRUE(reloaded.has_value()) << reloaded.error();
+    ASSERT_EQ(reloaded->tx_bodies.size(), 1U);
+    EXPECT_EQ(x23::serialize(reloaded->tx_bodies[0]), x23::serialize(body));
 
     // Well-formed pairs that are not this block's, under this block's root.
     rewrite_events_file(dir_,

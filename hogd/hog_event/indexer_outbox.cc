@@ -883,11 +883,9 @@ IndexerOutboxStore::publish_committed_stored(
       co_return std::unexpected(rpc_size.error());
     }
   }
-  // The root is not marked established here: publication does not read the
-  // events file (the live path only probes its size), so it has no digest to
-  // bind the root to. The first load recomputes the roots over the file's
-  // bytes and records that digest, which both validates the pairs and pins
-  // the exact file object the fast path may later serve without rechecking.
+  // No root is established here: publication never reads the events file (the
+  // live path only probes its size), so there is no digest to bind. The first
+  // load validates the pairs and records that digest.
   auto exists = has_committed(height);
   if (!exists) {
     co_return std::unexpected(exists.error());
@@ -1043,12 +1041,8 @@ IndexerOutboxStore::load_committed_record(
   if (auto shape = validate_committed_shape(*payload, block_height); !shape) {
     co_return std::unexpected(shape.error());
   }
-  // The roots are recomputed over the pairs unless this process has already
-  // validated this exact events file: a root is established only together
-  // with the digest of the bytes it was recomputed over, so a file that was
-  // replaced on disk under an established root no longer matches and is
-  // revalidated, where the altered pairs are caught fail-closed. An unchanged
-  // file on the established fast path is a parse and nothing more.
+  // Skip revalidation only when an established root matches this file's
+  // digest; otherwise recompute the roots and fail closed on a mismatch.
   const SHA256Hash event_root =
       payload->consensus_value.proposal_header.events_hash;
   bool established = false;
@@ -2119,10 +2113,8 @@ IndexerOutboxStore::assemble_committed_payload(
     offset += static_cast<size_t>(read_size);
   }
 
-  // Digest the exact bytes served under this root. load_committed_record uses
-  // it to decide whether an established root may skip revalidation: only the
-  // file object the root was validated over matches, so a replacement file is
-  // never served on the established fast path.
+  // Digest the exact bytes served, binding an established root to this file
+  // object so a replacement file cannot ride the fast path.
   *events_file_digest = sha256(x23::BufView(bytes));
 
   auto pairs = parse_events_file_pairs(bytes, name);

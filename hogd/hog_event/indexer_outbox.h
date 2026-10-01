@@ -272,11 +272,9 @@ private:
   validate_payload_digest(std::string_view filename,
                           const IndexerOutboxRecordHeader &header) const;
   IndexerOutboxStatus<bool> has_regular_file(std::string_view filename) const;
-  // Reads <event_root>.events from the events directory and reassembles the
-  // full committed payload the stored record references. On success,
-  // *events_file_digest is set to the SHA-256 of the raw events-file bytes
-  // that were read, so the caller can bind an established root to the exact
-  // file object served under it.
+  // Reads <event_root>.events and reassembles the full committed payload the
+  // stored record references. On success, *events_file_digest is the SHA-256
+  // of the raw events-file bytes read.
   IndexerOutboxStatus<IndexerOutboxCommittedPayload>
   assemble_committed_payload(const IndexerOutboxRecordHeader &header,
                              std::span<const uint8_t> stored_bytes,
@@ -331,13 +329,10 @@ private:
   mutable std::unique_ptr<x23::CoroLock> committed_publication_lock_ =
       std::make_unique<x23::CoroLock>();
   mutable std::optional<CommittedAppendCache> committed_append_cache_;
-  // Event roots this process has validated in full, each mapped to the
-  // SHA-256 digest of the exact events-file bytes the roots were recomputed
-  // over. A load whose events file still hashes to the recorded digest is a
-  // parse and nothing more; any other file -- one first seen since startup,
-  // or one whose bytes were replaced under an established root -- gets the
-  // full root recomputation, which fails closed when the pairs no longer
-  // match the header. Guarded by committed_publication_lock_.
+  // Each event root this process has validated, mapped to the SHA-256 digest
+  // of the events-file bytes it was recomputed over. A load whose file still
+  // hashes to that digest skips revalidation; any mismatch is revalidated and
+  // fails closed. Guarded by committed_publication_lock_.
   mutable std::unordered_map<SHA256Hash, SHA256Hash, SipHash24Hasher>
       established_event_roots_;
   mutable size_t committed_history_scan_count_ = 0;
