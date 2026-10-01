@@ -1,11 +1,16 @@
 #include "hogd/metrics/heap_profile.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <istream>
 #include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace hogd {

@@ -1,6 +1,8 @@
 #include "hogd/metrics/heap_profile.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <iterator>
