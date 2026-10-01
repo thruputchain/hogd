@@ -192,8 +192,8 @@ make_transfer(const std::vector<Account> &accounts, size_t nonce,
           .calldata = token::make_calldata<u8"transfer">(
               recipient.address, std::tuple<int64_t, uint64_t>{0, 1}),
       }};
-  // Bootstrap accounts are native pubkey accounts reached through the
-  // default-wallet fallback; the address commits to nonce zero.
+  // A bootstrap account is a standalone pubkey account with no on-chain auth
+  // data, so it authorizes itself with the preimage of its own address.
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   auto &preimage = claim.pubkey_preimage();
   preimage.pubkey.scheme(CryptographicScheme::Ed25519);
