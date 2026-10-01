@@ -2509,12 +2509,7 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
                 // hog_db and mockdb, so I guess so?
 }
 
-// Deleting an RCQ makes block close remove one persisted block row per
-// unconsumed historical block (RetrocausalQueueLock::cleanup_on_deletion). That
-// work scales with the queue's accumulated history, so the DeleteObject syscall
-// must charge for it rather than the flat storage-access cost. This builds two
-// queues with different histories, deletes each, and checks the delete's gas
-// grows by exactly kStorageAccessCost per additional historical block.
+// Delete gas should grow by kStorageAccessCost per unconsumed historical block.
 TEST_P(RCQDeleteTest, HistoricalDeleteWorkIsReflectedInGas)
 {
   if (GetParam() != TestDB::kHogDb) {

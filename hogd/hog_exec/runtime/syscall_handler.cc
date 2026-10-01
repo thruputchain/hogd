@@ -1864,17 +1864,10 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
-  // Deleting a committed retrocausal queue tears down one persisted block row
-  // per unconsumed historical block. That cleanup runs at block close
-  // (RetrocausalQueueLock::cleanup_on_deletion), after this transaction's
-  // syscall gas has already been settled, so it must be billed to the deleting
-  // syscall here. The work scales with the queue's accumulated history, which a
-  // single DeleteObject would otherwise clear for the flat storage-access cost.
-  //
-  // Read the committed (block-start) snapshot directly rather than the frame
-  // view: that is the metadata the cleanup consults, so the block count billed
-  // equals the rows removed, and it is right regardless of how this transaction
-  // has already touched the key (e.g. a consume before the delete).
+  // A queue delete tears down one block row per unconsumed historical block at
+  // block close (cleanup_on_deletion), after gas is settled, so bill it here.
+  // Read the committed snapshot (what cleanup consults) so the count is right
+  // regardless of how this transaction already touched the key.
   GasAmount body_gas = kStorageAccessCost;
   auto snapshot = co_await snapshot_cache_.try_get_snapshot_item(item_key);
   if (!snapshot.has_value()) {
@@ -1887,9 +1880,8 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
     const uint64_t live_blocks =
         meta.max_live_block_num -
         meta.consume_state.max_fully_consumed_block_number;
-    // One storage access per block row cleanup will remove. Saturate: a charge
-    // that reaches the gas limit just yields OutOfGas, so capping the product
-    // at the gas-domain max loses only the overflow.
+    // One storage access per row removed; saturate (a charge at the gas limit
+    // just yields OutOfGas).
     const uint64_t headroom = std::numeric_limits<GasAmount>::max() - body_gas;
     body_gas += (live_blocks > headroom / kStorageAccessCost)
                     ? headroom
