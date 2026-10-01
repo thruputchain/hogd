@@ -124,5 +124,16 @@ TEST_F(HealthTest, HealthMetricsRoutesReturnExpectedResponses)
   EXPECT_NE(http_response.find("\"status\""), std::string::npos);
 }
 
+TEST_F(HealthTest, HeapProfileRouteIsAbsentByDefault)
+{
+  HttpServer server;
+  add_health_metrics_routes(server);
+  uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
+  const std::string response =
+      request(port,
+              "GET /debug/pprof/heap HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  EXPECT_NE(response.find("HTTP/1.1 404"), std::string::npos);
+}
+
 } // namespace
 } // namespace hogd
