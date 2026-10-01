@@ -7,6 +7,7 @@
 #include <future>
 #include <print>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "hogd/base/cli.h"
@@ -25,12 +26,17 @@
 #include "hogd/version.h"
 #include "sched_event.hh"
 #include "x23/sockio.h"
+#include "x23/srpc.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
 namespace {
 
-auto
+using sched_event_client_t =
+    SchedEvent1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
+
+sched_event_client_t
 connect_to_event_sched_server(std::string const &address)
 {
   x23::HostPort host_port;
@@ -73,7 +79,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
 
   // Register with the mempool. connect_to_event_sched_server validates the
   // address.
-  auto client = connect_to_event_sched_server(mempool_address);
+  sched_event_client_t client = connect_to_event_sched_server(mempool_address);
   std::string address_for_exec =
       format_advertised_address(bind_ip, actual_exec_port);
   std::string address_for_mempool =
@@ -84,32 +90,79 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
                  .address_for_sched = address_for_mempool.c_str()};
   constexpr auto kInitialRegistrationRetryDelay = std::chrono::milliseconds(50);
   constexpr auto kMaxRegistrationRetryDelay = std::chrono::milliseconds(1000);
+  // The mempool only clears [EventPrepareNotReady] once the coordinator has
+  // loaded genesis, which can take as long as the coordinator takes to show
+  // up. Say so periodically: a silent wait here is indistinguishable from a
+  // hang, and the only other evidence lives in the mempool's log.
+  constexpr auto kRegistrationProgressInterval = std::chrono::seconds(30);
   auto retry_delay = kInitialRegistrationRetryDelay;
   const auto wait_to_retry = [&] {
     std::this_thread::sleep_for(retry_delay);
     retry_delay = std::min(retry_delay * 2, kMaxRegistrationRetryDelay);
   };
+  const auto started_at = std::chrono::steady_clock::now();
+  auto next_progress_report = started_at + kRegistrationProgressInterval;
+  uint64_t prepare_attempts = 0;
+  const auto report_progress = [&](std::string_view waiting_for) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now < next_progress_report) {
+      return;
+    }
+    next_progress_report = now + kRegistrationProgressInterval;
+    info("still registering with the mempool at {}: {} after {}s and {} "
+         "prepare attempts",
+         mempool_address, waiting_for,
+         std::chrono::duration_cast<std::chrono::seconds>(now - started_at)
+             .count(),
+         prepare_attempts);
+  };
   while (true) {
-    auto prepared = client.schedevent_prepare_event(card);
-    if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+    // A dropped connection is not fatal: the mempool may restart, and this
+    // loop can run for as long as the coordinator takes. Letting the
+    // XdrException escape aborts the process, and "terminate called" is the
+    // only thing the next reader gets.
+    try {
+      ++prepare_attempts;
+      auto prepared = client.schedevent_prepare_event(card);
+      if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+        report_progress("waiting for the coordinator to load genesis");
+        wait_to_retry();
+        continue;
+      }
+      if (prepared.outcome() != EventPrepareOutcome::EventPrepareOK) {
+        panic("mempool at {} refused this event's registration: prepare "
+              "outcome {}",
+              mempool_address, prepared.outcome());
+      }
+      EventRegistrationSnapshot snapshot = prepared.snapshot();
+      auto reconciled =
+          ctx.reconcile_outbox_tip(snapshot.tip.block_id,
+                                   snapshot.tip.consensus_value)();
+      if (!reconciled) {
+        panic("event outbox reconciliation failed");
+      }
+      Health::instance().set_current_block_height(
+          snapshot.tip.consensus_value.proposal_header.block_height)();
+      auto activated = client.schedevent_activate_event(snapshot);
+      if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
+        break;
+      }
+      if (activated.outcome() != EventActivationOutcome::EventActivationRetry) {
+        panic("mempool at {} refused this event's activation: outcome {}",
+              mempool_address, activated.outcome());
+      }
+      report_progress("activation lost a race with a new tip, re-preparing");
       wait_to_retry();
-      continue;
+    } catch (const x23::XdrException &e) {
+      error("event registration RPC to {} failed after {}s: {}; reconnecting",
+            mempool_address,
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - started_at)
+                .count(),
+            e.what());
+      wait_to_retry();
+      client = connect_to_event_sched_server(mempool_address);
     }
-    CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-    EventRegistrationSnapshot snapshot = prepared.snapshot();
-    auto reconciled = ctx.reconcile_outbox_tip(snapshot.tip.block_id,
-                                               snapshot.tip.consensus_value)();
-    if (!reconciled) {
-      panic("event outbox reconciliation failed");
-    }
-    Health::instance().set_current_block_height(
-        snapshot.tip.consensus_value.proposal_header.block_height)();
-    auto activated = client.schedevent_activate_event(snapshot);
-    if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
-      break;
-    }
-    CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationRetry);
-    wait_to_retry();
   }
 
   // Registration and durable outbox reconciliation are complete.

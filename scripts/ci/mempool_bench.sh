@@ -18,6 +18,35 @@ kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
 }
 
+# How much of a dead process's output [expect_running] replays.
+EXPECT_RUNNING_TAIL_LINES=${EXPECT_RUNNING_TAIL_LINES:-80}
+
+# [expect_running], but say why when the process is gone. The control server
+# writes each process it starts to /tmp/hogd_{stdout,stderr}* on that process's
+# own host, and the newest pair belongs to the one just started -- the same
+# assumption the coordinator_output.txt copy below makes. Without this the CI
+# log records only "Process is not running: exit code N", which says nothing
+# about why it exited.
+expect_running() {
+  local host=$1
+  local remote_tail
+
+  if $CONTROL_CLI "$host" "$CI_CONTROL_PORT" expect_running; then
+    return 0
+  fi
+
+  # Runs on $host, so the globs and $(...) are deliberately left unexpanded
+  # here.
+  printf -v remote_tail '%s' \
+    "tail -n $EXPECT_RUNNING_TAIL_LINES " \
+    '"$(ls -1t /tmp/hogd_stdout* | head -n 1)" ' \
+    '"$(ls -1t /tmp/hogd_stderr* | head -n 1)"'
+  echo "===== last $EXPECT_RUNNING_TAIL_LINES lines of the most recent process on $host ====="
+  ci_remote_run "$host" "$remote_tail" || true
+  echo "===== end of $host process output ====="
+  return 1
+}
+
 cleanup() {
   local exit_code=$1
 
@@ -94,8 +123,8 @@ $CONTROL_CLI hog6 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-ad
 # can't wait for hog-exec: that's waiting on the coordinator
 
 echo 'check hog-exec is running'
-$CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
+expect_running hog5
+expect_running hog6
 
 echo 'launch event'
 $CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_event/hog-event --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir "$EVENT_WORK_DIR" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
@@ -135,13 +164,13 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --scp-control-addr 127.0.0.1:4400
 
 echo 'make sure procs are running'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog7 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog8 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
+expect_running hog4
+expect_running hog5
+expect_running hog6
+expect_running hog7
+expect_running hog8
+expect_running hog9
+expect_running hog11
 
 echo 'launch mempool'
 set +e

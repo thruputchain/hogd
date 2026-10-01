@@ -215,6 +215,17 @@ get_record_stderr_path() {
   return 1
 }
 
+# Reports what the event server was waiting on when its activation wait timed
+# out. Returns non-zero so the caller's `||` still ends the run the way a bare
+# [wait_control_log_line] would.
+report_event_activation_timeout() {
+  local node=$1
+
+  echo "node${node}_event never activated; the coordinator never loaded genesis" >&2
+  replay_control_log_for_label "node${node}_chuckd"
+  return 1
+}
+
 start_log_stream() {
   local host=$1
   local label=$2
@@ -492,7 +503,13 @@ done
 
 echo 'wait for coordinator-driven event activation'
 for node in "${NODE_IDS[@]}"; do
-  wait_control_log_line "node${node}_event" 'event initialization complete.'
+  # Only the coordinator can clear this wait: the event server stays in its
+  # registration loop until a genesis load publishes a tip at a real height,
+  # and only [schedcoord_load_genesis_configuration] does that. So a timeout
+  # here is a question about chuckd, whose log is otherwise collected only at
+  # the end of the run. Replay it alongside the event's.
+  wait_control_log_line "node${node}_event" 'event initialization complete.' ||
+    report_event_activation_timeout "$node"
 done
 
 echo 'launch hog-exec shards'
