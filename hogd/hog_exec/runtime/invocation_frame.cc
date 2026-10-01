@@ -186,12 +186,9 @@ InvocationFrame::try_acquire_frame_locks(
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
 
-  // Stop materializing deltas into the staging batch as soon as it already
-  // overflows the push cap: the push below rejects any over-cap batch as a
-  // conflict, so there is no point copying the rest of a retained aggregate
-  // (which a malicious contract can grow far past one push via many sub-cap
-  // TryInvoke children merged into the root) only to discard it. The remaining
-  // observation/deployment deltas are skipped for the same reason.
+  // Stop staging deltas once the batch already exceeds the push cap; the push
+  // below rejects it anyway, so there is no point copying the rest of a
+  // retained aggregate a contract can grow far past one push.
   bool exceeds_cap = false;
   for (auto const &[key, item_view] : modified_items_) {
     const AddressAndKey addrkey = key.to_address_and_key();
@@ -217,8 +214,7 @@ InvocationFrame::try_acquire_frame_locks(
     }
   }
 
-  // Once over the cap, skip the remaining (bounded) observation and deployment
-  // deltas too: the push below rejects the batch regardless.
+  // Skipped for the same reason when over the cap.
   if (!exceeds_cap) {
     for (auto const &[addrkey, entries] : observations) {
       if (!entries.empty() &&

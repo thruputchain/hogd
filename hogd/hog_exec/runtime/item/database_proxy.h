@@ -161,16 +161,12 @@ public:
     current_subtransaction_batch_.reserve(delta_count);
   }
 
-  // Stages one delta and folds its serialized-footprint bound into the running
-  // total, so current_subtransaction_exceeds_cap() can report an over-cap batch
-  // without a second pass. Out of line: footprint_bound lives in the .cc.
+  // Stages a delta and folds its footprint bound into the running total.
   void add_delta(AddressAndKey addrkey, StorageDelta delta,
                  StorageDeltaFlagSet flags);
 
-  // True once the staged batch's footprint would overflow the executor->HogDb
-  // message, using the exact bound try_push_new_subtransaction gates on. Lets a
-  // caller stop materializing further deltas instead of copying the whole
-  // retained aggregate into the batch before the push-time cap rejects it.
+  // True once the staged batch's footprint would exceed the cap that
+  // try_push_new_subtransaction gates on.
   bool current_subtransaction_exceeds_cap() const;
 
   // Conflict diagnostics from the most recent failed push, at the level

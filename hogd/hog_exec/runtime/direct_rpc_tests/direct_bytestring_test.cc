@@ -1939,13 +1939,8 @@ TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
   }
 }
 
-// The staged footprint is tracked incrementally as deltas are added, so an
-// over-cap batch is reported (current_subtransaction_exceeds_cap()) before the
-// whole aggregate is materialized. try_acquire_frame_locks relies on this to
-// stop copying a retained aggregate -- which a contract can grow far past one
-// push via many sub-cap TryInvoke children merged into the root -- once the
-// batch already overflows, instead of materializing all of it only to have the
-// push-time gate reject it. The reported boundary matches that gate exactly.
+// Staged footprint is tracked incrementally, so an over-cap batch is reported
+// before the whole aggregate is materialized, matching the push-time gate.
 TEST_P(DirectBytestringTest, SubtransactionFootprintTrackedIncrementally)
 {
   auto contract_addr = make_contract_address(0);
