@@ -49,6 +49,8 @@ struct NetworkConfigParams {
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
 
+  bool operator==(NetworkConfigParams const &) const = default;
+
   // The parameters `config` puts in force, flattened.
   explicit NetworkConfigParams(NetworkConfigV0 const &config);
 
@@ -63,6 +65,10 @@ struct NetworkConfigParams {
 
   // A ConfigParam stating `value` for `id`.
   static ConfigParam make_param(ConfigParamID id, uint32_t value);
+
+  // A canonical configuration stating every parameter this build knows at its
+  // default, so the defaults above are the only place those values live.
+  static NetworkConfig stated_defaults();
 
 private:
   // The value the list states for `id`, or nullopt past its end. Canonical
@@ -303,6 +309,18 @@ NetworkConfigParams::set_param(NetworkConfig &config, ConfigParamID id,
                    param_id == id ? value : params.in_force(param_id)));
   }
   config = std::move(rebuilt);
+}
+
+inline NetworkConfig
+NetworkConfigParams::stated_defaults()
+{
+  // set_param fills every lower id with the value in force, so stating the
+  // highest id on an empty list states all of them.
+  NetworkConfig config;
+  config.v(0);
+  set_param(config, kHighestConfigParamID,
+            NetworkConfigParams{}.in_force(kHighestConfigParamID));
+  return config;
 }
 
 } // namespace hogd

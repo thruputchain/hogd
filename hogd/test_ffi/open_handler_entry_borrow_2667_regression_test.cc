@@ -50,7 +50,11 @@ make_stx(ContractAddress const &addr, uint32_t calldata_bytes)
       .signatures = {},
   };
   stx.tx.invocation.calldata.resize_uninitialized(calldata_bytes);
-  std::memset(stx.tx.invocation.calldata.data(), 0x5a, calldata_bytes);
+  // memset() is __nonnull and calldata.data() is null when empty, which ubsan
+  // rejects even for a zero-byte copy (issue #4267).
+  if (calldata_bytes > 0) {
+    std::memset(stx.tx.invocation.calldata.data(), 0x5a, calldata_bytes);
+  }
   return stx;
 }
 

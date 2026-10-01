@@ -18,15 +18,10 @@
 #include <string_view>
 #include <utility>
 
-#include "built_contracts/dev_wallet.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
 #include "types.hh"
@@ -37,10 +32,6 @@ namespace {
 
 constexpr std::size_t kMaxBootstrapManifestBytes = 64 * 1024;
 constexpr std::string_view kBootstrapManifestKind = "groundhog-bootstrap";
-// v2 supports only the hog-devnode-default contract profile and the
-// hogd-default cost-model profile. When benchmark profiles arrive (spec: Phase
-// 5), this equality check generalizes into a lookup, and the per-profile rule
-// that benchmark profiles must pin `protocol` becomes mandatory.
 constexpr std::string_view kBootstrapProfile = "local-dev";
 constexpr std::string_view kStorageCostModelProfile = "hogd-default";
 
@@ -195,80 +186,6 @@ require_string_value(std::string_view actual, std::string_view expected,
   return {};
 }
 
-// hog-devnode only: this asserts that the manifest matches the dev-wallet
-// artifact the binary already has. In a non-dev backend the relationship
-// reverses: the manifest names the artifact bytes to deploy and the backend
-// verifies its deployed sha256 against the manifest's contentHash.
-std::expected<DevWalletProfile, std::string>
-validate_dev_wallet_assertions(const json::Value &dev_wallet)
-{
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-
-  std::expected<std::string_view, std::string> profile_name =
-      require_string_field(dev_wallet, "profile", "devWallet");
-  if (!profile_name) {
-    return std::unexpected(std::move(profile_name.error()));
-  }
-  if (std::expected<void, std::string> valid =
-          require_string_value(*profile_name, kDefaultDevWalletProfile,
-                               "devWallet.profile");
-      !valid) {
-    return std::unexpected(std::move(valid.error()));
-  }
-  DevWalletProfile profile = resolve_dev_wallet_profile(*profile_name);
-
-  std::expected<std::optional<std::string_view>, std::string> content_hash =
-      optional_string_field(dev_wallet, "contentHash", "devWallet");
-  if (!content_hash) {
-    return std::unexpected(std::move(content_hash.error()));
-  }
-  if (content_hash->has_value()) {
-    auto wallet_contract = load_dev_wallet_contract(profile);
-    const std::string wallet_hash = hex_string(sha256(*wallet_contract));
-    if (std::expected<void, std::string> valid =
-            require_string_value(**content_hash, wallet_hash,
-                                 "devWallet.contentHash");
-        !valid) {
-      return std::unexpected(std::move(valid.error()));
-    }
-  }
-
-  std::expected<std::optional<std::string_view>, std::string>
-      deploy_entrypoint =
-          optional_string_field(dev_wallet, "deployEntrypoint", "devWallet");
-  if (!deploy_entrypoint) {
-    return std::unexpected(std::move(deploy_entrypoint.error()));
-  }
-  if (deploy_entrypoint->has_value()) {
-    if (std::expected<void, std::string> valid =
-            require_string_value(**deploy_entrypoint,
-                                 entrypoint_hex(
-                                     wallet_meta::entrypoint<u8"deploy">()),
-                                 "devWallet.deployEntrypoint");
-        !valid) {
-      return std::unexpected(std::move(valid.error()));
-    }
-  }
-
-  std::expected<std::optional<std::string_view>, std::string>
-      do_action_entrypoint =
-          optional_string_field(dev_wallet, "doActionEntrypoint", "devWallet");
-  if (!do_action_entrypoint) {
-    return std::unexpected(std::move(do_action_entrypoint.error()));
-  }
-  if (do_action_entrypoint->has_value()) {
-    if (std::expected<void, std::string> valid =
-            require_string_value(**do_action_entrypoint,
-                                 entrypoint_hex(
-                                     wallet_meta::entrypoint<u8"do_action">()),
-                                 "devWallet.doActionEntrypoint");
-        !valid) {
-      return std::unexpected(std::move(valid.error()));
-    }
-  }
-  return profile;
-}
-
 } // namespace
 
 std::expected<BootstrapManifestConfig, std::string>
@@ -294,15 +211,16 @@ load_bootstrap_manifest(std::filesystem::path const &path)
   if (!schema_version) {
     return std::unexpected(std::move(schema_version.error()));
   }
-  if (*schema_version != 2) {
-    if (*schema_version == 1) {
-      return std::unexpected(
-          "bootstrap manifest schemaVersion 1 uses the legacy account layout; "
-          "upgrade groundhog node to generate schemaVersion 2");
-    }
+  if (*schema_version != 3) {
     return std::unexpected(std::format(
-        "unsupported bootstrap manifest schemaVersion {}, expected 2",
+        "unsupported bootstrap manifest schemaVersion {}, expected 3; "
+        "use the original runtime for legacy manifests or generate a new "
+        "manifest",
         *schema_version));
+  }
+  if (parsed->find("devWallet") != nullptr) {
+    return std::unexpected(
+        "bootstrap manifest schemaVersion 3 must not contain devWallet");
   }
 
   std::expected<std::string_view, std::string> kind =
@@ -350,17 +268,6 @@ load_bootstrap_manifest(std::filesystem::path const &path)
         !valid) {
       return std::unexpected(std::move(valid.error()));
     }
-  }
-
-  std::expected<const json::Value *, std::string> dev_wallet_field =
-      require_object_field(*parsed, "devWallet", "root");
-  if (!dev_wallet_field) {
-    return std::unexpected(std::move(dev_wallet_field.error()));
-  }
-  std::expected<DevWalletProfile, std::string> dev_wallet_profile =
-      validate_dev_wallet_assertions(**dev_wallet_field);
-  if (!dev_wallet_profile) {
-    return std::unexpected(std::move(dev_wallet_profile.error()));
   }
 
   std::expected<const json::Value *, std::string> storage_cost_model =
@@ -467,7 +374,6 @@ load_bootstrap_manifest(std::filesystem::path const &path)
       .user_account_count = static_cast<std::uint32_t>(*count),
       .seed = std::move(seed),
       .user_storage_tokens = *user_storage_tokens,
-      .dev_wallet_profile = std::string(dev_wallet_profile->name),
   };
   return BootstrapManifestConfig{
       .network_hash = *network_hash,

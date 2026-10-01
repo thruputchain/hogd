@@ -21,16 +21,11 @@
 #include <string_view>
 #include <system_error>
 
-#include "built_contracts/dev_wallet.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/network_hash.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
-#include "hogd/devnode/dev_wallet_profile.h"
-#include "hogd/devnode/manifest_hex.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
@@ -38,24 +33,12 @@
 namespace hogd {
 namespace {
 
-using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-
-// Returns the SHA-256 hex of the bundled dev-wallet artifact. Used as the
-// "correct" devWallet.contentHash value in happy-path fixtures.
-std::string
-real_dev_wallet_content_hash()
-{
-  auto wallet_contract = load_dev_wallet_contract(
-      resolve_dev_wallet_profile(kDefaultDevWalletProfile));
-  return hex_string(sha256(*wallet_contract));
-}
-
 // Builds a minimal valid bootstrap manifest JSON document. Each builder
 // option corresponds to one field; the defaults represent a well-formed
 // manifest. Tests tweak only the field(s) under test.
 struct ManifestBuilder {
   bool include_schema_version = true;
-  std::int64_t schema_version = 2;
+  std::int64_t schema_version = 3;
 
   std::string kind = "groundhog-bootstrap";
 
@@ -68,12 +51,7 @@ struct ManifestBuilder {
   bool include_protocol = true;
   std::string protocol = std::string(protocol_text(version::kHogdProtocol()));
 
-  bool include_dev_wallet = true;
-  std::string dev_wallet_profile = "hog-devnode-default";
-  bool include_dev_wallet_content_hash = true;
-  std::string dev_wallet_content_hash;
-  std::string dev_wallet_deploy_entrypoint;
-  std::string dev_wallet_do_action_entrypoint;
+  bool include_dev_wallet = false;
 
   bool include_bootstrap_faucet = true;
   std::int64_t faucet_index = 0;
@@ -89,15 +67,6 @@ struct ManifestBuilder {
 
   bool include_storage_cost_model = true;
   std::string storage_cost_profile = "hogd-default";
-
-  ManifestBuilder()
-  {
-    dev_wallet_content_hash = real_dev_wallet_content_hash();
-    dev_wallet_deploy_entrypoint =
-        entrypoint_hex(wallet_meta::entrypoint<u8"deploy">());
-    dev_wallet_do_action_entrypoint =
-        entrypoint_hex(wallet_meta::entrypoint<u8"do_action">());
-  }
 
   std::string build() const
   {
@@ -115,15 +84,7 @@ struct ManifestBuilder {
         w.field("protocol", protocol);
       }
       if (include_dev_wallet) {
-        w.object_field("devWallet", [&](json::Writer &w) {
-          w.field("profile", dev_wallet_profile);
-          w.field("artifactHint", "./dev-wallet.rv32a");
-          if (include_dev_wallet_content_hash) {
-            w.field("contentHash", dev_wallet_content_hash);
-          }
-          w.field("deployEntrypoint", dev_wallet_deploy_entrypoint);
-          w.field("doActionEntrypoint", dev_wallet_do_action_entrypoint);
-        });
+        w.object_field("devWallet", [](json::Writer &) {});
       }
       if (include_bootstrap_faucet) {
         w.object_field("bootstrapFaucet", [&](json::Writer &w) {
@@ -260,7 +221,7 @@ TEST(BootstrapManifest, RejectsWrongSchemaVersion)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "legacy account layout");
+  expect_error_with(path, "expected 3");
 }
 
 TEST(BootstrapManifest, RejectsMissingSchemaVersion)
@@ -334,65 +295,22 @@ TEST(BootstrapManifest, RejectsMissingNetworkHash)
   expect_error_with(path, "missing root.networkHash");
 }
 
-TEST(BootstrapManifest, RejectsMissingDevWallet)
+TEST(BootstrapManifest, RejectsLegacyWalletMetadata)
 {
   ManifestBuilder builder;
-  builder.include_dev_wallet = false;
+  builder.include_dev_wallet = true;
   CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "missing root.devWallet");
+  auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "must not contain devWallet");
 }
 
-TEST(BootstrapManifest, RejectsWrongDevWalletProfile)
+TEST(BootstrapManifest, RejectsLegacySchemaTwo)
 {
   ManifestBuilder builder;
-  builder.dev_wallet_profile = "wrong";
+  builder.schema_version = 2;
   CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "devWallet.profile");
-}
-
-TEST(BootstrapManifest, RejectsMismatchedContentHash)
-{
-  ManifestBuilder builder;
-  builder.dev_wallet_content_hash =
-      "0x9999999999999999999999999999999999999999999999999999999999999999";
-  CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "devWallet.contentHash");
-}
-
-TEST(BootstrapManifest, RejectsMismatchedDeployEntrypoint)
-{
-  ManifestBuilder builder;
-  builder.dev_wallet_deploy_entrypoint = "0xdeadbeefdeadbeef";
-  CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "devWallet.deployEntrypoint");
-}
-
-TEST(BootstrapManifest, RejectsMismatchedDoActionEntrypoint)
-{
-  ManifestBuilder builder;
-  builder.dev_wallet_do_action_entrypoint = "0xdeadbeefdeadbeef";
-  CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "devWallet.doActionEntrypoint");
-}
-
-TEST(BootstrapManifest, AcceptsOmittedContentHash)
-{
-  ManifestBuilder builder;
-  builder.include_dev_wallet_content_hash = false;
-  CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_ok(path);
+  auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "expected 3");
 }
 
 TEST(BootstrapManifest, RejectsMissingBootstrapAccounts)
