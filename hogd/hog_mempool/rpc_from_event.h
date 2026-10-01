@@ -32,10 +32,8 @@ public:
 
   static EventPrepareResult schedevent_prepare_event(const EventCard &card)
   {
-    // The event server retries this call about once a second for as long as
-    // the coordinator has yet to load the genesis block, so logging every
-    // attempt drowns out every other line in the mempool's log -- including
-    // whatever says why the coordinator never arrived. Rate-limit it.
+    // Rate-limited: the event server retries this about once a second until
+    // the coordinator has loaded the genesis block.
     info_every_n_sec(5.0F, "event server preparing registration");
     if (card.protocol != version::kHogdProtocol()) {
       return EventPrepareResult{EventPrepareOutcome::EventPrepareError};

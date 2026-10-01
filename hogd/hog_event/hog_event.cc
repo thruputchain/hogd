@@ -92,10 +92,8 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   while (true) {
     auto prepared = client.schedevent_prepare_event(card);
     if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
-      // The mempool reports this until its coordinator has loaded the genesis
-      // block, and the retry is unbounded: a coordinator that never arrives
-      // leaves us here until something outside kills us. Name what is missing
-      // rather than waiting in silence.
+      // Not ready until the coordinator loads the genesis block; the retry is
+      // unbounded.
       warn_every_n_sec(5.0F,
                        "mempool at {} is not ready to register the event "
                        "server: it has no genesis block yet",

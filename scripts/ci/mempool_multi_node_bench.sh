@@ -488,10 +488,7 @@ echo 'stream coordinator stdout/stderr logs'
 for node in "${NODE_IDS[@]}"; do
   start_log_stream "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" stdout \
     "$(get_record_stdout_path "node${node}_chuckd")"
-  # The coordinator's own logging goes to stderr; stdout carries only its
-  # benchmark results. Without this stream a coordinator that dies before it
-  # loads the genesis block leaves no trace at all, and the run surfaces as the
-  # event server timing out below instead.
+  # Coordinator logging goes to stderr; stdout carries only benchmark results.
   start_log_stream "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" stderr \
     "$(get_record_stderr_path "node${node}_chuckd")"
 done
