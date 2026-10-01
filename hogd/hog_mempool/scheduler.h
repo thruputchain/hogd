@@ -69,8 +69,8 @@ public:
                             x23::XdrVec<SignedTransaction> &txs);
 
   void start_pending_nomination(BlockID block_id);
-  void commit_pending_nomination(BlockID block_id);
-  void abandon_pending_nomination(BlockID block_id);
+  x23::Async<void> commit_pending_nomination(BlockID block_id);
+  x23::Async<void> abandon_pending_nomination(BlockID block_id);
   x23::Async<void>
   apply_committed_block_hog_ages(const x23::XdrVec<SignedTransaction> &txs,
                                  BlockHeight block_height);
@@ -195,7 +195,7 @@ public:
   {
     return current_block_.load(std::memory_order_relaxed);
   }
-  void increment_current_block()
+  x23::Async<void> increment_current_block()
   {
     current_block_.fetch_add(1, std::memory_order_relaxed);
     co_await prune_transaction_outcomes();
@@ -298,7 +298,7 @@ private:
   x23::Async<bool> add_txs_helper(const SignedTransaction &tx,
                                   const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
-  void cycle_accounts_during_schedule_helper(
+  x23::Async<void> cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
       const TxKey &lower_bound);
 
@@ -331,9 +331,9 @@ private:
       AccountState &account_state, const ContractAddress &account);
   const HogAge &get_hog_age_from_pending_nomination_if_exists(
       const AccountState &account_state, const ContractAddress &account) const;
-  void refresh_ready_accounts(
+  x23::Async<void> refresh_ready_accounts(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts);
-  void refresh_accounts_excluded_from_block();
+  x23::Async<void> refresh_accounts_excluded_from_block();
   bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
   x23::Async<void> prune_transaction_outcomes();

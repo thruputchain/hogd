@@ -1219,7 +1219,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                     {
                       x23::CoroGuard scheduler_guard;
                       co_await scheduler_guard(scheduler_->global_lock_);
-                      scheduler_->abandon_pending_nomination(cache.block_id);
+                      co_await scheduler_->abandon_pending_nomination(
+                          cache.block_id);
                     }
                     cache.block_id = 0;
                     co_return;
@@ -1249,9 +1250,9 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                           {
                             x23::CoroGuard scheduler_guard;
                             co_await scheduler_guard(scheduler_->global_lock_);
-                            scheduler_->schedule(kMaxBlockSize /
-                                                     kNumSchedulerIterations,
-                                                 cache.tx_hashes, cache.txs);
+                            co_await scheduler_->schedule(
+                                kMaxBlockSize / kNumSchedulerIterations,
+                                cache.tx_hashes, cache.txs);
                           }
                           const size_t start = state->num_scheduled;
                           const size_t end = cache.tx_hashes.size();
@@ -1944,7 +1945,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
       {
         x23::CoroGuard scheduler_guard;
         co_await scheduler_guard(scheduler_->global_lock_);
-        scheduler_->abandon_pending_nomination(block_id);
+        co_await scheduler_->abandon_pending_nomination(block_id);
       }
       nominated_block_cache_.block_id = 0;
       co_return;
@@ -3228,13 +3229,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (commit_plan.committed_nominated) {
           x23::CoroGuard cg;
           co_await cg(scheduler_->global_lock_);
-          scheduler_->commit_pending_nomination(block_id);
+          co_await scheduler_->commit_pending_nomination(block_id);
         }
         else {
           if (nominated_block_cache_.block_id) {
             x23::CoroGuard cg;
             co_await cg(scheduler_->global_lock_);
-            scheduler_->abandon_pending_nomination(
+            co_await scheduler_->abandon_pending_nomination(
                 nominated_block_cache_.block_id);
           }
           // [apply_committed_block_hog_ages] acquires
@@ -3283,7 +3284,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         nominated_block_cache_.block_id = 0;
         validated_block_cache_.clear();
 
-        scheduler_->increment_current_block();
+        co_await scheduler_->increment_current_block();
         co_await Health::instance().set_current_block_height(
             last_committed_block_.value.proposal_header.block_height);
         MempoolMetrics::instance().current_block_height.record(

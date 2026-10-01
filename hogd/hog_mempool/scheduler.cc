@@ -156,7 +156,7 @@ Scheduler::start_pending_nomination(BlockID block_id)
   pending_nomination_.block_id = block_id;
 }
 
-void
+x23::Async<void>
 Scheduler::commit_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
@@ -165,12 +165,12 @@ Scheduler::commit_pending_nomination(BlockID block_id)
     auto [account_state, lock] = get_account_state(account);
     account_state->hog_age = hog_age;
   }
-  refresh_ready_accounts(pending_nomination_.touched_accounts);
-  refresh_accounts_excluded_from_block();
+  co_await refresh_ready_accounts(pending_nomination_.touched_accounts);
+  co_await refresh_accounts_excluded_from_block();
   pending_nomination_.clear();
 }
 
-void
+x23::Async<void>
 Scheduler::abandon_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
@@ -189,8 +189,8 @@ Scheduler::abandon_pending_nomination(BlockID block_id)
   // overhead.
   pending_nomination_.block_id = 0;
   pending_nomination_.hog_ages.clear();
-  refresh_ready_accounts(pending_nomination_.touched_accounts);
-  refresh_accounts_excluded_from_block();
+  co_await refresh_ready_accounts(pending_nomination_.touched_accounts);
+  co_await refresh_accounts_excluded_from_block();
   pending_nomination_.clear();
 }
 
@@ -262,7 +262,7 @@ Scheduler::apply_committed_block_hog_ages(
     account_state->hog_age = hog_age;
     touched_accounts.insert(account);
   }
-  refresh_ready_accounts(touched_accounts);
+  co_await refresh_ready_accounts(touched_accounts);
 }
 
 x23::Async<Scheduler::ReadAverageHogAgesResult>
@@ -501,7 +501,7 @@ x23::Async<SchedulerTransactionOutcome>
 Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 {
   if (find_tx(tx_hash)) {
-    return SchedulerTransactionOutcome{
+    co_return SchedulerTransactionOutcome{
         .status = SchedulerTransactionStatus::SchedulerTransactionPending,
         .error_source =
             SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
@@ -515,9 +515,9 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
-    return it->second->outcome;
+    co_return it->second->outcome;
   }
-  return SchedulerTransactionOutcome{
+  co_return SchedulerTransactionOutcome{
       .status = SchedulerTransactionStatus::SchedulerTransactionNotFound,
       .error_source =
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
@@ -556,7 +556,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   }
   co_await clear_transaction_outcome(tx_hash);
-  return account_state->txs.insert({key, *tx_ptr}).second;
+  co_return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
 bool
@@ -979,7 +979,7 @@ Scheduler::account_excluded_from_block(const ContractAddress &account) const
   return pending_nomination_.accounts_excluded_from_block.contains(account);
 }
 
-void
+x23::Async<void>
 Scheduler::refresh_accounts_excluded_from_block()
 {
   // We do not check that [pending_nomination.block_id] is nonzero here because
@@ -994,7 +994,7 @@ Scheduler::refresh_accounts_excluded_from_block()
   }
 }
 
-void
+x23::Async<void>
 Scheduler::refresh_ready_accounts(
     const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts)
 {
@@ -1042,10 +1042,10 @@ Scheduler::account_is_ready(const ContractAddress &account,
     size_ -= to_remove;
     txs.erase(txs.begin(), lower_it);
   }
-  return ret;
+  co_return ret;
 }
 
-void
+x23::Async<void>
 Scheduler::cycle_accounts_during_schedule_helper(
     const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
     const TxKey &lower_bound)
@@ -1069,7 +1069,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
     }
 
     cycle_if_needed(account, gas_limit);
-    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+    if (co_await account_is_ready(account, /*remove_expired_txs=*/false)) {
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
   }
@@ -1097,7 +1097,8 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
   while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
     if (account_it == ready_accounts_.end()) {
       ready_accounts_.clear();
-      cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+      co_await cycle_accounts_during_schedule_helper(removed_accounts,
+                                                     lower_bound);
       removed_accounts.clear();
       account_it = ready_accounts_.begin();
       if (ready_accounts_.empty()) {
@@ -1252,7 +1253,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
   // Add [removed_accounts] back to [ready_accounts_] for each account that is
   // still ready.
   ready_accounts_.erase(ready_accounts_.begin(), account_it);
-  cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+  co_await cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
   if (!pending_nomination_.block_id) {
     for (const ContractAddress &account : accounts_excluded_from_block) {
@@ -1355,8 +1356,17 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
     x23::Async<size_t> &handle = handles[i];
     total_removed_from_runqueue += co_await handle;
   }
-  accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
-    const ContractAddress &account = kv.first;
+
+  // We need to [co_await] for each account in [accounts]. However,
+  // [accounts.for_each()] does not support asynchronous callbacks, so we need
+  // to add the accounts to [affected_accounts] and then do the [co_await] in a
+  // normal for loop below.
+  x23::Vec<ContractAddress> affected_accounts;
+  accounts.for_each(
+      [&affected_accounts](const std::pair<ContractAddress, char> &kv) {
+        affected_accounts.push_back(kv.first);
+      });
+  for (const ContractAddress &account : affected_accounts) {
     if (!co_await account_is_ready(account, /*remove_expired_txs=*/true)) {
       // We do not CHECK that the account is removed from [ready_accounts_]
       // because the account may not be currently in [ready_accounts_]. For
@@ -1368,7 +1378,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
       // contract is already not in [ready_accounts_].
       ready_accounts_.erase(get_account_key(account));
     }
-  });
+  }
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
   double c = timer.elapsed();
 
