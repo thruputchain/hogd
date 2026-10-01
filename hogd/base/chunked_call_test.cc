@@ -5,16 +5,20 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <span>
 #include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunked_call.h"
 #include "hogd/base/coropoll.h"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 namespace {
@@ -30,11 +34,15 @@ struct SentChunk {
 // Records every chunk a run sends.
 class ChunkRecorder {
 public:
-  void record(ChunkPosition position, const x23::XdrVec<std::uint32_t> &items)
+  void record(ChunkPosition position, ChunkItems<std::uint32_t> items)
   {
     const std::lock_guard<std::mutex> lock(mutex_);
-    sent_.push_back(SentChunk{.position = position,
-                              .items = Items(items.begin(), items.end())});
+    Items copied;
+    for (const std::span<const std::uint32_t> &piece : items.pieces()) {
+      copied.insert(copied.end(), piece.begin(), piece.end());
+    }
+    sent_.push_back(
+        SentChunk{.position = position, .items = std::move(copied)});
   }
 
   // The chunks sent so far, in index order.
@@ -55,7 +63,7 @@ private:
 
 x23::Async<void>
 record(ChunkRecorder *recorder, ChunkPosition position,
-       x23::XdrVec<std::uint32_t> items)
+       ChunkItems<std::uint32_t> items)
 {
   recorder->record(position, items);
   co_return;
@@ -65,8 +73,8 @@ record(ChunkRecorder *recorder, ChunkPosition position,
 auto
 recording(ChunkRecorder *recorder)
 {
-  return [recorder](ChunkPosition position, x23::XdrVec<std::uint32_t> items) {
-    return record(recorder, position, std::move(items));
+  return [recorder](ChunkPosition position, ChunkItems<std::uint32_t> items) {
+    return record(recorder, position, items);
   };
 }
 
@@ -152,7 +160,7 @@ TEST(CallInChunks, SendsChunksConcurrently)
   call_in_chunks<std::uint32_t>(
       Parts{{0, 1, 2, 3}}, /*max_items_per_chunk=*/2,
       [&in_flight](ChunkPosition /*position*/,
-                   const x23::XdrVec<std::uint32_t> & /*items*/) {
+                   ChunkItems<std::uint32_t> /*items*/) {
         return await_peers(&in_flight, 2);
       },
       /*max_in_flight=*/2)();
@@ -163,11 +171,11 @@ TEST(CallInChunks, FailsWithACallsExceptionAndIssuesNoFurtherChunk)
 {
   ChunkRecorder recorder;
   auto failing_second = [&recorder](ChunkPosition position,
-                                    x23::XdrVec<std::uint32_t> items) {
+                                    ChunkItems<std::uint32_t> items) {
     if (position.index == 1) {
       throw std::runtime_error("chunk refused");
     }
-    return record(&recorder, position, std::move(items));
+    return record(&recorder, position, items);
   };
   // One worker sends the chunks in order, so the failure on chunk 1 is what
   // stops chunk 2.
@@ -179,6 +187,43 @@ TEST(CallInChunks, FailsWithACallsExceptionAndIssuesNoFurtherChunk)
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 1U);
   expect_position(sent[0], 0, 3);
+}
+
+static_assert(x23::serializes_like<ChunkItems<std::uint32_t>,
+                                   x23::XdrVec<std::uint32_t>>);
+
+TEST(ChunkItems, SerializesLikeTheVectorOfItsItems)
+{
+  const Items first{1, 2, 3};
+  const Items second{};
+  const Items third{4};
+  const std::vector<std::span<const std::uint32_t>> pieces{first, second,
+                                                           third};
+  const ChunkItems<std::uint32_t> items(pieces);
+  const x23::XdrVec<std::uint32_t> vector{1, 2, 3, 4};
+  EXPECT_EQ(items.size(), 4U);
+  EXPECT_EQ(xdr_size(items), x23::xdr_size(vector));
+  EXPECT_EQ(x23::serialize(items), x23::serialize(vector));
+}
+
+TEST(ChunkItems, SerializesVariableSizeItemsLikeTheirVector)
+{
+  using Inner = x23::XdrVec<std::uint32_t>;
+  const std::vector<Inner> first{Inner{1, 2}, Inner{}};
+  const std::vector<Inner> second{Inner{3, 4, 5}};
+  const std::vector<std::span<const Inner>> pieces{first, second};
+  const ChunkItems<Inner> items(pieces);
+  const x23::XdrVec<Inner> vector{Inner{1, 2}, Inner{}, Inner{3, 4, 5}};
+  EXPECT_EQ(xdr_size(items), x23::xdr_size(vector));
+  EXPECT_EQ(x23::serialize(items), x23::serialize(vector));
+}
+
+TEST(ChunkItems, EmptyChunkSerializesLikeAnEmptyVector)
+{
+  const std::vector<std::span<const std::uint32_t>> pieces;
+  const ChunkItems<std::uint32_t> items(pieces);
+  EXPECT_EQ(x23::serialize(items),
+            x23::serialize(x23::XdrVec<std::uint32_t>{}));
 }
 
 } // namespace hogd

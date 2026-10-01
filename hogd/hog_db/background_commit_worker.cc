@@ -1,15 +1,18 @@
 #include "background_commit_worker.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <mutex>
 #include <stop_token>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "auth_rpc.hh"
+#include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunked_call.h"
 #include "hogd/base/log.h"
@@ -19,7 +22,8 @@
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/vec.h"
+#include "x23/serialize.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -37,18 +41,52 @@ BackgroundCommitWorker::BackgroundCommitWorker(
 }
 
 namespace {
-// Issues one chunk of [block_height]'s run, owning the record for the call's
-// lifetime.
+// A HogsTransferredChunk whose deltas are still in the per-thread vectors
+// they were produced in. It serializes identically to the wire struct, so
+// the client sends it as one without copying a delta.
+struct TransferChunkView {
+  BlockHeight block;
+  std::uint32_t chunk_index;
+  std::uint32_t chunk_count;
+  ChunkItems<Delta> deltas;
+};
+
+size_t
+xdr_size(const TransferChunkView &view)
+{
+  return x23::xdr_size(view.block) + x23::xdr_size(view.chunk_index) +
+         x23::xdr_size(view.chunk_count) + xdr_size(view.deltas);
+}
+
+void
+xdr_serialize(auto &serializer, const TransferChunkView &view)
+{
+  serializer(view.block);
+  serializer(view.chunk_index);
+  serializer(view.chunk_count);
+  serializer(view.deltas);
+}
+} // namespace
+} // namespace hogd
+
+template<>
+struct x23::serialize_equiv<hogd::HogsTransferredChunk, hogd::TransferChunkView>
+  : std::true_type {};
+
+namespace hogd {
+namespace {
+// Issues one chunk of [block_height]'s run. The record is serialized from
+// [deltas] in place, before the call first suspends.
 x23::Async<void>
 send_transfer_chunk(BackgroundCommitWorker::sched_db_client_t *sched_db_client,
                     BlockHeight block_height, ChunkPosition position,
-                    x23::XdrVec<Delta> deltas)
+                    ChunkItems<Delta> deltas)
 {
-  HogsTransferredChunk chunk{.block = block_height,
-                             .chunk_index = position.index,
-                             .chunk_count = position.count,
-                             .deltas = std::move(deltas)};
-  co_await sched_db_client->scheddb_hogs_transferred_chunk(chunk);
+  const TransferChunkView view{.block = block_height,
+                               .chunk_index = position.index,
+                               .chunk_count = position.count,
+                               .deltas = deltas};
+  co_await sched_db_client->scheddb_hogs_transferred_chunk(view);
 }
 
 // Sends a committed block's balance deltas to the scheduler as a run of
@@ -72,10 +110,10 @@ dispatch_balance_deltas(
   call_in_chunks<Delta>(std::move(parts), max_deltas_per_chunk,
                         [&sched_db_client,
                          block_height](ChunkPosition position,
-                                       x23::XdrVec<Delta> deltas) {
+                                       ChunkItems<Delta> deltas) {
                           return send_transfer_chunk(&sched_db_client,
                                                      block_height, position,
-                                                     std::move(deltas));
+                                                     deltas);
                         })();
 }
 } // namespace
