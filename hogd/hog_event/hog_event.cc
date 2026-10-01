@@ -92,11 +92,11 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   while (true) {
     auto prepared = client.schedevent_prepare_event(card);
     if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
-      // Not ready until the coordinator loads the genesis block; the retry is
-      // unbounded.
+      // Not ready until the mempool publishes a canonical tip at a real
+      // height; the retry is unbounded.
       warn_every_n_sec(5.0F,
                        "mempool at {} is not ready to register the event "
-                       "server: it has no genesis block yet",
+                       "server: no canonical tip at a real height yet",
                        mempool_address);
       wait_to_retry();
       continue;

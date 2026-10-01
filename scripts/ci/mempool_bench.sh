@@ -110,7 +110,9 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+# Capture the output: control_cli reports this process's exact log paths, and
+# picking them with [ls -t] instead can land on another run's files.
+if ! coordinator_start_output=$($CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
   --stack \
@@ -132,7 +134,19 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path ./$BUILD_DIR/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400
+  --scp-control-addr 127.0.0.1:4400 2>&1); then
+  printf '%s\n' "$coordinator_start_output"
+  exit 1
+fi
+printf '%s\n' "$coordinator_start_output"
+coordinator_stdout_path=$(printf '%s\n' "$coordinator_start_output" |
+  sed -n 's/^CONTROL_STDOUT_PATH=//p' | tail -n 1)
+coordinator_stderr_path=$(printf '%s\n' "$coordinator_start_output" |
+  sed -n 's/^CONTROL_STDERR_PATH=//p' | tail -n 1)
+if [[ -z $coordinator_stdout_path || -z $coordinator_stderr_path ]]; then
+  echo 'failed to parse coordinator log paths from control_cli' >&2
+  exit 1
+fi
 
 echo 'make sure procs are running'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
@@ -168,17 +182,22 @@ if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
 fi
 
 echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+scp hog4:"$coordinator_stdout_path" ./coordinator_output.txt
 
 echo 'copy coordinator stderr from hog4'
 # Coordinator logging goes to stderr; stdout carries only benchmark results.
 # A missing file must not abort the run ahead of the status checks below.
 : >./coordinator_stderr.txt
-if ! scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stderr* | head -n 1')" \
-  ./coordinator_stderr.txt; then
+if ! scp hog4:"$coordinator_stderr_path" ./coordinator_stderr.txt; then
   echo 'could not copy coordinator stderr from hog4' >&2
   : >./coordinator_stderr.txt
+fi
+
+if [[ $coordinator_status -ne 0 ]]; then
+  # Print before the mempool check below, which may exit first.
+  echo '===== last 200 lines of coordinator stderr on hog4 =====' >&2
+  tail -n 200 ./coordinator_stderr.txt >&2
+  echo '===== end of coordinator stderr =====' >&2
 fi
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
@@ -190,10 +209,6 @@ if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   exit "$mempool_status"
 fi
 if [[ $coordinator_status -ne 0 ]]; then
-  # Mempool timeout is expected here, so print the coordinator log.
-  echo '===== last 200 lines of coordinator stderr on hog4 =====' >&2
-  tail -n 200 ./coordinator_stderr.txt >&2
-  echo '===== end of coordinator stderr =====' >&2
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
   exit "$coordinator_status"
 fi

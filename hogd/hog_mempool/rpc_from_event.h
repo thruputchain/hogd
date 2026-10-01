@@ -33,7 +33,7 @@ public:
   static EventPrepareResult schedevent_prepare_event(const EventCard &card)
   {
     // Rate-limited: the event server retries this about once a second until
-    // the coordinator has loaded the genesis block.
+    // the mempool publishes a canonical tip at a real height.
     info_every_n_sec(5.0F, "event server preparing registration");
     if (card.protocol != version::kHogdProtocol()) {
       return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
