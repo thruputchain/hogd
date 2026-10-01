@@ -1939,6 +1939,46 @@ TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
   }
 }
 
+// The staged footprint is tracked incrementally as deltas are added, so an
+// over-cap batch is reported (current_subtransaction_exceeds_cap()) before the
+// whole aggregate is materialized. try_acquire_frame_locks relies on this to
+// stop copying a retained aggregate -- which a contract can grow far past one
+// push via many sub-cap TryInvoke children merged into the root -- once the
+// batch already overflows, instead of materializing all of it only to have the
+// push-time gate reject it. The reported boundary matches that gate exactly.
+TEST_P(DirectBytestringTest, SubtransactionFootprintTrackedIncrementally)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000'000);
+
+  const std::string max_value(kDefaultMaxBytestringLen, 'x');
+  auto tx = make_new_per_tx_db_proxy();
+  EXPECT_FALSE(tx.current_subtransaction_exceeds_cap())
+      << "an empty batch is within the message cap";
+
+  // Each delta is ~1 KiB; adding max-size bytestrings across distinct keys
+  // crosses the 16 MiB cap well before all 16000 would be staged.
+  bool crossed = false;
+  int added = 0;
+  for (int i = 0; i < 16000 && !crossed; ++i) {
+    tx.add_delta(make_addrkey(contract_addr, "spray" + std::to_string(i)),
+                 make_bytestring_delta(max_value),
+                 std::to_underlying(StorageDeltaFlags::None));
+    ++added;
+    crossed = tx.current_subtransaction_exceeds_cap();
+  }
+  EXPECT_TRUE(crossed) << "the staged footprint must report the cap crossing";
+  EXPECT_LT(added, 16000)
+      << "the crossing must be reported before the whole aggregate is staged";
+
+  auto r = tx.try_push_current_subtransaction()();
+  ASSERT_TRUE(r.has_value());
+  EXPECT_FALSE(r.value())
+      << "a batch over the message cap is still rejected as a conflict";
+  EXPECT_FALSE(tx.current_subtransaction_exceeds_cap())
+      << "pushing clears the staged batch and resets the footprint";
+}
+
 // The footprint gate in DatabaseProxy::try_push_new_subtransaction is strict
 // (footprint + kMessageOverhead > kExecToDbMessageCap): a batch whose
 // type-derived footprint lands exactly on the budget is pushed; one XDR word

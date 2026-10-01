@@ -186,6 +186,13 @@ InvocationFrame::try_acquire_frame_locks(
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
 
+  // Stop materializing deltas into the staging batch as soon as it already
+  // overflows the push cap: the push below rejects any over-cap batch as a
+  // conflict, so there is no point copying the rest of a retained aggregate
+  // (which a malicious contract can grow far past one push via many sub-cap
+  // TryInvoke children merged into the root) only to discard it. The remaining
+  // observation/deployment deltas are skipped for the same reason.
+  bool exceeds_cap = false;
   for (auto const &[key, item_view] : modified_items_) {
     const AddressAndKey addrkey = key.to_address_and_key();
     bool has_observations = false;
@@ -203,25 +210,33 @@ InvocationFrame::try_acquire_frame_locks(
     }
     if (delta) {
       db_proxy.add_delta(addrkey, std::move(*delta), flags);
+      if (db_proxy.current_subtransaction_exceeds_cap()) {
+        exceeds_cap = true;
+        break;
+      }
     }
   }
 
-  for (auto const &[addrkey, entries] : observations) {
-    if (!entries.empty() &&
-        !modified_items_.contains(FrameItemKey::from(addrkey))) {
-      StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-      delta.retrocausal_queue().observed_concurrent_entries = {entries.begin(),
-                                                               entries.end()};
-      db_proxy.add_delta(addrkey, std::move(delta),
+  // Once over the cap, skip the remaining (bounded) observation and deployment
+  // deltas too: the push below rejects the batch regardless.
+  if (!exceeds_cap) {
+    for (auto const &[addrkey, entries] : observations) {
+      if (!entries.empty() &&
+          !modified_items_.contains(FrameItemKey::from(addrkey))) {
+        StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+        delta.retrocausal_queue().observed_concurrent_entries = {
+            entries.begin(), entries.end()};
+        db_proxy.add_delta(addrkey, std::move(delta),
+                           std::to_underlying(StorageDeltaFlags::None));
+      }
+    }
+
+    for (auto const &[addr, deployment] : new_contract_deployments_) {
+      AddressAndKey addrkey = {.address = addr,
+                               .key = StorageKey(StorageKeyType::Metadata)};
+      db_proxy.add_delta(addrkey, make_deployed_contract_delta(deployment),
                          std::to_underlying(StorageDeltaFlags::None));
     }
-  }
-
-  for (auto const &[addr, deployment] : new_contract_deployments_) {
-    AddressAndKey addrkey = {.address = addr,
-                             .key = StorageKey(StorageKeyType::Metadata)};
-    db_proxy.add_delta(addrkey, make_deployed_contract_delta(deployment),
-                       std::to_underlying(StorageDeltaFlags::None));
   }
 
   auto res = co_await db_proxy.try_push_current_subtransaction();

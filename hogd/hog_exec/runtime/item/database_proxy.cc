@@ -621,6 +621,24 @@ DatabaseProxy::close_viewing_snapshot(BlockID block_id)
   }
 }
 
+void
+PerTransactionDatabaseProxy::add_delta(AddressAndKey addrkey,
+                                       StorageDelta delta,
+                                       StorageDeltaFlagSet flags)
+{
+  current_subtransaction_batch_.emplace_back(std::move(addrkey),
+                                             std::move(delta), flags);
+  current_subtransaction_footprint_ +=
+      footprint_bound(current_subtransaction_batch_.back());
+}
+
+bool
+PerTransactionDatabaseProxy::current_subtransaction_exceeds_cap() const
+{
+  return current_subtransaction_footprint_ + kMessageOverhead >
+         kExecToDbMessageCap;
+}
+
 x23::Async<SystemStatus<bool>>
 PerTransactionDatabaseProxy::try_push_current_subtransaction()
 {
@@ -645,6 +663,7 @@ PerTransactionDatabaseProxy::try_push_current_subtransaction()
   auto r = co_await db_proxy_.try_push_new_subtransaction(
       block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
   current_subtransaction_batch_.clear();
+  current_subtransaction_footprint_ = 0;
   co_return r;
 }
 

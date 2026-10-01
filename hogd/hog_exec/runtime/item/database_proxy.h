@@ -161,12 +161,17 @@ public:
     current_subtransaction_batch_.reserve(delta_count);
   }
 
+  // Stages one delta and folds its serialized-footprint bound into the running
+  // total, so current_subtransaction_exceeds_cap() can report an over-cap batch
+  // without a second pass. Out of line: footprint_bound lives in the .cc.
   void add_delta(AddressAndKey addrkey, StorageDelta delta,
-                 StorageDeltaFlagSet flags)
-  {
-    current_subtransaction_batch_.emplace_back(std::move(addrkey),
-                                               std::move(delta), flags);
-  }
+                 StorageDeltaFlagSet flags);
+
+  // True once the staged batch's footprint would overflow the executor->HogDb
+  // message, using the exact bound try_push_new_subtransaction gates on. Lets a
+  // caller stop materializing further deltas instead of copying the whole
+  // retained aggregate into the batch before the push-time cap rejects it.
+  bool current_subtransaction_exceeds_cap() const;
 
   // Conflict diagnostics from the most recent failed push, at the level
   // the database selected from the block mode; the None arm if the last
@@ -231,6 +236,9 @@ private:
   // acquire and release both touch only the running thread's pool, so that
   // stays correct under interleaving.
   StorageDeltaBatch current_subtransaction_batch_;
+  // Running footprint bound of current_subtransaction_batch_, kept in step with
+  // it: add_delta adds, try_push_current_subtransaction resets it on clear.
+  size_t current_subtransaction_footprint_ = 0;
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;
