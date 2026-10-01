@@ -22,9 +22,7 @@
 #include <thread>
 #include <utility>
 
-#include "address_auth.hh"
 #include "auth_card.hh"
-#include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -415,7 +413,7 @@ preflight_data_dir_metadata(
     }
     // Directory setup runs before this preflight. Empty subsystem directories
     // are a fresh skeleton; any persisted file requires compatible metadata.
-    for (auto name : {"ramdb", "events", "indexer"}) {
+    for (const auto *name : {"ramdb", "events", "indexer"}) {
       const auto subsystem = *data_dir / name;
       if (!std::filesystem::exists(subsystem, ec)) {
         if (ec) {

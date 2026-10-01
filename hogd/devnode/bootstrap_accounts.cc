@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include "contract.hh"
+#include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -149,7 +149,9 @@ derive_bootstrap_account_address(Ed25519PublicKey const &public_key)
   key.ed25519() = public_key;
   auto address =
       pubkey_auth_address(PubkeyAccountPreimage{.pubkey = key, .nonce = 0});
-  CHECK(address.has_value());
+  if (!address.has_value()) {
+    throw std::logic_error("native bootstrap address derivation failed");
+  }
   return *address;
 }
 

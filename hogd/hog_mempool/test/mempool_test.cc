@@ -4019,7 +4019,10 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   public_key.ed25519() = raw_public_key;
   const auto native_account = pubkey_auth_address(
       PubkeyAccountPreimage{.pubkey = public_key, .nonce = 0});
-  ASSERT_TRUE(native_account.has_value());
+  if (!native_account.has_value()) {
+    ADD_FAILURE() << "native account address derivation failed";
+    return;
+  }
   builder.add_account_allocation(*native_account, allocation);
 
   auto root_contract = load_stock_genesis_root_contract();
@@ -4157,10 +4160,10 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   const auto minted_supply = server.read_nnint128(
       ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
   ASSERT_TRUE(minted_supply.has_value());
-  const int128_t ceremony_funding = 2 * cost_model.get_balance_cost() +
+  const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
                                     cost_model.get_replay_cache_cost(1) +
                                     cost_model.get_nnint_cost();
-  EXPECT_EQ(*minted_supply, 3 * allocation + ceremony_funding);
+  EXPECT_EQ(*minted_supply, (3 * allocation) + ceremony_funding);
 
   GenesisCeremonyResult retry =
       coordinator_client.schedulercoord_commit_genesis_ceremony(

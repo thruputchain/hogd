@@ -279,7 +279,7 @@ TEST(GenesisCeremonyBuilder, DirectAllocationsRejectNegativeAndExcessSupply)
 
   const int128_t supply =
       int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
-  const int128_t ceremony_funding = 2 * cost_model.get_balance_cost() +
+  const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
                                     cost_model.get_replay_cache_cost(1) +
                                     cost_model.get_nnint_cost();
   GenesisConfigurationBuilder excessive;
@@ -303,14 +303,14 @@ TEST(GenesisCeremonyBuilder,
   const auto cost_model = StorageCostModel::default_cost_model();
   const int128_t supply =
       int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
-  const int128_t ceremony_funding = 2 * cost_model.get_balance_cost() +
+  const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
                                     cost_model.get_replay_cache_cost(1) +
                                     cost_model.get_nnint_cost();
   auto contract = std::make_shared<Contract>(ContractType::kRv32);
   contract->rv32_contract() = load_contract_blob("fibonacci.rv32a");
   GenesisConfigurationBuilder builder;
   builder.add_account_allocation(sha256(uint64_t{0}),
-                                 supply - 2 * ceremony_funding);
+                                 supply - (2 * ceremony_funding));
   for (uint64_t index = 1; index < 15; ++index) {
     builder.add_account_allocation(sha256(index), 0);
   }

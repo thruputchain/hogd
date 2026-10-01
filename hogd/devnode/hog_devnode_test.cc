@@ -39,6 +39,7 @@
 #include "auth_claim.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/default_wallet.h"
+#include "built_contracts/default_wallet.hh"
 #include "built_contracts/dev_wallet.h"
 #include "built_contracts/itc_erc20.h"
 #include "consensus.hh"
@@ -60,7 +61,6 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -92,7 +92,8 @@
 #include "types.hh"
 #include "view.hh"
 #include "view_gateway.hh"
-#include "x23/serialize.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 #ifndef HOG_DEVNODE_BINARY
 #error "HOG_DEVNODE_BINARY must be defined by CMake"

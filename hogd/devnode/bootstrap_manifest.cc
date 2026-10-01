@@ -20,9 +20,7 @@
 
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
