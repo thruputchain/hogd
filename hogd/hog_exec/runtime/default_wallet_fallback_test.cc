@@ -14,6 +14,7 @@
 #include "built_contracts/calldata_wrapper.h"
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
+#include "built_contracts/itc_erc20.h"
 #include "built_contracts/manual_revert_test.h"
 #include "contract.hh"
 #include "exec_result.hh"
@@ -487,7 +488,9 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentInsufficientSenderRollsBack)
   auto before = stored_balance(wallet_);
   auto block = get_block_number();
   auto rec = run_deploy_tx(nonce, hash, 2'000'000'000);
-  auto expected = wallet_error_abort_bytes(WalletError::CallAborted);
+  auto expected = x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+                                     itc_erc20::ERC20Error::TooLarge)
+                      .value();
   ASSERT_EQ(rec.size(), 2U + expected.size());
   EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
   EXPECT_EQ(rec[1],

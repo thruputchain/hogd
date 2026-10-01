@@ -17,6 +17,7 @@
 #include "built_contracts/calldata_wrapper.h"
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
+#include "built_contracts/itc_erc20.h"
 #include "built_contracts/manual_revert_test.h"
 #include "contract.hh"
 #include "exec_result.hh"
@@ -208,7 +209,7 @@ protected:
   }
 
   // A call that manually aborts: test_error_type_revert(1) throws
-  // ManualRevertTestError -> child frame Abort -> WalletError::CallAborted.
+  // ManualRevertTestError is forwarded unchanged by the wallet.
   static WalletCall abort_call()
   {
     auto calldata = mrt_meta::make_calldata<u8"test_error_type_revert">(
@@ -318,6 +319,14 @@ protected:
   {
     constexpr uint64_t kWalletExceptionSelector = 0x931d3297d37d1bdfULL;
     auto buf = x23::serialize_cxs(kWalletExceptionSelector, err);
+    CHECK(buf.has_value());
+    return {buf->begin(), buf->end()};
+  }
+
+  static std::vector<uint8_t>
+  manual_revert_abort_bytes(manual_revert_test::ManualRevertTestError err)
+  {
+    auto buf = x23::serialize_cxs(uint64_t{0x82827bef8087f1b6ULL}, err);
     CHECK(buf.has_value());
     return {buf->begin(), buf->end()};
   }
@@ -667,9 +676,81 @@ TEST_F(DefaultWalletParityTest, CalleeAborts)
   setup_wallets_and_targets();
   make_ctx();
   wallet_calls_t calls;
-  calls.push_back(echo_call(4)); // one success first: abort discards it
+  // A successful state write must also roll back when the next call aborts.
+  WalletCall write = abort_call();
+  write.entrypoint = mrt_meta::entrypoint<u8"test_basic_manual_revert">();
+  write.calldata = mrt_meta::make_calldata<u8"test_basic_manual_revert">(false);
+  calls.push_back(write);
   calls.push_back(abort_call());
-  expect_parity(calls);
+  auto expected = manual_revert_abort_bytes(
+      manual_revert_test::ManualRevertTestError::ErrorTypeRevert);
+  for (auto const &[wallet, preimage] : {
+           std::pair{native_wallet_, native_preimage_},
+           std::pair{rv32_wallet_, rv32_preimage_},
+       }) {
+    auto record = run_wallet_execute_tx(wallet, preimage, calls);
+    ASSERT_GE(record.size(), 2U);
+    EXPECT_EQ(record[1],
+              static_cast<uint8_t>(ExecResult::ExecResultTxRootFrameReverted));
+    EXPECT_EQ(CapturedRecord(record.begin() + 2, record.end()), expected);
+    WalletCall query = abort_call();
+    query.entrypoint = mrt_meta::entrypoint<u8"check_storage_exists">();
+    query.calldata.clear();
+    auto returned = run_wallet_execute_tx(wallet, preimage, {query});
+    EXPECT_EQ(returned,
+              (CapturedRecord{1, static_cast<uint8_t>(ExecResult::ExecResultOK),
+                              1, 1, 0}));
+  }
+}
+
+TEST_F(DefaultWalletParityTest, ForwardsOpaqueAbortAndRejectsMalformedSelector)
+{
+  setup_wallets_and_targets();
+  constexpr int32_t kAbortId = 65;
+  constexpr auto kRawAbortAddr = make_contract_address(230);
+  ReturnBuffer payload;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0,
+              [&payload](
+                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                ctx.handler().set_return_buffer(ReturnBuffer{payload}, true,
+                                                {});
+                co_return InvokeStatus<void>{};
+              });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
+  extra.emplace(kAbortId, std::make_unique<NativeContract>(std::move(fns)));
+  make_ctx(std::move(extra));
+  auto obj = make_native_contract(kAbortId);
+  write_contract(obj);
+  write_deployment(kRawAbortAddr, obj);
+  setup_grant_storage_token(kRawAbortAddr, 1'000'000'000);
+  WalletCall call{};
+  call.target = kRawAbortAddr;
+  call.entrypoint = entrypoint_from_method_id(0);
+  call.gas_limit = UINT64_MAX;
+  auto known_selector = x23::serialize_cxs(kLibraryExceptionSelector).value();
+  ReturnBuffer known(known_selector.begin(), known_selector.end());
+  known.push_back(
+      0xff); // The wallet validates only the selector, not the body.
+  ReturnBuffer maximum(1024, 0xab);
+  maximum[0] = 42;
+  for (auto const &wire : {ReturnBuffer{}, ReturnBuffer{0xff}, ReturnBuffer{42},
+                           ReturnBuffer{42, 0xff}, known, maximum}) {
+    payload = wire;
+    auto expected = wire.empty() || wire == ReturnBuffer{0xff}
+                        ? wallet_error_abort_bytes(WalletError::CallAborted)
+                        : CapturedRecord(wire.begin(), wire.end());
+    for (auto const &[wallet, preimage] : {
+             std::pair{native_wallet_, native_preimage_},
+             std::pair{rv32_wallet_, rv32_preimage_},
+         }) {
+      auto record = run_wallet_execute_tx(wallet, preimage, {call});
+      ASSERT_GE(record.size(), 2U);
+      EXPECT_EQ(record[1], static_cast<uint8_t>(
+                               ExecResult::ExecResultTxRootFrameReverted));
+      EXPECT_EQ(CapturedRecord(record.begin() + 2, record.end()), expected);
+    }
+  }
 }
 
 TEST_F(DefaultWalletParityTest, CalleeFaultsOutOfGas)
@@ -1051,8 +1132,11 @@ TEST_F(DefaultWalletParityTest, DeploymentInitializationCommitsOrRollsBack)
       else {
         EXPECT_EQ(record[1], static_cast<uint8_t>(
                                  ExecResult::ExecResultTxRootFrameReverted));
-        auto expected = wallet_error_abort_bytes(
-            mode == 1 ? WalletError::CallAborted : WalletError::CallFaulted);
+        auto expected =
+            mode == 1
+                ? manual_revert_abort_bytes(
+                      manual_revert_test::ManualRevertTestError::BasicRevert)
+                : wallet_error_abort_bytes(WalletError::CallFaulted);
         ASSERT_EQ(record.size(), 2U + expected.size());
         EXPECT_TRUE(
             std::equal(expected.begin(), expected.end(), record.begin() + 2));
@@ -1118,8 +1202,11 @@ TEST_F(DefaultWalletParityTest, DeploymentInitializesRv32CodeWithCallerGasLimit)
                             1, 1, 1}));
       }
       else {
-        auto expected = wallet_error_abort_bytes(
-            mode == 1 ? WalletError::CallAborted : WalletError::CallFaulted);
+        auto expected =
+            mode == 1
+                ? manual_revert_abort_bytes(
+                      manual_revert_test::ManualRevertTestError::BasicRevert)
+                : wallet_error_abort_bytes(WalletError::CallFaulted);
         ASSERT_EQ(record.size(), 2U + expected.size());
         EXPECT_EQ(record[1], static_cast<uint8_t>(
                                  ExecResult::ExecResultTxRootFrameReverted));
@@ -1182,9 +1269,12 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
     }
     else if (amount < 0) {
       // The wallet hands the negative amount to the token, which rejects it
-      // with NegativeAmount: the wallet reverts with CallAborted, deploys
+      // with NegativeAmount: the wallet forwards the exception, deploys
       // nothing and moves no tokens, identically on both wallets.
-      auto const expected = wallet_error_abort_bytes(WalletError::CallAborted);
+      auto const expected =
+          x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+                             itc_erc20::ERC20Error::NegativeAmount)
+              .value();
       for (auto const &[wallet, preimage] : {
                std::pair{native_wallet_, native_preimage_},
                std::pair{rv32_wallet_, rv32_preimage_},

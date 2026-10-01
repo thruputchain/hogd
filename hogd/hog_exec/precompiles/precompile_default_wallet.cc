@@ -183,10 +183,15 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   }
 
   if (outputs.frame_status == InvocationFrameStatusCode::Abort) {
-    // sdk contract_call: payload fetched (and here dropped), then
-    // the abort is reported.
-    co_return child_result_t::make_err(
-        WalletException{WalletError::CallAborted});
+    // SDK RawExceptionRef only requires a CXS u64 selector; its body is
+    // opaque. Preserve the entire wire buffer, including unknown exceptions.
+    uint64_t selector = 0;
+    if (!x23::deserialize_cxs_from(&selector, x23::BufViewEnd{return_buf})) {
+      co_return child_result_t::make_err(
+          WalletException{WalletError::CallAborted});
+    }
+    co_return child_result_t::make_err(child_result_t::err_type::from_raw_abort(
+        ReturnBuffer(return_buf.begin(), return_buf.end())));
   }
 
   co_return child_result_t::make_ok(std::move(return_buf));
@@ -323,8 +328,12 @@ make_native_default_wallet_contract()
                 WalletException{WalletError::CallFaulted});
           }
           if (!transfer->value()->is_ok()) {
+            auto abort = transfer->value()->err().serialize();
+            if (!abort) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
             co_return deploy_result_t::make_err(
-                WalletException{WalletError::CallAborted});
+                deploy_result_t::err_type::from_raw_abort(std::move(*abort)));
           }
         }
         auto deployed = co_await deploy_contract(ctx, nonce, contract_hash);
