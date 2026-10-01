@@ -1997,10 +1997,10 @@ retrocausal_queue_item_from_view(ItemView *item_view,
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 load_next_queue_entry(RetrocausalQueueItem &queue_item,
                       ExecutionModeData &execution_mode_data,
-                      bool advance_cursor)
+                      bool advance_cursor, GasAmount &load_gas)
 {
-  auto entry =
-      co_await queue_item.get_next_item(execution_mode_data, advance_cursor);
+  auto entry = co_await queue_item.get_next_item(execution_mode_data,
+                                                 advance_cursor, load_gas);
   if (!entry.has_value()) {
     co_return entry.error();
   }
@@ -2045,11 +2045,13 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
                                  FrameItemKey const &item_key,
                                  AddressAndKey const &addrkey,
                                  StorageSnapshotCache &snapshot_cache,
-                                 ExecutionModeData &execution_mode_data)
+                                 ExecutionModeData &execution_mode_data,
+                                 GasAmount &load_gas)
 {
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
     co_return co_await load_next_queue_entry(*queue_item, execution_mode_data,
-                                             /*advance_cursor=*/false);
+                                             /*advance_cursor=*/false,
+                                             load_gas);
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
@@ -2064,7 +2066,8 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
     }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     co_return co_await load_next_queue_entry(queue_item, execution_mode_data,
-                                             /*advance_cursor=*/false);
+                                             /*advance_cursor=*/false,
+                                             load_gas);
   }
 
   if (item_view->get<DeletedItem>()) {
@@ -2076,7 +2079,8 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
     }
     co_return co_await load_next_queue_entry(queue_item.value(),
                                              execution_mode_data,
-                                             /*advance_cursor=*/false);
+                                             /*advance_cursor=*/false,
+                                             load_gas);
   }
 
   co_return SyscallError{
@@ -2116,7 +2120,7 @@ SystemCallHandler::retrocausal_queue_insert(
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
-                                             bool peek)
+                                             bool peek, GasAmount &load_gas)
 {
   const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
@@ -2127,7 +2131,8 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     co_return co_await retrocausal_queue_peek_from_view(item_view, item_key,
                                                         addrkey,
                                                         snapshot_cache_,
-                                                        execution_mode_data_);
+                                                        execution_mode_data_,
+                                                        load_gas);
   }
 
   // For unmodified keys, probe with a local item first. Only persist
@@ -2146,7 +2151,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
-                                       /*advance_cursor=*/true);
+                                       /*advance_cursor=*/true, load_gas);
     if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
@@ -2160,7 +2165,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
     auto entry =
         co_await load_next_queue_entry(*queue_item, execution_mode_data_,
-                                       /*advance_cursor=*/true);
+                                       /*advance_cursor=*/true, load_gas);
     item_view->sync_retrocausally_consumed(*queue_item);
     co_return entry;
   }
@@ -2177,7 +2182,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     auto &queue_item = queue_item_res.value();
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
-                                       /*advance_cursor=*/true);
+                                       /*advance_cursor=*/true, load_gas);
     if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {

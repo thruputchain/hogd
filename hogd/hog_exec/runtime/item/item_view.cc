@@ -16,6 +16,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
@@ -240,7 +241,7 @@ RetrocausalQueueItem::construct_consume_delta()
 // behavior of peek changed in direct response to an action by the contract.
 x23::Async<SystemStatus<const QueueEntry *>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
-                                    bool advance_cursor)
+                                    bool advance_cursor, GasAmount &load_gas)
 {
   assert(base_item_);
   // Step 1: try consume from past blocks
@@ -334,7 +335,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   // Step 3: try to consume concurrent entries not from this transaction
   auto concurrent_entry =
       co_await get_next_concurrent_entry(locally_consumed_index_,
-                                         execution_mode_data);
+                                         execution_mode_data, load_gas);
   if (!concurrent_entry.has_value()) {
     co_return concurrent_entry.error();
   }
@@ -432,7 +433,8 @@ RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 // returned pointer aliases into owned observation storage (see get_next_item).
 x23::MaybeAsync<SystemStatus<const QueueEntry *>>
 RetrocausalQueueItem::get_next_concurrent_entry(
-    uint32_t index, ExecutionModeData &execution_mode_data) const
+    uint32_t index, ExecutionModeData &execution_mode_data,
+    GasAmount &load_gas) const
 {
   assert(base_item_);
   auto const &addrkey = base_item_->addrkey();
@@ -446,7 +448,7 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     }
     // Only proposal mode reads the database here; viewing and validation
     // replay recorded observations below and never suspend.
-    return get_next_concurrent_entry_proposing(index, *proposal_data);
+    return get_next_concurrent_entry_proposing(index, *proposal_data, load_gas);
   }
 
   if (auto *viewing_data = std::get_if<ViewingModeData>(&execution_mode_data)) {
@@ -457,7 +459,8 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     // so it cannot be called on the returned temporary directly.
     auto queue_bit = viewing_data->view_query_queue_observation_bit();
     if (!queue_bit.get()) {
-      // no queue entry available
+      // No entry available; charge the RPC the proposal paid for this read.
+      load_gas += kDBRPCCost;
       return SystemStatus<const QueueEntry *>{nullptr};
     }
     // Bind before .get(): Nondeterministic::get() needs an lvalue.
@@ -484,6 +487,8 @@ RetrocausalQueueItem::get_next_concurrent_entry(
         SystemError{SystemErrorCode::ValidationFailure}};
   }
   if (!bit_res->get()) {
+    // No entry available; charge the RPC the proposal paid for this read.
+    load_gas += kDBRPCCost;
     return SystemStatus<const QueueEntry *>{nullptr};
   }
   // Bind before .get(): Nondeterministic::get() needs an lvalue.
@@ -500,7 +505,7 @@ RetrocausalQueueItem::get_next_concurrent_entry(
 // ExecutionModeData, which outlives the transaction.
 x23::Async<SystemStatus<const QueueEntry *>>
 RetrocausalQueueItem::get_next_concurrent_entry_proposing(
-    uint32_t index, ProposalModeData &proposal_data) const
+    uint32_t index, ProposalModeData &proposal_data, GasAmount &load_gas) const
 {
   auto const &addrkey = base_item_->addrkey();
   auto out = co_await base_item_->get_concurrent_rcq_entry(index);
@@ -511,6 +516,9 @@ RetrocausalQueueItem::get_next_concurrent_entry_proposing(
   // allocation the original also avoided.
   auto const &live_opt = out.value().get();
   if (!live_opt.has_value()) {
+    // Absent entries are never cached, so each empty read is a live RPC; charge
+    // it (#1443).
+    load_gas += kDBRPCCost;
     proposal_data.log_nondeterministic_bit({false});
     co_return nullptr;
   }

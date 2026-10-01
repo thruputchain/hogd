@@ -46,16 +46,19 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
                                       std::span<std::byte> output_queue_entry,
                                       RuntimeMemoryLength &output_written_len)
 {
+  // Forward the RPC cost on every path: the read already happened (#1443).
+  GasAmount load_gas = 0;
   auto status =
-      co_await syscall_handler.retrocausal_queue_consume(input_key, input_peek);
+      co_await syscall_handler.retrocausal_queue_consume(input_key, input_peek,
+                                                         load_gas);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -72,7 +75,7 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{load_gas}};
 }
 
 MaybeAsyncSyscallInnerResult
@@ -81,17 +84,20 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
                                       RuntimeMemoryLength &output_len)
 {
 
+  // See syscall_RetrocausalQueueConsume_inner: empty reads still cost a DB RPC.
+  GasAmount load_gas = 0;
   auto status =
       co_await syscall_handler.retrocausal_queue_consume(input_key,
-                                                         /*peek=*/true);
+                                                         /*peek=*/true,
+                                                         load_gas);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -105,7 +111,7 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{load_gas}};
 }
 
 } // namespace hogd

@@ -14,6 +14,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -45,6 +46,90 @@ public:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+// Empty RCQ reads must be charged kDBRPCCost, identically in proposal and
+// validation (#1443).
+TEST_F(SyscallRcqPeekTest, EmptyReadsChargeDbRpcGasAndReplayDeterministically)
+{
+  constexpr size_t kCallsPerSyscall = 4;
+  constexpr size_t kTotalCalls = 2 * kCallsPerSyscall;
+
+  auto contract_addr = make_contract_address(0);
+
+  // Measure the per-syscall gas delta so initial-validation gas is excluded;
+  // item_view_test pins the item-level charge to exactly kDBRPCCost.
+  NativeContractBuilder builder;
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        for (size_t i = 0; i < kCallsPerSyscall; ++i) {
+          RuntimeMemoryLength len = 0;
+          auto const before = ctx.total_gas_consumed();
+          auto status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                  SyscallRcqPeekTest::kStorageKey, len);
+          if (!status.has_value() ||
+              status.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry ||
+              len != 0 || ctx.total_gas_consumed() - before < kDBRPCCost) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        for (size_t i = 0; i < kCallsPerSyscall; ++i) {
+          RuntimeMemoryLength written_len = 0;
+          auto const before = ctx.total_gas_consumed();
+          auto status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  SyscallRcqPeekTest::kStorageKey, /*peek=*/false,
+                  std::span<std::byte>{}, written_len);
+          if (!status.has_value() ||
+              status.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry ||
+              written_len != 0 ||
+              ctx.total_gas_consumed() - before < kDBRPCCost) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto tx =
+      Transaction{.invocation =
+                      Invocation{.invoked_address = contract_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()};
+
+  // A read billed under kDBRPCCost fails the contract, so root success proves
+  // the metering; empty reads write nothing, so there is no commit to verify.
+  NondeterministicProposalData proposal_data;
+  GasAmount proposal_gas = 0;
+  {
+    auto handler = make_new_system_call_handler(tx, *context);
+    auto root_res = handler.root_invoke()();
+    ASSERT_TRUE(root_res.is_root_success());
+    proposal_gas = root_res.gas_consumed_;
+    proposal_data = handler.get_proposal_data();
+    // One false presence bit per empty read, no recorded entries.
+    EXPECT_EQ(proposal_data.nondeterministic_bit_count, kTotalCalls);
+    EXPECT_TRUE(proposal_data.observed_queue_entry_sequence.empty());
+  }
+
+  // Validation replay must bill the same total as proposal.
+  auto handler =
+      make_new_system_call_handler_validation(tx, *context, proposal_data);
+  auto root_res = handler.root_invoke()();
+  ASSERT_TRUE(root_res.is_root_success());
+  EXPECT_EQ(root_res.gas_consumed_, proposal_gas);
+}
 
 TEST_F(SyscallRcqPeekTest, PeekLenMatchesInsertedEntry)
 {
