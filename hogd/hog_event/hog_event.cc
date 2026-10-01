@@ -5,8 +5,10 @@
 #include <cstdlib>
 #include <format>
 #include <future>
+#include <optional>
 #include <print>
 #include <string>
+#include <system_error>
 #include <thread>
 
 #include "hogd/base/cli.h"
@@ -25,6 +27,7 @@
 #include "hogd/version.h"
 #include "sched_event.hh"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -73,7 +76,6 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
 
   // Register with the mempool. connect_to_event_sched_server validates the
   // address.
-  auto client = connect_to_event_sched_server(mempool_address);
   std::string address_for_exec =
       format_advertised_address(bind_ip, actual_exec_port);
   std::string address_for_mempool =
@@ -89,26 +91,61 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
     std::this_thread::sleep_for(retry_delay);
     retry_delay = std::min(retry_delay * 2, kMaxRegistrationRetryDelay);
   };
-  while (true) {
-    auto prepared = client.schedevent_prepare_event(card);
-    if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+  // Runs one registration conversation over [client] and returns once the
+  // mempool has activated us. Throws if the link to the mempool fails.
+  const auto register_over = [&](auto &rpc) {
+    while (true) {
+      auto prepared = rpc.schedevent_prepare_event(card);
+      if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+        wait_to_retry();
+        continue;
+      }
+      CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+      EventRegistrationSnapshot snapshot = prepared.snapshot();
+      auto reconciled =
+          ctx.reconcile_outbox_tip(snapshot.tip.block_id,
+                                   snapshot.tip.consensus_value)();
+      if (!reconciled) {
+        panic("event outbox reconciliation failed");
+      }
+      Health::instance().set_current_block_height(
+          snapshot.tip.consensus_value.proposal_header.block_height)();
+      auto activated = rpc.schedevent_activate_event(snapshot);
+      if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
+        return;
+      }
+      CHECK_EQ(activated.outcome(),
+               EventActivationOutcome::EventActivationRetry);
       wait_to_retry();
-      continue;
     }
-    CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
-    EventRegistrationSnapshot snapshot = prepared.snapshot();
-    auto reconciled = ctx.reconcile_outbox_tip(snapshot.tip.block_id,
-                                               snapshot.tip.consensus_value)();
-    if (!reconciled) {
-      panic("event outbox reconciliation failed");
-    }
-    Health::instance().set_current_block_height(
-        snapshot.tip.consensus_value.proposal_header.block_height)();
-    auto activated = client.schedevent_activate_event(snapshot);
-    if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
+  };
+  // A mempool that goes away mid-registration is a dependency delay, not a
+  // fatal error: docs/component-failure-model.md requires peers to tolerate
+  // start order through registration and retry. The srpc client reports a
+  // closed link by throwing [x23::XdrException] ("EOF waiting for result of
+  // SchedEvent1::schedevent_prepare_event"), and a reconnect that fails for
+  // anything but a refused connection throws [std::system_error]. Neither was
+  // caught, so hog-event aborted with a bare "terminate called" that named no
+  // peer and left nothing to retry. Reconnect and resume the handshake
+  // instead; both prepare and activate are idempotent for an unchanged card.
+  std::optional<decltype(connect_to_event_sched_server(mempool_address))>
+      client;
+  while (true) {
+    try {
+      if (!client) {
+        client.emplace(connect_to_event_sched_server(mempool_address));
+      }
+      register_over(*client);
       break;
+    } catch (const x23::XdrException &e) {
+      error("event registration to mempool {} failed: {}; reconnecting",
+            mempool_address, e.what());
+    } catch (const std::system_error &e) {
+      error("event registration to mempool {} lost its connection: {}; "
+            "reconnecting",
+            mempool_address, e.what());
     }
-    CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationRetry);
+    client.reset();
     wait_to_retry();
   }
 

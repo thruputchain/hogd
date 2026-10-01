@@ -492,7 +492,16 @@ done
 
 echo 'wait for coordinator-driven event activation'
 for node in "${NODE_IDS[@]}"; do
-  wait_control_log_line "node${node}_event" 'event initialization complete.'
+  # Activation is driven by the coordinator loading genesis, so a timeout here
+  # usually means the coordinator never got that far. The event's own log only
+  # shows it still waiting, so replay the coordinator and the mempool it
+  # registers with as well: the reason lives in one of those two.
+  if ! wait_control_log_line "node${node}_event" \
+      'event initialization complete.'; then
+    replay_control_log_for_label "node${node}_chuckd"
+    replay_control_log_for_label "node${node}_mempool"
+    exit 1
+  fi
 done
 
 echo 'launch hog-exec shards'

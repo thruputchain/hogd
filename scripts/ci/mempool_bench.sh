@@ -13,6 +13,7 @@ CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
+COORDINATOR_LOG_TAIL_LINES=200
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -181,6 +182,12 @@ if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
 fi
 if [[ $coordinator_status -ne 0 ]]; then
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
+  # The coordinator drives genesis, so its log is the first place to look when
+  # the chain never starts. Until now it was only published to metrics history,
+  # which a failed run never reaches, leaving the bare status above as the only
+  # thing CI printed about it.
+  echo "===== last $COORDINATOR_LOG_TAIL_LINES lines of coordinator output ====="
+  tail -n "$COORDINATOR_LOG_TAIL_LINES" ./coordinator_output.txt || true
   exit "$coordinator_status"
 fi
 
