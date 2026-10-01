@@ -1742,8 +1742,7 @@ TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
         }
 
         // A warm read pays exactly the Invoke crossing, the method's one gas
-        // unit, and a single flat access charge (no load_gas once warm). The
-        // exact check catches both an omitted charge and a double charge.
+        // unit, and a single flat access charge (no load_gas once warm).
         static constexpr GasAmount kWarmReadCost =
             kSyscallBaseCost + 1 + kStorageAccessCost;
         EXPECT_EQ(read_costs[1], kWarmReadCost)
