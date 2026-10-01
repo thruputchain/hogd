@@ -201,7 +201,6 @@ jobs:
 
           for archive in artifacts/*.tar.gz; do
             contents=$(tar -tzf "$archive")
-            grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
             grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
           done
 
@@ -342,7 +341,6 @@ jobs:
           cp build/release/hogd/devnode/hog-devnode package/hog-devnode-macos-arm64/hog-devnode
           chmod +x package/hog-devnode-macos-arm64/hog-devnode
           mkdir -p package/hog-devnode-macos-arm64/contracts
-          cp build/release/built_contracts/dev_wallet.rv32a package/hog-devnode-macos-arm64/contracts/dev_wallet.rv32a
           cp build/release/built_contracts/genesis_root.rv32a package/hog-devnode-macos-arm64/contracts/genesis_root.rv32a
 
           pushd package/hog-devnode-macos-arm64 >/dev/null
@@ -485,6 +483,10 @@ jobs:
               raise SystemExit(f"unexpected readiness payload: {readiness}")
           with open(readiness["manifestPath"], encoding="utf-8") as handle:
               manifest = json.load(handle)
+          if readiness.get("schemaVersion") != 3 or manifest.get("schemaVersion") != 3:
+              raise SystemExit("packaged hog-devnode must emit native bootstrap schema 3")
+          if "devWallet" in manifest.get("bootstrap", {}):
+              raise SystemExit("packaged hog-devnode still advertises devWallet")
           accounts = manifest.get("bootstrapAccounts")
           expected = [
               {"index": 0, "role": "faucet", "initialStorageTokens": "10000000000000"},
@@ -505,11 +507,9 @@ jobs:
           tar -czf artifacts/hog-devnode-macos-arm64.tar.gz \
             -C package/hog-devnode-macos-arm64 \
             hog-devnode \
-            contracts/dev_wallet.rv32a \
             contracts/genesis_root.rv32a \
             lib
           contents=$(tar -tzf artifacts/hog-devnode-macos-arm64.tar.gz)
-          grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
           grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
 
       - name: Upload Artifact

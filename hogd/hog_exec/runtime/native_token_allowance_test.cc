@@ -1681,6 +1681,7 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
   auto tx = Transaction{
       .invocation = root_client.make_invocation<u8"distribute">(
           UINT64_MAX, x23::Vec<genesis_root::Distribution, UINT32_MAX>{},
+          x23::Vec<genesis_root::AccountAllocation, UINT32_MAX>{},
           make_amount(0), make_amount(0)),
       .uniquifier = make_new_uniquifier(),
   };

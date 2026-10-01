@@ -226,6 +226,12 @@ public:
     return get_db().read_address_metadata(address);
   }
 
+  HogDbStatus<AddressAuthData>
+  read_address_auth_data(const ContractAddress &address)
+  {
+    return get_db().read_address_auth_data(address);
+  }
+
   HogDbStatus<ReplayCacheMetadata>
   read_address_replay_cache_meta(const ContractAddress &address)
   {
