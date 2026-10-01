@@ -139,7 +139,7 @@ stock_network_config()
   config.v(0);
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
-                                 8);
+                                 kDefaultMaxSHA256Buffers);
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxCrossInvokeDepth,
                                  256);
