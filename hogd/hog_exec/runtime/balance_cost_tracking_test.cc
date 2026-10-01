@@ -1696,6 +1696,91 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
                           ProposedTransaction{.signed_tx = handler_tx})());
 }
 
+// Regression for #4270: warm native-token balance reads skipped the flat
+// kStorageAccessCost once the view was loaded and load_gas dropped to zero.
+TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
+{
+  constexpr static ContractAddress kCallerAddr = make_contract_address(183);
+
+  setup_grant_storage_token(kCallerAddr,
+                            1'000'000 + replay_cache_cost_charged(1));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kCallerAddr);
+
+        // The first read loads the view; reads 2 and 3 are warm (no load_gas)
+        // but still owe the flat access cost.
+        std::array<GasAmount, 3> read_costs{};
+        for (size_t i = 0; i < read_costs.size(); ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto before = ctx.total_gas_consumed();
+          auto status = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          read_costs[i] = ctx.total_gas_consumed() - before;
+
+          if (!status.has_value() ||
+              status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "balance read " << i
+                          << " did not return successfully";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        // A warm read pays exactly the Invoke crossing, the method's one gas
+        // unit, and a single flat access charge (no load_gas once warm).
+        static constexpr GasAmount kWarmReadCost =
+            kSyscallBaseCost + 1 + kStorageAccessCost;
+        EXPECT_EQ(read_costs[1], kWarmReadCost)
+            << "warm balance read is not priced at crossing + method + access";
+        EXPECT_EQ(read_costs[2], kWarmReadCost);
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kCallerNativeId = 18;
+  contract_map.emplace(kCallerNativeId, std::move(caller_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddr, caller_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)
