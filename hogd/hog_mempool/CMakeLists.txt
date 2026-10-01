@@ -4,7 +4,6 @@ add_library(
   hog_mempool
   rpc_from_coord.cc
   scheduler.cc
-  transfer_run_assembler.cc
 )
 target_link_libraries(
   hog_mempool

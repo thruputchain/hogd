@@ -1,18 +1,17 @@
 #include "background_commit_worker.h"
 
-#include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <exception>
 #include <memory>
 #include <mutex>
-#include <span>
 #include <stop_token>
 #include <thread>
 #include <utility>
 #include <vector>
 
 #include "auth_rpc.hh"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunked_call.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
@@ -20,6 +19,7 @@
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -37,43 +37,46 @@ BackgroundCommitWorker::BackgroundCommitWorker(
 }
 
 namespace {
+// Issues one chunk of [block_height]'s run, owning the record for the call's
+// lifetime.
+x23::Async<void>
+send_transfer_chunk(BackgroundCommitWorker::sched_db_client_t *sched_db_client,
+                    BlockHeight block_height, ChunkPosition position,
+                    x23::XdrVec<Delta> deltas)
+{
+  HogsTransferredChunk chunk{.block = block_height,
+                             .chunk_index = position.index,
+                             .chunk_count = position.count,
+                             .deltas = std::move(deltas)};
+  co_await sched_db_client->scheddb_hogs_transferred_chunk(chunk);
+}
+
 // Sends a committed block's balance deltas to the scheduler as a run of
-// chunks. Every chunk carries its index and the run's length, so the mempool
-// accepts the run in any order and completes the block once all of it is in;
-// a block with no nonzero delta still sends one empty chunk. This sends the
-// chunks one at a time and awaits each, which also keeps the contract that
-// the next block's run starts only after every chunk of this one is
-// acknowledged; a sender may fan a run out over several connections instead.
+// chunks, several in flight at once (call_in_chunks). The mempool completes
+// the block once every chunk is in, and this returns only once every chunk
+// is acknowledged, so the next block's run cannot start before that.
 void
 dispatch_balance_deltas(
     BlockHeight block_height, PerThread<std::vector<Delta>> balance_deltas,
     size_t max_deltas_per_chunk,
     BackgroundCommitWorker::sched_db_client_t &sched_db_client)
 {
-  std::vector<Delta> deltas;
+  std::vector<std::vector<Delta>> parts;
   // Release ul before calling the rpc client
   {
     auto ul = balance_deltas.lock_threads();
-    balance_deltas.for_each(ul, [&](const std::vector<Delta> &thread_deltas) {
-      deltas.insert(deltas.end(), thread_deltas.begin(), thread_deltas.end());
+    balance_deltas.for_each(ul, [&parts](std::vector<Delta> &thread_deltas) {
+      parts.push_back(std::move(thread_deltas));
     });
   }
-
-  const std::span<const Delta> all(deltas);
-  const size_t chunk_count =
-      std::max<size_t>(1, (all.size() + max_deltas_per_chunk - 1) /
-                              max_deltas_per_chunk);
-  for (size_t index = 0; index < chunk_count; ++index) {
-    const size_t begin = index * max_deltas_per_chunk;
-    const size_t count = std::min(max_deltas_per_chunk, all.size() - begin);
-    HogsTransferredChunk chunk{.block = block_height,
-                               .chunk_index = static_cast<std::uint32_t>(index),
-                               .chunk_count =
-                                   static_cast<std::uint32_t>(chunk_count),
-                               .deltas = {}};
-    chunk.deltas.append_range(all.subspan(begin, count));
-    sched_db_client.scheddb_hogs_transferred_chunk(std::move(chunk))();
-  }
+  call_in_chunks<Delta>(std::move(parts), max_deltas_per_chunk,
+                        [&sched_db_client,
+                         block_height](ChunkPosition position,
+                                       x23::XdrVec<Delta> deltas) {
+                          return send_transfer_chunk(&sched_db_client,
+                                                     block_height, position,
+                                                     std::move(deltas));
+                        })();
 }
 } // namespace
 

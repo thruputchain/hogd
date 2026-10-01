@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -104,11 +105,17 @@ run_block(size_t num_deltas, size_t max_deltas_per_chunk,
   return server.impl()->chunks();
 }
 
+// Checks [arrived] is the whole run, split at [max_deltas_per_chunk], in
+// whatever order the chunks were sent.
 void
-expect_run(const std::vector<HogsTransferredChunk> &chunks, size_t num_deltas,
+expect_run(std::vector<HogsTransferredChunk> arrived, size_t num_deltas,
            size_t max_deltas_per_chunk)
 {
-  ASSERT_FALSE(chunks.empty());
+  ASSERT_FALSE(arrived.empty());
+  std::vector<HogsTransferredChunk> chunks = std::move(arrived);
+  std::ranges::sort(chunks, {}, [](const HogsTransferredChunk &chunk) {
+    return chunk.chunk_index;
+  });
   const auto chunk_count = static_cast<uint32_t>(chunks.size());
   uint64_t next = 0;
   for (uint32_t index = 0; index < chunk_count; ++index) {

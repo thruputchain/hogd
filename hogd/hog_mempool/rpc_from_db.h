@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/base/chunk_position.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
@@ -13,7 +14,6 @@
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
-#include "hogd/hog_mempool/transfer_run_assembler.h"
 #include "sched_db.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -62,11 +62,16 @@ public:
            "issue in that case.");
       co_return;
     }
-    std::optional<BlockTransfers> transfers =
-        run_assembler_.push(std::move(chunk));
-    if (transfers.has_value()) {
+    std::optional<TransferRunAssembler::Run> run =
+        run_assembler_.push(chunk.block,
+                            ChunkPosition{.index = chunk.chunk_index,
+                                          .count = chunk.chunk_count},
+                            std::move(chunk.deltas));
+    if (run.has_value()) {
       // See the comment above if you change this.
-      handle_transfer(std::move(*transfers), std::move(cg));
+      handle_transfer(BlockTransfers{.block = run->key,
+                                     .delta_chunks = std::move(run->parts)},
+                      std::move(cg));
     }
     co_return;
   }
