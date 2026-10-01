@@ -955,7 +955,8 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         46, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           for (int i = 0; i < 2; ++i) {
-            auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
+            auto r =
+                co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "Failed to delete queue";
