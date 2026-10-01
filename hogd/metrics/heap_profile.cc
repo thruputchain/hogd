@@ -161,7 +161,7 @@ jemalloc_to_pprof(std::string_view dump, std::string_view maps)
       if (!n)
         continue;
       Number scaled_bytes = adjusted(n, b, period);
-      Number scaled_count = static_cast<Number>(
+      auto scaled_count = static_cast<Number>(
           std::round(static_cast<double>(scaled_bytes) *
                      static_cast<double>(n) / static_cast<double>(b)));
       std::string sample;

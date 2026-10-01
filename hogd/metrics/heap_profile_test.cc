@@ -27,7 +27,7 @@ read_varint(std::string_view &input)
     require(!input.empty());
     unsigned char byte = input.front();
     input.remove_prefix(1);
-    value |= std::uint64_t(byte & 127) << shift;
+    value |= static_cast<std::uint64_t>(byte & 127) << shift;
     if (!(byte & 128))
       return value;
   }
@@ -45,7 +45,7 @@ decode(std::string_view input)
   std::vector<Field> result;
   while (!input.empty()) {
     const auto key = read_varint(input);
-    Field field{key >> 3, 0, {}};
+    Field field{.tag = key >> 3, .value = 0, .message = {}};
     if ((key & 7) == 0)
       field.value = read_varint(input);
     else {
