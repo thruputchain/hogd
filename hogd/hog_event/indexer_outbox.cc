@@ -883,9 +883,8 @@ IndexerOutboxStore::publish_committed_stored(
       co_return std::unexpected(rpc_size.error());
     }
   }
-  // No root is established here: publication never reads the events file (the
-  // live path only probes its size), so there is no digest to bind. The first
-  // load validates the pairs and records that digest.
+  // Publication never reads the events file, so there is no digest to bind;
+  // the first load validates the pairs and records it.
   auto exists = has_committed(height);
   if (!exists) {
     co_return std::unexpected(exists.error());

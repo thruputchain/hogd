@@ -329,10 +329,8 @@ private:
   mutable std::unique_ptr<x23::CoroLock> committed_publication_lock_ =
       std::make_unique<x23::CoroLock>();
   mutable std::optional<CommittedAppendCache> committed_append_cache_;
-  // Each event root this process has validated, mapped to the SHA-256 digest
-  // of the events-file bytes it was recomputed over. A load whose file still
-  // hashes to that digest skips revalidation; any mismatch is revalidated and
-  // fails closed. Guarded by committed_publication_lock_.
+  // Event root -> digest of the validated events-file bytes; a match skips
+  // revalidation. Guarded by committed_publication_lock_.
   mutable std::unordered_map<SHA256Hash, SHA256Hash, SipHash24Hasher>
       established_event_roots_;
   mutable size_t committed_history_scan_count_ = 0;
