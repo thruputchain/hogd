@@ -171,6 +171,18 @@ echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
 scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
 
+echo 'copy coordinator stderr from hog4'
+# Only the benchmark results go to the coordinator's stdout; its own logging
+# goes to stderr. A coordinator that died before registering with the mempool
+# says why here and nowhere else. This is diagnostics, so a missing file must
+# not abort the run ahead of the status checks below.
+: >./coordinator_stderr.txt
+if ! scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stderr* | head -n 1')" \
+  ./coordinator_stderr.txt; then
+  echo 'could not copy coordinator stderr from hog4' >&2
+  : >./coordinator_stderr.txt
+fi
+
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the
   # expected end of this benchmark. Anything else is a real failure, and a
@@ -180,6 +192,12 @@ if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   exit "$mempool_status"
 fi
 if [[ $coordinator_status -ne 0 ]]; then
+  # The mempool reaching its timeout is the expected end of this benchmark, so
+  # a dead coordinator is the only thing left to explain the failure. Print its
+  # log: the run digest shows this script's output and nothing from hog4.
+  echo '===== last 200 lines of coordinator stderr on hog4 =====' >&2
+  tail -n 200 ./coordinator_stderr.txt >&2
+  echo '===== end of coordinator stderr =====' >&2
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
   exit "$coordinator_status"
 fi
