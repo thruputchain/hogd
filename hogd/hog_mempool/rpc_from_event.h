@@ -39,9 +39,8 @@ public:
     EventPrepareResult result =
         Registration::registration().prepare_event(card);
     if (result.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
-      // hog-event polls this every second until a canonical tip exists, so
-      // throttle it: unthrottled, a chain that never reaches genesis floods
-      // the log for the whole wait.
+      // Throttled: hog-event polls this once a second until a canonical tip
+      // exists.
       info_every_n_sec(30.0F, "event server preparing registration: waiting "
                               "for a canonical tip at a real height");
       return result;

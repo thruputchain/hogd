@@ -134,9 +134,8 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
       register_over(*client);
       break;
     }
-    // Only a lost connection is the dependency delay above. A call the mempool
-    // rejected, or a reply we cannot decode, says that port is not serving
-    // this contract, and reconnecting never fixes that; keep those fatal.
+    // Rejected calls and undecodable replies are fatal; only a lost connection
+    // is retried.
     catch (const x23::XdrCallFailed &e) {
       panic("event registration to mempool {} was rejected: {}",
             mempool_address, e.what());

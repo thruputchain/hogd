@@ -371,11 +371,8 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   EXPECT_EQ(restarted.kill_unclean(), SIGKILL);
 }
 
-// A mempool that drops the link mid-registration must not take hog-event with
-// it. The EOF from the dropped call used to escape as an uncaught
-// XdrException and abort the process, so the only evidence left was
-// "terminate called"; hog-event now reconnects and finishes registering once
-// the mempool is back.
+// hog-event must survive a mempool that drops the link mid-registration and
+// finish registering once it returns.
 TEST(HogEventProcess, ReconnectsAfterMempoolDropsLinkDuringRegistration)
 {
   Registration &registration = Registration::registration();
@@ -385,9 +382,8 @@ TEST(HogEventProcess, ReconnectsAfterMempoolDropsLinkDuringRegistration)
   // No canonical tip is published yet, so prepare_event would answer NotReady
   // and hog-event stays in its registration poll.
 
-  // hog-event reconnects to the --mempool-addr it was given, so the mempool
-  // has to come back on the same port, and a kernel-assigned one is up for
-  // grabs the moment the first listener closes.
+  // The mempool must come back on the same port, so reserve it instead of
+  // taking an ephemeral one.
   ReservedEventPorts mempool_reserved = reserve_event_ports();
   const std::uint16_t mempool_port = mempool_reserved.ports[0];
   const std::string mempool_addr =
@@ -403,12 +399,8 @@ TEST(HogEventProcess, ReconnectsAfterMempoolDropsLinkDuringRegistration)
   mempool_reserved.holders.clear();
   reserved.holders.clear();
 
-  // A bare listener rather than an RpcServer, so the link is cut at a known
-  // point: accept() returns only once hog-event has connected, and the read
-  // only once it has sent a prepare_event call. Closing both then leaves that
-  // call in flight, which is the EOF hog-event used to die on. Tearing down an
-  // RpcServer instead races the retry loop's sleep, and a drop that lands
-  // before hog-event has connected proves nothing.
+  // Bare listener so the link is cut exactly after hog-event sends
+  // prepare_event.
   x23::UniqueFd listener = listen_loopback(mempool_port);
   DaemonProcess event =
       DaemonProcess::start(HOG_EVENT_BINARY,
