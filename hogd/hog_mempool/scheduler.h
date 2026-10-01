@@ -87,11 +87,13 @@ public:
 
   SchedulerTransactionOutcome
   lookup_transaction_outcome(const TransactionHash &tx_hash);
+
   void record_transaction_outcome(
       const TransactionHash &tx_hash, SchedulerTransactionStatus status,
       SchedulerTransactionErrorSource error_source =
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
       int32_t error_code = 0);
+
   void clear_transaction_outcome(const TransactionHash &tx_hash);
 
   void get_txs_for_account(const ContractAddress &address,
@@ -226,6 +228,8 @@ private:
   struct TransactionOutcomeEntry {
     TransactionHash tx_hash;
     SchedulerTransactionOutcome outcome;
+    // We record the height since we use the height to evict tx outcomes that
+    // are at least [kTransactionOutcomeBlockLifetime] blocks old.
     BlockHeight processed_height;
   };
 

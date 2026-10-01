@@ -431,7 +431,6 @@ Scheduler::prune_transaction_outcomes()
   const BlockHeight height = current_block();
   std::lock_guard lock(transaction_outcomes_mutex_);
   while (!transaction_outcomes_order_.empty() &&
-         height >= transaction_outcomes_order_.front().processed_height &&
          height - transaction_outcomes_order_.front().processed_height >=
              kTransactionOutcomeBlockLifetime) {
     transaction_outcomes_.erase(transaction_outcomes_order_.front().tx_hash);
@@ -448,13 +447,24 @@ Scheduler::record_transaction_outcome(
   std::lock_guard lock(transaction_outcomes_mutex_);
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
+    // The tx hash may already exist in the map if the tx was submitted again
+    // after an outcome was recorded. Note that even though [add_txs_helper()]
+    // calls [clear_transaction_outcome()], a tx can fail and therefore have an
+    // outcome recorded before it reaches the scheduler, such as if the tx fails
+    // authentication.
     transaction_outcomes_order_.erase(it->second);
     transaction_outcomes_.erase(it);
   }
-  while (transaction_outcomes_.size() >= kMaxTransactionOutcomes) {
+
+  CHECK_LE(transaction_outcomes_.size(), kMaxTransactionOutcomes);
+  if (transaction_outcomes_.size() == kMaxTransactionOutcomes) {
+    // [transaction_outcomes_] is at capacity, so remove a tx outcome from it so
+    // we have room to add a new outcome.
     transaction_outcomes_.erase(transaction_outcomes_order_.front().tx_hash);
     transaction_outcomes_order_.pop_front();
   }
+  CHECK_LT(transaction_outcomes_.size(), kMaxTransactionOutcomes);
+
   transaction_outcomes_order_.push_back(TransactionOutcomeEntry{
       .tx_hash = tx_hash,
       .outcome =
@@ -573,44 +583,46 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back(
-        [](const ChunkRange *chunk,
-           const x23::XdrVec<hogd::SignedTransaction> &txs,
-           const x23::XdrVec<TransactionHash> &tx_hashes,
-           const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
-           SchedGatewaySubmitOutcomeBatch &outcomes,
-           Scheduler &scheduler) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
+    handles.push_back([](const ChunkRange *chunk,
+                         const x23::XdrVec<hogd::SignedTransaction> &txs,
+                         const x23::XdrVec<TransactionHash> &tx_hashes,
+                         const std::unordered_set<ContractAddress,
+                                                  SipHash24Hasher> &missing,
+                         SchedGatewaySubmitOutcomeBatch &outcomes,
+                         Scheduler &scheduler) noexcept -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
 
-          size_t num_added = 0;
-          for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
-            if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
-              // The DB RPC currently cannot distinguish an unknown account
-              // from a transient or internal read failure. Standalone-pubkey
-              // claims can authenticate without an on-chain auth entry and
-              // reach this path, so conservatively report the ambiguous
-              // scheduler-side failure as internal.
-              info("scheduler: dropping tx after hog-age lookup failed for {}",
-                   show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
-              outcomes[tx_idx] =
-                  SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
-              scheduler.record_transaction_outcome(
-                  tx_hashes[tx_idx],
-                  SchedulerTransactionStatus::SchedulerTransactionRetry,
-                  SchedulerTransactionErrorSource::
-                      SchedulerTransactionErrorScheduler,
-                  static_cast<int32_t>(
-                      SchedulerErrorCode::SchedulerErrorHogAgeUnavailable));
-              continue;
-            }
-            const TransactionHash &tx_hash = tx_hashes[tx_idx];
-            if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
-              num_added++;
-            }
-          }
-          scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
-          co_return;
-        }(&chunk, txs, tx_hashes, missing, outcomes, *this));
+      size_t num_added = 0;
+      for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
+        if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
+          // The DB RPC currently cannot distinguish an unknown account
+          // from a transient or internal read failure. Standalone-pubkey
+          // claims can authenticate without an on-chain auth entry and
+          // reach this path, so conservatively report the ambiguous
+          // scheduler-side failure as internal.
+          info("scheduler: dropping tx after hog-age lookup failed for {}",
+               show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
+          outcomes[tx_idx] =
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
+          scheduler.record_transaction_outcome(
+              tx_hashes[tx_idx],
+              /*status=*/SchedulerTransactionStatus::SchedulerTransactionRetry,
+              /*error_source=*/
+              SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorScheduler,
+              /*error_code=*/
+              static_cast<int32_t>(
+                  SchedulerErrorCode::SchedulerErrorHogAgeUnavailable));
+          continue;
+        }
+        const TransactionHash &tx_hash = tx_hashes[tx_idx];
+        if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
+          num_added++;
+        }
+      }
+      scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
+      co_return;
+    }(&chunk, txs, tx_hashes, missing, outcomes, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -1102,9 +1114,12 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
              it_remove++) {
           const TransactionHash &tx_hash = it_remove->first.tx_hash;
           record_transaction_outcome(
-              tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+              tx_hash, /*status=*/
+              SchedulerTransactionStatus::SchedulerTransactionDropped,
+              /*error_source=*/
               SchedulerTransactionErrorSource::
                   SchedulerTransactionErrorScheduler,
+              /*error_code=*/
               static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
           // [txs_.remove()] acquires a lock, so the subtraction from
           // [tx_cache_size_] happens before the tx is removed from [txs_] from
@@ -1179,9 +1194,12 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // the perspective of anyone accessing the tx in [txs_].
           tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
           record_transaction_outcome(
-              tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+              tx_hash, /*status=*/
+              SchedulerTransactionStatus::SchedulerTransactionDropped,
+              /*error_source=*/
               SchedulerTransactionErrorSource::
                   SchedulerTransactionErrorScheduler,
+              /*error_code=*/
               static_cast<int32_t>(
                   SchedulerErrorCode::SchedulerErrorInsufficientHogs));
           CHECK_EQ(txs_.remove(tx_hash), 1UL);
