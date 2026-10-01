@@ -480,10 +480,8 @@ TEST_F(FaucetScenarioTest, DripFaucetEnforcesWindowBudgetAcrossCallers)
   EXPECT_EQ(read_balance(account_address(carol)), 0);
   EXPECT_EQ(read_total_supply(), 90);
 
-  // Block h0+2, still the same window: 10 remain. Carol retries with 10 and
-  // succeeds; Alice's further claim of 1 now overdraws *visibly* and is
-  // rejected by the contract itself (DripError::ExceedsWindowBudget),
-  // forwarded unchanged by the wallet before any state is staged.
+  // With 10 left, Carol's 10 succeeds; Alice's 1 aborts with
+  // DripError::ExceedsWindowBudget, forwarded unchanged by the wallet.
   auto c2 = run_claim_tx(carol, drip_claim_call(10));
   EXPECT_EQ(c2.commit, ExecResult::ExecResultOK);
   EXPECT_EQ(read_balance(account_address(carol)), 10);
@@ -528,11 +526,8 @@ TEST_F(FaucetScenarioTest, DripFaucetEnforcesWindowBudgetAcrossCallers)
   EXPECT_EQ(read_total_supply(), 200);
 }
 
-// A negative drip claim passes the faucet's own budget check (a negative
-// amount never exceeds what remains) and stages a capacity change before the
-// native token rejects the mint with NegativeAmount. INT128_MIN overflows
-// the capacity calculation first. Both exceptions must leave exactly 40
-// claimable after Alice takes 60 of the 100-unit window.
+// Negative claims abort (NegativeAmount, or overflow for INT128_MIN), leaving
+// the window budget untouched: 40 claimable after Alice's 60.
 TEST_F(FaucetScenarioTest, DripFaucetNegativeClaimLeavesBudgetUnchanged)
 {
   make_ctx();
