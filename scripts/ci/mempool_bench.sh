@@ -20,11 +20,8 @@ COORDINATOR_STDERR_FILE=./coordinator_stderr.txt
 # How much of the coordinator's output the failure path replays.
 COORDINATOR_TAIL_LINES=${COORDINATOR_TAIL_LINES:-200}
 
-# Replays what the coordinator said before the run gave up on it. Both files
-# are already local by the time anything below can fail, and nothing else ever
-# prints them: [log_metric.sh] consumes coordinator_output.txt only on the
-# success path, so without this a coordinator that exits non-zero leaves
-# nothing in the job log but "coordinator exit status 1".
+# Dumps the tail of both coordinator output files on the failure path. Nothing
+# else prints them; [log_metric.sh] reads the stdout one past the exits below.
 replay_coordinator_output() {
   local file
 
@@ -195,11 +192,8 @@ fi
 echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
 scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" "$COORDINATOR_STDOUT_FILE"
-# chuckd reports its benchmark results on stdout and everything else -- its
-# own logging, and whatever killed it -- on stderr, which the control server
-# writes to a separate file. Fetching only stdout above means a coordinator
-# that dies says nothing at all. This copy is diagnostics, so a host that
-# cannot produce it must not turn into a second failure on top of the first.
+# chuckd logs to stderr, which the stdout-only copy above leaves on hog4, so
+# fetch it too. Best-effort: this is diagnostics, not a second failure.
 coordinator_stderr_path=$(
   ci_remote_run hog4 'ls -1t /tmp/hogd_stderr* 2>/dev/null | head -n 1'
 ) || coordinator_stderr_path=""
