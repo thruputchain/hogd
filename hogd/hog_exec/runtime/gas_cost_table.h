@@ -45,15 +45,9 @@ constexpr static uint64_t kSyscallBaseCost = 50;
 // call, which is inside the fit's own residual.
 constexpr static uint64_t kSHA256HashBlockCost = 22;
 
-// Per-call stream-table cost for SHA256Update and SHA256Copy, in addition to
-// compression blocks. Charged on every call, including repeat touches, to
-// cover stream creation and lookup. The table is a std::map keyed by the
-// contract-chosen index, so a call is O(log n) in the live stream count rather
-// than occupancy-independent: the charge fits at the default-scale caps this
-// schedule targets and is exceeded only by a small factor as streams approach
-// the largest measured occupancy (32768). The tree keeps that growth bounded
-// whatever indices the contract picks; a hashed table would let crafted
-// collisions make a call linear in the colliding count instead.
+// Per-call stream-table cost for SHA256Update and SHA256Copy, on top of
+// compression blocks. Charged every call to cover stream creation and lookup,
+// which are O(log n) in the live stream count (std::map; see hash_buffers.h).
 constexpr static uint64_t kSHA256StreamCost = 26;
 
 // ed25519, which this schedule prices for the first time. The curve arithmetic
