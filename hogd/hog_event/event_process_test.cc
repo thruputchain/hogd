@@ -389,15 +389,15 @@ TEST(HogEventProcess, ReconnectsAfterMempoolDropsLinkDuringRegistration)
   const std::string mempool_addr =
       std::string(x23::HostPort{"127.0.0.1", mempool_port}.show());
 
-  ReservedEventPorts reserved = reserve_event_ports();
-  const std::uint16_t event_exec_port = reserved.ports[0];
-  const std::uint16_t event_indexer_port = reserved.ports[1];
-  const std::uint16_t event_mempool_port = reserved.ports[2];
-  const std::uint16_t event_metrics_port = reserved.ports[3];
+  ReservedEventPorts event_reserved = reserve_event_ports();
+  const std::uint16_t event_exec_port = event_reserved.ports[0];
+  const std::uint16_t event_indexer_port = event_reserved.ports[1];
+  const std::uint16_t event_mempool_port = event_reserved.ports[2];
+  const std::uint16_t event_metrics_port = event_reserved.ports[3];
 
   TmpDir work_dir;
   mempool_reserved.holders.clear();
-  reserved.holders.clear();
+  event_reserved.holders.clear();
 
   // Bare listener so the link is cut exactly after hog-event sends
   // prepare_event.

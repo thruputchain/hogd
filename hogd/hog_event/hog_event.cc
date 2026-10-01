@@ -121,22 +121,20 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
       wait_to_retry();
     }
   };
-  // A mempool that goes away mid-registration is a dependency delay, not a
-  // fatal error: reconnect and resume. Prepare and activate are both
+  // Mempool loss mid-registration is a delay, not fatal; prepare/activate are
   // idempotent for an unchanged card.
   std::optional<decltype(connect_to_event_sched_server(mempool_address))>
       client;
   while (true) {
+    // Rejected calls and undecodable replies are fatal; only a lost connection
+    // is retried.
     try {
       if (!client) {
         client.emplace(connect_to_event_sched_server(mempool_address));
       }
       register_over(*client);
       break;
-    }
-    // Rejected calls and undecodable replies are fatal; only a lost connection
-    // is retried.
-    catch (const x23::XdrCallFailed &e) {
+    } catch (const x23::XdrCallFailed &e) {
       panic("event registration to mempool {} was rejected: {}",
             mempool_address, e.what());
     } catch (const x23::XdrBadInput &e) {
