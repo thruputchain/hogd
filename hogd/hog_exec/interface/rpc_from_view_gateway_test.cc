@@ -38,6 +38,7 @@ make_raw_ok(InvocationFrameStatusCode status)
 {
   ExpectedViewResult raw(TransactionViewStatus::Ok);
   raw.result().output = InvocationFrameOutput(status);
+  raw.result().gas_consumed = 1234;
   return raw;
 }
 
@@ -65,6 +66,7 @@ TEST(ViewGatewayRpc, MapsRawOkOutputs)
     ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
     EXPECT_EQ(result.payload().height, 7);
     EXPECT_EQ(result.payload().output.status_code(), status);
+    EXPECT_EQ(result.payload().gas_consumed, 1234U);
   }
 }
 
