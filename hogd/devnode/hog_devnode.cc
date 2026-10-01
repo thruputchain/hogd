@@ -288,8 +288,7 @@ Options:
   --contract-artifacts-dir <dir> Search this directory before default contract
                                  artifact locations. May be repeated.
   --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
-                                 dev-account shorthand flags
-                                 conflict.
+                                 dev-account shorthand flags conflict.
   --network-config <name=value>  Override a genesis execution parameter.
                                  Repeat for multiple parameters. Values are
                                  decimal uint32. Existing data directories
