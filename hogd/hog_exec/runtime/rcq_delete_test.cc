@@ -21,6 +21,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -2506,6 +2507,78 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
   ASSERT_EQ(qe.max_live_block_num,
             2); // TODO(geoff): is this assertion correct?   This matches in
                 // hog_db and mockdb, so I guess so?
+}
+
+// Deleting an RCQ makes block close remove one persisted block row per
+// unconsumed historical block (RetrocausalQueueLock::cleanup_on_deletion). That
+// work scales with the queue's accumulated history, so the DeleteObject syscall
+// must charge for it rather than the flat storage-access cost. This builds two
+// queues with different histories, deletes each, and checks the delete's gas
+// grows by exactly kStorageAccessCost per additional historical block.
+TEST_P(RCQDeleteTest, HistoricalDeleteWorkIsReflectedInGas)
+{
+  if (GetParam() != TestDB::kHogDb) {
+    GTEST_SKIP() << "Historical RCQ row checks require HogDb DAO access";
+  }
+
+  auto run_case = [&](uint64_t history_len, uint64_t &live_blocks,
+                      GasAmount &delete_gas) {
+    for (uint64_t i = 0; i < history_len; ++i) {
+      insert(static_cast<uint32_t>(i + 1));
+      advance_block();
+    }
+
+    auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+    ASSERT_TRUE(queue.has_value());
+    ASSERT_EQ(queue->type(), StorageItemType::kItemTypeRetrocausalQueue);
+    auto const &meta = queue->metadata();
+    // Block rows cleanup walks: (first unconsumed .. max_live_block_num].
+    live_blocks = meta.max_live_block_num -
+                  meta.consume_state.max_fully_consumed_block_number;
+
+    auto tx = make_tx(kContractAddress, 31); // just_delete
+    auto handler = make_new_system_call_handler(tx, *context_);
+    handler.enable_tracing();
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+    auto const *trace = handler.get_trace();
+    ASSERT_NE(trace, nullptr);
+    bool saw_delete = false;
+    for (auto const &call : trace->system_calls) {
+      if (call.body.syscall_number() == SyscallNo::kDeleteObject) {
+        ASSERT_FALSE(saw_delete) << "delete entrypoint issued DeleteObject "
+                                    "more than once";
+        saw_delete = true;
+        ASSERT_GE(call.gas_remaining_at_start, call.gas_remaining_at_end);
+        delete_gas = call.gas_remaining_at_start - call.gas_remaining_at_end;
+      }
+    }
+    ASSERT_TRUE(saw_delete);
+
+    advance_block();
+    ASSERT_FALSE(lookup_storage_item_from_db(get_queue_addrkey()).has_value());
+  };
+
+  constexpr uint64_t kSmallHistory = 2;
+  constexpr uint64_t kLargeHistory = 32;
+  uint64_t small_live_blocks = 0;
+  uint64_t large_live_blocks = 0;
+  GasAmount small_delete_gas = 0;
+  GasAmount large_delete_gas = 0;
+
+  run_case(kSmallHistory, small_live_blocks, small_delete_gas);
+  ASSERT_FALSE(HasFatalFailure());
+  run_case(kLargeHistory, large_live_blocks, large_delete_gas);
+  ASSERT_FALSE(HasFatalFailure());
+
+  ASSERT_EQ(small_live_blocks, kSmallHistory);
+  ASSERT_EQ(large_live_blocks, kLargeHistory);
+  // The fixed per-delete costs (crossing and storage access) cancel in the
+  // difference, leaving only the per-historical-block cleanup charge.
+  EXPECT_GT(large_delete_gas, small_delete_gas);
+  EXPECT_EQ(large_delete_gas - small_delete_gas,
+            kStorageAccessCost * (large_live_blocks - small_live_blocks));
 }
 
 // Verifies that when an RCQ with entries in past blocks is deleted and

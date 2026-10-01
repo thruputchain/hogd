@@ -1854,14 +1854,49 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                 .add_value_ = to_xdr(add_value)});
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+x23::Async<SystemStatus<StorageRead<void>>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
   CHECK(!is_read_only());
 
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  const FrameItemKey item_key =
+      invocation_frame_stack_.frame_item_key(storage_key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
-  co_return item_view->set(DeletedItem{});
+
+  // Deleting a committed retrocausal queue tears down one persisted block row
+  // per unconsumed historical block. That cleanup runs at block close
+  // (RetrocausalQueueLock::cleanup_on_deletion), after this transaction's
+  // syscall gas has already been settled, so it must be billed to the deleting
+  // syscall here. The work scales with the queue's accumulated history, which a
+  // single DeleteObject would otherwise clear for the flat storage-access cost.
+  //
+  // Read the committed (block-start) snapshot directly rather than the frame
+  // view: that is the metadata the cleanup consults, so the block count billed
+  // equals the rows removed, and it is right regardless of how this transaction
+  // has already touched the key (e.g. a consume before the delete).
+  GasAmount body_gas = kStorageAccessCost;
+  auto snapshot = co_await snapshot_cache_.try_get_snapshot_item(item_key);
+  if (!snapshot.has_value()) {
+    co_return snapshot.error();
+  }
+  if (const SnapshotStorageItem *committed = snapshot.value();
+      committed != nullptr &&
+      committed->type() == ItemViewType::kRetrocausalQueue) {
+    auto const &meta = committed->retrocausal_queue_metadata();
+    const uint64_t live_blocks =
+        meta.max_live_block_num -
+        meta.consume_state.max_fully_consumed_block_number;
+    // One storage access per block row cleanup will remove. Saturate: a charge
+    // that reaches the gas limit just yields OutOfGas, so capping the product
+    // at the gas-domain max loses only the overflow.
+    const uint64_t headroom = std::numeric_limits<GasAmount>::max() - body_gas;
+    body_gas += (live_blocks > headroom / kStorageAccessCost)
+                    ? headroom
+                    : kStorageAccessCost * live_blocks;
+  }
+
+  co_return StorageRead<void>{item_view->set(DeletedItem{}), body_gas};
 }
 
 SyscallStatus<void>

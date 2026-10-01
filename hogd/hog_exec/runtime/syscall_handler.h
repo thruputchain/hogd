@@ -391,7 +391,12 @@ public:
             std::optional<int128_t> set_value, const int128_t &add_value);
 
   // === Delete syscall ===
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  // load_gas carries the body gas the delete should charge beyond the universal
+  // crossing: the storage access it always pays, plus -- when it deletes a
+  // committed retrocausal queue -- the historical block cleanup that block
+  // close performs on its behalf (see the definition for why this is billed
+  // here rather than at block close).
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<void>>>
   delete_object(StorageKeyContractData const &storage_key);
 
   // === Storage flags syscalls ===

@@ -20,15 +20,17 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
   }
   // The frame walk and first-touch item-view insertion have happened by now, so
   // both syscall-visible exits pay the access, as the storage-flags and NNInt
-  // syscalls do.
-  auto &delete_status = *status;
+  // syscalls do. delete_object folds in any retrocausal-queue cleanup cost, so
+  // body_gas already covers the historical block teardown block close performs.
+  auto &delete_read = *status;
+  const WrappedGasAmount body_gas{delete_read.load_gas};
+  auto &delete_status = delete_read.result;
   if (!delete_status) {
-    co_return SyscallInnerResult{delete_status.error().code(),
-                                 WrappedGasAmount{kStorageAccessCost}};
+    co_return SyscallInnerResult{delete_status.error().code(), body_gas};
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost}};
+                               body_gas};
 }
 
 } // namespace hogd
