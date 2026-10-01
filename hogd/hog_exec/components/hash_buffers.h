@@ -32,11 +32,8 @@ private:
   [[nodiscard]] SyscallStatus<void>
   update_existing_stream(uint32_t index, std::span<const std::byte> data);
 
-  // Contract input chooses these stream indices, so the table must not let
-  // crafted keys amplify per-operation cost. A std::map keeps find/emplace/
-  // erase at O(log n) worst case, bounded by max_buffers_, whatever the key
-  // distribution; a hashed table lets colliding indices degrade a metered
-  // lookup to O(n).
+  // Contract-chosen indices: std::map keeps lookups O(log n) worst case,
+  // unlike a hash table where crafted collisions degrade them to O(n).
   std::map<uint32_t, Stream> streams_;
 
   const uint32_t max_buffers_;
