@@ -14,7 +14,7 @@
 #include "built_contracts/calldata_wrapper.h"
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
-#include "built_contracts/itc_erc20.h"
+#include "built_contracts/itc_erc20.hh"
 #include "built_contracts/manual_revert_test.h"
 #include "contract.hh"
 #include "exec_result.hh"

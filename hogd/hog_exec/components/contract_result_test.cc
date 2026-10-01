@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include "hogd/hog_exec/components/contract_result.h"
+#include "transaction.hh"
+#include "x23/serialize_cxs.h"
 
 namespace hogd {
 

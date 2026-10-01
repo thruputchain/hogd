@@ -13,6 +13,7 @@
 #include "built_contracts/default_wallet.hh"
 #include "built_contracts/itc_erc20.h"
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/domain_separators.h"
