@@ -358,7 +358,7 @@ public:
       co_return ret;
     }
     for (const TransactionHash &tx_hash : tx_hashes) {
-      ret.push_back(scheduler_->lookup_transaction_outcome(tx_hash));
+      ret.push_back(co_await scheduler_->lookup_transaction_outcome(tx_hash));
     }
     co_return ret;
   }

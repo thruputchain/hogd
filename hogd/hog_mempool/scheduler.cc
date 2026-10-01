@@ -425,11 +425,14 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
   return account_state.hog_age;
 }
 
-void
+x23::Async<void>
 Scheduler::prune_transaction_outcomes()
 {
   const BlockHeight height = current_block();
-  std::lock_guard lock(transaction_outcomes_mutex_);
+
+  x23::CoroGuard cg;
+  co_await cg(transaction_outcomes_lock_);
+
   while (!transaction_outcomes_order_.empty() &&
          height - transaction_outcomes_order_.front().processed_height >=
              kTransactionOutcomeBlockLifetime) {
@@ -438,13 +441,16 @@ Scheduler::prune_transaction_outcomes()
   }
 }
 
-void
+x23::Async<void>
 Scheduler::record_transaction_outcome(
     const TransactionHash &tx_hash, SchedulerTransactionStatus status,
     SchedulerTransactionErrorSource error_source, int32_t error_code)
 {
-  prune_transaction_outcomes();
-  std::lock_guard lock(transaction_outcomes_mutex_);
+  co_await prune_transaction_outcomes();
+
+  x23::CoroGuard cg;
+  co_await cg(transaction_outcomes_lock_);
+
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
     // The tx hash may already exist in the map if the tx was submitted again
@@ -478,10 +484,12 @@ Scheduler::record_transaction_outcome(
   transaction_outcomes_[tx_hash] = std::prev(transaction_outcomes_order_.end());
 }
 
-void
+x23::Async<void>
 Scheduler::clear_transaction_outcome(const TransactionHash &tx_hash)
 {
-  std::lock_guard lock(transaction_outcomes_mutex_);
+  x23::CoroGuard cg;
+  co_await cg(transaction_outcomes_lock_);
+
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
     transaction_outcomes_order_.erase(it->second);
@@ -489,7 +497,7 @@ Scheduler::clear_transaction_outcome(const TransactionHash &tx_hash)
   }
 }
 
-SchedulerTransactionOutcome
+x23::Async<SchedulerTransactionOutcome>
 Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 {
   if (find_tx(tx_hash)) {
@@ -500,8 +508,11 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
         .error_code = 0,
     };
   }
-  prune_transaction_outcomes();
-  std::lock_guard lock(transaction_outcomes_mutex_);
+  co_await prune_transaction_outcomes();
+
+  x23::CoroGuard cg;
+  co_await cg(transaction_outcomes_lock_);
+
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
     return it->second->outcome;
@@ -516,7 +527,7 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
-bool
+x23::Async<bool>
 Scheduler::add_txs_helper(const SignedTransaction &tx,
                           const TransactionHash &tx_hash)
 {
@@ -544,7 +555,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // perspective of anyone accessing the tx in [txs_].
     tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   }
-  clear_transaction_outcome(tx_hash);
+  co_await clear_transaction_outcome(tx_hash);
   return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
@@ -604,7 +615,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
                show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
           outcomes[tx_idx] =
               SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
-          scheduler.record_transaction_outcome(
+          co_await scheduler.record_transaction_outcome(
               tx_hashes[tx_idx],
               /*status=*/SchedulerTransactionStatus::SchedulerTransactionRetry,
               /*error_source=*/
@@ -616,7 +627,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
           continue;
         }
         const TransactionHash &tx_hash = tx_hashes[tx_idx];
-        if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
+        if (co_await scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
           num_added++;
         }
       }
@@ -977,7 +988,7 @@ Scheduler::refresh_accounts_excluded_from_block()
   for (const ContractAddress &account :
        pending_nomination_.accounts_excluded_from_block) {
     erase_ready_account(account);
-    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+    if (co_await account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
@@ -996,13 +1007,13 @@ Scheduler::refresh_ready_accounts(
     if (account_excluded_from_block(account)) {
       continue;
     }
-    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+    if (co_await account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
 }
 
-bool
+x23::Async<bool>
 Scheduler::account_is_ready(const ContractAddress &account,
                             bool remove_expired_txs)
 {
@@ -1017,7 +1028,7 @@ Scheduler::account_is_ready(const ContractAddress &account,
   if (remove_expired_txs) {
     for (auto it = txs.begin(); it != lower_it; it++) {
       const TransactionHash &tx_hash = it->first.tx_hash;
-      record_transaction_outcome(
+      co_await record_transaction_outcome(
           tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
           SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
           static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
@@ -1064,7 +1075,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
   }
 }
 
-void
+x23::Async<void>
 Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
                     x23::XdrVec<SignedTransaction> &txs)
 {
@@ -1113,7 +1124,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
              it_remove++) {
           const TransactionHash &tx_hash = it_remove->first.tx_hash;
-          record_transaction_outcome(
+          co_await record_transaction_outcome(
               tx_hash, /*status=*/
               SchedulerTransactionStatus::SchedulerTransactionDropped,
               /*error_source=*/
@@ -1193,7 +1204,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // [tx_cache_size_] happens before the tx is removed from [txs_] from
           // the perspective of anyone accessing the tx in [txs_].
           tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
-          record_transaction_outcome(
+          co_await record_transaction_outcome(
               tx_hash, /*status=*/
               SchedulerTransactionStatus::SchedulerTransactionDropped,
               /*error_source=*/
@@ -1245,7 +1256,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
 
   if (!pending_nomination_.block_id) {
     for (const ContractAddress &account : accounts_excluded_from_block) {
-      if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+      if (co_await account_is_ready(account, /*remove_expired_txs=*/false)) {
         CHECK(ready_accounts_.insert(get_account_key(account)).second);
       }
     }
@@ -1346,7 +1357,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   }
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
-    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
+    if (!co_await account_is_ready(account, /*remove_expired_txs=*/true)) {
       // We do not CHECK that the account is removed from [ready_accounts_]
       // because the account may not be currently in [ready_accounts_]. For
       // example, if a tx is submitted that the contract does not have enough

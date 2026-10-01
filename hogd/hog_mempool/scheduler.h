@@ -64,8 +64,9 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  void schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
-                x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<void> schedule(size_t num_txs,
+                            x23::XdrVec<TransactionHash> &tx_hashes,
+                            x23::XdrVec<SignedTransaction> &txs);
 
   void start_pending_nomination(BlockID block_id);
   void commit_pending_nomination(BlockID block_id);
@@ -85,16 +86,16 @@ public:
     return {};
   }
 
-  SchedulerTransactionOutcome
+  x23::Async<SchedulerTransactionOutcome>
   lookup_transaction_outcome(const TransactionHash &tx_hash);
 
-  void record_transaction_outcome(
+  x23::Async<void> record_transaction_outcome(
       const TransactionHash &tx_hash, SchedulerTransactionStatus status,
       SchedulerTransactionErrorSource error_source =
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
       int32_t error_code = 0);
 
-  void clear_transaction_outcome(const TransactionHash &tx_hash);
+  x23::Async<void> clear_transaction_outcome(const TransactionHash &tx_hash);
 
   void get_txs_for_account(const ContractAddress &address,
                            TransactionHashBatch &tx_hashes,
@@ -197,7 +198,7 @@ public:
   void increment_current_block()
   {
     current_block_.fetch_add(1, std::memory_order_relaxed);
-    prune_transaction_outcomes();
+    co_await prune_transaction_outcomes();
   }
   void set_current_block(BlockHeight height)
   {
@@ -291,11 +292,11 @@ private:
 
   AccountKey get_account_key(const ContractAddress &account);
 
-  bool account_is_ready(const ContractAddress &account,
-                        bool remove_expired_txs);
+  x23::Async<bool> account_is_ready(const ContractAddress &account,
+                                    bool remove_expired_txs);
 
-  bool add_txs_helper(const SignedTransaction &tx,
-                      const TransactionHash &tx_hash);
+  x23::Async<bool> add_txs_helper(const SignedTransaction &tx,
+                                  const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
@@ -335,7 +336,7 @@ private:
   void refresh_accounts_excluded_from_block();
   bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
-  void prune_transaction_outcomes();
+  x23::Async<void> prune_transaction_outcomes();
 
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
@@ -360,7 +361,7 @@ private:
   std::atomic<ssize_t> tx_cache_size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
 
-  std::mutex transaction_outcomes_mutex_;
+  x23::CoroLock transaction_outcomes_lock_;
   std::list<TransactionOutcomeEntry> transaction_outcomes_order_;
   std::unordered_map<TransactionHash,
                      std::list<TransactionOutcomeEntry>::iterator,

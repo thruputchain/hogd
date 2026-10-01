@@ -484,7 +484,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           else {
             (*outcomes)[original_idx] = outcome;
 
-            scheduler_->record_transaction_outcome(
+            co_await scheduler_->record_transaction_outcome(
                 /*tx_hash=*/(*tx_hashes)[i],
                 /*status=*/transaction_status_for_auth(code),
                 /*error_source=*/
@@ -554,7 +554,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
             (*outcomes)[(*original_indices)[i]] =
                 SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
 
-            scheduler_->record_transaction_outcome(
+            co_await scheduler_->record_transaction_outcome(
                 tx_hash, /*status=*/
                 SchedulerTransactionStatus::SchedulerTransactionRetry,
                 /*error_source=*/
@@ -3190,7 +3190,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
           // We committed the block we nominated.
           for (const TransactionHash &hash :
                nominated_block_cache_.result_tx_hashes) {
-            scheduler_->record_transaction_outcome(
+            co_await scheduler_->record_transaction_outcome(
                 hash, /*status=*/
                 SchedulerTransactionStatus::SchedulerTransactionSucceeded,
                 /*error_source=*/
@@ -3203,7 +3203,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
                i++) {
             const ExecResult result =
                 nominated_block_cache_.failed_tx_results[i];
-            scheduler_->record_transaction_outcome(
+            co_await scheduler_->record_transaction_outcome(
                 /*tx_hash=*/nominated_block_cache_.failed_tx_hashes[i],
                 /*status=*/transaction_status_for_exec(result),
                 /*error_source=*/
@@ -3215,7 +3215,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         else {
           // We committed a block we validated.
           for (const TransactionHash &hash : *remove_from_scheduler) {
-            scheduler_->record_transaction_outcome(
+            co_await scheduler_->record_transaction_outcome(
                 hash, /*status=*/
                 SchedulerTransactionStatus::SchedulerTransactionSucceeded,
                 /*error_source=*/
@@ -3406,7 +3406,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      scheduler_->record_transaction_outcome(
+      co_await scheduler_->record_transaction_outcome(
           tx_hashes[i],
           /*status=*/transaction_status_for_auth(code),
           /*error_source=*/
