@@ -139,6 +139,20 @@ transaction_status_for_exec(const ExecResult result)
   }
 }
 
+SchedulerTransactionStatus
+transaction_status_for_auth(const AuthErrorCode result)
+{
+  switch (result) {
+  case AuthErrorCode::kAuthSuccess:
+    return SchedulerTransactionStatus::SchedulerTransactionSucceeded;
+  case AuthErrorCode::kAuthFailed:
+    return SchedulerTransactionStatus::SchedulerTransactionDropped;
+  case AuthErrorCode::kAuthStaleBlockHeight:
+  case AuthErrorCode::kAuthInternal:
+    return SchedulerTransactionStatus::SchedulerTransactionRetry;
+  }
+}
+
 template<typename T>
 x23::DagDeps
 dag_deps_from_nodes(const x23::Vec<x23::DagNode<T>> &nodes)
@@ -469,13 +483,13 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           }
           else {
             (*outcomes)[original_idx] = outcome;
+
             scheduler_->record_transaction_outcome(
-                (*tx_hashes)[i],
-                code == AuthErrorCode::kAuthFailed
-                    ? SchedulerTransactionStatus::SchedulerTransactionDropped
-                    : SchedulerTransactionStatus::SchedulerTransactionRetry,
+                /*tx_hash=*/(*tx_hashes)[i],
+                /*status=*/transaction_status_for_auth(code),
+                /*error_source=*/
                 SchedulerTransactionErrorSource::SchedulerTransactionErrorAuth,
-                static_cast<int32_t>(code));
+                /*error_code=*/static_cast<int32_t>(code));
             num_auth_failures++;
           }
         }
@@ -539,10 +553,14 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           else {
             (*outcomes)[(*original_indices)[i]] =
                 SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
+
             scheduler_->record_transaction_outcome(
-                tx_hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+                tx_hash, /*status=*/
+                SchedulerTransactionStatus::SchedulerTransactionRetry,
+                /*error_source=*/
                 SchedulerTransactionErrorSource::
                     SchedulerTransactionErrorScheduler,
+                /*error_code=*/
                 static_cast<int32_t>(
                     SchedulerErrorCode::SchedulerErrorCapacity));
             num_discarded++;
@@ -3169,12 +3187,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         CHECK_PTR(remove_from_scheduler);
         remove_from_scheduler_size = remove_from_scheduler->size();
         if (commit_plan.committed_nominated) {
+          // We committed the block we nominated.
           for (const TransactionHash &hash :
                nominated_block_cache_.result_tx_hashes) {
             scheduler_->record_transaction_outcome(
-                hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                hash, /*status=*/
+                SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                /*error_source=*/
                 SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
-                0);
+                /*error_code=*/0);
           }
           CHECK_EQ(nominated_block_cache_.failed_tx_hashes.size(),
                    nominated_block_cache_.failed_tx_results.size());
@@ -3183,19 +3204,23 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
             const ExecResult result =
                 nominated_block_cache_.failed_tx_results[i];
             scheduler_->record_transaction_outcome(
-                nominated_block_cache_.failed_tx_hashes[i],
-                transaction_status_for_exec(result),
+                /*tx_hash=*/nominated_block_cache_.failed_tx_hashes[i],
+                /*status=*/transaction_status_for_exec(result),
+                /*error_source=*/
                 SchedulerTransactionErrorSource::
                     SchedulerTransactionErrorExecutor,
-                static_cast<int32_t>(result));
+                /*error_code=*/static_cast<int32_t>(result));
           }
         }
         else {
+          // We committed a block we validated.
           for (const TransactionHash &hash : *remove_from_scheduler) {
             scheduler_->record_transaction_outcome(
-                hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                hash, /*status=*/
+                SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                /*error_source=*/
                 SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
-                0);
+                /*error_code=*/0);
           }
         }
         co_await scheduler_->remove_from_scheduler(
@@ -3383,11 +3408,10 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     if (code != AuthErrorCode::kAuthSuccess) {
       scheduler_->record_transaction_outcome(
           tx_hashes[i],
-          code == AuthErrorCode::kAuthFailed
-              ? SchedulerTransactionStatus::SchedulerTransactionDropped
-              : SchedulerTransactionStatus::SchedulerTransactionRetry,
+          /*status=*/transaction_status_for_auth(code),
+          /*error_source=*/
           SchedulerTransactionErrorSource::SchedulerTransactionErrorAuth,
-          static_cast<int32_t>(code));
+          /*error_code=*/static_cast<int32_t>(code));
       to_remove.push_back(tx_hashes[i]);
     }
   }
