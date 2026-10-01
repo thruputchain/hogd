@@ -1896,7 +1896,8 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
                     : kStorageAccessCost * live_blocks;
   }
 
-  co_return StorageRead<void>{item_view->set(DeletedItem{}), body_gas};
+  co_return StorageRead<void>{.result = item_view->set(DeletedItem{}),
+                              .load_gas = body_gas};
 }
 
 SyscallStatus<void>
