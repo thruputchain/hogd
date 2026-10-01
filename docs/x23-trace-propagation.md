@@ -48,17 +48,36 @@ Two encodings:
 | | A: new flavour `AUTH_GH_TRACE` | B: `AUTH_NONE` with a non-empty body |
 |---|---|---|
 | Wire change | Adds an enum value to `rpc_msg.x` | None |
-| Old receivers | Probably reject the frame when decoding the unknown enum value. Verify in each implementation. | Already decode it, and ignore the body |
-| Rollout | Two steps: every peer learns to decode the flavour, then senders enable it | One step: senders can enable whenever ready |
+| Old receivers | Accept it: decoders do not check that an enum value is a declared variant | Accept it, and ignore the body |
+| Rollout | One step | One step |
 | Semantics | Clean and explicit | Bends RFC 5531, which says `AUTH_NONE`'s body is empty |
 
-**Recommendation: A, with the two-step rollout.** B stays the fallback if a
-peer implementation cannot be updated in time.
+**Recommendation: A.** Unknown `auth_flavor` values are already accepted, so
+no decode-first release is needed. Still confirm it once per stack with a
+cross-implementation test.
 
 **Body format:** a version byte, then `traceparent`, then optionally
 `tracestate`, so the format can evolve. A receiver that cannot parse the body
 ignores it and starts a new root (or does nothing when unsampled). It never
 rejects the call.
+
+### Allocation on the hot path
+
+`opaque body<400>` is variable-length, so a populated body costs an
+allocation per call to encode and another to decode. To keep that off the hot
+path:
+
+- **Unsampled calls**, the common case, keep sending `AUTH_NONE` with an empty
+  body. The wire bytes and the work are what they are today: no allocation.
+- **Only sampled calls**, about 5% by default, carry `AUTH_GH_TRACE` and pay
+  the ~26-byte body.
+- **If that still shows up in the benchmark-regression numbers**, change the
+  structure itself. For example, replace the credential's variable opaque with
+  a fixed-size trace field (16-byte trace id, 8-byte span id, flags, all zero
+  when tracing is off), or give the C++ decoder a small inline buffer so a
+  body this size never reaches the heap. This departs from the RFC 5531
+  layout, so it needs agreement from x23's maintainers. Decide on measured
+  numbers, not in advance.
 
 ## Implementations to change
 
@@ -69,22 +88,81 @@ starting; do not rely on this list.
 |---|---|---|
 | C++ x23 | `hogd/x23/x23/rpc*.{h,cc}`, `rpc_common.h` | server and client in every hog-* daemon |
 | Rust | `groundhog-rpc` x23 backend crates (`crates/x23/...`) and the `rpc_driver` crate (private registry) | the gateway's and faucet's calls into hogd |
-| Go | chuckd's x23 client, via `groundhog-go` / `protocol-go` | chuckd → hog-mempool (`SchedulerCoord1`) |
-| Rust | `scp`'s `rpc_driver` use | chuckd ↔ scpd, if that path is x23 |
+| Rust | `scp`, through `rpc_driver` | scpd's side of chuckd ↔ scpd, which is XDR RPC |
+| Go | chuckd's XDR RPC stack, via `groundhog-go` / `protocol-go` | chuckd → hog-mempool (`SchedulerCoord1`), and chuckd ↔ scpd |
+
+Because chuckd ↔ scpd uses the Rust and Go XDR RPC implementations, scpd
+joins the block trace once those two stacks carry the credential. No hogd
+change is needed for it.
 
 ## hogd design
 
-1. **Context travels with the coroutine, not the thread.**
-   - Add a small `x23::TraceCtx` (trace id, span id, flags) to the coroutine
-     promise of x23's `Async`/`MaybeAsync`.
-   - When one task `co_await`s another, the child inherits the parent's
-     context.
-   - The server sets the root task's context from the incoming `cred` in
-     `RpcDispatcher::serve`.
-   - The client copies the current task's context into `cred` when it builds
-     a call.
-   - Handler code changes nowhere. Everything lives in x23.
-   - The unsampled check is a flag test before any allocation.
+1. **Context travels with the coroutine, not the thread. Reuse corotrace's
+   plumbing, not corotrace.**
+
+   x23 already has coroutine tracing: `x23/x23/corotrace.{h,cc}`, behind
+   `X23_CORO_TRACE`.
+   - **What it records:** every `PromiseBase` gains creation and suspension
+     `source_location`s and a `waiter_` link to the coroutine awaiting it.
+     Every suspension point updates them (`Awaitable::await_suspend` in
+     `async.h`, the semaphore and mutex awaiters in `corosync.h`).
+     `CoroHandle` and `AtomicCoroHandle` carry the `PromiseBase*` across
+     threads.
+   - **Why it can't be the vehicle:** its cost is too high to run all the
+     time, and CMake enables it only for Debug builds. It also tracks far more
+     than a trace needs.
+
+   So trace context gets separate, minimal machinery, attached at the same
+   points corotrace already uses:
+   - **Storage.** One pointer, `const TraceCtx *trace_`, in `PromiseBase`.
+     It lives in the variant compiled for every build, behind a new flag
+     (`X23_TRACE_CONTEXT`, default on in Release) rather than
+     `X23_CORO_TRACE`. It is null unless the coroutine belongs to a sampled
+     trace, so unsampled frames grow by 8 bytes and pay a null check.
+     `TraceCtx` (trace id, parent span id, flags) is reference-counted and
+     allocated once per sampled server call.
+   - **Where context can be read: the awaiter.** An awaiter's
+     `await_suspend(h)` sees the awaiting coroutine's promise. That is how
+     corotrace sets `waiter_` (`async.h`, `Awaitable::await_suspend`), and how
+     `GetCoroTrace` reads the current promise without really suspending.
+   - **The catch: there is no single resume point.**
+     - Coroutines resume through three explicit `resume()` calls in
+       `async.h`.
+     - They also resume through symmetric transfer, when `await_suspend`
+       returns a handle, which offers no hook.
+     - And through `resume_in_another_thread(CoroHandle{h, nullptr})` in
+       `corosync.h`, which drops the promise pointer.
+
+     So a thread-local "current context" kept up to date on every resume is
+     not reliable. Do not build on one.
+   - **The catch with eager start.** x23's `Async` starts eagerly
+     (`initial_suspend` returns `suspend_never`). A child coroutine's body
+     runs before its parent reaches `co_await`, so copying context into the
+     child at `await_suspend` arrives after any work the child does before
+     its first suspension.
+
+   The design that fits both constraints:
+   - **Server root.** `RpcDispatcher::serve` decodes `cred` and sets
+     `trace_` on the handler's promise.
+   - **Inheritance down awaited chains.** At the `await_suspend` sites where
+     corotrace records `waiter_`, a child with no context copies its waiter's
+     `trace_`. That covers everything the child does after its first
+     suspension.
+   - **Client side reads the caller, not the callee.** The outbound call
+     takes its context from the coroutine that is calling, through the call
+     awaiter's `await_suspend(h)`, and encodes `cred` there. This is correct
+     only if x23's client builds and sends the call message from an awaiter's
+     `await_suspend` (or later), not from an eagerly started coroutine body.
+     **Reviewer question:** where does the x23 client send today? If it sends
+     from an eager body, restructuring the send into the awaiter is the core
+     x23 change here.
+   - **Handler code changes:** none, if the client point above holds.
+   - **Alternative, if that point does not hold:** pass context explicitly.
+     Handlers forward a `TraceCtx` into the x23 client calls they make. That
+     is simple and cheap, but it touches every handler that calls another
+     daemon.
+   - **Measure** `X23_TRACE_CONTEXT=1` against `=0` with the
+     benchmark-regression scripts before turning it on by default.
 2. **Spans.**
    - **Server:** one per served call, named `<program>/<proc>` with the same
      names as the eBPF uprobe metrics (`SchedulerCoord1/commit_block`, …).
@@ -119,19 +197,20 @@ starting; do not rely on this list.
 
 ## Order
 
-1. **Decode support everywhere** (flavour A). Every stack decodes
-   `AUTH_GH_TRACE` and ignores it. Release each component and promote one
-   devnet release with all of them, so every peer can decode the new flavour
-   before anyone sends it.
-2. **Senders.** `hog-gateway`, `hog-faucet` and `chuckd` put their current
-   context into `cred` on x23 calls. hogd still ignores it.
-3. **hogd.** The coroutine context, server and client spans, the exporter and
-   the env controls, behind `OTEL_EXPORTER_OTLP_ENDPOINT`.
-4. **ops.** Set the OTel env in the validator compose for hog-core and the
+1. **Senders.** `hog-gateway`, `hog-faucet` and `chuckd` put their current
+   context into `cred` on XDR RPC calls, as `AUTH_GH_TRACE` on sampled calls
+   only. scpd does the same through `rpc_driver`. Receivers already accept
+   the unknown flavour; prove it with a cross-implementation test before
+   enabling it.
+2. **hogd.** The context pointer, its inheritance at the `await_suspend`
+   sites, server and client spans, the exporter and the env controls. All of it sits behind
+   `OTEL_EXPORTER_OTLP_ENDPOINT` at runtime and `X23_TRACE_CONTEXT` at build
+   time.
+3. **ops.** Set the OTel env in the validator compose for hog-core and the
    coordinator, pointed at the host Alloy receiver (`0.0.0.0:4317` on the
    validator since phase 1). It goes out with the promotion that carries
-   step 3.
-5. **Verify on devnet.**
+   step 2.
+4. **Verify on devnet.**
    - A sampled `groundhog_sendRawTransaction`, or the nearest submit method,
      shows gateway → mempool → exec / db spans in one trace.
    - A sampled block shows chuckd → mempool `commit_block` → db and event
@@ -150,14 +229,29 @@ starting; do not rely on this list.
   stops every span export.
 - **Old peers keep working throughout**, at every step of the rollout.
 
+## Resolved questions
+
+- **Unknown `auth_flavor` values:** accepted. Decoders do not check that an
+  enum value is a declared variant, so flavour A rolls out in one step.
+- **chuckd ↔ scpd:** XDR RPC, through the Rust and Go implementations, so
+  scpd joins via those stacks.
+- **corotrace:** not used directly, because its overhead is too high to leave
+  on. Its attachment points (`PromiseBase`, `CoroHandle`/`AtomicCoroHandle`)
+  are reused for a pointer-sized context.
+
 ## Open questions
 
-1. Does each x23 decoder reject an unknown `auth_flavor` value? This decides
-   whether flavour A needs step 1 or can go straight to step 2.
-2. Is chuckd ↔ scpd x23, or another transport? If x23, scpd joins the block
-   trace in step 2.
-3. Which exporter, opentelemetry-cpp or the minimal one? Decide after the
-   step 3 prototype measurements.
+1. Which exporter, opentelemetry-cpp or the minimal one? Decide after the
+   prototype measurements in step 2.
+2. Where does the x23 client build and send a call message: an awaiter's
+   `await_suspend`, or an eagerly started coroutine body? This decides
+   whether context can be read implicitly from the caller or must be passed
+   explicitly.
+4. Is one pointer per coroutine frame (`X23_TRACE_CONTEXT=1`) within budget
+   on the benchmark-regression numbers?
+3. If sampled-call allocation for the `cred` body shows up in the
+   measurements, do x23's maintainers accept a fixed-size trace field in place
+   of the RFC 5531 `opaque_auth`, or an inline-buffer decoder?
 
 ## Not in scope
 
