@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <mutex>
+#include <optional>
 #include <thread>
 
 #include "event_rpc.hh"
@@ -32,11 +34,14 @@ public:
 
   static EventPrepareResult schedevent_prepare_event(const EventCard &card)
   {
-    info("event server preparing registration");
     if (card.protocol != version::kHogdProtocol()) {
+      report_prepare_attempt(EventPrepareOutcome::EventPrepareError);
       return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
     }
-    return Registration::registration().prepare_event(card);
+    EventPrepareResult result =
+        Registration::registration().prepare_event(card);
+    report_prepare_attempt(result.outcome());
+    return result;
   }
 
   static EventActivationResult
@@ -97,6 +102,27 @@ public:
   }
 
 private:
+  // The event server retries [schedevent_prepare_event] about once a second
+  // until the coordinator has loaded genesis, which can take minutes. A line
+  // per attempt pushes every other line out of the bounded log tail that CI
+  // replays for a failed benchmark -- a run that times out waiting for the
+  // event replays a tail holding nothing but this message, and whatever did
+  // fail is no longer in it. Report the first attempt, and after that only a
+  // change of outcome.
+  static void report_prepare_attempt(EventPrepareOutcome outcome)
+  {
+    static std::mutex reported_mutex;
+    static std::optional<EventPrepareOutcome> reported;
+    {
+      std::unique_lock lk(reported_mutex);
+      if (reported == outcome) {
+        return;
+      }
+      reported = outcome;
+    }
+    info("event server preparing registration: {}", outcome);
+  }
+
   std::atomic<bool> shutdown_flag_ = false;
 };
 

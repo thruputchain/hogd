@@ -14,8 +14,27 @@ WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
 
+COORDINATOR_LOG_TAIL_LINES=80
+
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
+}
+
+# Replays the tail of the coordinator's captured stdout and stderr. Best
+# effort: a host that has gone away must not replace the failure being
+# reported with a failure of its own.
+replay_coordinator_output() {
+  local quoted_paths
+
+  echo "===== last $COORDINATOR_LOG_TAIL_LINES lines of the coordinator on hog4 ====="
+  if [[ -z ${COORDINATOR_STDOUT_PATH:-} || -z ${COORDINATOR_STDERR_PATH:-} ]]; then
+    echo '(no captured coordinator log paths)'
+  else
+    printf -v quoted_paths '%q %q' \
+      "$COORDINATOR_STDOUT_PATH" "$COORDINATOR_STDERR_PATH"
+    ci_remote_run hog4 "tail -n $COORDINATOR_LOG_TAIL_LINES $quoted_paths" || true
+  fi
+  echo '===== end of coordinator output ====='
 }
 
 cleanup() {
@@ -110,7 +129,7 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+coordinator_launch=$($CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
   --stack \
@@ -132,10 +151,23 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path ./$BUILD_DIR/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400
+  --scp-control-addr 127.0.0.1:4400 2>&1)
+printf '%s\n' "$coordinator_launch"
+COORDINATOR_STDOUT_PATH=$(printf '%s\n' "$coordinator_launch" |
+  sed -n 's/^CONTROL_STDOUT_PATH=//p' | tail -n 1)
+COORDINATOR_STDERR_PATH=$(printf '%s\n' "$coordinator_launch" |
+  sed -n 's/^CONTROL_STDERR_PATH=//p' | tail -n 1)
 
 echo 'make sure procs are running'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
+# [control_cli start] returns as soon as the coordinator is spawned, so one
+# that dies during startup is first noticed here -- and [expect_running]
+# reports only that it is gone and with what status. The reason is in the
+# output the control server captured for it, which the copy at the end of this
+# script never reaches once this check aborts the run, so replay it here.
+$CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running || {
+  replay_coordinator_output
+  false
+}
 $CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog7 $CI_CONTROL_PORT expect_running
