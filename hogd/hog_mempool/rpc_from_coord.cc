@@ -150,6 +150,9 @@ transaction_status_for_auth(const AuthErrorCode result)
   case AuthErrorCode::kAuthStaleBlockHeight:
   case AuthErrorCode::kAuthInternal:
     return SchedulerTransactionStatus::SchedulerTransactionRetry;
+  default:
+    CHECK(false);
+    return SchedulerTransactionStatus::SchedulerTransactionDropped;
   }
 }
 
