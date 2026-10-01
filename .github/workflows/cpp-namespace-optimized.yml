@@ -438,9 +438,7 @@ jobs:
       - name: Build GCC Release
         run: ./scripts/build.sh -d build/gcc_release -t Release -c gcc
 
-      # EXCLUDE_FROM_ALL targets are not covered by the build above, so a
-      # break in them only surfaces in the scheduled jobs that build them.
-      # Compiling them here is incremental against the same build directory.
+      # EXCLUDE_FROM_ALL targets aren't built above, so build them here to catch breaks early.
       - name: Build Excluded Bench Targets
         run: |
           ./scripts/build.sh -d build/gcc_release -t Release -c gcc \
