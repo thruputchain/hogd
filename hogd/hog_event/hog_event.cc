@@ -26,6 +26,8 @@
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
 #include "sched_event.hh"
+#include "x23/rpc_common.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
 
@@ -131,12 +133,28 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
       }
       register_over(*client);
       break;
-    } catch (const x23::XdrException &e) {
-      error("event registration to mempool {} failed: {}; reconnecting",
+    }
+    // Only a lost connection is the dependency delay above. A call the mempool
+    // rejected, or a reply we cannot decode, says that port is not serving
+    // this contract, and reconnecting never fixes that; keep those fatal.
+    catch (const x23::XdrCallFailed &e) {
+      panic("event registration to mempool {} was rejected: {}",
             mempool_address, e.what());
-    } catch (const std::system_error &e) {
+    } catch (const x23::XdrBadInput &e) {
+      panic("event registration to mempool {} returned an undecodable reply: "
+            "{}",
+            mempool_address, e.what());
+    } catch (const x23::XdrLengthError &e) {
+      panic("event registration to mempool {} returned an undecodable reply: "
+            "{}",
+            mempool_address, e.what());
+    } catch (const x23::XdrException &e) {
       error("event registration to mempool {} lost its connection: {}; "
             "reconnecting",
+            mempool_address, e.what());
+    } catch (const std::system_error &e) {
+      error("event registration to mempool {} could not reconnect: {}; "
+            "retrying",
             mempool_address, e.what());
     }
     client.reset();

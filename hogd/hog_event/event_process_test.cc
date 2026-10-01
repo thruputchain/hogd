@@ -370,5 +370,72 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   EXPECT_EQ(restarted.kill_unclean(), SIGKILL);
 }
 
+// A mempool that drops the link mid-registration must not take hog-event with
+// it. The EOF from the dropped call used to escape as an uncaught
+// XdrException and abort the process, so the only evidence left was
+// "terminate called"; hog-event now reconnects and finishes registering once
+// the mempool is back.
+TEST(HogEventProcess, ReconnectsAfterMempoolDropsLinkDuringRegistration)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+
+  // No canonical tip yet, so prepare_event answers NotReady and hog-event
+  // stays in its registration poll, which is where the link gets cut.
+
+  // hog-event reconnects to the --mempool-addr it was given, so the mempool
+  // has to come back on the same port. A kernel-assigned one is up for grabs
+  // the moment the first server releases it, so reserve a fixed one.
+  ReservedEventPorts mempool_reserved = reserve_event_ports();
+  const std::uint16_t mempool_port = mempool_reserved.ports[0];
+  const std::string mempool_addr =
+      std::string(x23::HostPort{"127.0.0.1", mempool_port}.show());
+
+  ReservedEventPorts reserved = reserve_event_ports();
+  const std::uint16_t event_exec_port = reserved.ports[0];
+  const std::uint16_t event_indexer_port = reserved.ports[1];
+  const std::uint16_t event_mempool_port = reserved.ports[2];
+  const std::uint16_t event_metrics_port = reserved.ports[3];
+
+  TmpDir work_dir;
+  mempool_reserved.holders.clear();
+  reserved.holders.clear();
+
+  std::optional<RpcServer<MempoolEventRpc>> mempool_event;
+  mempool_event.emplace();
+  ASSERT_EQ(mempool_event->start_server(
+                x23::HostPort{"127.0.0.1", mempool_port}),
+            mempool_port);
+
+  DaemonProcess event =
+      DaemonProcess::start(HOG_EVENT_BINARY,
+                           event_args(mempool_addr, work_dir.directory(),
+                                      event_exec_port, event_indexer_port,
+                                      event_mempool_port, event_metrics_port));
+  // The last listener is published just before registration begins.
+  event.wait_until_log_contains("PORT event.mempool=");
+
+  // ~RpcServer poisons the connections it accepted, so the in-flight
+  // prepare_event call ends in EOF. Nothing listens on the port until the
+  // mempool is back, so the reconnect attempts are refused and retried rather
+  // than landing on a stray socket.
+  mempool_event.reset();
+  event.wait_until_log_contains("lost its connection");
+
+  mempool_event.emplace();
+  ASSERT_EQ(mempool_event->start_server(
+                x23::HostPort{"127.0.0.1", mempool_port}),
+            mempool_port);
+
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = 0, .consensus_value = genesis});
+
+  event.wait_until_log_contains("event initialization complete.");
+  EXPECT_EQ(event.kill_unclean(), SIGKILL);
+}
+
 } // namespace
 } // namespace hogd
