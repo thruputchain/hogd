@@ -47,3 +47,7 @@ syscalls:
     async: true
   WriteAddressRequiredWeight:
     async: true
+  GetAddressAuthData:
+    # Composes the committed row from the block snapshot with this
+    # transaction's pending delta, so it may load from hog_db.
+    async: true

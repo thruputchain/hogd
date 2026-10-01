@@ -16,6 +16,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -135,6 +136,41 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
         SyscallGetAuthClaimOutputs{.auth_claim = claim});
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+MaybeAsyncSyscallInnerResult
+syscall_GetAddressAuthData_inner(SystemCallHandler &syscall_handler,
+                                 std::span<std::byte> output_buffer,
+                                 RuntimeMemoryLength &output_written_len)
+{
+  auto status = co_await syscall_handler.get_address_auth_data();
+  if (!status) {
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
+  }
+  // Priced like NonnegativeIntGet: the access and any load are paid whatever
+  // the outcome, since both happen before the read can answer.
+  auto &[result, load_gas] = *status;
+  const WrappedGasAmount gas{kStorageAccessCost + load_gas};
+  if (!result.has_value()) {
+    co_return SyscallInnerResult{result.error().code(), gas};
+  }
+
+  // The contract decodes the XDR itself; written_len reports the full
+  // encoding so a short buffer can be retried.
+  auto serialized = x23::serialize(*result);
+  output_written_len =
+      copy_to_guest_buffer(output_buffer,
+                           std::as_bytes(std::span(serialized.data(),
+                                                   serialized.size())));
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetAddressAuthData>()) {
+    trace_data->outputs.emplace(
+        SyscallGetAddressAuthDataOutputs{.auth_data = std::move(*result)});
+  }
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, gas};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

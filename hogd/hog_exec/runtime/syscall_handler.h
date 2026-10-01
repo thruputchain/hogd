@@ -429,6 +429,14 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_address_required_weight(Weight required_weight);
 
+  // The current address's AddressAuthData as this call frame sees it: the
+  // committed row (an empty registration when the address has none) with the
+  // registration changes pending in this transaction applied, and stamped
+  // with the executing height when any are. Loads the committed row on the
+  // transaction's first read of it; load_gas prices that load.
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<AddressAuthData>>>
+  get_address_auth_data();
+
   // Auth token syscalls
   [[nodiscard]] SyscallStatus<uint32_t>
   mint_auth_token(AuthToken const &auth_token);

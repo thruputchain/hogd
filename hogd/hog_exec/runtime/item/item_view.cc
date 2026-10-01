@@ -9,6 +9,8 @@
 #include <utility>
 #include <variant>
 
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -572,6 +574,39 @@ AddressAuthDataItem::get_delta() const
                  std::mt19937{std::random_device{}()});
   }
   return delta;
+}
+
+AddressAuthData
+AddressAuthDataItem::compose(AddressAuthData const *base,
+                             BlockHeight executing_height) const
+{
+  assert(internal_auth_data_);
+  AddressAuthData result = base ? *base : AddressAuthData{};
+  if (!writes_row(base != nullptr)) {
+    return result;
+  }
+  for (auto const &[key_index, new_key] : internal_auth_data_->pk_changes_) {
+    assert(key_index < kMaxSigners);
+    result.public_keys[key_index] = new_key;
+  }
+  if (internal_auth_data_->required_weight_.has_value()) {
+    result.required_weight = *internal_auth_data_->required_weight_;
+  }
+  result.last_written_height = executing_height;
+  return result;
+}
+
+bool
+AddressAuthDataItem::writes_row(bool row_exists) const
+{
+  assert(internal_auth_data_);
+  if (row_exists || internal_auth_data_->required_weight_.has_value()) {
+    return true;
+  }
+  return std::ranges::any_of(internal_auth_data_->pk_changes_,
+                             [](auto const &change) {
+                               return change.second != nullptr;
+                             });
 }
 
 AddressAuthDataItem &
