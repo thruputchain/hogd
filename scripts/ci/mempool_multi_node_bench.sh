@@ -497,7 +497,7 @@ for node in "${NODE_IDS[@]}"; do
   # shows it still waiting, so replay the coordinator and the mempool it
   # registers with as well: the reason lives in one of those two.
   if ! wait_control_log_line "node${node}_event" \
-      'event initialization complete.'; then
+    'event initialization complete.'; then
     replay_control_log_for_label "node${node}_chuckd"
     replay_control_log_for_label "node${node}_mempool"
     exit 1
