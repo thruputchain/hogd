@@ -883,12 +883,11 @@ IndexerOutboxStore::publish_committed_stored(
       co_return std::unexpected(rpc_size.error());
     }
   }
-  // Either way the file's roots are established: the live block computed
-  // the event root over the pairs it streamed, and promotion validated the
-  // full payload before calling here. Loads of this file skip the
-  // recomputation for the life of this process.
-  established_event_roots_.insert(
-      stored.consensus_value.proposal_header.events_hash);
+  // The root is not marked established here: publication does not read the
+  // events file (the live path only probes its size), so it has no digest to
+  // bind the root to. The first load recomputes the roots over the file's
+  // bytes and records that digest, which both validates the pairs and pins
+  // the exact file object the fast path may later serve without rechecking.
   auto exists = has_committed(height);
   if (!exists) {
     co_return std::unexpected(exists.error());
@@ -1035,24 +1034,30 @@ IndexerOutboxStore::load_committed_record(
   if (!bytes) {
     co_return std::unexpected(bytes.error());
   }
-  auto payload = assemble_committed_payload(*header, *bytes);
+  SHA256Hash events_file_digest{};
+  auto payload =
+      assemble_committed_payload(*header, *bytes, &events_file_digest);
   if (!payload) {
     co_return std::unexpected(payload.error());
   }
   if (auto shape = validate_committed_shape(*payload, block_height); !shape) {
     co_return std::unexpected(shape.error());
   }
-  // The roots are recomputed over the pairs only for a file this process has
-  // not established: one it neither streamed nor promoted, seen for the first
-  // time since it started. That is the restart case, where damage at rest is
-  // caught fail-closed, once. Every other load is a parse and nothing more.
+  // The roots are recomputed over the pairs unless this process has already
+  // validated this exact events file: a root is established only together
+  // with the digest of the bytes it was recomputed over, so a file that was
+  // replaced on disk under an established root no longer matches and is
+  // revalidated, where the altered pairs are caught fail-closed. An unchanged
+  // file on the established fast path is a parse and nothing more.
   const SHA256Hash event_root =
       payload->consensus_value.proposal_header.events_hash;
   bool established = false;
   {
     x23::CoroGuard publication_guard;
     co_await publication_guard(*committed_publication_lock_);
-    established = established_event_roots_.contains(event_root);
+    auto it = established_event_roots_.find(event_root);
+    established = it != established_event_roots_.end() &&
+                  it->second == events_file_digest;
   }
   if (!established) {
     if (auto valid = co_await validate_indexer_committed_payload(*payload);
@@ -1061,7 +1066,7 @@ IndexerOutboxStore::load_committed_record(
     }
     x23::CoroGuard publication_guard;
     co_await publication_guard(*committed_publication_lock_);
-    established_event_roots_.insert(event_root);
+    established_event_roots_.insert_or_assign(event_root, events_file_digest);
   }
   if (sha256(payload->consensus_value) != header->consensus_hash ||
       payload->consensus_value.prev_hash != header->prev_hash ||
@@ -2068,7 +2073,7 @@ events_file_basename(const EventsHash &event_root)
 IndexerOutboxStatus<IndexerOutboxCommittedPayload>
 IndexerOutboxStore::assemble_committed_payload(
     const IndexerOutboxRecordHeader &header,
-    std::span<const uint8_t> stored_bytes) const
+    std::span<const uint8_t> stored_bytes, SHA256Hash *events_file_digest) const
 {
   auto stored =
       decode_payload<IndexerOutboxCommittedStoredPayload>(stored_bytes,
@@ -2113,6 +2118,12 @@ IndexerOutboxStore::assemble_committed_payload(
     }
     offset += static_cast<size_t>(read_size);
   }
+
+  // Digest the exact bytes served under this root. load_committed_record uses
+  // it to decide whether an established root may skip revalidation: only the
+  // file object the root was validated over matches, so a replacement file is
+  // never served on the established fast path.
+  *events_file_digest = sha256(x23::BufView(bytes));
 
   auto pairs = parse_events_file_pairs(bytes, name);
   if (!pairs) {

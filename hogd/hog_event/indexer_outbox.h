@@ -8,7 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -273,10 +273,14 @@ private:
                           const IndexerOutboxRecordHeader &header) const;
   IndexerOutboxStatus<bool> has_regular_file(std::string_view filename) const;
   // Reads <event_root>.events from the events directory and reassembles the
-  // full committed payload the stored record references.
+  // full committed payload the stored record references. On success,
+  // *events_file_digest is set to the SHA-256 of the raw events-file bytes
+  // that were read, so the caller can bind an established root to the exact
+  // file object served under it.
   IndexerOutboxStatus<IndexerOutboxCommittedPayload>
   assemble_committed_payload(const IndexerOutboxRecordHeader &header,
-                             std::span<const uint8_t> stored_bytes) const;
+                             std::span<const uint8_t> stored_bytes,
+                             SHA256Hash *events_file_digest) const;
   // Publishes the payload's pairs as <event_root>.events if that file does not
   // already exist, first writer wins. The production commit path streamed the
   // file at close, so this is a stat; synthetic publishers get the file
@@ -327,12 +331,14 @@ private:
   mutable std::unique_ptr<x23::CoroLock> committed_publication_lock_ =
       std::make_unique<x23::CoroLock>();
   mutable std::optional<CommittedAppendCache> committed_append_cache_;
-  // Event roots whose files this process has established: streamed by one of
-  // its own blocks, validated in full at promotion, or recomputed once on
-  // first load. A load of an established file is a parse and nothing more;
-  // a file first seen after a restart gets the full root recomputation once.
-  // Guarded by committed_publication_lock_.
-  mutable std::unordered_set<SHA256Hash, SipHash24Hasher>
+  // Event roots this process has validated in full, each mapped to the
+  // SHA-256 digest of the exact events-file bytes the roots were recomputed
+  // over. A load whose events file still hashes to the recorded digest is a
+  // parse and nothing more; any other file -- one first seen since startup,
+  // or one whose bytes were replaced under an established root -- gets the
+  // full root recomputation, which fails closed when the pairs no longer
+  // match the header. Guarded by committed_publication_lock_.
+  mutable std::unordered_map<SHA256Hash, SHA256Hash, SipHash24Hasher>
       established_event_roots_;
   mutable size_t committed_history_scan_count_ = 0;
 };

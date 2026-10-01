@@ -584,12 +584,13 @@ TEST_F(IndexerOutboxTest, RecognizedNamespaceIncludesCandidatesAndOrigins)
   EXPECT_FALSE(*store.recognized_namespace_empty());
 }
 
-// A committed file's roots are recomputed once per process, and only by a
-// store that did not establish the file itself. The store that published it
-// trusts it for the life of the process: a load is a parse and nothing more.
-// A store opened afterwards recomputes on its first load and refuses a file
-// whose pairs no longer match the header.
-TEST_F(IndexerOutboxTest, RootsAreRecomputedOncePerProcessForUnestablishedFiles)
+// A committed file's roots are recomputed on its first load and then skipped
+// only for the exact bytes they were recomputed over: the established root is
+// bound to that file's digest. Replacing the events file on disk -- the data
+// directory tampering model -- breaks the digest, so even the store that
+// published the record revalidates on the next load and refuses pairs that no
+// longer match the header, in the live process and in one opened afterwards.
+TEST_F(IndexerOutboxTest, ReplacedEventsFileIsRejectedUnderEstablishedRoot)
 {
   const ProposedTransaction body = make_body(1);
   const auto committed = make_committed(1, {body}, {make_event(body, 0x01)});
@@ -601,14 +602,20 @@ TEST_F(IndexerOutboxTest, RootsAreRecomputedOncePerProcessForUnestablishedFiles)
     initialize_test_origin(store, committed);
     ASSERT_TRUE(store.publish_committed(committed)().has_value());
 
+    // The genuine file loads and establishes the root bound to its digest.
+    auto genuine = store.load_committed(1)();
+    ASSERT_TRUE(genuine.has_value()) << genuine.error();
+    ASSERT_EQ(genuine->tx_bodies.size(), 1U);
+    EXPECT_EQ(x23::serialize(genuine->tx_bodies[0]), x23::serialize(body));
+
     // Well-formed pairs that are not this block's, under this block's root.
     rewrite_events_file(dir_,
                         committed.consensus_value.proposal_header.events_hash,
                         other_events, other_bodies);
     auto loaded = store.load_committed(1)();
-    ASSERT_TRUE(loaded.has_value()) << loaded.error();
-    ASSERT_EQ(loaded->tx_bodies.size(), 1U);
-    EXPECT_EQ(x23::serialize(loaded->tx_bodies[0]), x23::serialize(other));
+    ASSERT_FALSE(loaded.has_value());
+    EXPECT_NE(loaded.error().find("root differs"), std::string::npos)
+        << loaded.error();
   }
 
   IndexerOutboxStore reopened = open_store(dir_);
