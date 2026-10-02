@@ -538,13 +538,9 @@ TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
   EXPECT_EQ(file_size(), committed_size);
 }
 
-// A tampered snapshot can keep every logical byte and a valid (unkeyed) CRC32C
-// while claiming an end LSN of UINT64_MAX. No honestly minted LSN ever reaches
-// that value, and recovering at it would set the writer's cur_lsn to its own
-// last representable value; the next honest snapshot would then wrap the
-// durable LSN to zero and a production reopen would treat the populated
-// database as fresh, silently losing state. Recovery must reject such a
-// snapshot as corruption (#4297).
+// Recovery must reject a snapshot claiming end_lsn == UINT64_MAX: no minted LSN
+// reaches it, and recovering there would wrap the next LSN to zero and lose
+// state on reopen (#4297).
 TEST_F(DatabaseTest, RecoveryRejectsSnapshotWithMaxEndLsn)
 {
   constexpr std::string_view kKey = "sentinel-key";
