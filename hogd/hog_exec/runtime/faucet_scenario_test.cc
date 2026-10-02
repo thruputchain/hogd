@@ -1,15 +1,13 @@
 #include <gtest/gtest.h>
 
-#include <concepts>
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <span>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "auth_claim.hh"
@@ -31,6 +29,7 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -47,6 +46,7 @@
 #include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -79,35 +79,6 @@ std::tuple<int64_t, uint64_t>
 make_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
-}
-
-// The wallet-level error a wallet tx aborted with, or nullopt when the abort
-// payload was not a decodable default_wallet::WalletError (e.g. a fault).
-std::optional<default_wallet::WalletError>
-wallet_error_of(std::vector<uint8_t> const &abort_buffer)
-{
-  auto payload =
-      std::as_bytes(std::span(abort_buffer.data(), abort_buffer.size()));
-  auto decoded =
-      wallet_meta::decode_return<u8"execute">(payload,
-                                              /*manually_reverted=*/true);
-  if (!decoded.has_value() || decoded->is_ok()) {
-    return std::nullopt;
-  }
-  return std::visit(
-      [](auto const &exception) -> std::optional<default_wallet::WalletError> {
-        if constexpr (requires {
-                        {
-                          exception.exn
-                        } -> std::convertible_to<default_wallet::WalletError>;
-                      }) {
-          return exception.exn;
-        }
-        else {
-          return std::nullopt;
-        }
-      },
-      decoded->err().variant_);
 }
 
 } // namespace
@@ -377,15 +348,17 @@ TEST_F(FaucetScenarioTest, AirdropBootstrapsPubkeyAccountsFromZero)
                                   kBootstrapFunding));
 
   // A negative amount, down to INT128_MIN, is rejected by the native token
-  // itself (NegativeAmount); the wallet reports the aborted call and nothing
+  // itself (NegativeAmount); the wallet forwards that exception and nothing
   // is minted.
   auto greedy = make_preimage(4);
   auto greedy_out =
       run_claim_tx(greedy,
                    airdrop_claim_call(std::numeric_limits<int128_t>::min()));
   EXPECT_EQ(greedy_out.status, InvocationFrameStatusCode::Abort);
-  EXPECT_EQ(wallet_error_of(greedy_out.buffer),
-            std::optional(default_wallet::WalletError::CallAborted));
+  auto expected = x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+                                     itc_erc20::ERC20Error::NegativeAmount)
+                      .value();
+  EXPECT_TRUE(std::ranges::equal(greedy_out.buffer, expected));
   EXPECT_EQ(read_total_supply(),
             static_cast<int128_t>(kAliceAmount + kBobAmount +
                                   kBootstrapFunding));
@@ -507,17 +480,18 @@ TEST_F(FaucetScenarioTest, DripFaucetEnforcesWindowBudgetAcrossCallers)
   EXPECT_EQ(read_balance(account_address(carol)), 0);
   EXPECT_EQ(read_total_supply(), 90);
 
-  // Block h0+2, still the same window: 10 remain. Carol retries with 10 and
-  // succeeds; Alice's further claim of 1 now overdraws *visibly* and is
-  // rejected by the contract itself (WalletError::CallAborted wrapping
-  // DripError::ExceedsWindowBudget), before any state is staged.
+  // With 10 left, Carol's 10 succeeds; Alice's 1 aborts with
+  // DripError::ExceedsWindowBudget, forwarded unchanged by the wallet.
   auto c2 = run_claim_tx(carol, drip_claim_call(10));
   EXPECT_EQ(c2.commit, ExecResult::ExecResultOK);
   EXPECT_EQ(read_balance(account_address(carol)), 10);
   auto a2 = run_claim_tx(alice, drip_claim_call(1));
   EXPECT_EQ(a2.status, InvocationFrameStatusCode::Abort);
-  EXPECT_EQ(wallet_error_of(a2.buffer),
-            std::optional(default_wallet::WalletError::CallAborted));
+  auto budget_error =
+      x23::serialize_cxs(uint64_t{0x950789fa428d60b9ULL},
+                         drip_faucet::DripError::ExceedsWindowBudget)
+          .value();
+  EXPECT_TRUE(std::ranges::equal(a2.buffer, budget_error));
   EXPECT_EQ(read_total_supply(), 100)
       << "the window's budget is exactly exhausted";
 
@@ -546,18 +520,14 @@ TEST_F(FaucetScenarioTest, DripFaucetEnforcesWindowBudgetAcrossCallers)
     return calls;
   }());
   EXPECT_EQ(batch.status, InvocationFrameStatusCode::Abort);
-  EXPECT_EQ(wallet_error_of(batch.buffer),
-            std::optional(default_wallet::WalletError::CallAborted));
+  EXPECT_TRUE(std::ranges::equal(batch.buffer, budget_error));
   EXPECT_EQ(read_balance(account_address(bob)), 30)
       << "the aborted batch must not mint anything";
   EXPECT_EQ(read_total_supply(), 200);
 }
 
-// A negative drip claim passes the faucet's own budget check (a negative
-// amount never exceeds what remains) and stages a capacity change before the
-// native token rejects the mint with NegativeAmount. The abort must discard
-// that staged change: after Alice takes 60 of the 100-unit window, a
-// claim(-50) or claim(INT128_MIN) leaves exactly 40 claimable, not 90.
+// Negative claims abort (NegativeAmount, or overflow for INT128_MIN), leaving
+// the window budget untouched: 40 claimable after Alice's 60.
 TEST_F(FaucetScenarioTest, DripFaucetNegativeClaimLeavesBudgetUnchanged)
 {
   make_ctx();
@@ -583,12 +553,23 @@ TEST_F(FaucetScenarioTest, DripFaucetNegativeClaimLeavesBudgetUnchanged)
   ASSERT_EQ(a1.commit, ExecResult::ExecResultOK);
   ASSERT_EQ(read_total_supply(), 60);
 
+  auto negative_amount_error =
+      x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+                         itc_erc20::ERC20Error::NegativeAmount)
+          .value();
+  auto overflow_error =
+      x23::serialize_cxs(kLibraryExceptionSelector,
+                         LibraryExn(
+                             LibraryExnKind::kLibraryExnNonNegativeIntOverflow))
+          .value();
   for (int128_t amount :
        {int128_t{-50}, std::numeric_limits<int128_t>::min()}) {
     auto negative = run_claim_tx(bob, drip_claim_call(amount));
     EXPECT_EQ(negative.status, InvocationFrameStatusCode::Abort);
-    EXPECT_EQ(wallet_error_of(negative.buffer),
-              std::optional(default_wallet::WalletError::CallAborted));
+    auto const &expected = amount == std::numeric_limits<int128_t>::min()
+                               ? overflow_error
+                               : negative_amount_error;
+    EXPECT_TRUE(std::ranges::equal(negative.buffer, expected));
     EXPECT_EQ(read_balance(account_address(bob)), 0);
     EXPECT_EQ(read_total_supply(), 60);
   }
@@ -600,8 +581,11 @@ TEST_F(FaucetScenarioTest, DripFaucetNegativeClaimLeavesBudgetUnchanged)
   EXPECT_EQ(read_balance(account_address(carol)), 40);
   auto c2 = run_claim_tx(carol, drip_claim_call(1));
   EXPECT_EQ(c2.status, InvocationFrameStatusCode::Abort);
-  EXPECT_EQ(wallet_error_of(c2.buffer),
-            std::optional(default_wallet::WalletError::CallAborted));
+  auto budget_error =
+      x23::serialize_cxs(uint64_t{0x950789fa428d60b9ULL},
+                         drip_faucet::DripError::ExceedsWindowBudget)
+          .value();
+  EXPECT_TRUE(std::ranges::equal(c2.buffer, budget_error));
   EXPECT_EQ(read_total_supply(), 100);
 }
 
