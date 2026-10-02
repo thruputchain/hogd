@@ -274,11 +274,9 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUnregisteredContractType)
                                                   cost_model_));
 }
 
-// A recovered tip can keep the native wallet's code hash while rewriting its
-// claimed type to the registered kRv32, recomputing the config hash so the
-// earlier guards pass. Startup must bind the claimed type to the decoded code
-// row and refuse the mismatch before a fallback reaches the rv32/native sink
-// (#4306).
+// A retained code hash with a rewritten kRv32 type and a recomputed config hash
+// passes the earlier guards, so startup must still refuse the type mismatch
+// against the decoded code row (#4306).
 TEST_F(RecoveredTipTest, RejectsDefaultWalletTypeMismatchingContractRow)
 {
   HogDbDAO db = reopen();

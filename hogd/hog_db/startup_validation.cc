@@ -63,11 +63,8 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
       critical("no contract stored for the tip's default wallet");
       return false;
     }
-    // The tip row is outside the state hash, so a tamper can keep an existing
-    // code hash while claiming a different registered type (#4306). A missing
-    // check lets a default-wallet fallback resolve the wrong runtime and reach
-    // an unrecoverable rv32/native type mismatch, so bind the claimed type to
-    // the decoded code row here.
+    // The tip row is outside the state hash, so a tamper can keep the code hash
+    // while rewriting the claimed type (#4306); bind it to the decoded row.
     Contract contract;
     try {
       x23::deserialize(&contract, x23::BufView{*code});
