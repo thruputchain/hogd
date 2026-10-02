@@ -95,7 +95,8 @@ public:
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
       int32_t error_code = 0);
 
-  x23::Async<void> clear_transaction_outcome(const TransactionHash &tx_hash);
+  x23::Async<void> clear_transaction_outcome_if_not_already_committed(
+      const TransactionHash &tx_hash);
 
   void get_txs_for_account(const ContractAddress &address,
                            TransactionHashBatch &tx_hashes,

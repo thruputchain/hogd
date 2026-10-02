@@ -453,11 +453,15 @@ Scheduler::record_transaction_outcome(
 
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
-    // The tx hash may already exist in the map if the tx was submitted again
-    // after an outcome was recorded. Note that even though [add_txs_helper()]
-    // calls [clear_transaction_outcome()], a tx can fail and therefore have an
-    // outcome recorded before it reaches the scheduler, such as if the tx fails
-    // authentication.
+    // Once a tx is committed, its committed outcome is never overwritten by a
+    // different outcome for a duplicate tx.
+    //
+    // On the other hand, if a tx fails, its failure outcome will be overwritten
+    // by the outcome for a duplicate tx that is submitted after.
+    if (it->second->outcome.status ==
+        SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+      co_return;
+    }
     transaction_outcomes_order_.erase(it->second);
     transaction_outcomes_.erase(it);
   }
@@ -485,13 +489,21 @@ Scheduler::record_transaction_outcome(
 }
 
 x23::Async<void>
-Scheduler::clear_transaction_outcome(const TransactionHash &tx_hash)
+Scheduler::clear_transaction_outcome_if_not_already_committed(
+    const TransactionHash &tx_hash)
 {
   x23::CoroGuard cg;
   co_await cg(transaction_outcomes_lock_);
 
   if (auto it = transaction_outcomes_.find(tx_hash);
-      it != transaction_outcomes_.end()) {
+      it != transaction_outcomes_.end() &&
+      // Once a tx is committed, its committed outcome is never overwritten by a
+      // different outcome for a duplicate tx.
+      //
+      // On the other hand, if a tx fails, its failure outcome will be
+      // overwritten by the outcome for a duplicate tx that is submitted after.
+      it->second->outcome.status !=
+          SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
     transaction_outcomes_order_.erase(it->second);
     transaction_outcomes_.erase(it);
   }
@@ -500,14 +512,6 @@ Scheduler::clear_transaction_outcome(const TransactionHash &tx_hash)
 x23::Async<SchedulerTransactionOutcome>
 Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 {
-  if (find_tx(tx_hash)) {
-    co_return SchedulerTransactionOutcome{
-        .status = SchedulerTransactionStatus::SchedulerTransactionPending,
-        .error_source =
-            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
-        .error_code = 0,
-    };
-  }
   co_await prune_transaction_outcomes();
 
   x23::CoroGuard cg;
@@ -516,6 +520,18 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
     co_return it->second->outcome;
+  }
+  cg.reset();
+
+  // We checked above that there is no existing recorded outcome for [tx_hash],
+  // so now we check if [tx_hash] is for a tx pending in the scheduler.
+  if (find_tx(tx_hash)) {
+    co_return SchedulerTransactionOutcome{
+        .status = SchedulerTransactionStatus::SchedulerTransactionPending,
+        .error_source =
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+        .error_code = 0,
+    };
   }
   co_return SchedulerTransactionOutcome{
       .status = SchedulerTransactionStatus::SchedulerTransactionNotFound,
@@ -531,6 +547,15 @@ x23::Async<bool>
 Scheduler::add_txs_helper(const SignedTransaction &tx,
                           const TransactionHash &tx_hash)
 {
+  // If a duplicate of [tx] has already been submitted and failed, its failed
+  // outcome is currently being stored. Once [tx] is enqueued, the "outcome"
+  // should be updated to a pending status. Thus, to ensure this pending outcome
+  // is reported properly, we clear any existing failed outcome for [tx]. Note
+  // that once a tx is committed, its committed outcome is never overwritten by
+  // a duplicate tx's outcome, which is why only a failed outcome is
+  // overwritten.
+  co_await clear_transaction_outcome_if_not_already_committed(tx_hash);
+
   const ContractAddress &account = tx.tx.invocation.invoked_address;
   const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
@@ -555,7 +580,6 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // perspective of anyone accessing the tx in [txs_].
     tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   }
-  co_await clear_transaction_outcome(tx_hash);
   co_return account_state->txs.insert({key, *tx_ptr}).second;
 }
 

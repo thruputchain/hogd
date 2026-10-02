@@ -139,23 +139,6 @@ transaction_status_for_exec(const ExecResult result)
   }
 }
 
-SchedulerTransactionStatus
-transaction_status_for_auth(const AuthErrorCode result)
-{
-  switch (result) {
-  case AuthErrorCode::kAuthSuccess:
-    return SchedulerTransactionStatus::SchedulerTransactionSucceeded;
-  case AuthErrorCode::kAuthFailed:
-    return SchedulerTransactionStatus::SchedulerTransactionDropped;
-  case AuthErrorCode::kAuthStaleBlockHeight:
-  case AuthErrorCode::kAuthInternal:
-    return SchedulerTransactionStatus::SchedulerTransactionRetry;
-  default:
-    CHECK(false);
-    return SchedulerTransactionStatus::SchedulerTransactionDropped;
-  }
-}
-
 template<typename T>
 x23::DagDeps
 dag_deps_from_nodes(const x23::Vec<x23::DagNode<T>> &nodes)
@@ -486,13 +469,6 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           }
           else {
             (*outcomes)[original_idx] = outcome;
-
-            co_await scheduler_->record_transaction_outcome(
-                /*tx_hash=*/(*tx_hashes)[i],
-                /*status=*/transaction_status_for_auth(code),
-                /*error_source=*/
-                SchedulerTransactionErrorSource::SchedulerTransactionErrorAuth,
-                /*error_code=*/static_cast<int32_t>(code));
             num_auth_failures++;
           }
         }
@@ -726,12 +702,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           if (code != AuthErrorCode::kAuthSuccess) {
-            co_await scheduler_->record_transaction_outcome(
-                /*tx_hash=*/(*tx_hashes)[i],
-                /*status=*/transaction_status_for_auth(code),
-                /*error_source=*/
-                SchedulerTransactionErrorSource::SchedulerTransactionErrorAuth,
-                /*error_code=*/static_cast<int32_t>(code));
             to_remove_indices.push_back(i);
           }
         }
@@ -3414,12 +3384,6 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      co_await scheduler_->record_transaction_outcome(
-          tx_hashes[i],
-          /*status=*/transaction_status_for_auth(code),
-          /*error_source=*/
-          SchedulerTransactionErrorSource::SchedulerTransactionErrorAuth,
-          /*error_code=*/static_cast<int32_t>(code));
       to_remove.push_back(tx_hashes[i]);
     }
   }
