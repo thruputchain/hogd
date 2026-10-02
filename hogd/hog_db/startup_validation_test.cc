@@ -232,9 +232,8 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
   }
 }
 
-// #4293: a tampered default_wallet.contract_type survives the recovery
-// round-trip (enums XDR-decode by cast) and the config-hash recompute, so
-// startup must reject it rather than serve it to dispatch.
+// A tampered default-wallet type must not survive the recovery round-trip
+// into a servable tip (#4293).
 TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUnregisteredContractType)
 {
   HogDbDAO db = reopen();

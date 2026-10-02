@@ -31,9 +31,8 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
     critical("tip configuration does not hash to its committed config hash");
     return false;
   }
-  // Reject a default-wallet type outside the registered runtime set: the tip
-  // row is excluded from the state hash, so a tampered type can arrive with a
-  // matching config hash and otherwise reach dispatch as Unrecoverable (#4293).
+  // The tip row is outside the state hash, so a tampered default-wallet type
+  // can pass the config hash and reach dispatch as Unrecoverable (#4293).
   bool registered_wallet_type = false;
   switch (tip.default_wallet.contract_type) {
   case ContractType::kNative:
