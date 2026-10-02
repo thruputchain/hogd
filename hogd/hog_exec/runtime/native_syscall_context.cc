@@ -32,9 +32,8 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   if (!status.has_value()) {
     co_return status.error();
   }
-  // Already proven affordable by the peek above. Match ordinary storage reads
-  // and the sibling write helper: the flat access cost on top of load_gas,
-  // which is zero once the view is loaded.
+  // Match ordinary storage reads and the sibling write helper: the flat access
+  // cost on top of load_gas, which is zero once the view is loaded.
   consume_gas(kStorageAccessCost + status->load_gas);
   co_return std::move(status->result);
 }

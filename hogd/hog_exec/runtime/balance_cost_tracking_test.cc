@@ -1696,11 +1696,9 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
                           ProposedTransaction{.signed_tx = handler_tx})());
 }
 
-// Regression for #4210: a two-gas child cannot pay a cold native-token balance
-// load, so it must fault *before* performing the load. The discriminator is a
-// second, funded read of the SAME address: if the starved read had loaded it
-// for free, this one would run warm and pay only the flat access cost; because
-// the starved read refused before loading, it still pays the full cold price.
+// Regression for #4210: an underfunded read must fault before loading; a later
+// funded read of the same address still pays the cold price (it would run warm
+// if the starved read had loaded it for free).
 TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
 {
   constexpr static ContractAddress kCallerAddr = make_contract_address(214);
