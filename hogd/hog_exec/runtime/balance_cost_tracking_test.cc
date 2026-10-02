@@ -1696,40 +1696,35 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
                           ProposedTransaction{.signed_tx = handler_tx})());
 }
 
-// Regression for #4210: an underfunded balance read must fault before loading,
-// so repeated starved reads stay cold faults while a funded read still pays.
+// Regression for #4210: a two-gas child cannot pay a cold native-token balance
+// load, so it must fault *before* performing the load. The discriminator is a
+// second, funded read of the SAME address: if the starved read had loaded it
+// for free, this one would run warm and pay only the flat access cost; because
+// the starved read refused before loading, it still pays the full cold price.
 TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
 {
   constexpr static ContractAddress kCallerAddr = make_contract_address(214);
   constexpr static ContractAddress kFreshAddr = make_contract_address(215);
-  constexpr static ContractAddress kFundedAddr = make_contract_address(216);
   constexpr static GasAmount kTwoGas = 2;
   constexpr static GasAmount kCappedCharge = kSyscallBaseCost + kTwoGas;
+  // The two reads of kFreshAddr, in order: starved then funded.
+  constexpr static std::array<GasAmount, 2> kGasLimits{kTwoGas, UINT64_MAX};
 
-  struct ReadPlan {
-    ContractAddress addr;
-    GasAmount gas_limit;
-  };
-  constexpr static std::array<ReadPlan, 3> kReads{
-      {{.addr = kFreshAddr, .gas_limit = kTwoGas},
-       {.addr = kFreshAddr, .gas_limit = kTwoGas},
-       {.addr = kFundedAddr, .gas_limit = UINT64_MAX}}};
-
-  std::array<GasAmount, kReads.size()> charges{};
-  std::array<InvocationFrameStatusCode, kReads.size()> statuses{};
+  std::array<GasAmount, kGasLimits.size()> charges{};
+  std::array<InvocationFrameStatusCode, kGasLimits.size()> statuses{};
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
       0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-        for (size_t i = 0; i < kReads.size(); ++i) {
-          auto calldata =
-              erc20_meta::make_calldata<u8"get_balance_of">(kReads[i].addr);
+        auto calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kFreshAddr);
+        for (size_t i = 0; i < kGasLimits.size(); ++i) {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
-              .gas_limit = kReads[i].gas_limit,
+              .gas_limit = kGasLimits[i],
               .flags = std::to_underlying(InvokeFlag::None),
           };
           CopyableInvokeOutputs outputs{};
@@ -1778,16 +1773,15 @@ TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
   auto handler = make_new_system_call_handler(tx, *runtime_context);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
-  // Starved reads stay cold faults and pay only the capped allowance.
-  for (size_t i = 0; i < 2; ++i) {
-    EXPECT_EQ(statuses[i], InvocationFrameStatusCode::Fault);
-    EXPECT_EQ(charges[i], kCappedCharge);
-    EXPECT_LT(charges[i], kDBRPCCost);
-  }
+  // The starved read faulted, paying only the capped child allowance.
+  EXPECT_EQ(statuses[0], InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(charges[0], kCappedCharge);
+  EXPECT_LT(charges[0], kDBRPCCost);
 
-  // The funded read did the cold load and paid for it.
-  EXPECT_EQ(statuses[2], InvocationFrameStatusCode::Return);
-  EXPECT_GE(charges[2], kDBRPCCost);
+  // The funded read of the same address still pays the cold-load price, proving
+  // the starved read did not load the key for free.
+  EXPECT_EQ(statuses[1], InvocationFrameStatusCode::Return);
+  EXPECT_GE(charges[1], kDBRPCCost);
 }
 
 // Regression for #4270: warm native-token balance reads skipped the flat
