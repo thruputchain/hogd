@@ -1883,9 +1883,7 @@ SystemCallHandler::set_storage_flags(StorageKeyContractData const &storage_key,
 StorageDeltaFlagSet
 SystemCallHandler::get_storage_flags(StorageKeyContractData const &storage_key)
 {
-  // Reading flags is metadata-only, so look them up across the frame stack
-  // without copying a (possibly large) parent-frame item view into the active
-  // frame.
+  // Metadata-only read: look up the flags without materializing the item.
   return invocation_frame_stack_.get_item_view_flags(storage_key);
 }
 
