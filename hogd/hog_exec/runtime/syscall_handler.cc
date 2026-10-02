@@ -1883,9 +1883,10 @@ SystemCallHandler::set_storage_flags(StorageKeyContractData const &storage_key,
 StorageDeltaFlagSet
 SystemCallHandler::get_storage_flags(StorageKeyContractData const &storage_key)
 {
-  auto const *item_view = invocation_frame_stack_.get_item_view(storage_key);
-  assert(item_view);
-  return item_view->flags();
+  // Reading flags is metadata-only, so look them up across the frame stack
+  // without copying a (possibly large) parent-frame item view into the active
+  // frame.
+  return invocation_frame_stack_.get_item_view_flags(storage_key);
 }
 
 void

@@ -15,6 +15,8 @@
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
+#include "hogd/hog_exec/runtime/item/item_view.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
@@ -385,6 +387,45 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
   // parent no longer owns the token (successful child keeps it)
   ASSERT_FALSE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
+}
+
+// Reading the storage flags for a key held in a parent frame is metadata-only:
+// it must return the flags without copying that frame's (possibly large) item
+// view into the active frame. See issue #4303.
+TEST_F(InvocationFrameTest, GetItemViewFlagsDoesNotMaterializeParentView)
+{
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+
+  constexpr auto kTokenAddress = make_test_address(1);
+  const auto key =
+      FrameItemKey::contract_data(kTokenAddress, StorageKeyContractData{7});
+  constexpr StorageDeltaFlagSet kExclusive =
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+  // The root frame stages a flagged bytestring write under its key.
+  ASSERT_TRUE(stack.start_frame(kTokenAddress, Calldata{}, 0, {}).has_value());
+  auto *view = stack.get_item_view(key);
+  ASSERT_TRUE(view->set(BytestringItem(Bytestring{0, 1, 2, 3})).has_value());
+  ASSERT_TRUE(view->set_flags(kExclusive).has_value());
+
+  // A child frame reads the flags. The lookup finds them in the parent frame,
+  // but leaves no view materialized in the active frame.
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(2), Calldata{}, 0, {}).has_value());
+  EXPECT_EQ(stack.get_item_view_flags(key), kExclusive);
+  EXPECT_FALSE(stack.active_frame_holds_item_view(key));
+
+  // A key that no frame holds reads as unflagged, still without materializing.
+  const auto absent =
+      FrameItemKey::contract_data(kTokenAddress, StorageKeyContractData{8});
+  EXPECT_EQ(stack.get_item_view_flags(absent),
+            std::to_underlying(StorageDeltaFlags::None));
+  EXPECT_FALSE(stack.active_frame_holds_item_view(absent));
+
+  // The materializing lookup, by contrast, does copy the parent view in.
+  EXPECT_NE(stack.get_item_view(key), nullptr);
+  EXPECT_TRUE(stack.active_frame_holds_item_view(key));
+  EXPECT_EQ(stack.get_item_view(key)->flags(), kExclusive);
 }
 
 } // namespace hogd

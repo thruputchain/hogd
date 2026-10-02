@@ -424,6 +424,23 @@ public:
   ItemView *get_item_view(AddressAndKey const &addrkey);
   ItemView *get_item_view(FrameItemKey const &key);
 
+  // Reads the storage flags for `key` without materializing a view in the
+  // active frame. Walks the frame stack from the active frame outward and
+  // returns the first matching view's flags, or None when no frame holds the
+  // key. Unlike get_item_view, a metadata-only flags read never copies a
+  // parent frame's (possibly large) item into the active frame.
+  StorageDeltaFlagSet get_item_view_flags(FrameItemKey const &key) const;
+  StorageDeltaFlagSet
+  get_item_view_flags(StorageKeyContractData const &data_key) const;
+
+  // Whether the active (top) frame already holds a materialized view for
+  // `key`, without walking parent frames or materializing one.
+  bool active_frame_holds_item_view(FrameItemKey const &key) const
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().get_item_view(key) != nullptr;
+  }
+
   // The frame key for `data_key` under the active frame's address, laid out
   // and hashed once. A syscall that may reach the snapshot cache builds this,
   // probes the frames with it, and hands the same key to UnmodifiedItem::load,
