@@ -187,6 +187,75 @@ TEST(Scheduler, AddVettedTxDuplicate)
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
+TEST(Scheduler, LatestFailedTransactionOutcomeWins)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
+  const TransactionHash tx_hash = sha256(tx.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(
+          SchedulerErrorCode::SchedulerErrorHogAgeUnavailable))();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({tx}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().status,
+            SchedulerTransactionStatus::SchedulerTransactionPending);
+
+  const TransactionHashBatch tx_hashes{tx_hash};
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(tx_hashes))();
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired))();
+
+  const SchedulerTransactionOutcome outcome =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionDropped);
+  EXPECT_EQ(
+      outcome.error_source,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler);
+  EXPECT_EQ(outcome.error_code,
+            static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
+}
+
+TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
+  const TransactionHash tx_hash = sha256(tx.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded)();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({tx}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired))();
+
+  const SchedulerTransactionOutcome outcome =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+}
+
 TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)
 {
   HogAge hog_age{};
