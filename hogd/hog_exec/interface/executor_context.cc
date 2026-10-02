@@ -233,27 +233,10 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
         .signed_tx = std::move(signed_tx),
         .nondeterministic_proposal_data = out.proposal_data(),
     };
-    // Use release ordering to ensure the event RPC spawn is visible to
-    // other threads before they see the incremented counter.
-    pending_event_calls_.fetch_add(1, std::memory_order_release);
-    // The release of the PerThreaadARC for this happens after the above
-    // fetch_add; hence, when finish_block() is called, the above change is
-    // visible.
-    //
-    // Furthermore, it is not possible that the acquire_reference() for this
-    // transaction could succeed if the PerThreadARC is in shutdown mode. (If
-    // someone sends a bunch of propose_transaction() calls and then immediately
-    // calls finish_block() without waiting for those, and uses different tcp
-    // connections so the calls aren't ordered, then some of those propose calls
-    // might still fail by failing to acquire a reference).
-    //
-    // Hence, once shutdown has started, the final cleanup owner can drain
-    // pending_event_calls_ before this ExecutorContext is destroyed.
-    syscall_handler->emit_events(exec_res, std::move(proposed_tx))(
-        [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res);
-          co_return;
-        });
+    if (!spawn_event_emission(*syscall_handler, exec_res,
+                              std::move(proposed_tx))) {
+      out = ExecProposeResult(ExecResult::ExecResultUnrecoverable);
+    }
   }
 
   co_return out;
@@ -308,18 +291,13 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
       exec_res == ExecResult::ExecResultTxRootFrameReverted) {
-    // Use release ordering to ensure the event RPC spawn is visible to
-    // other threads before they see the incremented counter.
-    pending_event_calls_.fetch_add(1, std::memory_order_release);
     // In validation mode the full body was given to us; move it into the event
     // coroutine (which owns it by value) rather than copying — [tx] is not
     // used again, so the attacker-influenced proposal body is never deep-copied
     // on this post-commit path.
-    syscall_handler->emit_events(exec_res, std::move(tx))(
-        [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res);
-          co_return void();
-        });
+    if (!spawn_event_emission(*syscall_handler, exec_res, std::move(tx))) {
+      exec_res = ExecResult::ExecResultUnrecoverable;
+    }
   }
   co_return exec_res;
 }
@@ -334,6 +312,38 @@ ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
       make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max()),
       make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
       query, *context, {});
+}
+
+bool
+ExecutorContext::spawn_event_emission(SystemCallHandler &handler,
+                                      ExecResult exec_res,
+                                      ProposedTransaction proposed_tx)
+{
+  // Release so the spawn is visible before other threads observe the bump; the
+  // PerThreadARC release is ordered after it, so finish_block()'s drain owner
+  // (reached once shutdown blocks new acquire_reference()s) sees this counter.
+  pending_event_calls_.fetch_add(1, std::memory_order_release);
+  // The ramp (emit_events -> event-server proxy -> x23::Async::operator())
+  // allocates frames via a throwing FramePromiseAlloc, and an exception
+  // escaping the x23-coroutine caller is fatal. Contain bad_alloc: roll the
+  // bump back and report failure, else await_event_return() hangs forever.
+  try {
+    handler.emit_events(exec_res, std::move(proposed_tx))(
+        [this](SystemStatus<void> res) -> x23::Detached {
+          log_event_return(res);
+          co_return;
+        });
+  } catch (std::bad_alloc const &e) {
+    pending_event_calls_.fetch_sub(1, std::memory_order_release);
+    // Formatting can throw too; fall back to the no-allocation reporter.
+    try {
+      error("Unrecoverable: event handoff allocation failed: {}", e.what());
+    } catch (...) {
+      report_dropped_log("event handoff allocation failure diagnostic");
+    }
+    return false;
+  }
+  return true;
 }
 
 void

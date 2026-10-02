@@ -22,6 +22,8 @@
 
 namespace hogd {
 
+class SystemCallHandler;
+
 // Context for executing transactions in a single block.
 // Maintains the block's snapshot cache and any other cached data.
 class ExecutorContext {
@@ -84,6 +86,12 @@ private:
 
   x23::Async<ExpectedViewResult>
   run_view_transaction(TransactionViewQuery const &query);
+
+  // Increment pending_event_calls_ and spawn the detached event-emission
+  // coroutine that later decrements it; returns false (after rolling the
+  // increment back) if the coroutine ramp fails to allocate.
+  bool spawn_event_emission(SystemCallHandler &handler, ExecResult exec_res,
+                            ProposedTransaction proposed_tx);
 
   void log_event_return(SystemStatus<void> error);
 
