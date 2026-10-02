@@ -1585,12 +1585,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   }
   if (last_committed_block_.value.proposal_header.block_height ==
       std::numeric_limits<BlockHeight>::max()) {
-    // The successor height below is block_height + 1. BlockHeight is signed, so
-    // at the maximum representable height that addition is UB, and no successor
-    // block can exist anyway. A recovered tip can carry a tampered maximum
-    // height -- the <DBTIP> row is global metadata, excluded from the state
-    // hash, so it survives recovery unchanged -- so reject it here before the
-    // nomination DAG evaluates height + 1 (issue #4291).
+    // No successor exists at the maximum height, and the height + 1 computation
+    // below would overflow the signed BlockHeight (issue #4291).
     error("Refusing to nominate: committed tip height {} is the maximum "
           "representable BlockHeight, so it has no successor",
           last_committed_block_.value.proposal_header.block_height);

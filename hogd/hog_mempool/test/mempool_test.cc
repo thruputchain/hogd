@@ -4458,12 +4458,8 @@ TEST(Mempool, OverCapBodyIsDroppedFromProposal)
   EXPECT_TRUE(nominated_hashes(proposed.proposed_block().proposal).empty());
 }
 
-// A recovered tip can carry a tampered maximum BlockHeight: the <DBTIP> row is
-// global metadata, excluded from the state hash, so a CRC-valid rewrite of just
-// the persisted height survives recovery. The successor height is height + 1,
-// and BlockHeight is signed, so proposing over such a tip used to evaluate
-// max() + 1 (signed overflow UB) before any downstream guard. Proposal setup
-// must reject the tip gracefully instead. See
+// A recovered tip at the maximum BlockHeight must be rejected during proposal
+// setup: its successor height would overflow the signed type. See
 // https://github.com/groundhogchain/hogd/issues/4291.
 TEST(Mempool, RecoveredMaximumHeightOverflowsDuringProposalSetup)
 {
