@@ -31,19 +31,15 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
     critical("tip configuration does not hash to its committed config hash");
     return false;
   }
-  // The tip row is outside the state hash, so a tampered default-wallet type
-  // can pass the config hash and reach dispatch as Unrecoverable (#4293).
-  bool registered_wallet_type = false;
+  // The tip row is outside the state hash, so a tampered type can pass the
+  // config hash (#4293); kMockTest is test-only, never a real default wallet.
   switch (tip.default_wallet.contract_type) {
   case ContractType::kNative:
-  case ContractType::kMockTest:
   case ContractType::kRv32:
-    registered_wallet_type = true;
     break;
-  }
-  if (!registered_wallet_type) {
-    critical("tip default wallet has an unregistered contract type {}",
-             tip.default_wallet.contract_type);
+  default:
+    error("tip default wallet has an unregistered contract type {}",
+          tip.default_wallet.contract_type);
     return false;
   }
   // Height 0 is exempt: a chain may name a wallet its genesis ceremony
