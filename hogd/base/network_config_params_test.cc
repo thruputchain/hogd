@@ -74,4 +74,13 @@ TEST(ConfigParamValueTest, ReadsTheArmTheParameterNames)
   }
 }
 
+TEST(NetworkConfigParamsTest, StatedDefaultsStatesEveryParameterAtItsDefault)
+{
+  const NetworkConfig config = NetworkConfigParams::stated_defaults();
+
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
+  EXPECT_EQ(config.v0().params.size(), kNames.size());
+  EXPECT_EQ(NetworkConfigParams(config.v0()), NetworkConfigParams{});
+}
+
 } // namespace hogd

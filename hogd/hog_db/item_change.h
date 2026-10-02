@@ -403,6 +403,15 @@ public:
 
   size_t count_active_keys() const;
 
+  // Whether this change registers a key in a slot while another slot of the
+  // table it produces (base_auth_data() with the change applied) holds the
+  // same key. Such a table would count one key's weight twice, so every
+  // reservation path refuses the change with DuplicateSigner. Only slots the
+  // change sets are checked: a duplicate already committed does not block
+  // changes that leave it alone, and a change that clears one copy while
+  // keeping the other is a move, not a duplicate.
+  bool introduces_duplicate_signer() const;
+
 private:
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
   std::optional<Weight> required_weight_change_;

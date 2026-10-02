@@ -78,7 +78,7 @@ public:
     auto used_bytes =
         x23::deserialize_cxs_from(&selector, x23::BufViewEnd{abort_buffer});
     if (!used_bytes) {
-      variant_ = ParseFailureType{std::move(abort_buffer)};
+      variant_ = RawAbortType{std::move(abort_buffer)};
       return;
     }
 
@@ -89,7 +89,7 @@ public:
         this->template try_dispatch_exceptions<LibraryException, T...>(
             selector, body_span);
     if (!matched) {
-      variant_ = ParseFailureType{std::move(abort_buffer)};
+      variant_ = RawAbortType{std::move(abort_buffer)};
     }
   }
 
@@ -101,9 +101,11 @@ public:
   {}
 
 private:
-  struct ParseFailureType {
+  struct RawAbortType {
     ReturnBuffer abort_buffer;
   };
+
+  explicit ContractErrorType(RawAbortType raw) : variant_(std::move(raw)) {}
 
   // `U` is `ContractException<Exn, Sel>` with `kSelector` and `exn`.
   //
@@ -141,13 +143,20 @@ private:
   }
 
 public:
+  // Forward an exception without decoding and re-encoding its body. Wallets
+  // use this after validating the selector, matching SDK RawExceptionRef.
+  static ContractErrorType from_raw_abort(ReturnBuffer abort_buffer)
+  {
+    return ContractErrorType(RawAbortType{std::move(abort_buffer)});
+  }
+
   // Re-serialize to (u64 selector, CXS body) format.
   x23::CxsStatus<ReturnBuffer> serialize() const
   {
     return std::visit(
         [](auto const &v) -> x23::CxsStatus<ReturnBuffer> {
           using V = std::remove_cvref_t<decltype(v)>;
-          if constexpr (std::is_same_v<V, ParseFailureType>) {
+          if constexpr (std::is_same_v<V, RawAbortType>) {
             return v.abort_buffer;
           }
           else {
@@ -161,7 +170,7 @@ public:
         variant_);
   }
 
-  std::variant<LibraryException, ParseFailureType, T...> variant_;
+  std::variant<LibraryException, RawAbortType, T...> variant_;
 };
 
 // Parse and work with result types returned by contract methods.

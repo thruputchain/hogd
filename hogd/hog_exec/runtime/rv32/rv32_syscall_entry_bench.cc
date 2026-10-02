@@ -98,7 +98,7 @@ constexpr uint32_t kMessageAddress = kPublicKeyAddress + kPublicKeyBytes;
 static_assert(kMessageAddress + kMaxMessageBytes <= kInputAddress,
               "VerifySignature's material must not run into the hashing input");
 // Hasher slots. HashBuffers caps live streams at the network config's
-// max_sha256_buffers (8 here), and Copy needs a distinct destination, so two
+// max_sha256_buffers, and Copy needs a distinct destination, so two
 // low indices are enough and stay well inside the cap.
 constexpr uint32_t kHashSlot = 0;
 constexpr uint32_t kHashSlotCopy = 1;

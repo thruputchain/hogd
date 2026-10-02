@@ -104,6 +104,12 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
         after->get()->base_auth_data() != base_auth_data_) {
       return ctx.conflict(DbConflictCode::ValueMismatch);
     }
+    // Refused before the lock is taken, so a rejected transaction leaves the
+    // address open to the next one in the block. The base matched above, so
+    // the change's own table is the one this lock would commit.
+    if (after->get()->introduces_duplicate_signer()) {
+      return ctx.conflict(DbConflictCode::DuplicateSigner);
+    }
     locked_ = true;
   }
   else {

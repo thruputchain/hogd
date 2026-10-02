@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -23,7 +24,8 @@
 #include <vector>
 
 #include "auth_claim.hh"
-#include "built_contracts/dev_wallet.h"
+#include "built_contracts/default_wallet.h"
+#include "built_contracts/default_wallet.hh"
 #include "built_contracts/itc_erc20.h"
 #include "exec_result.hh"
 #include "hogd/auth_claim/signature_preimage.h"
@@ -49,9 +51,9 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
-#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {
@@ -141,6 +143,7 @@ connect(const json::Value &manifest, std::string_view endpoint,
 
 struct Account {
   ContractAddress address;
+  Ed25519PublicKey public_key;
   Ed25519SecretKey secret;
 };
 
@@ -165,6 +168,7 @@ accounts_from_manifest(const json::Value &manifest)
             "bootstrap public key mismatch");
     accounts.push_back(
         {.address = hex_value<ContractAddress>(field(account, "walletAddress")),
+         .public_key = public_key,
          .secret = secret});
   }
   require(accounts.size() >= 2,
@@ -176,23 +180,30 @@ SignedTransaction
 make_transfer(const std::vector<Account> &accounts, size_t nonce,
               const NetworkHash &network)
 {
-  using wallet = ContractTraitMeta<dev_wallet::DevWallet>;
+  using wallet = ContractTraitMeta<default_wallet::DefaultWallet>;
   using token = ContractTraitMeta<itc_erc20::ERC20>;
   const auto &sender = accounts[nonce % accounts.size()];
   const auto &recipient = accounts[(nonce + 1) % accounts.size()];
-  Calldata action = x23::serialize(
-      kNativeTokenContractAddress, token::entrypoint<u8"transfer">(),
-      GasAmount{10'000'000},
-      token::make_calldata<u8"transfer">(recipient.address,
-                                         std::tuple<int64_t, uint64_t>{0, 1}));
-  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
-  claim.source_address_claim().allowed_keys = 1;
-  claim.source_address_claim().required_weight = 1;
+  x23::Vec<default_wallet::WalletCall, UINT32_MAX> calls{
+      default_wallet::WalletCall{
+          .target = kNativeTokenContractAddress,
+          .entrypoint = token::entrypoint<u8"transfer">(),
+          .gas_limit = 10'000'000,
+          .calldata = token::make_calldata<u8"transfer">(
+              recipient.address, std::tuple<int64_t, uint64_t>{0, 1}),
+      }};
+  // A bootstrap account is a standalone pubkey account with no on-chain auth
+  // data, so it authorizes itself with the preimage of its own address.
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  auto &preimage = claim.pubkey_preimage();
+  preimage.pubkey.scheme(CryptographicScheme::Ed25519);
+  preimage.pubkey.ed25519() = sender.public_key;
+  preimage.nonce = 0;
   Transaction tx{
       .invocation = {.invoked_address = sender.address,
-                     .entrypoint = wallet::entrypoint<u8"do_action">(),
+                     .entrypoint = wallet::entrypoint<u8"execute">(),
                      .gas_limit = GasAmount{10'000'000},
-                     .calldata = wallet::make_calldata<u8"do_action">(action)},
+                     .calldata = wallet::make_calldata<u8"execute">(calls)},
       .uniquifier = {.block_expiry_height = 10'000'000, .nonce = nonce},
       .auth_claim = claim,
   };
@@ -415,7 +426,7 @@ run_benchmark(int argc, char **argv)
     if (hogd_init(argc, argv, false, LogLevel::kError))
       return 2;
     auto manifest = read_manifest(argv[1]);
-    require(field(manifest, "schemaVersion").as_integer() == 2 &&
+    require(field(manifest, "schemaVersion").as_integer() == 3 &&
                 str(field(manifest, "kind")) == "hogd-dev-runtime" &&
                 str(field(manifest, "chainState")) == "fresh",
             "requires a fresh hog-devnode runtime manifest");

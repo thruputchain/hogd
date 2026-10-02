@@ -17,13 +17,11 @@
 #include <vector>
 
 #include "address_auth.hh"
-#include "auth_token.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/genesis_root.h"
 #include "built_contracts/genesis_root.hh"
 #include "contract.hh"
 #include "genesis.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -33,7 +31,6 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "precompiles.hh"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -125,52 +122,14 @@ load_stock_genesis_root_contract()
   return contract;
 }
 
-// max_new_contracts_per_tx for this repository's dev and test chains.
-constexpr uint32_t kStockMaxNewContractsPerTx = 4;
-
 NetworkConfig
 stock_network_config()
 {
-  // Values this repository's dev and test chains run under. They are a choice,
-  // not a protocol default: nothing inherits them, and a real chain passes its
-  // own to build(). Every parameter is stated outright rather than left to a
-  // node's default, so changing either is visible in the config hash.
-  NetworkConfig config;
-  config.v(0);
-  NetworkConfigParams::set_param(config,
-                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
-                                 8);
-  NetworkConfigParams::set_param(config,
-                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
-                                 256);
-  NetworkConfigParams::set_param(
-      config, ConfigParamID::kConfigParamMaxNewContractsPerTx,
-      kStockMaxNewContractsPerTx);
-  NetworkConfigParams::set_param(config,
-                                 ConfigParamID::kConfigParamMaxBytestringLen,
-                                 static_cast<uint32_t>(
-                                     kDefaultMaxBytestringLen));
-  NetworkConfigParams::set_param(
-      config, ConfigParamID::kConfigParamMaxContractSizeBytes,
-      static_cast<uint32_t>(kDefaultMaxContractSizeBytes));
-  NetworkConfigParams::set_param(config,
-                                 ConfigParamID::kConfigParamMaxSavepointDepth,
-                                 static_cast<uint32_t>(kMaxSavepointDepth));
-  NetworkConfigParams::set_param(
-      config, ConfigParamID::kConfigParamMaxSHA256BufferBytes,
-      static_cast<uint32_t>(kSHA256BufferMaxSize));
-  NetworkConfigParams::set_param(config,
-                                 ConfigParamID::kConfigParamMaxAuthTokenDepth,
-                                 static_cast<uint32_t>(kAuthTokenMaxDepth));
-  NetworkConfigParams::set_param(config,
-                                 ConfigParamID::kConfigParamMaxRv32CodeBytes,
-                                 static_cast<uint32_t>(
-                                     kDefaultMaxRv32CodeBytes));
-  NetworkConfigParams::set_param(config,
-                                 ConfigParamID::kConfigParamMaxRv32MemoryBytes,
-                                 static_cast<uint32_t>(
-                                     kDefaultMaxRv32MemoryBytes));
-  return config;
+  // This repository's dev and test chains run at the protocol defaults from
+  // network_config_params.h. Every parameter is stated outright rather than
+  // left to a node's default, so a change to any of them is visible in the
+  // config hash.
+  return NetworkConfigParams::stated_defaults();
 }
 
 GenesisConfiguration
@@ -286,7 +245,7 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
 
     // Fail where the artifact is built, not at a height-1 block the chain's
     // own rules refuse to execute.
-    if (contracts_to_deploy.size() > kStockMaxNewContractsPerTx) {
+    if (contracts_to_deploy.size() > kDefaultMaxNewContractsPerTx) {
       return std::unexpected(GenesisCeremonyError::kTooManyDistinctContracts);
     }
 
