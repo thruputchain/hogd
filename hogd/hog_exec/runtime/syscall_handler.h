@@ -160,8 +160,7 @@ public:
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
   // Testing-only: whether the active frame already holds a materialized view
-  // for `storage_key`. Lets a test confirm a metadata-only read, such as
-  // get_storage_flags, did not copy a parent-frame item into the active frame.
+  // for `storage_key`, to confirm a metadata-only read did not copy one in.
   bool active_frame_holds_storage_item(
       StorageKeyContractData const &storage_key) const
   {

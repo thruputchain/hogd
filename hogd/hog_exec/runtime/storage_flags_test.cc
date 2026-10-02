@@ -559,11 +559,8 @@ TEST_F(StorageFlagsTest, LaterWritesAndFramesKeepFlags)
             kExclusive);
 }
 
-// GetStorageFlags is metadata-only: a fresh sibling frame reads the flags an
-// earlier frame set without copying k's parent-frame item (its bytestring
-// payload) into the active frame (#4303). Guards the get_storage_flags path
-// itself, which the return-value checks above would not catch if it reverted
-// to the materializing lookup.
+// GetStorageFlags is metadata-only: reading a sibling frame's flags must not
+// copy k's parent-frame item into the active frame (#4303).
 TEST_F(StorageFlagsTest, GetStorageFlagsDoesNotCopyParentItem)
 {
   EXPECT_EQ(run_script({

@@ -390,9 +390,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 }
 
-// Reading the storage flags for a key held in a parent frame is metadata-only:
-// it must return the flags without copying that frame's (possibly large) item
-// view into the active frame. See issue #4303.
+// Reading a parent frame's storage flags must not copy its item view (#4303).
 TEST_F(InvocationFrameTest, GetItemViewFlagsDoesNotMaterializeParentView)
 {
   InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
