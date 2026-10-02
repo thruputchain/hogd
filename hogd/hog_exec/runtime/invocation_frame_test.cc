@@ -21,6 +21,7 @@
 #include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
