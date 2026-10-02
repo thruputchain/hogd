@@ -1,10 +1,13 @@
 #include "hogd/hog_db/startup_validation.h"
 
+#include <limits>
+
 #include "hogd/base/log.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -16,6 +19,14 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
   // persisted tip. Accepting it here reopens the genesis admission path.
   if (tip.value.proposal_header.block_height < 0) {
     critical("recovered tip has a negative committed block height");
+    return false;
+  }
+  // The successor height is block_height + 1, which must stay representable in
+  // the signed BlockHeight. A live chain never reaches this height, so it only
+  // appears on a tampered recovered tip (issue #4291).
+  if (tip.value.proposal_header.block_height ==
+      std::numeric_limits<BlockHeight>::max()) {
+    critical("recovered tip is at the maximum committed block height");
     return false;
   }
   // Ahead of make_config_hash_preimage, which CHECKs this.

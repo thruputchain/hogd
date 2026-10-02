@@ -232,6 +232,23 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
   }
 }
 
+// The successor height would overflow the signed BlockHeight, so the maximum
+// committed height is refused even though it is nonnegative (issue #4291).
+TEST_F(RecoveredTipTest, RejectsPersistedMaximumHeight)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  tip->value.proposal_header.block_height =
+      std::numeric_limits<BlockHeight>::max();
+  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+  ASSERT_TRUE(db.commit().has_value());
+  const auto recovered = db.read_dbtip();
+  ASSERT_TRUE(recovered.has_value());
+  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *recovered, cost_model_));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
