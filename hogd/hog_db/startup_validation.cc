@@ -9,6 +9,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -55,10 +56,31 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
   }
   // Height 0 is exempt: a chain may name a wallet its genesis ceremony
   // deploys in the height-1 block.
-  if (tip.value.proposal_header.block_height > 0 &&
-      !db.read_contract_code(tip.default_wallet.hash)) {
-    critical("no contract stored for the tip's default wallet");
-    return false;
+  if (tip.value.proposal_header.block_height > 0) {
+    const HogDbStatus<OwningSpan<const std::byte>> code =
+        db.read_contract_code(tip.default_wallet.hash);
+    if (!code) {
+      critical("no contract stored for the tip's default wallet");
+      return false;
+    }
+    // The tip row is outside the state hash, so a tamper can keep an existing
+    // code hash while claiming a different registered type (#4306). A missing
+    // check lets a default-wallet fallback resolve the wrong runtime and reach
+    // an unrecoverable rv32/native type mismatch, so bind the claimed type to
+    // the decoded code row here.
+    Contract contract;
+    try {
+      x23::deserialize(&contract, x23::BufView{*code});
+    } catch (const x23::XdrException &e) {
+      critical("tip default wallet code row does not decode as a contract: {}",
+               e.what());
+      return false;
+    }
+    if (contract.contract_type() != tip.default_wallet.contract_type) {
+      critical("tip default wallet code type {} does not match claimed type {}",
+               contract.contract_type(), tip.default_wallet.contract_type);
+      return false;
+    }
   }
   return true;
 }

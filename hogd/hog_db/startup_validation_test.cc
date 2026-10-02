@@ -273,6 +273,36 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUnregisteredContractType)
                                                   cost_model_));
 }
 
+// A recovered tip can keep the native wallet's code hash while rewriting its
+// claimed type to the registered kRv32, recomputing the config hash so the
+// earlier guards pass. Startup must bind the claimed type to the decoded code
+// row and refuse the mismatch before a fallback reaches the rv32/native sink
+// (#4306).
+TEST_F(RecoveredTipTest, RejectsDefaultWalletTypeMismatchingContractRow)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  tip->default_wallet.contract_type = ContractType::kRv32;
+  // Recompute so the config-hash guard passes and the type check is what bites.
+  tip->value.proposal_header.config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model_, tip->network_config,
+                                tip->default_wallet));
+  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  HogDbDAO recovered_db = reopen();
+  const HogDbStatus<DbTip> recovered = recovered_db.read_dbtip();
+  ASSERT_TRUE(recovered.has_value());
+  // The retained code row still decodes as the native wallet.
+  const HogDbStatus<OwningSpan<const std::byte>> code =
+      recovered_db.read_contract_code(recovered->default_wallet.hash);
+  ASSERT_TRUE(code.has_value());
+  EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
+                                                  cost_model_));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
