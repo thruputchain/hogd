@@ -49,6 +49,40 @@ AuthLock::build_result(BlockHeight block_height) const
 }
 
 bool
+AuthLock::introduces_duplicate_signer(AuthDataItem const &after) const
+{
+  // The key a slot holds once [after] is applied: its change where it has
+  // one, the committed key otherwise. Null for an empty slot.
+  auto effective = [&](size_t slot) -> PublicKeyConfig const * {
+    if (after.pk_changes_[slot].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      return after.pk_changes_[slot].value().get();
+    }
+    return base_auth_data_.public_keys[slot].get();
+  };
+
+  for (size_t slot = 0; slot < kMaxSigners; ++slot) {
+    if (!after.pk_changes_[slot].has_value()) {
+      continue;
+    }
+    PublicKeyConfig const *registered = effective(slot);
+    if (registered == nullptr) {
+      continue; // a clear introduces nothing
+    }
+    for (size_t other = 0; other < kMaxSigners; ++other) {
+      if (other == slot) {
+        continue;
+      }
+      PublicKeyConfig const *held = effective(other);
+      if (held != nullptr && held->key == registered->key) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool
 AuthLock::writes_row() const
 {
   if (row_exists_ || required_weight_change_.has_value()) {
@@ -103,6 +137,11 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
     if (after->get()->row_exists() != row_exists_ ||
         after->get()->base_auth_data() != base_auth_data_) {
       return ctx.conflict(DbConflictCode::ValueMismatch);
+    }
+    // Refused before the lock is taken, so a rejected transaction leaves the
+    // address open to the next one in the block.
+    if (introduces_duplicate_signer(*after->get())) {
+      return ctx.conflict(DbConflictCode::DuplicateSigner);
     }
     locked_ = true;
   }

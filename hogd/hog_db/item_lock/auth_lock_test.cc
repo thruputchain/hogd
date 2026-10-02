@@ -1,16 +1,19 @@
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "db_conflict.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/auth_lock.h"
 #include "hogd/hog_db/item_lock/concepts.h"
+#include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
 #include "x23/x23.h"
@@ -76,6 +79,15 @@ make_dummy_context()
   static HogDbDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
   return LockContext(dummy_dao, 0, dummy_key, &kTestCostModel);
+}
+
+// A context that records the DbConflictCode a refusal reports in [reason].
+inline LockContext
+make_reason_context(std::optional<DbConflictCode> &reason)
+{
+  LockContext ctx = make_dummy_context();
+  ctx.conflict_reason = &reason;
+  return ctx;
 }
 
 } // namespace
@@ -779,6 +791,100 @@ TEST(AuthLockTest, DISABLED_PartialRelease)
   EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &conflicting_tx,
                                            make_dummy_context())
                    .has_value());
+}
+
+// A change that registers, in one slot, the key the committed row holds in
+// another is refused as DuplicateSigner, and refused before the lock is
+// taken: a change registering a distinct key still reserves afterwards.
+TEST(AuthLockTest, RefusesAKeyAnotherSlotHolds)
+{
+  AddressAuthData base = make_base_auth_data({0});
+  AuthLock lock(base);
+
+  std::optional<DbConflictCode> reason;
+  LockContext ctx = make_reason_context(reason);
+
+  // Same key as slot 0, at a different weight: the weight does not matter.
+  auto duplicate = make_auth_item(base, {{1, make_test_pk_config(0, 7)}});
+  auto status = lock.try_atomic_change_lock(nullptr, &duplicate, ctx);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbError(HogDbCode::kConflict));
+  EXPECT_EQ(reason, DbConflictCode::DuplicateSigner);
+
+  auto distinct = make_auth_item(base, {{1, make_test_pk_config(1)}});
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &distinct, make_dummy_context())
+          .has_value());
+}
+
+// One change putting the same key in two slots is refused, with or without
+// a committed row.
+TEST(AuthLockTest, RefusesOneKeyInTwoSlotsOfOneChange)
+{
+  for (bool row_exists : {false, true}) {
+    // The lock sees the same table the change was built from: the empty
+    // committed row, or the defaults a missing row starts from.
+    PointerItem<AuthDataItem> duplicate =
+        row_exists ? make_auth_item(make_base_auth_data(), {})
+                   : PointerItem<AuthDataItem>(AuthDataItem::for_missing_row());
+    AuthLock lock(duplicate.get()->base_auth_data(), row_exists);
+
+    std::optional<DbConflictCode> reason;
+    LockContext ctx = make_reason_context(reason);
+
+    duplicate.get()->set_new_pk(0, make_test_pk_config(5));
+    duplicate.get()->set_new_pk(1, make_test_pk_config(5, 9));
+    auto status = lock.try_atomic_change_lock(nullptr, &duplicate, ctx);
+    ASSERT_FALSE(status.has_value()) << "row_exists=" << row_exists;
+    EXPECT_EQ(status.error(), HogDbError(HogDbCode::kConflict));
+    EXPECT_EQ(reason, DbConflictCode::DuplicateSigner);
+  }
+}
+
+// Re-registering a slot's own key (a weight change) and moving a key to
+// another slot in one change both leave each key in one slot, so both are
+// allowed.
+TEST(AuthLockTest, AllowsReweightingAndMovingAKey)
+{
+  AddressAuthData base = make_base_auth_data({0});
+  AuthLock lock(base);
+
+  auto reweight = make_auth_item(base, {{0, make_test_pk_config(0, 250)}});
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &reweight, make_dummy_context())
+          .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&reweight, nullptr, make_dummy_context())
+          .has_value());
+
+  auto move = make_auth_item(base, {{0, nullptr}, {1, make_test_pk_config(0)}});
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &move, make_dummy_context())
+                  .has_value());
+}
+
+// A duplicate already committed does not block changes that leave it alone,
+// but a change adding a third copy of that key is refused.
+TEST(AuthLockTest, CommittedDuplicateBlocksOnlyFurtherCopies)
+{
+  AddressAuthData base = make_base_auth_data();
+  base.public_keys[0] = make_test_pk_config(3);
+  base.public_keys[1] = make_test_pk_config(3);
+  AuthLock lock(base);
+
+  auto unrelated = make_auth_item(base, {{2, make_test_pk_config(4)}});
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &unrelated, make_dummy_context())
+          .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&unrelated, nullptr, make_dummy_context())
+          .has_value());
+
+  std::optional<DbConflictCode> reason;
+  LockContext ctx = make_reason_context(reason);
+  auto third = make_auth_item(base, {{2, make_test_pk_config(3)}});
+  auto status = lock.try_atomic_change_lock(nullptr, &third, ctx);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(reason, DbConflictCode::DuplicateSigner);
 }
 
 } // namespace hogd

@@ -59,6 +59,15 @@ private:
   size_t count_active_keys() const;
   int128_t committed_cost(const StorageCostModel &cost_model) const;
 
+  // Whether [after] registers a key in a slot while another slot of the
+  // table it produces (the committed row with [after] applied) holds the
+  // same key. Such a table would count one key's weight twice, so
+  // try_atomic_change_lock refuses the change with DuplicateSigner. Only
+  // slots [after] sets are checked: a duplicate already committed does not
+  // block changes that leave it alone, and a change that clears one copy
+  // while keeping the other is a move, not a duplicate.
+  bool introduces_duplicate_signer(AuthDataItem const &after) const;
+
   AddressAuthData base_auth_data_;
   bool row_exists_;
   x23::TestLock lock_;
