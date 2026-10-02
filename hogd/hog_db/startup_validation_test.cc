@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -301,6 +302,28 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletTypeMismatchingContractRow)
                   .has_value());
   EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
                                                   cost_model_));
+}
+
+// A wallet code row that cannot be decoded as a Contract is corrupt recovered
+// state. Startup must reject the tip rather than let the decode error escape
+// into the first default-wallet fallback (#4306).
+TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUndecodableContractRow)
+{
+  HogDbDAO db = reopen();
+  const HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  // Overwrite the native wallet's code row with bytes too short to decode as a
+  // Contract, leaving the config-hash-committed native metadata in place.
+  constexpr std::array<std::byte, 3> kTruncatedContractXdr{std::byte{0},
+                                                           std::byte{0},
+                                                           std::byte{0}};
+  ASSERT_TRUE(db.write_contract_code(native_default_wallet_hash().hash,
+                                     kTruncatedContractXdr)
+                  .has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *tip, cost_model_));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
