@@ -600,6 +600,72 @@ TEST_F(DatabaseTest, RecoveryRejectsSnapshotWithMaxEndLsn)
   EXPECT_EQ(opened.error(), DBCode::kCorruption);
 }
 
+// The highest usable LSN is UINT64_MAX - 1, so recovery accepts a snapshot
+// ending there, but the writer then refuses to mint UINT64_MAX and fails the
+// next sync closed rather than wrapping to zero. Reader and writer agree on the
+// boundary, and no state is silently lost (#4297).
+TEST_F(DatabaseTest, WriterRefusesToMintMaxLsnAfterRecovery)
+{
+  constexpr std::string_view kKey = "sentinel-key";
+  constexpr std::string_view kValue = "sentinel-value";
+  constexpr uint64_t kMaxUsableLsn = std::numeric_limits<uint64_t>::max() - 1;
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(kKey)), 0,
+                       std::as_bytes(std::span(kValue))));
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_EQ(snapshot->first, 1U);
+  ASSERT_TRUE(snapshot->second.get());
+  db_.reset();
+
+  // Rewrite the snapshot's commit header to claim lsn UINT64_MAX - 2 (so it
+  // matches an end_lsn of UINT64_MAX - 1), then recompute the trailing CRC32C
+  // so the record stays structurally valid.
+  {
+    ErrnoStatus<struct stat> st = dir_.stat("0-1.snap");
+    ASSERT_TRUE(static_cast<bool>(st));
+    ErrnoStatus<File> file = dir_.openat("0-1.snap", O_RDWR);
+    ASSERT_TRUE(static_cast<bool>(file));
+    std::vector<std::byte> bytes(static_cast<size_t>(st->st_size));
+    ASSERT_TRUE(static_cast<bool>(read_full(*file, bytes)));
+
+    const size_t commit_offset =
+        bytes.size() - sizeof(ItemHeader) - sizeof(uint32_t);
+    ItemHeader commit_header;
+    std::memcpy(&commit_header, bytes.data() + commit_offset,
+                sizeof(commit_header));
+    ASSERT_EQ(commit_header.storage, ItemStorage::kCommit);
+    commit_header.lsn = kMaxUsableLsn - 1;
+    std::memcpy(bytes.data() + commit_offset, &commit_header,
+                sizeof(commit_header));
+
+    uint32_t crc = cpu_to_le(crc32c(
+        std::span<const std::byte>(bytes).first(bytes.size() - sizeof(crc))));
+    std::memcpy(bytes.data() + bytes.size() - sizeof(crc), &crc, sizeof(crc));
+
+    ASSERT_TRUE(static_cast<bool>(file->lseek(0, SEEK_SET)));
+    ASSERT_TRUE(static_cast<bool>(write_full(*file, bytes)));
+    ASSERT_TRUE(static_cast<bool>(file->sync()));
+  }
+
+  ASSERT_TRUE(static_cast<bool>(
+      dir_.rename("0-1.snap", std::format("0-{}.snap", kMaxUsableLsn))));
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+
+  // Recovery accepts the snapshot (end_lsn == UINT64_MAX - 1 is usable).
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  ASSERT_TRUE(db_->get(std::as_bytes(std::span(kKey))));
+
+  // The next write must fail closed rather than mint UINT64_MAX.
+  constexpr std::string_view kHonestKey = "honest-key";
+  constexpr std::string_view kHonestValue = "honest-value";
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(kHonestKey)), 0,
+                       std::as_bytes(std::span(kHonestValue))));
+  DBStatus<uint64_t> synced = db_->sync();
+  ASSERT_FALSE(synced);
+  EXPECT_EQ(synced.error(), DBCode::kIO);
+}
+
 TEST_F(DatabaseTest, Compact)
 {
   insert_n(kInsertions);

@@ -476,8 +476,9 @@ load_log_file(
         }
       }
       // A snapshot commits at end_lsn - 1; reject anything else, including a
-      // zero end_lsn (#4229) or a UINT64_MAX end_lsn (#4297) whose successor
-      // would wrap cur_lsn to zero.
+      // zero end_lsn whose successor would wrap to zero (#4229) or a UINT64_MAX
+      // end_lsn that the writer never mints and that would strand recovery at
+      // the last usable LSN (#4297).
       else if (file.end_lsn_exclusive_ == 0 ||
                file.end_lsn_exclusive_ ==
                    std::numeric_limits<uint64_t>::max() ||
