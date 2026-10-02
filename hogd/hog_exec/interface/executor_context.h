@@ -87,11 +87,16 @@ private:
   x23::Async<ExpectedViewResult>
   run_view_transaction(TransactionViewQuery const &query);
 
-  // Increment pending_event_calls_ and spawn the detached event-emission
-  // coroutine that later decrements it; returns false (after rolling the
-  // increment back) if the coroutine ramp fails to allocate.
-  bool spawn_event_emission(SystemCallHandler &handler, ExecResult exec_res,
+  // Bump pending_event_calls_ and spawn emit_and_release; on spawn-allocation
+  // failure, record a block-level event error and release the counter.
+  void spawn_event_emission(SystemCallHandler &handler, ExecResult exec_res,
                             ProposedTransaction proposed_tx);
+
+  // Detached coroutine: emit the committed transaction's events, then release
+  // the pending-event ledger via log_event_return once they return.
+  x23::Detached emit_and_release(SystemCallHandler &handler,
+                                 ExecResult exec_res,
+                                 ProposedTransaction proposed_tx);
 
   void log_event_return(SystemStatus<void> error);
 

@@ -221,22 +221,13 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
       exec_res == ExecResult::ExecResultTxRootFrameReverted) {
-    // Assemble the full transaction body forwarded to the event server: the
-    // SignedTransaction we executed plus the nondeterministic data this
-    // proposal produced (already captured into [out] above). Move signed_tx
-    // in — it is not used again — so the event coroutine, which owns the body
-    // by value, never has to deep-copy the attacker-influenced signed_tx; only
-    // proposal_data is copied, and it is bounded and also needed in [out].
-    // Building this before the pending-counter increment keeps any allocation
-    // failure here from leaving the counter unbalanced.
+    // Move signed_tx (unused after this) so the attacker-influenced tx is not
+    // deep-copied into the event coroutine's body.
     ProposedTransaction proposed_tx{
         .signed_tx = std::move(signed_tx),
         .nondeterministic_proposal_data = out.proposal_data(),
     };
-    if (!spawn_event_emission(*syscall_handler, exec_res,
-                              std::move(proposed_tx))) {
-      out = ExecProposeResult(ExecResult::ExecResultUnrecoverable);
-    }
+    spawn_event_emission(*syscall_handler, exec_res, std::move(proposed_tx));
   }
 
   co_return out;
@@ -291,13 +282,9 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
       exec_res == ExecResult::ExecResultTxRootFrameReverted) {
-    // In validation mode the full body was given to us; move it into the event
-    // coroutine (which owns it by value) rather than copying — [tx] is not
-    // used again, so the attacker-influenced proposal body is never deep-copied
-    // on this post-commit path.
-    if (!spawn_event_emission(*syscall_handler, exec_res, std::move(tx))) {
-      exec_res = ExecResult::ExecResultUnrecoverable;
-    }
+    // [tx] is unused after this; move it so the attacker-influenced proposal
+    // body is never deep-copied into the event coroutine.
+    spawn_event_emission(*syscall_handler, exec_res, std::move(tx));
   }
   co_return exec_res;
 }
@@ -314,36 +301,33 @@ ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
       query, *context, {});
 }
 
-bool
+x23::Detached
+ExecutorContext::emit_and_release(SystemCallHandler &handler,
+                                  ExecResult exec_res,
+                                  ProposedTransaction proposed_tx)
+{
+  // co_await keeps the event coroutine owned here (so a later allocation can't
+  // destroy it mid-flight); log_event_return then releases the ledger.
+  log_event_return(
+      co_await handler.emit_events(exec_res, std::move(proposed_tx)));
+}
+
+void
 ExecutorContext::spawn_event_emission(SystemCallHandler &handler,
                                       ExecResult exec_res,
                                       ProposedTransaction proposed_tx)
 {
-  // Release so the spawn is visible before other threads observe the bump; the
-  // PerThreadARC release is ordered after it, so finish_block()'s drain owner
-  // (reached once shutdown blocks new acquire_reference()s) sees this counter.
+  // Release: the bump must be visible before other threads see it; finish_block
+  // drains the ledger at shutdown once acquire_reference() starts failing.
   pending_event_calls_.fetch_add(1, std::memory_order_release);
-  // The ramp (emit_events -> event-server proxy -> x23::Async::operator())
-  // allocates frames via a throwing FramePromiseAlloc, and an exception
-  // escaping the x23-coroutine caller is fatal. Contain bad_alloc: roll the
-  // bump back and report failure, else await_event_return() hangs forever.
+  // The ramp allocates before anything is in flight, so on bad_alloc record a
+  // block event error and release the ledger; deeper failures stay fatal.
   try {
-    handler.emit_events(exec_res, std::move(proposed_tx))(
-        [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res);
-          co_return;
-        });
-  } catch (std::bad_alloc const &e) {
-    pending_event_calls_.fetch_sub(1, std::memory_order_release);
-    // Formatting can throw too; fall back to the no-allocation reporter.
-    try {
-      error("Unrecoverable: event handoff allocation failed: {}", e.what());
-    } catch (...) {
-      report_dropped_log("event handoff allocation failure diagnostic");
-    }
-    return false;
+    emit_and_release(handler, exec_res, std::move(proposed_tx));
+  } catch (std::bad_alloc const &) {
+    log_event_return(
+        SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}});
   }
-  return true;
 }
 
 void
