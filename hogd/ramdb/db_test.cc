@@ -538,9 +538,8 @@ TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
   EXPECT_EQ(file_size(), committed_size);
 }
 
-// Recovery must reject a snapshot claiming end_lsn == UINT64_MAX: no minted LSN
-// reaches it, and recovering there would wrap the next LSN to zero and lose
-// state on reopen (#4297).
+// Recovery rejects a snapshot claiming end_lsn == UINT64_MAX, which no minted
+// LSN reaches (#4297).
 TEST_F(DatabaseTest, RecoveryRejectsSnapshotWithMaxEndLsn)
 {
   constexpr std::string_view kKey = "sentinel-key";
@@ -555,9 +554,7 @@ TEST_F(DatabaseTest, RecoveryRejectsSnapshotWithMaxEndLsn)
   ASSERT_TRUE(snapshot->second.get());
   db_.reset();
 
-  // Rewrite the snapshot's commit header to claim lsn UINT64_MAX - 1 (so it
-  // matches an end_lsn of UINT64_MAX), then recompute the trailing CRC32C so
-  // the record stays structurally valid.
+  // Rewrite the commit header's lsn to UINT64_MAX - 1 and fix up the CRC32C.
   {
     ErrnoStatus<struct stat> st = dir_.stat("0-1.snap");
     ASSERT_TRUE(static_cast<bool>(st));
@@ -600,10 +597,8 @@ TEST_F(DatabaseTest, RecoveryRejectsSnapshotWithMaxEndLsn)
   EXPECT_EQ(opened.error(), DBCode::kCorruption);
 }
 
-// The highest usable LSN is UINT64_MAX - 1, so recovery accepts a snapshot
-// ending there, but the writer then refuses to mint UINT64_MAX and fails the
-// next sync closed rather than wrapping to zero. Reader and writer agree on the
-// boundary, and no state is silently lost (#4297).
+// end_lsn == UINT64_MAX - 1 recovers, but the next sync fails closed rather
+// than minting UINT64_MAX (#4297).
 TEST_F(DatabaseTest, WriterRefusesToMintMaxLsnAfterRecovery)
 {
   constexpr std::string_view kKey = "sentinel-key";
@@ -618,9 +613,7 @@ TEST_F(DatabaseTest, WriterRefusesToMintMaxLsnAfterRecovery)
   ASSERT_TRUE(snapshot->second.get());
   db_.reset();
 
-  // Rewrite the snapshot's commit header to claim lsn UINT64_MAX - 2 (so it
-  // matches an end_lsn of UINT64_MAX - 1), then recompute the trailing CRC32C
-  // so the record stays structurally valid.
+  // Rewrite the commit header's lsn to UINT64_MAX - 2 and fix up the CRC32C.
   {
     ErrnoStatus<struct stat> st = dir_.stat("0-1.snap");
     ASSERT_TRUE(static_cast<bool>(st));

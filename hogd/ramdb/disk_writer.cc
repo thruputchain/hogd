@@ -201,10 +201,8 @@ DiskWriter::sync()
 
   std::unique_lock ul(to_disk_lock_);
 
-  // The highest usable LSN is UINT64_MAX - 1: recovery rejects a snapshot
-  // ending at UINT64_MAX, so the writer must never mint it (nor wrap past it).
-  // Fail closed here, before draining any head, so the sync fails atomically
-  // (#4297).
+  // UINT64_MAX - 1 is the highest usable LSN (recovery rejects a snapshot
+  // ending at UINT64_MAX); fail closed before draining any head (#4297).
   if (cur_lsn_ >= std::numeric_limits<uint64_t>::max() - 1) {
     error("LSN space exhausted; refusing to mint UINT64_MAX");
     return DBError(DBCode::kIO);
