@@ -14,6 +14,7 @@
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
+#include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_gateway.hh"
 #include "transaction.hh"
@@ -99,7 +100,7 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
 }
@@ -141,7 +142,7 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
 
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
@@ -185,6 +186,75 @@ TEST(Scheduler, AddVettedTxDuplicate)
   EXPECT_EQ(duplicate[0],
             SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
+}
+
+TEST(Scheduler, LatestFailedTransactionOutcomeWins)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
+  const TransactionHash tx_hash = sha256(tx.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(
+          SchedulerErrorCode::SchedulerErrorHogAgeUnavailable))();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({tx}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().status,
+            SchedulerTransactionStatus::SchedulerTransactionPending);
+
+  const TransactionHashBatch tx_hashes{tx_hash};
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(tx_hashes))();
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired))();
+
+  const SchedulerTransactionOutcome outcome =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionDropped);
+  EXPECT_EQ(
+      outcome.error_source,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler);
+  EXPECT_EQ(outcome.error_code,
+            static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
+}
+
+TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
+  const TransactionHash tx_hash = sha256(tx.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded)();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({tx}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired))();
+
+  const SchedulerTransactionOutcome outcome =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
 }
 
 TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)
@@ -232,7 +302,7 @@ TEST(Scheduler, Single)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
+  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestInfra::kAccountAddresses[0]);
@@ -272,7 +342,7 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
   scheduler->start_pending_nomination(/*block_id=*/1);
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
 
   auto [during_nomination, during_lock] =
@@ -283,7 +353,7 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
             0UL);
   during_lock.unlock();
 
-  scheduler->commit_pending_nomination(/*block_id=*/1);
+  scheduler->commit_pending_nomination(/*block_id=*/1)();
 
   auto [after_commit, after_lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(after_commit->num_hogs[kHogAgeGroupToSchedule]),
@@ -322,7 +392,7 @@ TEST(Scheduler, PendingNominationExcludesUnschedulableAccountAcrossSchedules)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 1UL);
@@ -330,14 +400,14 @@ TEST(Scheduler, PendingNominationExcludesUnschedulableAccountAcrossSchedules)
   scheduled_hashes.clear();
   scheduled.clear();
   // Check that no tx is scheduled.
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 1UL);
 
-  scheduler->commit_pending_nomination(/*block_id=*/1);
+  scheduler->commit_pending_nomination(/*block_id=*/1)();
 
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[2]);
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -370,7 +440,7 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -381,14 +451,14 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
   scheduled_hashes.clear();
   scheduled.clear();
   // Check that no tx is scheduled.
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 1UL);
 
-  scheduler->abandon_pending_nomination(/*block_id=*/1);
+  scheduler->abandon_pending_nomination(/*block_id=*/1)();
 
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[2]);
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -424,7 +494,7 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   // txs[0] is nominated; txs[1] is over budget, so [account] is excluded from
   // the block and dropped from [ready_accounts_] for the rest of the block.
   ASSERT_EQ(scheduled.size(), 1UL);
@@ -439,7 +509,7 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
 
   scheduled_hashes.clear();
   scheduled.clear();
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled.empty()); // still excluded
 
   // Commit a block that touches the excluded account's runqueue tx.
@@ -487,7 +557,7 @@ TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 1UL);
@@ -498,7 +568,7 @@ TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
   committed.push_back(sha256(txs[2].tx));
   scheduler->remove_from_scheduler(
       x23::span<const TransactionHash>(committed))();
-  scheduler->abandon_pending_nomination(/*block_id=*/1);
+  scheduler->abandon_pending_nomination(/*block_id=*/1)();
 
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
@@ -507,7 +577,7 @@ TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
   scheduler->add_txs({txs[3]}, hash_txs({txs[3]}))();
   scheduled_hashes.clear();
   scheduled.clear();
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[3]);
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -544,7 +614,7 @@ TEST(Scheduler, ValidatedCommitAfterUnaffordableHeadTxLeavesAccountReady)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 1UL);
   ASSERT_NE(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
@@ -553,7 +623,7 @@ TEST(Scheduler, ValidatedCommitAfterUnaffordableHeadTxLeavesAccountReady)
   committed.push_back(sha256(txs[1].tx));
   scheduler->remove_from_scheduler(
       x23::span<const TransactionHash>(committed))();
-  scheduler->abandon_pending_nomination(/*block_id=*/1);
+  scheduler->abandon_pending_nomination(/*block_id=*/1)();
 
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
@@ -561,7 +631,7 @@ TEST(Scheduler, ValidatedCommitAfterUnaffordableHeadTxLeavesAccountReady)
   scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
   scheduled_hashes.clear();
   scheduled.clear();
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[2]);
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -790,7 +860,7 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
 
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
@@ -847,7 +917,7 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   // Nominate a block.
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(sha256(scheduled.front().tx), sha256(txs[1].tx));
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -884,7 +954,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
@@ -907,7 +977,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   EXPECT_EQ(scheduled_hashes.size(), 2UL);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
@@ -921,7 +991,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
 
   scheduled_hashes.clear();
   scheduled.clear();
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
@@ -940,7 +1010,7 @@ TEST(Scheduler, ReenqueueTxs)
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 2UL);
   EXPECT_EQ(scheduler->size(), 0UL);
 
@@ -996,14 +1066,14 @@ TEST(Scheduler, Fairness)
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::XdrVec<TransactionHash> scheduled_hashes;
     x23::XdrVec<SignedTransaction> scheduled;
-    scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
+    scheduler->schedule(kBlockSize, scheduled_hashes, scheduled)();
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
 
     // We simulate committing the block by increment the current block number in
     // the scheduler.
-    scheduler->increment_current_block();
+    scheduler->increment_current_block()();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -1071,13 +1141,13 @@ TEST(Scheduler, FairnessAcrossBlocks)
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::XdrVec<TransactionHash> scheduled_hashes;
     x23::XdrVec<SignedTransaction> scheduled;
-    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
 
     // We simulate committing the block by increment the current block number in
     // the scheduler.
-    scheduler->increment_current_block();
+    scheduler->increment_current_block()();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -1146,7 +1216,7 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
     x23::XdrVec<SignedTransaction> scheduled;
     // Ensure that this does not trigger a CHECK in the scheduler (see issue
     // #1474).
-    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   }
 }
 

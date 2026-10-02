@@ -3310,6 +3310,29 @@ unregistered_signer()
 
 } // namespace
 
+TEST(Mempool, AuthenticationFailureIsNotRecorded)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  register_single_signer(server, txs[0].tx);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      server.mempool_coord_rpc().submit_unvetted_with_outcomes(
+          t_to_parallel_batch(txs)())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(
+      outcomes[0],
+      SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected);
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .scheduler()
+                ->lookup_transaction_outcome(tx_hash)()
+                .status,
+            SchedulerTransactionStatus::SchedulerTransactionNotFound);
+}
+
 // The property the whole design rests on: [TransactionHash] covers
 // [Transaction] and nothing else, so no manipulation of the signatures can
 // change it. That is what makes a signature-keyed verdict stored under a
