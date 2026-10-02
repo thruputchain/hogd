@@ -295,10 +295,10 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletTypeMismatchingContractRow)
   HogDbDAO recovered_db = reopen();
   const HogDbStatus<DbTip> recovered = recovered_db.read_dbtip();
   ASSERT_TRUE(recovered.has_value());
-  // The retained code row still decodes as the native wallet.
-  const HogDbStatus<OwningSpan<const std::byte>> code =
-      recovered_db.read_contract_code(recovered->default_wallet.hash);
-  ASSERT_TRUE(code.has_value());
+  // The native wallet's code row is still present under the retained hash, so
+  // the rejection is the type mismatch rather than a missing row.
+  ASSERT_TRUE(recovered_db.read_contract_code(recovered->default_wallet.hash)
+                  .has_value());
   EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
                                                   cost_model_));
 }

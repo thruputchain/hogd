@@ -10,6 +10,7 @@
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -57,8 +58,7 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
   // Height 0 is exempt: a chain may name a wallet its genesis ceremony
   // deploys in the height-1 block.
   if (tip.value.proposal_header.block_height > 0) {
-    const HogDbStatus<OwningSpan<const std::byte>> code =
-        db.read_contract_code(tip.default_wallet.hash);
+    const auto code = db.read_contract_code(tip.default_wallet.hash);
     if (!code) {
       critical("no contract stored for the tip's default wallet");
       return false;
