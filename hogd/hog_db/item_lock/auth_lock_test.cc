@@ -13,6 +13,7 @@
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/auth_lock.h"
 #include "hogd/hog_db/item_lock/concepts.h"
+#include "hogd/hog_db/item_lock/exclusive_lock.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
@@ -885,6 +886,36 @@ TEST(AuthLockTest, CommittedDuplicateBlocksOnlyFurtherCopies)
   auto status = lock.try_atomic_change_lock(nullptr, &third, ctx);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(reason, DbConflictCode::DuplicateSigner);
+}
+
+// An exclusive reservation refuses a duplicate too: ExclusiveLock prices the
+// change without an AuthLock, and a refusal left to the commit's admission
+// would come after the transaction's balance changes committed.
+TEST(AuthLockTest, ExclusiveReservationRefusesADuplicateSigner)
+{
+  AddressAuthData base = make_base_auth_data({0});
+
+  AuthDataItem duplicate(base);
+  duplicate.set_new_pk(1, make_test_pk_config(0, 7));
+  ItemChange duplicate_change(std::move(duplicate));
+  duplicate_change.set_permanent_exclusive();
+
+  std::optional<DbConflictCode> reason;
+  LockContext ctx = make_reason_context(reason);
+  ExclusiveLock lock;
+  auto status = lock.try_atomic_change_lock(nullptr, &duplicate_change, ctx);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbError(HogDbCode::kConflict));
+  EXPECT_EQ(reason, DbConflictCode::DuplicateSigner);
+
+  AuthDataItem distinct(base);
+  distinct.set_new_pk(1, make_test_pk_config(1));
+  ItemChange distinct_change(std::move(distinct));
+  distinct_change.set_permanent_exclusive();
+  auto cost = lock.try_atomic_change_lock(nullptr, &distinct_change,
+                                          make_dummy_context());
+  ASSERT_TRUE(cost.has_value());
+  EXPECT_EQ(*cost, kTestCostModel.get_auth_data_cost(2));
 }
 
 } // namespace hogd
