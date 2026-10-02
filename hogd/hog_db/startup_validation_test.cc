@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <span>
@@ -230,6 +231,29 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
     EXPECT_FALSE(
         StartupValidation::tip_is_servable(db, *recovered, cost_model_));
   }
+}
+
+// #4293: default_wallet is a DeployedContractHash whose ContractType
+// discriminant XDR decodes by cast, and the tip row is global metadata
+// excluded from the state hash, so a tampered type survives the CRC. read_dbtip
+// applies the same enum guard as read_address_metadata, refusing the corrupt
+// type before it can reach root fallback dispatch as an Unrecoverable fault.
+TEST_F(RecoveredTipTest, RejectsRecoveredDefaultWalletWithInvalidContractType)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  const StorageLongHash state_hash = db.compute_full_db_hash();
+  tip->default_wallet.contract_type =
+      static_cast<ContractType>(std::numeric_limits<uint32_t>::max());
+  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  // Unchanged, which is why nothing else catches this.
+  EXPECT_EQ(db.compute_full_db_hash(), state_hash);
+
+  EXPECT_FALSE(db.read_dbtip().has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
