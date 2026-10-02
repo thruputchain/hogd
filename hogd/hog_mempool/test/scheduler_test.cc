@@ -14,6 +14,7 @@
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
+#include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_gateway.hh"
 #include "transaction.hh"
