@@ -1,5 +1,6 @@
 #include "hogd/hog_db/startup_validation.h"
 
+#include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_mempool/config_hash.h"
@@ -28,6 +29,24 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
                                                     tip.default_wallet)) !=
       tip.value.proposal_header.config_hash) {
     critical("tip configuration does not hash to its committed config hash");
+    return false;
+  }
+  // default_wallet.contract_type XDR-decodes by cast and the tip row is
+  // excluded from the state hash, so a tampered type reaches here with its
+  // config hash recomputed. Reject a type outside the registered runtime set
+  // before the root fallback serves it and dispatch reports Unrecoverable
+  // (#4293); deployed-address metadata is guarded the same way on read.
+  bool registered_wallet_type = false;
+  switch (tip.default_wallet.contract_type) {
+  case ContractType::kNative:
+  case ContractType::kMockTest:
+  case ContractType::kRv32:
+    registered_wallet_type = true;
+    break;
+  }
+  if (!registered_wallet_type) {
+    critical("tip default wallet has an unregistered contract type {}",
+             tip.default_wallet.contract_type);
     return false;
   }
   // Height 0 is exempt: a chain may name a wallet its genesis ceremony

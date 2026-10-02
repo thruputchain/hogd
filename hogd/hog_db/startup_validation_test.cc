@@ -232,27 +232,29 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
   }
 }
 
-// #4293: default_wallet is a DeployedContractHash whose ContractType
-// discriminant XDR decodes by cast, and the tip row is global metadata
-// excluded from the state hash, so a tampered type survives the CRC. read_dbtip
-// applies the same enum guard as read_address_metadata, refusing the corrupt
-// type before it can reach root fallback dispatch as an Unrecoverable fault.
-TEST_F(RecoveredTipTest, RejectsRecoveredDefaultWalletWithInvalidContractType)
+// #4293: default_wallet.contract_type XDR-decodes by cast, and the tip row is
+// global metadata excluded from the state hash, so a tampered type reaches
+// startup with its config hash recomputed to match. tip_is_servable rejects a
+// type outside the registered runtime set, before the root fallback serves it
+// and dispatch reports Unrecoverable.
+TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUnregisteredContractType)
 {
   HogDbDAO db = reopen();
   HogDbStatus<DbTip> tip = db.read_dbtip();
   ASSERT_TRUE(tip.has_value());
 
-  const StorageLongHash state_hash = db.compute_full_db_hash();
   tip->default_wallet.contract_type =
       static_cast<ContractType>(std::numeric_limits<uint32_t>::max());
-  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
-  ASSERT_TRUE(db.commit().has_value());
+  // Recompute the config hash so that guard passes and the type check is what
+  // rejects the tip, not an incidental hash mismatch.
+  tip->value.proposal_header.config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model_, tip->network_config,
+                                tip->default_wallet));
+  // The wallet hash still names the stored native wallet row, so the
+  // code-existence check is not what rejects it either.
+  ASSERT_TRUE(db.read_contract_code(tip->default_wallet.hash).has_value());
 
-  // Unchanged, which is why nothing else catches this.
-  EXPECT_EQ(db.compute_full_db_hash(), state_hash);
-
-  EXPECT_FALSE(db.read_dbtip().has_value());
+  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *tip, cost_model_));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

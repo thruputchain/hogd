@@ -141,13 +141,6 @@ HogDbDAO::read_dbtip()
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
   }
-  // default_wallet is a DeployedContractHash, and the tip row is global
-  // metadata excluded from the consensus db_hash, so a tampered type survives
-  // the CRC. Apply the same enum guard as read_address_metadata so a
-  // contract_type outside the registered runtime set cannot reach the root
-  // fallback dispatch as an Unrecoverable fault (#4293).
-  if (auto v = validate_address_metadata(tip.default_wallet); !v)
-    return v.error();
   return tip;
 }
 
