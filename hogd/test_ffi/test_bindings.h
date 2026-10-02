@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 35
+#define TEST_FFI_VERSION_MINOR 36
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -22,37 +22,39 @@ extern "C" {
 // DB lifecycle operations are mutually exclusive with open handlers, and with
 // each other. advance_new_block() and free_db() are rejected
 // (kTestFFIErrorCodeUnrecoverableError) while any syscall handler derived from
-// that DB is open -- for the handler's whole lifetime, from the moment
-// open_syscall_handler() / open_mocked_syscall_handler() begins constructing it
-// (so a concurrent advance cannot replace state a half-built handler is
-// borrowing) through close_syscall_handler(). For advance_new_block() the
-// exclusion runs both ways: while an advance is in flight, opening a handler
-// on that DB is itself rejected with kTestFFIErrorCodeUnrecoverableError, so a
-// caller racing those two from different threads sees one of them fail rather
-// than a handler bound to a snapshot the advance is replacing. A rejected open
-// borrows nothing and returns a null handler; retry it once the advance
-// returns.
+// that DB is open, for the handler's whole lifetime: from the moment
+// open_syscall_handler() / open_mocked_syscall_handler() registers its borrow,
+// which it does before deserializing its argument (so a concurrent advance
+// cannot replace state a half-built handler is borrowing), through
+// close_syscall_handler(). For advance_new_block() the exclusion runs both
+// ways: while an advance is in flight, opening a handler on that DB is itself
+// rejected with kTestFFIErrorCodeUnrecoverableError, so a caller racing those
+// two from different threads sees one of them fail rather than a handler bound
+// to a snapshot the advance is replacing. A rejected open borrows nothing and
+// returns a null handler; retry it once the advance returns.
 //
-// get_snapshot_storage_item() takes that same exclusion for the length of the
-// read, since it queries the snapshot an advance replaces: whichever of the two
-// arrives second is rejected, and either is fine to retry.
+// get_snapshot_storage_item() and the setup_* mutators (setup_create_contract,
+// setup_deploy_contract, setup_grant_contract_storage_tokens) take that same
+// exclusion for the length of their DB access: the read queries the snapshot
+// an advance replaces, and the writes go to the store the advance's commit
+// syncs, which that store forbids overlapping. Whichever of the two arrives
+// second is rejected with kTestFFIErrorCodeUnrecoverableError, and either is
+// fine to retry; a rejected mutator has written nothing.
 //
 // free_db() is weaker, and no in-library guard can make it otherwise: it
-// destroys the `db` handle itself, so a call that is already inside the
-// library -- an open_syscall_handler() still deserializing its argument, say --
-// has no object left to be rejected against. Every other call on that handle
-// must have returned before free_db() is called, and none may start after it;
-// the open-handler rejection above only catches a handler that has already
-// registered its borrow, and is not a substitute for sequencing the free
-// yourself.
+// destroys the `db` handle itself, so a call that has been entered but has not
+// yet registered its borrow (the first few instructions of any entry point)
+// has no object left to be rejected against. Every other call on that
+// handle must have returned before free_db() is called, and none may start
+// after it; the rejection above catches a call that has registered, and is not
+// a substitute for sequencing the free yourself.
 //
 // If a close fails to abort its transaction, the DB is poisoned:
 // advance_new_block is refused thereafter and the DB can only be freed. Beyond
-// that guarding the harness does not order your operations:
-// running transactions or the setup_* mutators (setup_create_contract,
-// setup_deploy_contract, ...) concurrently against the same DB leaves the
-// *result* unspecified -- sequence them yourself if you need a deterministic
-// outcome.
+// that guarding the harness does not order your operations: running
+// transactions or the setup_* mutators concurrently against the same DB is
+// memory-safe but leaves the *result* unspecified. Sequence them yourself if
+// you need a deterministic outcome.
 //
 // A single runtime context or syscall handler is stateful and is itself NOT
 // internally synchronized -- drive each individual handle from one thread at a
@@ -142,13 +144,16 @@ struct ForeignHostFnResult {
 
 // Translation of try_commit_transaction result into an FFI-safe type.
 struct ForeignTryCommitResult {
-  int32_t result_code; // ExecResult
+  // ExecResult: the commit decision. A post-commit failure to publish the
+  // transaction's events surfaces as ffi_error_code instead; the write is
+  // durable and the handler must still be closed.
+  int32_t result_code;
 
   // XDR-serialized DbConflictResult two-phase-commit conflict diagnostic.
   // Always populated with the whole union (the kDbDiagnosticNone arm when there
   // was no conflict) so the caller always deserializes a well-formed,
-  // self-describing value. Null only if serialization itself failed. Must be
-  // freed with free_ffi_data_buffer().
+  // self-describing value. Null when ffi_error_code is set, or if
+  // serialization itself failed. Must be freed with free_ffi_data_buffer().
   struct FFIDataBuffer serialized_conflict;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation

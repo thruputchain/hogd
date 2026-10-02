@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
@@ -135,9 +136,10 @@ step_entry(GasCursor &gas, GasAmount body_cost, SyscallTraceBody body,
 // selective_deployment_test).
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*unused*/,
-                                  NetworkConfigParams const & /*params*/,
-                                  PreparedContract &out) const override
+  InvokeErrorCode verify_contract(
+      Contract const & /*unused*/, NetworkConfigParams const & /*params*/,
+      PreparedContract &out,
+      std::optional<ContractRejectCode> & /*rejection*/) const override
   {
     // Hand back a placeholder image, as a real rv32 verification would: an
     // accepted attachment must look prepared. Its contents are irrelevant --
@@ -148,7 +150,8 @@ public:
     placeholder.data.append_range(
         rv32::test_artifact::build_artifact({rv32::test_program::addi(0, 0, 0)},
                                             std::span<const uint8_t>{}));
-    out.rv32 = Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults());
+    out.rv32.emplace(
+        *Rv32Contract::create(placeholder, rv32::Rv32Limits::defaults()));
     return InvokeErrorCode::None;
   }
 
@@ -528,8 +531,10 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
     body.sha256_update().inputs.index = index;
     body.sha256_update().inputs.buffer.append_range(buffer);
     body.sha256_update().inputs.reset = reset;
-    const GasAmount cost =
-        is_ok(status) ? GasCost::sha256_update(buffer.size()) : 0;
+    // A successful update bills its blocks plus the stream cost; a failed one
+    // still probed the stream table, so it bills that probe (#4218).
+    const GasAmount cost = is_ok(status) ? GasCost::sha256_update(buffer.size())
+                                         : kSHA256StreamCost;
     return step_entry(gas, cost, std::move(body), std::move(status));
   };
   auto finalize_entry = [&gas](uint32_t index, std::optional<SHA256Hash> hash,
@@ -541,8 +546,11 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
           SyscallSHA256FinalizeOutputs{.hash = hash.value()};
     }
     // A finalize that produced a hash compressed the padding block; one that
-    // errored did not, and bills only the crossing.
-    return step_entry(gas, hash.has_value() ? kSHA256HashBlockCost : 0,
+    // errored did not, but still probed the stream table, so it bills that
+    // probe (#4218).
+    return step_entry(gas,
+                      hash.has_value() ? kSHA256HashBlockCost
+                                       : kSHA256StreamCost,
                       std::move(body), std::move(status));
   };
   const auto invalid =
@@ -657,8 +665,10 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = src_index;
     body.sha256_copy().inputs.dst_index = dst_index;
-    const GasAmount cost = is_ok(status) ? kSHA256StreamCost : 0;
-    return step_entry(gas, cost, std::move(body), std::move(status));
+    // Success clones a stream; a miss still probed the table. Both pay the
+    // stream cost (#4218).
+    return step_entry(gas, kSHA256StreamCost, std::move(body),
+                      std::move(status));
   };
   auto finalize_entry = [&gas](uint32_t index, SHA256Hash hash,
                                HostFunctionStatusXdr status) {

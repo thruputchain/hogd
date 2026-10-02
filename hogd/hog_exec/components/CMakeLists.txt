@@ -25,6 +25,7 @@ add_library(components_test_objects OBJECT
   alias_guard_test.cc
   auth_token_registry_test.cc
   borrowed_contract_batch_test.cc
+  contract_result_test.cc
   execution_mode_test.cc
   ffi_helpers_tests.cc
   hash_buffers_test.cc

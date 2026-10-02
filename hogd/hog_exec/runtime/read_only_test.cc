@@ -377,8 +377,8 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 // return errors in read-only mode, causing the transfer to fail.
 TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 {
-  using amount_t = std::tuple<uint64_t, uint64_t>;
-  auto make_amount = [](uint128_t amount) -> amount_t {
+  using amount_t = std::tuple<int64_t, uint64_t>;
+  auto make_amount = [](int128_t amount) -> amount_t {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   };
 

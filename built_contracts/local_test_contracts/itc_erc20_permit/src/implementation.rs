@@ -2,7 +2,7 @@
 
 use crate::interface::*;
 use crate::permit_interface::{
-    ClearAllowanceGrant, ERC20Permit, ERC20PermitError, PermitGrant,
+    DeleteAllowanceGrant, ERC20Permit, ERC20PermitError, PermitGrant,
 };
 use sdk::signer::Signed;
 use sdk::*;
@@ -63,19 +63,19 @@ fn add_to_allowance(
         .unwrap_or_else(|_| throw(ERC20Error::TooLarge))
 }
 
-fn clear_allowance_for(owner: &ContractAddress, spender: &ContractAddress) {
+fn delete_allowance_for(owner: &ContractAddress, spender: &ContractAddress) {
     let key = get_allowance_key(owner, spender);
-    let remaining = non_negative_int_try_get(&key)
+    let removed = non_negative_int_try_get(&key)
         .none_if_missing()
         .unwrap_or(0);
     delete_exclusive(&key);
-    AllowanceChangeEvent::new(owner, spender, -remaining).log();
+    AllowanceDeleteEvent::new(owner, spender, removed).log();
 }
 
 #[sdk::storage]
 pub struct Token;
 
-#[contract(version = "0.1.0")]
+#[contract]
 impl ERC20 for Token {
     fn initialize(&mut self, contract_owner: &ContractAddress) {
         let key = get_owner_key();
@@ -89,7 +89,7 @@ impl ERC20 for Token {
 
     fn transfer(&mut self, to: &ContractAddress, amount: Amount) {
         let caller = get_caller();
-        let diff = amount_to_diff(amount);
+        let diff = check_amount(amount);
         add_to_balance(&caller, -diff);
         add_to_balance(to, diff);
 
@@ -103,7 +103,7 @@ impl ERC20 for Token {
         amount: Amount,
     ) {
         let spender = get_caller();
-        let diff = amount_to_diff(amount);
+        let diff = check_amount(amount);
         // Spending one's own tokens needs no allowance.
         if owner != &spender {
             add_to_allowance(owner, &spender, -diff);
@@ -118,24 +118,17 @@ impl ERC20 for Token {
         &mut self,
         spender: &ContractAddress,
         difference: Difference,
-        exclusive: bool,
     ) {
         let owner = get_caller();
         add_to_allowance(&owner, spender, difference);
-        if exclusive {
-            set_storage_flags(
-                &get_allowance_key(&owner, spender),
-                StorageDeltaFlags::ExclusiveLock,
-            );
-        }
         AllowanceChangeEvent::new(&owner, spender, difference).log();
     }
 
-    fn clear_allowance(&mut self, spender: &ContractAddress) {
-        clear_allowance_for(&get_caller(), spender);
+    fn delete_allowance(&mut self, spender: &ContractAddress) {
+        delete_allowance_for(&get_caller(), spender);
     }
 
-    fn clear_balance(&mut self) {
+    fn delete_balance(&mut self) {
         let key = get_balance_key(&get_caller());
         let balance = non_negative_int_try_get(&key)
             .none_if_missing()
@@ -167,21 +160,11 @@ impl ERC20 for Token {
     fn mint(&mut self, receiver: &ContractAddress, amount: Amount) {
         ensure_caller_is_owner();
 
-        let diff = amount_to_diff(amount);
+        let diff = check_amount(amount);
         add_to_balance(receiver, diff);
         add_to_total_supply(diff);
 
         MintEvent::new(receiver, diff).log();
-    }
-
-    fn burn(&mut self, owner: &ContractAddress, amount: Amount) {
-        ensure_caller_is_owner();
-
-        let diff = amount_to_diff(amount);
-        add_to_balance(owner, -diff);
-        add_to_total_supply(-diff);
-
-        BurnEvent::new(owner, diff).log();
     }
 
     fn total_supply(&self) -> Amount {
@@ -193,7 +176,7 @@ impl ERC20 for Token {
 
 // The grant's owner is its minter, reported by `consume`. Every method
 // consumes first, so nothing in the grant is acted on unverified.
-#[contract(version = "0.1.0")]
+#[contract]
 impl ERC20Permit for Token {
     fn transfer_from_signed(
         &mut self,
@@ -207,7 +190,7 @@ impl ERC20Permit for Token {
         ensure(get_caller() == grant.spender, ERC20PermitError::NotSpender);
         ensure(amount <= grant.amount, ERC20PermitError::ExceedsGrant);
 
-        let diff = amount_to_diff(amount);
+        let diff = check_amount(amount);
         add_to_balance(&owner, -diff);
         add_to_balance(receiver, diff);
 
@@ -216,15 +199,15 @@ impl ERC20Permit for Token {
 
     fn increase_allowance_signed(&mut self, grant: Signed<PermitGrant>) {
         let (grant, owner) = grant.consume();
-        let diff = amount_to_diff(grant.amount);
+        let diff = check_amount(grant.amount);
 
         add_to_allowance(&owner, &grant.spender, diff);
 
         AllowanceChangeEvent::new(&owner, &grant.spender, diff).log();
     }
 
-    fn clear_allowance_signed(&mut self, grant: Signed<ClearAllowanceGrant>) {
+    fn delete_allowance_signed(&mut self, grant: Signed<DeleteAllowanceGrant>) {
         let (grant, owner) = grant.consume();
-        clear_allowance_for(&owner, &grant.spender);
+        delete_allowance_for(&owner, &grant.spender);
     }
 }

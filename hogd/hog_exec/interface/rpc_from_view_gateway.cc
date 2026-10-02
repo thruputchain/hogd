@@ -440,27 +440,23 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw)
 {
-  // TODO(view-gateway): add a caller-error ViewGatewayOutcome. InvalidInput
-  // and bad user-supplied ndet are request problems, but v1 can only express
-  // Ok, Abandoned, or InternalError.
   switch (raw.status()) {
   case TransactionViewStatus::Ok:
   {
     ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayOk);
     result.payload().height = height;
     result.payload().output = std::move(raw.result().output);
+    result.payload().gas_consumed = raw.result().gas_consumed;
     result.payload().events = std::move(raw.result().events);
     return result;
   }
   case TransactionViewStatus::InvalidInput:
   {
-    warn("viewgateway: collapsing invalid view input to Fault: {}",
-         std::to_underlying(raw.error_code()));
-    ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayOk);
-    result.payload().height = height;
-    result.payload().output =
-        InvocationFrameOutput(InvocationFrameStatusCode::Fault);
-    result.payload().events = {};
+    // The request was rejected before any frame ran, so there is no frame
+    // output to report. Hand the caller the executor's error code instead of
+    // dressing the rejection up as a contract Fault.
+    ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayInvalidInput);
+    result.error_code() = raw.error_code();
     return result;
   }
   case TransactionViewStatus::Abandoned:

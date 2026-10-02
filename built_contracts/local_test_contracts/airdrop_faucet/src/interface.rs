@@ -7,5 +7,5 @@ use sdk::*;
 #[contract(client = Client)]
 pub trait AirdropFaucet {
     /// Mint `amount` native tokens to the caller.
-    fn claim(amount: u128);
+    fn claim(amount: i128);
 }

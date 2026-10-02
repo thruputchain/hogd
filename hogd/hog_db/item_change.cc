@@ -59,13 +59,34 @@ Balance::narrow(const Balance &other)
   return true;
 }
 
+AuthDataItem
+AuthDataItem::for_missing_row()
+{
+  AuthDataItem item(AddressAuthData{
+      .required_weight = Weight{kDefaultNewAddressRequiredWeight}});
+  item.row_exists_ = false;
+  return item;
+}
+
 HogDbStatus<bool>
 AuthDataItem::narrow(const AuthDataItem &auth_data_item) const
 {
-  if (base_auth_data() != auth_data_item.base_auth_data()) {
+  if (row_exists() != auth_data_item.row_exists() ||
+      base_auth_data() != auth_data_item.base_auth_data()) {
     return HogDbError(HogDbCode::kStaleBlock);
   }
   return true;
+}
+
+bool
+AuthDataItem::writes_row() const
+{
+  if (row_exists() || required_weight_change_.has_value()) {
+    return true;
+  }
+  return std::ranges::any_of(pk_changes_, [](auto const &change) {
+    return change.has_value() && *change != nullptr;
+  });
 }
 
 size_t

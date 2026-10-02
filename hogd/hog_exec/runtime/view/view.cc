@@ -155,6 +155,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   ExpectedViewResult result(TransactionViewStatus::Ok);
   // TODO(geoff): we could almost certainly elide a copy or two here
   result.result().output = syscall_handler.get_most_recent_frame_output();
+  result.result().gas_consumed = gas_consumed;
   result.result().events = syscall_handler.get_most_recent_frame_events();
   co_return result;
 }

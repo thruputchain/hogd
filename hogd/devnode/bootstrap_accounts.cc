@@ -13,15 +13,13 @@
 #include <utility>
 #include <vector>
 
-#include "built_contracts/dev_wallet.h"
-#include "contract.hh"
+#include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/devnode/dev_wallet_profile.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "types.hh"
@@ -57,30 +55,16 @@ derive_account_secret_seed(std::string_view seed, std::uint32_t index)
   return derive_labeled_hash(seed, std::format("account-{}", index));
 }
 
-SHA256Hash
-derive_wallet_nonce(std::string_view seed, std::uint32_t index)
-{
-  return derive_labeled_hash(seed, std::format("wallet-{}", index));
-}
-
 BootstrapAccountMetadata
 append_bootstrap_account(GenesisConfigurationBuilder &builder,
-                         std::shared_ptr<const Contract> const &wallet_contract,
                          std::string_view seed, std::uint32_t index,
                          std::uint64_t storage_tokens,
                          BootstrapAccountRole role)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
   auto keypair = derive_bootstrap_account_keypair(seed, index);
-  SHA256Hash nonce = derive_wallet_nonce(seed, index);
-  ContractAddress address =
-      calculate_genesis_deployment_address(sha256(*wallet_contract), nonce);
-
-  builder.add_distribution(wallet_contract, nonce,
-                           wallet_meta::entrypoint<u8"initialize">(),
-                           wallet_meta::make_calldata<u8"initialize">(
-                               keypair.first),
-                           static_cast<int128_t>(storage_tokens));
+  ContractAddress address = derive_bootstrap_account_address(keypair.first);
+  builder.add_account_allocation(address,
+                                 static_cast<int128_t>(storage_tokens));
   return BootstrapAccountMetadata{
       .index = index,
       .role = role,
@@ -158,6 +142,19 @@ derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index)
   return ed25519_keygen_from_seed(std::as_bytes(std::span(secret_seed)));
 }
 
+ContractAddress
+derive_bootstrap_account_address(Ed25519PublicKey const &public_key)
+{
+  PublicKey key(CryptographicScheme::Ed25519);
+  key.ed25519() = public_key;
+  auto address =
+      pubkey_auth_address(PubkeyAccountPreimage{.pubkey = key, .nonce = 0});
+  if (!address.has_value()) {
+    throw std::logic_error("native bootstrap address derivation failed");
+  }
+  return *address;
+}
+
 BootstrapAccountArtifact
 build_bootstrap_account_artifact(BootstrapAccountConfig const &config,
                                  NetworkHash const &network_hash,
@@ -178,17 +175,11 @@ append_bootstrap_accounts(GenesisConfigurationBuilder &builder,
 {
   CHECK_LE(config.count, kMaxBootstrapAccounts);
 
-  DevWalletProfile wallet_profile =
-      resolve_dev_wallet_profile(config.dev_wallet_profile);
-
-  auto wallet_contract = load_dev_wallet_contract(wallet_profile);
-
   std::vector<BootstrapAccountMetadata> accounts;
   accounts.reserve(config.count);
 
   for (std::uint32_t i = 0; i < config.count; ++i) {
-    accounts.push_back(append_bootstrap_account(builder, wallet_contract,
-                                                config.seed, i,
+    accounts.push_back(append_bootstrap_account(builder, config.seed, i,
                                                 config.storage_tokens, role));
   }
 
@@ -201,18 +192,15 @@ build_local_bootstrap_account_artifact(LocalBootstrapConfig const &config,
                                        StorageCostModel const &cost_model)
 {
   CHECK_LE(config.user_account_count, kMaxBootstrapAccounts);
-  auto wallet_contract = load_dev_wallet_contract(
-      resolve_dev_wallet_profile(config.dev_wallet_profile));
   GenesisConfigurationBuilder builder;
   std::vector<BootstrapAccountMetadata> accounts;
   accounts.reserve(static_cast<std::size_t>(config.user_account_count) + 1);
-  accounts.push_back(append_bootstrap_account(builder, wallet_contract,
-                                              config.seed, 0,
+  accounts.push_back(append_bootstrap_account(builder, config.seed, 0,
                                               kLocalFaucetStorageTokens,
                                               BootstrapAccountRole::kFaucet));
   for (std::uint32_t index = 1; index <= config.user_account_count; ++index) {
     accounts.push_back(
-        append_bootstrap_account(builder, wallet_contract, config.seed, index,
+        append_bootstrap_account(builder, config.seed, index,
                                  config.user_storage_tokens,
                                  BootstrapAccountRole::kLocalUser));
   }

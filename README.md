@@ -148,6 +148,19 @@ supervises the devnode process. Run `hog-devnode --help` for its options.
 Fresh local chains allow up to 256 KiB of RV32 code and 512 KiB per complete
 contract artifact by default; no network-config overrides are needed.
 
+Fresh local and hosted bootstrap accounts use the native default wallet at
+nonce zero. Genesis funds their public-key-derived addresses directly; runtime
+bundles need `genesis_root.rv32a` but no `dev_wallet.rv32a`. Bootstrap and runtime
+manifests use schema 3; hosted bootstrap metadata uses schema 2.
+
+Persistent local directories from the older dev-wallet bootstrap are not migrated
+in place. Keep the original CLI/runtime to open those directories, or explicitly
+choose a new data directory for a native-bootstrap chain. The new runtime refuses
+old metadata before opening the database; do not delete a directory to resolve
+that error unless you intend to discard its chain state. Deterministic signing
+keys remain the same, but fresh native account addresses differ from the old
+contract-wallet addresses.
+
 ## Update instructions
 
 To update to the latest version in the upstream git repository, do the

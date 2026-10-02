@@ -31,9 +31,10 @@ public:
   explicit RuntimeContext(
       std::unordered_map<int32_t, RuntimeContractImage> contracts);
 
-  InvokeErrorCode verify_contract(Contract const &contract,
-                                  NetworkConfigParams const &params,
-                                  hogd::PreparedContract &out) const override;
+  InvokeErrorCode
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  hogd::PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const override;
   using hogd::RuntimeContext::verify_contract;
 
   [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>

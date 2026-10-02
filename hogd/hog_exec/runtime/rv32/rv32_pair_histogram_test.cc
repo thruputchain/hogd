@@ -16,6 +16,7 @@
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/itc_erc20.h"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/network_config_params.h"
@@ -398,11 +399,12 @@ class TracingRv32Context final : public RuntimeContext {
 public:
   PairHistogram *active_histogram = nullptr;
 
-  InvokeErrorCode verify_contract(Contract const &contract,
-                                  NetworkConfigParams const &params,
-                                  PreparedContract &out) const override
+  InvokeErrorCode
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const override
   {
-    return delegate_.verify_contract(contract, params, out);
+    return delegate_.verify_contract(contract, params, out, rejection);
   }
 
   x23::Async<SystemStatus<std::unique_ptr<Runtime>>>

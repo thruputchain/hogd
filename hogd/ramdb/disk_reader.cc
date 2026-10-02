@@ -467,10 +467,21 @@ load_log_file(
       uncommitted_records = false;
       uncommitted_off = r.offset();
 
-      if (!file.snapshot_file_ && cur_lsn != hdr.lsn) {
-        error("replaying log file {}, saw commit for lsn {} while expecting "
-              "lsn {}",
-              file.path_, hdr.lsn, cur_lsn);
+      if (!file.snapshot_file_) {
+        if (cur_lsn != hdr.lsn) {
+          error("replaying log file {}, saw commit for lsn {} while expecting "
+                "lsn {}",
+                file.path_, hdr.lsn, cur_lsn);
+          return DBError{DBCode::kCorruption};
+        }
+      }
+      // A snapshot commits at end_lsn - 1; reject anything else, including a
+      // zero end_lsn whose successor would wrap to zero (#4229).
+      else if (file.end_lsn_exclusive_ == 0 ||
+               hdr.lsn != file.end_lsn_exclusive_ - 1) {
+        error("snapshot {} has commit for lsn {} but its filename range ends "
+              "at lsn {}",
+              file.path_, hdr.lsn, file.end_lsn_exclusive_);
         return DBError{DBCode::kCorruption};
       }
 

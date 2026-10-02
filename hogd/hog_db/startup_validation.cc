@@ -1,5 +1,6 @@
 #include "hogd/hog_db/startup_validation.h"
 
+#include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_mempool/config_hash.h"
@@ -28,6 +29,17 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
                                                     tip.default_wallet)) !=
       tip.value.proposal_header.config_hash) {
     critical("tip configuration does not hash to its committed config hash");
+    return false;
+  }
+  // The tip row is outside the state hash, so a tampered type can pass the
+  // config hash (#4293); kMockTest is test-only, never a real default wallet.
+  switch (tip.default_wallet.contract_type) {
+  case ContractType::kNative:
+  case ContractType::kRv32:
+    break;
+  default:
+    error("tip default wallet has an unregistered contract type {}",
+          tip.default_wallet.contract_type);
     return false;
   }
   // Height 0 is exempt: a chain may name a wallet its genesis ceremony

@@ -51,8 +51,8 @@ make_init_mint_expiry_height(size_t mint_index)
          static_cast<BlockHeight>(mint_index / kInitMintUniquifiersPerHeight);
 }
 
-std::tuple<uint64_t, uint64_t>
-make_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
@@ -170,7 +170,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                        GasAmount{1'000'000},
                        erc20_meta::make_calldata<u8"mint">(
                            wallets_[i].address,
-                           make_amount(uint128_t{1'000'000'000})));
+                           make_amount(int128_t{1'000'000'000})));
 
     auto calldata =
         wallet_meta::make_calldata<u8"do_action">(internal_calldata);

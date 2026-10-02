@@ -814,39 +814,29 @@ TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
 // it: the genesis root's row has no keys and `required_weight = 0`, and the
 // ceremony transactions reach it with an unsigned default claim.
 //
-// Only the address itself can reach this state, because its row is written
-// solely by its own code (see SyscallAuthConfigTest's first-touch tests for
-// how a row that never wrote a threshold commits at zero). A row that should
-// require signatures says so with WriteAddressRequiredWeight. The zero
-// threshold is a property of a present row: with no row, a source claim has
-// nothing to satisfy and is rejected, leaving kPubkeySignature as the only
-// claim that can authorize the address.
-//
-// Reported as issue #3069 and confirmed working-as-intended; this test pins
-// that behavior.
+// Only the address can set this: a new row defaults to
+// kDefaultNewAddressRequiredWeight unless it writes a zero threshold (#3069).
 TEST_F(AuthClaimTests, ZeroRequiredWeightAuthDataAcceptsUnsignedSourceClaim)
 {
   AuthClaim claim = make_claim(/*allowed_keys=*/0, /*required_weight=*/0);
   auto tx = make_transaction(claim);
   SignedTransaction stx{.tx = tx, .signatures = {}};
 
-  // A row with a registered key and no threshold written, as a key-only first
-  // registration commits it.
+  // A row with a registered key whose address wrote a zero threshold.
   auto [pk, _] = make_key_pair();
-  AddressAuthData key_without_threshold{
+  AddressAuthData keyed_zero_row{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
           new PublicKeyConfig{.key = pk, .max_weight = 5})},
       .required_weight = 0,
   };
-  // A row with neither, as genesis installs for the genesis root.
+  // A keyless zero-threshold row, as genesis installs for the genesis root.
   AddressAuthData empty_row{};
   ASSERT_EQ(empty_row.required_weight, Weight{0});
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx, &key_without_threshold)
-                  .has_value());
   EXPECT_TRUE(
-      verify_auth(stx, &key_without_threshold, kTestNetworkHash).has_value());
+      lightweight_validate_auth_claims(stx, &keyed_zero_row).has_value());
+  EXPECT_TRUE(verify_auth(stx, &keyed_zero_row, kTestNetworkHash).has_value());
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, &empty_row).has_value());
   EXPECT_TRUE(verify_auth(stx, &empty_row, kTestNetworkHash).has_value());
 
@@ -855,10 +845,9 @@ TEST_F(AuthClaimTests, ZeroRequiredWeightAuthDataAcceptsUnsignedSourceClaim)
   EXPECT_FALSE(missing_row.has_value());
   EXPECT_EQ(missing_row.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 
-  // Once the address writes a threshold, the same unsigned claim fails.
-  key_without_threshold.required_weight = 1;
-  auto with_threshold =
-      verify_auth(stx, &key_without_threshold, kTestNetworkHash);
+  // Once the address writes a nonzero threshold, the unsigned claim fails.
+  keyed_zero_row.required_weight = 1;
+  auto with_threshold = verify_auth(stx, &keyed_zero_row, kTestNetworkHash);
   EXPECT_FALSE(with_threshold.has_value());
   EXPECT_EQ(with_threshold.error().code(),
             AuthVerifyErrorCode::kAuthDataMismatch);

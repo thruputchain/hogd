@@ -1,12 +1,13 @@
 #pragma once
 
+#include <expected>
 #include <memory>
-#include <optional>
 
 #include "contract.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "types.hh"
@@ -19,12 +20,12 @@ class SystemCallHandler;
 // A translated and ready-to-instantiate RV32 contract.
 class Rv32Contract {
 public:
-  // TODO(geoff): decide if we want to wire out the several different error
-  // categories here.
   // Translates `contract_blob` under `limits`: the chain's configured bounds
-  // at attachment, the VM's ceilings for an already-deployed contract.
-  static std::optional<Rv32Contract> create(ContractBlob const &contract_blob,
-                                            rv32::Rv32Limits limits);
+  // at attachment, the VM's ceilings for an already-deployed contract. On
+  // failure, names the first artifact check that refused it; code that parses
+  // cleanly but does not translate is kInvalidProgram.
+  static std::expected<Rv32Contract, rv32::ArtifactError>
+  create(ContractBlob const &contract_blob, rv32::Rv32Limits limits);
   Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation);
 
   rv32::ThreadedMachine instantiate(uint64_t gas) const;
@@ -64,9 +65,10 @@ private:
 // context itself holds no per-contract state.
 class Rv32Context final : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const &contract,
-                                  NetworkConfigParams const &params,
-                                  PreparedContract &out) const override;
+  InvokeErrorCode
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const override;
   using RuntimeContext::verify_contract;
 
   [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<Runtime>>>

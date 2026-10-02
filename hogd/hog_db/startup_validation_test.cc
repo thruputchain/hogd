@@ -232,6 +232,30 @@ TEST_F(RecoveredTipTest, RejectsPersistedNegativeHeights)
   }
 }
 
+// A tampered default-wallet type must not survive the recovery round-trip
+// into a servable tip (#4293).
+TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUnregisteredContractType)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  tip->default_wallet.contract_type =
+      static_cast<ContractType>(std::numeric_limits<uint32_t>::max());
+  // Recompute so the config-hash guard passes and the type check is what bites.
+  tip->value.proposal_header.config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model_, tip->network_config,
+                                tip->default_wallet));
+  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  HogDbDAO recovered_db = reopen();
+  const HogDbStatus<DbTip> recovered = recovered_db.read_dbtip();
+  ASSERT_TRUE(recovered.has_value());
+  EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
+                                                  cost_model_));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace

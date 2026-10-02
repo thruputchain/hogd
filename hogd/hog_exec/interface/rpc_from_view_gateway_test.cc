@@ -38,6 +38,7 @@ make_raw_ok(InvocationFrameStatusCode status)
 {
   ExpectedViewResult raw(TransactionViewStatus::Ok);
   raw.result().output = InvocationFrameOutput(status);
+  raw.result().gas_consumed = 1234;
   return raw;
 }
 
@@ -65,10 +66,11 @@ TEST(ViewGatewayRpc, MapsRawOkOutputs)
     ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
     EXPECT_EQ(result.payload().height, 7);
     EXPECT_EQ(result.payload().output.status_code(), status);
+    EXPECT_EQ(result.payload().gas_consumed, 1234U);
   }
 }
 
-TEST(ViewGatewayRpc, MapsInvalidInputToFault)
+TEST(ViewGatewayRpc, MapsInvalidInputToInvalidInput)
 {
   ExpectedViewResult raw(TransactionViewStatus::InvalidInput);
   raw.error_code() = SyscallErrorCode::kSyscallErrorCodeReentrance;
@@ -76,11 +78,8 @@ TEST(ViewGatewayRpc, MapsInvalidInputToFault)
   ViewGatewayResult result =
       view_gateway_result_from_raw_view_result(9, std::move(raw));
 
-  ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
-  EXPECT_EQ(result.payload().height, 9);
-  EXPECT_EQ(result.payload().output.status_code(),
-            InvocationFrameStatusCode::Fault);
-  EXPECT_TRUE(result.payload().events.empty());
+  ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayInvalidInput);
+  EXPECT_EQ(result.error_code(), SyscallErrorCode::kSyscallErrorCodeReentrance);
 }
 
 TEST(ViewGatewayRpc, MapsBackendFailures)

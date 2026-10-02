@@ -32,7 +32,11 @@ private:
   [[nodiscard]] SyscallStatus<void>
   update_existing_stream(uint32_t index, std::span<const std::byte> data);
 
-  std::unordered_map<uint32_t, Stream> streams_;
+  // Contract-chosen indices are attacker-controlled, so the table hashes them
+  // with the process-keyed SipHash24 (like the codebase's other attacker-keyed
+  // maps): the key is secret, so collisions can't be precomputed to degrade a
+  // metered lookup, and buckets stay balanced in O(1) average.
+  std::unordered_map<uint32_t, Stream, SipHash24Hasher> streams_;
 
   const uint32_t max_buffers_;
 };

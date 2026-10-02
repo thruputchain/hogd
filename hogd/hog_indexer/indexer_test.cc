@@ -127,7 +127,7 @@ make_failure_diag(BlockHeight attempt_height)
 {
   TxFailureDiagnostic diag;
   diag.attempt_height = attempt_height;
-  diag.conflict.code = DbConflictCode::ValueMismatch;
+  diag.cause.conflict().code = DbConflictCode::ValueMismatch;
   return diag;
 }
 
@@ -521,7 +521,7 @@ TEST_F(IndexerTest, RecentFailureVisibleThenCommittedRecordWins)
   TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
   ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoRecentFailure);
   EXPECT_EQ(result.recent_failure().attempt_height, 100);
-  EXPECT_EQ(result.recent_failure().conflict.code,
+  EXPECT_EQ(result.recent_failure().cause.conflict().code,
             DbConflictCode::ValueMismatch);
 
   // The retried tx commits at height 101: the committed record wins.

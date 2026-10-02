@@ -701,7 +701,7 @@ TEST_F(EventRpcTest, TxFailureMailboxDrainsIsBoundedAndDoesNotBlockIngress)
   EventMempoolRpc mempool_rpc(ctx);
   TxFailureDiagnostic diag;
   diag.attempt_height = 42;
-  diag.conflict.code = DbConflictCode::ReplayProtection;
+  diag.cause.conflict().code = DbConflictCode::ReplayProtection;
   for (size_t i = 0; i < EventRPCContext::kMaxTxFailureNotices + 32; ++i) {
     TransactionHash tx_hash{};
     tx_hash[0] = static_cast<uint8_t>(i);

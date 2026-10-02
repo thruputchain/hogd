@@ -2,14 +2,26 @@
     "validator_config": {
         "private_info": {
             "public_info": {
-                "public_key": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56",
+                "public_key": {
+                    "Ed25519": {
+                        "ed25519": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                    }
+                },
                 "address": "localhost:50000"
             },
-            "secret_key": "b9cb6de12b73f1969adeeb7c1102d9420f692da1c977cdeb15271c6a090d06b8970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+            "secret_key": {
+                "Ed25519": {
+                    "ed25519": "b9cb6de12b73f1969adeeb7c1102d9420f692da1c977cdeb15271c6a090d06b8970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                }
+            }
         },
         "known_validators": [
             {
-                "public_key": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56",
+                "public_key": {
+                    "Ed25519": {
+                        "ed25519": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                    }
+                },
                 "address": "localhost:50000"
             }
         ]
@@ -63,8 +75,9 @@
             "threshold": 1,
             "validators": [
                 {
-                    "scheme": "Ed25519",
-                    "ed25519": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                    "Ed25519": {
+                        "ed25519": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                    }
                 }
             ],
             "inner_sets": [

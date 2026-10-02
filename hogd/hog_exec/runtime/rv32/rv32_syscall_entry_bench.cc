@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_conflict.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -97,7 +98,7 @@ constexpr uint32_t kMessageAddress = kPublicKeyAddress + kPublicKeyBytes;
 static_assert(kMessageAddress + kMaxMessageBytes <= kInputAddress,
               "VerifySignature's material must not run into the hashing input");
 // Hasher slots. HashBuffers caps live streams at the network config's
-// max_sha256_buffers (8 here), and Copy needs a distinct destination, so two
+// max_sha256_buffers, and Copy needs a distinct destination, so two
 // low indices are enough and stay well inside the cap.
 constexpr uint32_t kHashSlot = 0;
 constexpr uint32_t kHashSlotCopy = 1;
@@ -247,9 +248,10 @@ constexpr int64_t kColdIterations = 20000;
 // request so a new benchmark cannot silently measure a stub runtime.
 class NoChildRuntimeContext final : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*contract*/,
-                                  NetworkConfigParams const & /*params*/,
-                                  PreparedContract & /*out*/) const override
+  InvokeErrorCode verify_contract(
+      Contract const & /*contract*/, NetworkConfigParams const & /*params*/,
+      PreparedContract & /*out*/,
+      std::optional<ContractRejectCode> & /*rejection*/) const override
   {
     std::abort();
   }

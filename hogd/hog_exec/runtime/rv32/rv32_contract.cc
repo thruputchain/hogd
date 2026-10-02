@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
@@ -38,22 +39,22 @@ static_assert(rv32::kDefaultMaxCodeBytes ==
 static_assert(rv32::kDefaultMaxMemoryBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
 
-std::optional<Rv32Contract>
+std::expected<Rv32Contract, rv32::ArtifactError>
 Rv32Contract::create(ContractBlob const &contract_blob, rv32::Rv32Limits limits)
 {
   auto artifact = rv32::parse_threaded_artifact(contract_blob.data, limits);
   if (!artifact.has_value()) {
-    return std::nullopt;
+    return std::unexpected(artifact.error());
   }
 
   auto pre_instantiation = rv32::ThreadedMachinePreInstantiation::create(
       artifact->code, artifact->initial_memory, artifact->initial_memory_start,
       artifact->memory_bytes, false);
   if (!pre_instantiation.has_value()) {
-    return std::nullopt;
+    return std::unexpected(rv32::ArtifactError::kInvalidProgram);
   }
 
-  return std::make_optional<Rv32Contract>(std::move(*pre_instantiation));
+  return Rv32Contract(std::move(*pre_instantiation));
 }
 
 Rv32Contract::Rv32Contract(
@@ -206,35 +207,70 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
                      total_gas_consumed};
 }
 
+namespace {
+
+// The wire reason for an artifact Rv32Contract::create refused. Coarser than
+// ArtifactError: the wire names what an author can act on, not every check.
+ContractRejectCode
+to_contract_reject_code(rv32::ArtifactError error)
+{
+  using enum rv32::ArtifactError;
+  switch (error) {
+  case kTooSmall:
+  case kBadMagic:
+  case kBadHeaderSize:
+  case kInvalidSectionLayout:
+    return ContractRejectCode::ContractRejectMalformedArtifact;
+  case kUnsupportedFormatVersion:
+    return ContractRejectCode::ContractRejectUnsupportedFormat;
+  case kUnsupportedVmProfile:
+  case kUnsupportedFlags:
+  case kUnsupportedEntryAbi:
+  case kUnsupportedSyscallAbi:
+    return ContractRejectCode::ContractRejectUnsupportedAbi;
+  case kGasScheduleVersionMismatch:
+  case kGasScheduleDigestMismatch:
+    return ContractRejectCode::ContractRejectGasScheduleMismatch;
+  case kMemorySizeInvalid:
+    return ContractRejectCode::ContractRejectMemoryTooLarge;
+  case kCodeSizeInvalid:
+    return ContractRejectCode::ContractRejectCodeSizeInvalid;
+  case kInitialMemoryTooLarge:
+    return ContractRejectCode::ContractRejectInitialMemoryInvalid;
+  case kCodeDigestMismatch:
+  case kInitialMemoryDigestMismatch:
+    return ContractRejectCode::ContractRejectDigestMismatch;
+  case kInvalidProgram:
+    return ContractRejectCode::ContractRejectInvalidProgram;
+  }
+  // Every enumerator returns above; an out-of-range value is memory corruption.
+  CHECK(false);
+  return ContractRejectCode::ContractRejectMalformedArtifact;
+}
+
+} // namespace
+
 InvokeErrorCode
 Rv32Context::verify_contract(Contract const &contract,
                              NetworkConfigParams const &params,
-                             PreparedContract &out) const
+                             PreparedContract &out,
+                             std::optional<ContractRejectCode> &rejection) const
 {
   if (contract.contract_type() != ContractType::kRv32) {
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
     return InvokeErrorCode::Deterministic;
   }
-  // Verify full translatability, not just artifact parsing: parse_threaded_-
-  // artifact only runs the structural artifact checks, whereas Rv32Contract::-
-  // create additionally builds the threaded program (instruction decode) and
-  // the pre-instantiation image, which can reject inputs that parse cleanly.
-  // Rejecting non-translatable contracts at creation time is what makes the
-  // "not translatable" path in make_new_runtime unreachable for a deployed
-  // contract (so its Unrecoverable error is a true should-never-happen).
-  //
-  // The translation is handed back rather than discarded: it is the whole
-  // product of verification, and the caller reuses it for a same-transaction
-  // deployment instead of lowering the identical bytes a second time (#3536).
-  // Attachment uses the chain's bounds; a deployed contract runs under the
-  // VM's ceilings (StorageSnapshotCache).
-  std::optional<Rv32Contract> translated = Rv32Contract::create(
+  // Verify by translating (parsing alone misses decode failures) under the
+  // chain's bounds, and hand the translation back for reuse (#3536).
+  auto translated = Rv32Contract::create(
       contract.rv32_contract(),
       rv32::Rv32Limits{.max_code_bytes = params.max_rv32_code_bytes,
                        .max_memory_bytes = params.max_rv32_memory_bytes});
   if (!translated.has_value()) {
+    rejection = to_contract_reject_code(translated.error());
     return InvokeErrorCode::Deterministic;
   }
-  out.rv32 = std::move(translated);
+  out.rv32.emplace(std::move(*translated));
   return InvokeErrorCode::None;
 }
 
@@ -251,12 +287,8 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   }
   assert(syscall_handler != nullptr);
 
-  // Snapshot deployment: the back-pointer entry was translated eagerly when the
-  // contract entered the cache. A present translation is the fast path (no
-  // resolve_contract round trip, no per-invocation translation); a null
-  // translation is the cached result for a non-translatable artifact, so fail
-  // here rather than re-resolving and re-translating (which would just fail
-  // again).
+  // Snapshot deployment: the cache translated the entry eagerly and never
+  // holds an rv32 entry without a translation, so this check is a guard.
   if (deployed_contract.entry != nullptr) {
     if (!deployed_contract.entry->prepared.rv32.has_value()) [[unlikely]] {
       error("Unrecoverable: rv32 contract is not translatable: {}",

@@ -264,18 +264,26 @@ SystemCallHandler::perform_initial_validation()
   // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
       contracts_to_deploy_.size() > permitted) {
-    error("Transaction attaches {} contracts; chain permits {}",
-          contracts_to_deploy_.size(), permitted);
+    warn("tx {}: attaches {} contracts; chain permits {}",
+         show_byte_array(get_source_tx_hash()), contracts_to_deploy_.size(),
+         permitted);
+    report_contract_rejection(ContractRejectDiagnostic{
+        .contract_index = permitted,
+        .code = ContractRejectCode::ContractRejectTooMany});
     return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
   // The blob bound is the chain's (#2569): a configuration may raise it past
   // the default, and hog_db stores whatever a loadable genesis admits.
-  for (auto const &contract : contracts_to_deploy_) {
+  for (size_t i = 0; i < contracts_to_deploy_.size(); ++i) {
     if (const uint32_t permitted = config_params().max_contract_size_bytes;
-        contract_blob_size(contract) > permitted) {
-      error("Transaction attaches a {}-byte contract; chain permits {}",
-            contract_blob_size(contract), permitted);
+        contract_blob_size(contracts_to_deploy_[i]) > permitted) {
+      warn("tx {}: attached contract {} is {} bytes; chain permits {}",
+           show_byte_array(get_source_tx_hash()), i,
+           contract_blob_size(contracts_to_deploy_[i]), permitted);
+      report_contract_rejection(ContractRejectDiagnostic{
+          .contract_index = static_cast<uint32_t>(i),
+          .code = ContractRejectCode::ContractRejectBlobTooLarge});
       return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }
@@ -288,10 +296,17 @@ SystemCallHandler::perform_initial_validation()
   // handler itself cannot rethrow -- and keep anything else terminating,
   // since it is a genuine bug.
   try {
+    std::optional<ContractRejectDiagnostic> rejection;
     auto [res, gas_consumed] =
         NewContractSet::make(contracts_to_deploy_, runtime_context_,
-                             config_params());
+                             config_params(), rejection);
     if (!res.has_value()) {
+      if (rejection.has_value()) {
+        warn("tx {}: refusing attached contract {}: {}",
+             show_byte_array(get_source_tx_hash()), rejection->contract_index,
+             x23::show(rejection->code));
+        report_contract_rejection(*rejection);
+      }
       return {res.error(), gas_consumed};
     }
     newly_created_contracts_ = std::move(*res);
@@ -1229,15 +1244,29 @@ SystemCallHandler::report_db_conflict_diagnostic() const
     first = conflict.conflicts().data();
   }
 
-  // Fire-and-forget: drive the async send in a detached coroutine so execution
-  // never waits on it (the same detached-await shape as the event server's own
-  // detached sends). report_tx_failure copies the client, so the send is
-  // self-contained and safe to outlive us.
-  const BlockHeight height = get_block_height();
-  [](x23::Async<void> send)
-      -> x23::Detached { co_await send; }(event_server_proxy_.report_tx_failure(
-          get_source_tx_hash(),
-          TxFailureDiagnostic{.attempt_height = height, .conflict = *first}));
+  TxFailureCause cause(TxFailureKind::TxFailureDbConflict);
+  cause.conflict() = *first;
+  report_tx_failure(std::move(cause));
+}
+
+void
+SystemCallHandler::report_contract_rejection(
+    ContractRejectDiagnostic const &rejection) const
+{
+  if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+    TxFailureCause cause(TxFailureKind::TxFailureContractRejected);
+    cause.contract() = rejection;
+    report_tx_failure(std::move(cause));
+  }
+}
+
+void
+SystemCallHandler::report_tx_failure(TxFailureCause cause) const
+{
+  event_server_proxy_.report_tx_failure(
+      get_source_tx_hash(),
+      TxFailureDiagnostic{.attempt_height = get_block_height(),
+                          .cause = std::move(cause)});
 }
 
 void
