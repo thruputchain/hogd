@@ -4455,6 +4455,67 @@ TEST(Mempool, OverCapBodyIsDroppedFromProposal)
   EXPECT_TRUE(nominated_hashes(proposed.proposed_block().proposal).empty());
 }
 
+// A recovered tip can carry a tampered maximum BlockHeight: the <DBTIP> row is
+// global metadata, excluded from the state hash, so a CRC-valid rewrite of just
+// the persisted height survives recovery. The successor height is height + 1,
+// and BlockHeight is signed, so proposing over such a tip used to evaluate
+// max() + 1 (signed overflow UB) before any downstream guard. Proposal setup
+// must reject the tip gracefully instead. See
+// https://github.com/groundhogchain/hogd/issues/4291.
+TEST(Mempool, RecoveredMaximumHeightOverflowsDuringProposalSetup)
+{
+  TmpDir db_dir;
+  // Matches the heap size MempoolTestInfra opens its RAMDB with.
+  constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024;
+
+  {
+    MempoolTestInfra server(
+        MempoolTestInfra::Options{.db_directory = db_dir.directory()});
+    const SchedulerGetTipResult tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    ASSERT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
+  }
+
+  // Rewrite only the persisted tip height to the maximum representable value.
+  {
+    const DBStatus<uint64_t> lsn =
+        Database::check(db_dir.directory(), kRamDbBytes);
+    ASSERT_TRUE(lsn.has_value());
+    DBStatus<std::unique_ptr<Database>> ramdb =
+        Database::open_lsn(db_dir.directory(), *lsn, kRamDbBytes);
+    ASSERT_TRUE(ramdb.has_value());
+    HogDbDAO dao(RAMDB(std::move(*ramdb)));
+    HogDbStatus<DbTip> persisted_tip = dao.read_dbtip();
+    ASSERT_TRUE(persisted_tip.has_value());
+    persisted_tip->value.proposal_header.block_height =
+        std::numeric_limits<BlockHeight>::max();
+    ASSERT_TRUE(dao.write_dbtip(*persisted_tip).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  }
+
+  MempoolTestInfra restarted(
+      MempoolTestInfra::Options{.skip_genesis_block = true,
+                                .db_directory = db_dir.directory()});
+  restarted.register_runtime_after_genesis();
+  const SchedulerGetTipResult recovered =
+      restarted.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(recovered.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ASSERT_EQ(recovered.db_tip().value.proposal_header.block_height,
+            std::numeric_limits<BlockHeight>::max());
+
+  // Match the recovered timepoint so the proposal clears the timepoint guard
+  // and reaches the successor-height computation this test exercises.
+  ProposalContext context{};
+  context.protocol = 0;
+  context.block_timepoint =
+      recovered.db_tip().value.proposal_header.block_timepoint;
+  const SchedulerProposalResult result =
+      restarted.mempool_coord_rpc().schedulercoord_propose_block(
+          recovered.db_tip().id, std::move(context))();
+  EXPECT_EQ(result.outcome(), SchedulerProposalOutcome::SchedulerProposalError);
+}
+
 } // namespace hogd
 
 int
