@@ -538,6 +538,72 @@ TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
   EXPECT_EQ(file_size(), committed_size);
 }
 
+// A tampered snapshot can keep every logical byte and a valid (unkeyed) CRC32C
+// while claiming an end LSN of UINT64_MAX. No honestly minted LSN ever reaches
+// that value, and recovering at it would set the writer's cur_lsn to its own
+// last representable value; the next honest snapshot would then wrap the
+// durable LSN to zero and a production reopen would treat the populated
+// database as fresh, silently losing state. Recovery must reject such a
+// snapshot as corruption (#4297).
+TEST_F(DatabaseTest, RecoveryRejectsSnapshotWithMaxEndLsn)
+{
+  constexpr std::string_view kKey = "sentinel-key";
+  constexpr std::string_view kValue = "sentinel-value";
+  constexpr uint64_t kMaxLsn = std::numeric_limits<uint64_t>::max();
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(kKey)), 0,
+                       std::as_bytes(std::span(kValue))));
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_EQ(snapshot->first, 1U);
+  ASSERT_TRUE(snapshot->second.get());
+  db_.reset();
+
+  // Rewrite the snapshot's commit header to claim lsn UINT64_MAX - 1 (so it
+  // matches an end_lsn of UINT64_MAX), then recompute the trailing CRC32C so
+  // the record stays structurally valid.
+  {
+    ErrnoStatus<struct stat> st = dir_.stat("0-1.snap");
+    ASSERT_TRUE(static_cast<bool>(st));
+    ErrnoStatus<File> file = dir_.openat("0-1.snap", O_RDWR);
+    ASSERT_TRUE(static_cast<bool>(file));
+    std::vector<std::byte> bytes(static_cast<size_t>(st->st_size));
+    ASSERT_TRUE(static_cast<bool>(read_full(*file, bytes)));
+
+    const size_t commit_offset =
+        bytes.size() - sizeof(ItemHeader) - sizeof(uint32_t);
+    ItemHeader commit_header;
+    std::memcpy(&commit_header, bytes.data() + commit_offset,
+                sizeof(commit_header));
+    ASSERT_EQ(commit_header.storage, ItemStorage::kCommit);
+    commit_header.lsn = kMaxLsn - 1;
+    std::memcpy(bytes.data() + commit_offset, &commit_header,
+                sizeof(commit_header));
+
+    uint32_t crc = cpu_to_le(crc32c(
+        std::span<const std::byte>(bytes).first(bytes.size() - sizeof(crc))));
+    std::memcpy(bytes.data() + bytes.size() - sizeof(crc), &crc, sizeof(crc));
+
+    ASSERT_TRUE(static_cast<bool>(file->lseek(0, SEEK_SET)));
+    ASSERT_TRUE(static_cast<bool>(write_full(*file, bytes)));
+    ASSERT_TRUE(static_cast<bool>(file->sync()));
+  }
+
+  ASSERT_TRUE(static_cast<bool>(
+      dir_.rename("0-1.snap", std::format("0-{}.snap", kMaxLsn))));
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(checked);
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+
+  DBStatus<void> opened = open_db();
+  ASSERT_FALSE(opened);
+  EXPECT_EQ(opened.error(), DBCode::kCorruption);
+}
+
 TEST_F(DatabaseTest, Compact)
 {
   insert_n(kInsertions);
