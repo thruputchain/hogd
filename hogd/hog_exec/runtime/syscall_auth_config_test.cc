@@ -964,24 +964,25 @@ TEST_F(SyscallAuthConfigTest, ExplicitZeroRequiredWeightOverridesDefault)
   EXPECT_EQ(auth_data.required_weight, Weight{0});
 }
 
-// === GetAddressAuthData ===
+// === GetAddressAuthSummary / GetAddressPublicKey ===
 
 namespace {
 
 constexpr SyscallErrorCode kNone = SyscallErrorCode::kSyscallErrorCodeNone;
 
-// An empty registration encodes as kMaxSigners absent optionals, the weight
-// and the height; a full one adds a PublicKeyConfig (36-byte key union plus
-// weight) per slot. The syscall description quotes the latter as the bound.
-constexpr RuntimeMemoryLength kEmptyRegistrationXdrSize =
-    (kMaxSigners * 4) + 4 + 8;
-constexpr RuntimeMemoryLength kFullRegistrationXdrSize =
-    (kMaxSigners * (4 + 36 + 4)) + 4 + 8;
-static_assert(kEmptyRegistrationXdrSize == 96);
-static_assert(kFullRegistrationXdrSize == 936);
+// An empty summary encodes as kMaxSigners absent optionals, the weight and
+// the height; an occupied slot adds a scheme and a weight. The syscall
+// description quotes the latter as the bound.
+constexpr RuntimeMemoryLength kEmptySummaryXdrSize = (kMaxSigners * 4) + 4 + 8;
+constexpr RuntimeMemoryLength kFullSummaryXdrSize =
+    (kMaxSigners * (4 + 4 + 4)) + 4 + 8;
+static_assert(kEmptySummaryXdrSize == 96);
+static_assert(kFullSummaryXdrSize == 264);
 
-// Comfortably holds any encoding.
-constexpr size_t kAuthDataBufferSize = 1024;
+constexpr size_t kEd25519KeyLen = 32;
+
+// Comfortably holds any summary encoding.
+constexpr size_t kSummaryBufferSize = 512;
 
 PublicKeyConfigOpt
 make_key_config(auto const &ed25519_public_key, Weight max_weight)
@@ -993,48 +994,111 @@ make_key_config(auto const &ed25519_public_key, Weight max_weight)
       new PublicKeyConfig{.key = key, .max_weight = max_weight}}};
 }
 
-AddressAuthData
-decode_auth_data(std::span<const std::byte> bytes)
+PublicKeyConfigSummaryOpt
+make_slot_summary(Weight max_weight)
 {
-  AddressAuthData out{};
+  return PublicKeyConfigSummaryOpt{x23::Ptr<PublicKeyConfigSummary>{
+      new PublicKeyConfigSummary{.scheme = CryptographicScheme::Ed25519,
+                                 .max_weight = max_weight}}};
+}
+
+AddressAuthSummary
+decode_summary(std::span<const std::byte> bytes)
+{
+  AddressAuthSummary out{};
   x23::deserialize(&out, x23::BufView{bytes});
   return out;
 }
 
-// Reads the current address's registration through the syscall into a
-// buffer that holds any encoding. Fails the test and returns nullopt on any
-// error, so callers can bail out of the contract body.
-x23::Async<std::optional<AddressAuthData>>
-read_auth_data(NativeSyscallContext &ctx)
+// Reads the current address's registration summary through the syscall into
+// a buffer that holds any encoding. Fails the test and returns nullopt on
+// any error, so callers can bail out of the contract body.
+x23::Async<std::optional<AddressAuthSummary>>
+read_summary(NativeSyscallContext &ctx)
 {
-  std::array<std::byte, kAuthDataBufferSize> buffer{};
+  std::array<std::byte, kSummaryBufferSize> buffer{};
   RuntimeMemoryLength written_len = 0;
-  auto status = co_await ctx.syscall<SyscallNo::kGetAddressAuthData>(
+  auto status = co_await ctx.syscall<SyscallNo::kGetAddressAuthSummary>(
       std::span<std::byte>{buffer}, written_len);
   if (!status.has_value() || status.value() != kNone) {
-    ADD_FAILURE() << "GetAddressAuthData failed";
+    ADD_FAILURE() << "GetAddressAuthSummary failed";
     co_return std::nullopt;
   }
   if (written_len > buffer.size()) {
-    ADD_FAILURE() << "GetAddressAuthData reported " << written_len
+    ADD_FAILURE() << "GetAddressAuthSummary reported " << written_len
                   << " bytes, more than any encoding";
     co_return std::nullopt;
   }
-  co_return decode_auth_data(
+  co_return decode_summary(
       std::span<const std::byte>{buffer.data(), written_len});
 }
 
+// What one GetAddressPublicKey call reported.
+struct KeyRead {
+  SyscallErrorCode code;
+  RuntimeMemoryLength written_len;
+  std::array<std::byte, kEd25519KeyLen> buffer;
+};
+
+// Reads slot [index] into the first [buffer_len] bytes of a key-sized
+// buffer. Fails the test and returns nullopt on a host-level error.
+x23::Async<std::optional<KeyRead>>
+read_key(NativeSyscallContext &ctx, uint32_t index,
+         size_t buffer_len = kEd25519KeyLen)
+{
+  KeyRead read{.code = kNone, .written_len = 0, .buffer = {}};
+  auto status = co_await ctx.syscall<SyscallNo::kGetAddressPublicKey>(
+      index, std::span<std::byte>{read.buffer.data(), buffer_len},
+      read.written_len);
+  if (!status.has_value()) {
+    ADD_FAILURE() << "GetAddressPublicKey host error on slot " << index;
+    co_return std::nullopt;
+  }
+  read.code = status.value();
+  co_return read;
+}
+
+// Expects slot [index] to read back as [ed25519_public_key] in full.
+x23::Async<void>
+expect_key(NativeSyscallContext &ctx, uint32_t index,
+           auto const &ed25519_public_key)
+{
+  auto read = co_await read_key(ctx, index);
+  if (!read) {
+    co_return;
+  }
+  EXPECT_EQ(read->code, kNone) << "slot " << index;
+  EXPECT_EQ(read->written_len, kEd25519KeyLen) << "slot " << index;
+  EXPECT_TRUE(std::equal(read->buffer.begin(), read->buffer.end(),
+                         reinterpret_cast<const std::byte *>(
+                             ed25519_public_key.data())))
+      << "slot " << index;
+}
+
+x23::Async<void>
+expect_key_absent(NativeSyscallContext &ctx, uint32_t index)
+{
+  auto read = co_await read_key(ctx, index);
+  if (!read) {
+    co_return;
+  }
+  EXPECT_EQ(read->code, SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist)
+      << "slot " << index;
+}
+
 bool
-is_empty_registration(AddressAuthData const &auth_data)
+is_empty_registration(AddressAuthSummary const &summary)
 {
   for (size_t i = 0; i < kMaxSigners; ++i) {
-    if (auth_data.public_keys[i]) {
+    if (summary.public_keys[i]) {
       return false;
     }
   }
-  return auth_data.required_weight == 0 && auth_data.last_written_height == 0;
+  return summary.required_weight == 0 && summary.last_written_height == 0;
 }
 
+// Expects slot [index] of a committed row to hold [ed25519_public_key] at
+// [max_weight].
 void
 expect_slot(AddressAuthData const &auth_data, size_t index,
             auto const &ed25519_public_key, Weight max_weight)
@@ -1049,13 +1113,27 @@ expect_slot(AddressAuthData const &auth_data, size_t index,
   EXPECT_EQ(auth_data.public_keys[index]->max_weight, max_weight);
 }
 
+// Expects slot [index] of a summary to report an Ed25519 key at
+// [max_weight].
 void
-expect_slots_empty_except(AddressAuthData const &auth_data,
+expect_slot(AddressAuthSummary const &summary, size_t index, Weight max_weight)
+{
+  if (!summary.public_keys[index]) {
+    ADD_FAILURE() << "slot " << index << " is empty";
+    return;
+  }
+  EXPECT_EQ(summary.public_keys[index]->scheme, CryptographicScheme::Ed25519);
+  EXPECT_EQ(summary.public_keys[index]->max_weight, max_weight);
+}
+
+// Works on a committed row and on a summary alike.
+void
+expect_slots_empty_except(auto const &table,
                           std::initializer_list<size_t> occupied)
 {
   for (size_t i = 0; i < kMaxSigners; ++i) {
     const bool expected = std::ranges::find(occupied, i) != occupied.end();
-    EXPECT_EQ(static_cast<bool>(auth_data.public_keys[i]), expected)
+    EXPECT_EQ(static_cast<bool>(table.public_keys[i]), expected)
         << "slot " << i;
   }
 }
@@ -1106,18 +1184,18 @@ set_required_weight(NativeSyscallContext &ctx, Weight required_weight)
 
 } // namespace
 
-// The encoding bounds the syscall description quotes.
-TEST(AddressAuthDataXdrSizeTest, EncodingBoundsMatchSyscallDescription)
+// The encoding bounds the syscall description quotes: fixed whatever the
+// key scheme, which is the point of leaving the keys out.
+TEST(AddressAuthSummaryXdrSizeTest, EncodingBoundsMatchSyscallDescription)
 {
-  AddressAuthData empty{};
-  EXPECT_EQ(x23::xdr_size(empty), kEmptyRegistrationXdrSize);
+  AddressAuthSummary empty{};
+  EXPECT_EQ(x23::xdr_size(empty), kEmptySummaryXdrSize);
 
-  auto [public_key, secret_key] = ed25519_keygen();
-  AddressAuthData full{};
+  AddressAuthSummary full{};
   for (size_t i = 0; i < kMaxSigners; ++i) {
-    full.public_keys[i] = make_key_config(public_key, 1);
+    full.public_keys[i] = make_slot_summary(1);
   }
-  EXPECT_EQ(x23::xdr_size(full), kFullRegistrationXdrSize);
+  EXPECT_EQ(x23::xdr_size(full), kFullSummaryXdrSize);
 }
 
 // compose() over a committed row: changed slots replace the base's, a null
@@ -1172,7 +1250,10 @@ TEST(AddressAuthDataItemTest, ClearOnlyDeltaWritesNoRow)
   EXPECT_FALSE(item.writes_row(false));
   EXPECT_TRUE(item.writes_row(true));
 
-  EXPECT_TRUE(is_empty_registration(item.compose(nullptr, 7)));
+  auto composed = item.compose(nullptr, 7);
+  expect_slots_empty_except(composed, {});
+  EXPECT_EQ(composed.required_weight, 0U);
+  EXPECT_EQ(composed.last_written_height, 0U);
 
   AddressAuthData base{};
   base.last_written_height = 3;
@@ -1183,46 +1264,57 @@ TEST(AddressAuthDataItemTest, ClearOnlyDeltaWritesNoRow)
   EXPECT_EQ(item.compose(nullptr, 7).last_written_height, 7U);
 }
 
-// An address with no auth row reads as an empty registration, not an error.
-// A short buffer still reports the full length and receives the prefix that
-// fits; an empty buffer only measures. Reading writes nothing.
-TEST_F(SyscallAuthConfigTest, GetAddressAuthDataFreshAddressReadsEmpty)
+// An address with no auth row reads as an empty registration, not an error,
+// and every slot's key as absent. A short summary buffer still reports the
+// full length and receives the prefix that fits; an empty buffer only
+// measures. A slot number past the table is rejected. Reading writes
+// nothing.
+TEST_F(SyscallAuthConfigTest, GetAddressAuthSummaryFreshAddressReadsEmpty)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0,
-              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto auth_data = co_await read_auth_data(ctx);
-                if (!auth_data) {
-                  co_return InvokeError{InvokeErrorCode::Deterministic};
-                }
-                EXPECT_TRUE(is_empty_registration(*auth_data));
-                auto encoded = x23::serialize(*auth_data);
-                EXPECT_EQ(encoded.size(), kEmptyRegistrationXdrSize);
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto summary = co_await read_summary(ctx);
+        if (!summary) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        EXPECT_TRUE(is_empty_registration(*summary));
+        auto encoded = x23::serialize(*summary);
+        EXPECT_EQ(encoded.size(), kEmptySummaryXdrSize);
 
-                std::array<std::byte, 8> short_buffer{};
-                RuntimeMemoryLength written_len = 0;
-                auto short_status =
-                    co_await ctx.syscall<SyscallNo::kGetAddressAuthData>(
-                        std::span<std::byte>{short_buffer}, written_len);
-                EXPECT_TRUE(short_status.has_value());
-                EXPECT_EQ(short_status.value(), kNone);
-                EXPECT_EQ(written_len, kEmptyRegistrationXdrSize);
-                EXPECT_TRUE(std::equal(short_buffer.begin(), short_buffer.end(),
-                                       reinterpret_cast<const std::byte *>(
-                                           encoded.data())));
+        std::array<std::byte, 8> short_buffer{};
+        RuntimeMemoryLength written_len = 0;
+        auto short_status =
+            co_await ctx.syscall<SyscallNo::kGetAddressAuthSummary>(
+                std::span<std::byte>{short_buffer}, written_len);
+        EXPECT_TRUE(short_status.has_value());
+        EXPECT_EQ(short_status.value(), kNone);
+        EXPECT_EQ(written_len, kEmptySummaryXdrSize);
+        EXPECT_TRUE(
+            std::equal(short_buffer.begin(), short_buffer.end(),
+                       reinterpret_cast<const std::byte *>(encoded.data())));
 
-                RuntimeMemoryLength measured_len = 0;
-                auto measure_status =
-                    co_await ctx.syscall<SyscallNo::kGetAddressAuthData>(
-                        std::span<std::byte>{}, measured_len);
-                EXPECT_TRUE(measure_status.has_value());
-                EXPECT_EQ(measure_status.value(), kNone);
-                EXPECT_EQ(measured_len, kEmptyRegistrationXdrSize);
-                co_return InvokeStatus<void>{};
-              });
+        RuntimeMemoryLength measured_len = 0;
+        auto measure_status =
+            co_await ctx.syscall<SyscallNo::kGetAddressAuthSummary>(
+                std::span<std::byte>{}, measured_len);
+        EXPECT_TRUE(measure_status.has_value());
+        EXPECT_EQ(measure_status.value(), kNone);
+        EXPECT_EQ(measured_len, kEmptySummaryXdrSize);
+
+        co_await expect_key_absent(ctx, 0);
+        co_await expect_key_absent(ctx, kMaxSigners - 1);
+
+        auto past_table = co_await read_key(ctx, kMaxSigners);
+        if (past_table) {
+          EXPECT_EQ(past_table->code,
+                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto context = deploy_native_contract(contract_addr, std::move(fns));
 
   ASSERT_NO_FATAL_FAILURE(run_and_commit(contract_addr, *context, 0));
@@ -1232,11 +1324,12 @@ TEST_F(SyscallAuthConfigTest, GetAddressAuthDataFreshAddressReadsEmpty)
 }
 
 // The acceptance scenario: a registration made earlier in the same frame is
-// visible to the read, stamped with the executing height; after the block
+// visible to both reads, stamped with the executing height; after the block
 // commits a later transaction reads the same row back from the snapshot; a
 // removal in that transaction clears the slot while the committed weight
-// stays.
-TEST_F(SyscallAuthConfigTest, GetAddressAuthDataSeesPendingAndCommittedWrites)
+// stays. A short key buffer reports the full key length.
+TEST_F(SyscallAuthConfigTest,
+       GetAddressAuthSummarySeesPendingAndCommittedWrites)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -1245,8 +1338,8 @@ TEST_F(SyscallAuthConfigTest, GetAddressAuthDataSeesPendingAndCommittedWrites)
   BlockHeight registration_height = 0;
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  // Method 0: register slot 3 at weight 2 and require weight 2, then read it
-  // back in the same frame.
+  // Method 0: register slot 3 at weight 2 and require weight 2, then read
+  // both back in the same frame.
   fns.emplace(0,
               [public_key, &registration_height](
                   NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -1254,16 +1347,29 @@ TEST_F(SyscallAuthConfigTest, GetAddressAuthDataSeesPendingAndCommittedWrites)
                     !co_await set_required_weight(ctx, 2)) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                auto auth_data = co_await read_auth_data(ctx);
-                if (!auth_data) {
+                auto summary = co_await read_summary(ctx);
+                if (!summary) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                expect_slot(*auth_data, 3, public_key, 2);
-                expect_slots_empty_except(*auth_data, {3});
-                EXPECT_EQ(auth_data->required_weight, 2U);
-                EXPECT_EQ(auth_data->last_written_height,
+                expect_slot(*summary, 3, 2);
+                expect_slots_empty_except(*summary, {3});
+                EXPECT_EQ(summary->required_weight, 2U);
+                EXPECT_EQ(summary->last_written_height,
                           ctx.handler().get_block_height());
                 registration_height = ctx.handler().get_block_height();
+
+                co_await expect_key(ctx, 3, public_key);
+                co_await expect_key_absent(ctx, 2);
+
+                auto short_read = co_await read_key(ctx, 3, 8);
+                if (short_read) {
+                  EXPECT_EQ(short_read->code, kNone);
+                  EXPECT_EQ(short_read->written_len, kEd25519KeyLen);
+                  EXPECT_TRUE(std::equal(short_read->buffer.begin(),
+                                         short_read->buffer.begin() + 8,
+                                         reinterpret_cast<const std::byte *>(
+                                             public_key.data())));
+                }
                 co_return InvokeStatus<void>{};
               });
   // Method 1, a later block: the committed row reads back unchanged; removing
@@ -1271,21 +1377,22 @@ TEST_F(SyscallAuthConfigTest, GetAddressAuthDataSeesPendingAndCommittedWrites)
   fns.emplace(1,
               [public_key, &registration_height](
                   NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto committed = co_await read_auth_data(ctx);
+                auto committed = co_await read_summary(ctx);
                 if (!committed) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                expect_slot(*committed, 3, public_key, 2);
+                expect_slot(*committed, 3, 2);
                 expect_slots_empty_except(*committed, {3});
                 EXPECT_EQ(committed->required_weight, 2U);
                 EXPECT_EQ(committed->last_written_height, registration_height);
                 EXPECT_LT(registration_height,
                           ctx.handler().get_block_height());
+                co_await expect_key(ctx, 3, public_key);
 
                 if (!co_await remove_key(ctx, 3)) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                auto cleared = co_await read_auth_data(ctx);
+                auto cleared = co_await read_summary(ctx);
                 if (!cleared) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
@@ -1293,6 +1400,7 @@ TEST_F(SyscallAuthConfigTest, GetAddressAuthDataSeesPendingAndCommittedWrites)
                 EXPECT_EQ(cleared->required_weight, 2U);
                 EXPECT_EQ(cleared->last_written_height,
                           ctx.handler().get_block_height());
+                co_await expect_key_absent(ctx, 3);
                 co_return InvokeStatus<void>{};
               });
   auto context = deploy_native_contract(contract_addr, std::move(fns));
@@ -1320,11 +1428,11 @@ TEST_F(SyscallAuthConfigTest, GetAddressAuthDataSeesPendingAndCommittedWrites)
   }
 }
 
-// Base-plus-delta through the syscall: an untouched read is the committed
+// Base-plus-delta through the syscalls: an untouched read is the committed
 // row; a write to another slot layers over it without disturbing the
 // committed slot; a weight write replaces the committed weight.
 TEST_F(SyscallAuthConfigTest,
-       GetAddressAuthDataComposesPendingDeltaOverCommittedRow)
+       GetAddressAuthSummaryComposesPendingDeltaOverCommittedRow)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -1347,38 +1455,41 @@ TEST_F(SyscallAuthConfigTest,
   fns.emplace(1,
               [key0, key1, &first_height](
                   NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto before = co_await read_auth_data(ctx);
+                auto before = co_await read_summary(ctx);
                 if (!before) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                expect_slot(*before, 0, key0, 5);
+                expect_slot(*before, 0, 5);
                 expect_slots_empty_except(*before, {0});
                 EXPECT_EQ(before->required_weight, 3U);
                 EXPECT_EQ(before->last_written_height, first_height);
+                co_await expect_key(ctx, 0, key0);
 
                 if (!co_await register_key(ctx, 1, key1, 1)) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                auto after_key = co_await read_auth_data(ctx);
+                auto after_key = co_await read_summary(ctx);
                 if (!after_key) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                expect_slot(*after_key, 0, key0, 5);
-                expect_slot(*after_key, 1, key1, 1);
+                expect_slot(*after_key, 0, 5);
+                expect_slot(*after_key, 1, 1);
                 expect_slots_empty_except(*after_key, {0, 1});
                 EXPECT_EQ(after_key->required_weight, 3U);
                 EXPECT_EQ(after_key->last_written_height,
                           ctx.handler().get_block_height());
+                co_await expect_key(ctx, 0, key0);
+                co_await expect_key(ctx, 1, key1);
 
                 if (!co_await set_required_weight(ctx, 7)) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                auto after_weight = co_await read_auth_data(ctx);
+                auto after_weight = co_await read_summary(ctx);
                 if (!after_weight) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                expect_slot(*after_weight, 0, key0, 5);
-                expect_slot(*after_weight, 1, key1, 1);
+                expect_slot(*after_weight, 0, 5);
+                expect_slot(*after_weight, 1, 1);
                 EXPECT_EQ(after_weight->required_weight, 7U);
                 co_return InvokeStatus<void>{};
               });
@@ -1398,9 +1509,9 @@ TEST_F(SyscallAuthConfigTest,
 }
 
 // Clearing a slot of an address with no row writes nothing (see
-// DeletionOnlyFirstTouchCreatesNoRow), and the read agrees: still empty,
+// DeletionOnlyFirstTouchCreatesNoRow), and the reads agree: still empty,
 // still unstamped.
-TEST_F(SyscallAuthConfigTest, GetAddressAuthDataClearOnlyDeltaReadsEmpty)
+TEST_F(SyscallAuthConfigTest, GetAddressAuthSummaryClearOnlyDeltaReadsEmpty)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -1411,11 +1522,12 @@ TEST_F(SyscallAuthConfigTest, GetAddressAuthDataClearOnlyDeltaReadsEmpty)
                 if (!co_await remove_key(ctx, 0)) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                auto auth_data = co_await read_auth_data(ctx);
-                if (!auth_data) {
+                auto summary = co_await read_summary(ctx);
+                if (!summary) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                EXPECT_TRUE(is_empty_registration(*auth_data));
+                EXPECT_TRUE(is_empty_registration(*summary));
+                co_await expect_key_absent(ctx, 0);
                 co_return InvokeStatus<void>{};
               });
   auto context = deploy_native_contract(contract_addr, std::move(fns));
