@@ -725,7 +725,29 @@ HogDbDAO::get_charged_storage_cost_and_cache_data(
     }
   case ItemKeyType::kItemKeyTypeContractData:
   {
-    auto item = db_.get(make_contract_data_key(key));
+    auto db_key = make_contract_data_key(key);
+    auto type = db_.get_type(db_key);
+    if (!type) {
+      if (type.error() != HogDbCode::kNotFound) {
+        return type.error();
+      }
+      return HogDbError(HogDbCode::kNotFound);
+    }
+    // A bytestring's storage cost depends only on its length, so read the size
+    // directly instead of materializing (and copying) the whole stored value.
+    if (type.value() == kBytes) {
+      auto size = db_.get_size(db_key);
+      if (!size) {
+        if (size.error() != HogDbCode::kNotFound) {
+          return size.error();
+        }
+        return HogDbError(HogDbCode::kNotFound);
+      }
+      return std::make_pair(cost_model->get_bytestring_cost(size.value()),
+                            ItemLockCacheData::from_none());
+    }
+
+    auto item = db_.get(db_key);
     if (!item) {
       if (item.error() != HogDbCode::kNotFound) {
         return item.error();
@@ -743,10 +765,6 @@ HogDbDAO::get_charged_storage_cost_and_cache_data(
       return std::make_pair(cost_model->get_nnint_cost(),
                             ItemLockCacheData::from_nnint128_base(out));
     }
-    case kBytes:
-      return std::make_pair(cost_model->get_bytestring_cost(
-                                item.value().value.size()),
-                            ItemLockCacheData::from_none());
     case kRetrocausalQueue:
     {
       RetrocausalQueueMetadata meta;
