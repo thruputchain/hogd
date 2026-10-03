@@ -592,6 +592,44 @@ TEST_F(DatabaseTest, RecoveryRejectsSkippedWalCommitMarker)
   EXPECT_EQ(checked.error(), DBCode::kCorruption);
 }
 
+// Restoring to an LSN that falls inside a snapshot's range is valid: the
+// snapshot commits its whole range at once, so recovery buffers its rows and
+// then skips that commit (it is >= target_lsn), discarding the buffer and
+// recovering the requested LSNs from the WAL. The #4320 guard must not mistake
+// this for tampering.
+TEST_F(DatabaseTest, RestoreToLsnInsideSnapshotRange)
+{
+  const std::string key_a = "key-a";
+  const std::string key_b = "key-b";
+  const std::string value_a = "value-a";
+  const std::string value_b = "value-b";
+
+  // LSN 0: key_a. LSN 1: key_b. The snapshot below spans both (0-2.snap, commit
+  // at LSN 1), while 0.log keeps a separate commit per LSN.
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key_a)), 0,
+                       std::as_bytes(std::span(value_a))));
+  DBStatus<uint64_t> lsn0 = db_->sync();
+  ASSERT_TRUE(lsn0);
+  ASSERT_EQ(*lsn0, 1);
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key_b)), 0,
+                       std::as_bytes(std::span(value_b))));
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_EQ(snapshot->first, 2);
+  ASSERT_TRUE(snapshot->second.get());
+  check_file_exists("0-2.snap");
+  db_.reset();
+
+  // Restore through LSN 0 only. Recovery must succeed with key_a present at its
+  // LSN-0 value and key_b (LSN 1) absent.
+  ASSERT_TRUE(static_cast<bool>(open_db(1)));
+  DBStatus<DBItem> got_a = db_->get(std::as_bytes(std::span(key_a)));
+  ASSERT_TRUE(got_a);
+  EXPECT_EQ(to_string(got_a->value), value_a);
+  EXPECT_FALSE(static_cast<bool>(db_->get(std::as_bytes(std::span(key_b)))));
+}
+
 TEST_F(DatabaseTest, Compact)
 {
   insert_n(kInsertions);
