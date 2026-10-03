@@ -76,6 +76,7 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
             ~/.cargo
+            ~/.rustup
 
       - name: Configure Tidy Scope
         run: |

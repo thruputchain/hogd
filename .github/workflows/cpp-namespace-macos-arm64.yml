@@ -68,6 +68,7 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
             ~/.cache/cargo-install
+            ~/.cache/rustup
 
       - name: Configure Build Caches
         run: |
@@ -86,6 +87,19 @@ jobs:
           mkdir -p "$HOME/.cache/cargo-install/bin"
           echo "Cached cargo-install binaries:"
           ls -l "$HOME/.cache/cargo-install/bin"
+
+          # rustup keeps its toolchains in ~/.rustup, also off the cache volume,
+          # so every run downloaded 1.93.0, 1.96.0 and the contracts nightly
+          # again. Move RUSTUP_HOME onto the volume. A path the image does not
+          # already have avoids clobbering ~/.rustup; on a fresh volume, copy
+          # the image's rustup state in first so its default toolchain and
+          # settings carry over.
+          RUSTUP_CACHE="$HOME/.cache/rustup"
+          mkdir -p "$RUSTUP_CACHE"
+          if [ ! -e "$RUSTUP_CACHE/settings.toml" ] && [ -d "$HOME/.rustup" ]; then
+            cp -R "$HOME/.rustup/." "$RUSTUP_CACHE/"
+          fi
+          echo "RUSTUP_HOME=$RUSTUP_CACHE" >> "$GITHUB_ENV"
 
       - name: Configure Git for Submodule Caching
         run: |

@@ -61,9 +61,14 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
+          # Like the other Linux jobs, keep ~/.cargo (fetch.sh's groundhog-cli and
+          # groundhog-rv32-lower installs, rebuilt from source on every run
+          # without it) and ~/.rustup (toolchains) on the cache volume.
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cargo
+            ~/.rustup
 
       - name: Configure Git for Submodule Caching
         run: |
