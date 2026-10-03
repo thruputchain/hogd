@@ -382,16 +382,21 @@ load_log_file(
 
     if (skip) {
       if (hdr.storage == ItemStorage::kCommit) {
-        // A commit marker we skip implies its batch's records were skipped
-        // too (they share its LSN), so a non-empty buffer here means the
-        // commit's LSN was tampered to skip it, which would drop durable rows
-        // without CRC or expected-LSN validation; reject as corruption (#4320).
-        if (buf.size() != 0) {
-          error("skipped commit marker in {} with {} buffered bytes awaiting a "
-                "commit; treating as corruption",
-                file.path_, buf.size());
+        // A commit skipped because it precedes cur_lsn belongs to an
+        // already-recovered batch whose records were skipped too, so the buffer
+        // must be empty; a non-empty buffer means the commit's LSN was tampered
+        // below cur_lsn to skip it and drop buffered durable rows without CRC
+        // or expected-LSN validation (#4320). A commit skipped because it is
+        // >= target_lsn is instead a legitimate point-in-time restore
+        // truncating a batch, so there we drop the buffer and recover the
+        // requested LSNs from later files.
+        if (hdr.lsn < cur_lsn && buf.size() != 0) {
+          error("skipped commit marker in {} precedes cur_lsn {} with {} "
+                "buffered bytes; treating as corruption",
+                file.path_, cur_lsn, buf.size());
           return DBError(DBCode::kCorruption);
         }
+        buf.take_buffer();
         uncommitted_records = false;
         uncommitted_off = r.offset();
       }
