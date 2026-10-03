@@ -86,10 +86,8 @@ public:
   // Read-only: safe to call concurrently with put()/remove() and with sync().
   DBStatus<DBItem> get(std::span<const std::byte> key);
 
-  // get_with_size finds an item for a given key, returning its type, value
-  // size, and value. The value is not materialized (copied) for items whose
-  // type is metadata_only_type -- callers that need only the size of such items
-  // thereby avoid copying a potentially large value.
+  // get_with_size returns an item's type and value size; see
+  // ScalableMap::get_with_size.
   DBStatus<SizedDBItem> get_with_size(std::span<const std::byte> key,
                                       uint8_t metadata_only_type);
 

@@ -725,9 +725,8 @@ HogDbDAO::get_charged_storage_cost_and_cache_data(
     }
   case ItemKeyType::kItemKeyTypeContractData:
   {
-    // A bytestring's storage cost depends only on its length, so ask the DB to
-    // skip materializing (copying) the stored value for bytestrings; the other
-    // item types need the value to compute their cost and cache data.
+    // Bytestring cost depends only on length, so skip materializing the value;
+    // the other item types need the value for their cost and cache data.
     auto item = db_.get_with_size(make_contract_data_key(key), kBytes);
     if (!item) {
       if (item.error() != HogDbCode::kNotFound) {
