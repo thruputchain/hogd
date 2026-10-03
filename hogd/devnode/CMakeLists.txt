@@ -84,23 +84,39 @@ add_dependencies(
   all_riscv_contracts
   hog-devnode
 )
-# Every test that boots a devnode holds RESOURCE_LOCK hog_devnode (#1697), so
-# the ~90 of them run strictly one after another: 75-110s of serial work in CI.
+# Every test that boots a devnode holds a RESOURCE_LOCK, so the ~90 of them
+# run as serial chains: 75-110s of work in CI. #1697 added the lock because
+# all of them starting at once missed the readiness timeout under ASan.
 # CTest starts the highest-COST tests first, and a fresh build tree has no cost
-# history, so without a COST this chain starts last and runs alone on an idle
+# history, so without a COST the chain starts last and runs alone on an idle
 # runner after every other test has finished. A high COST starts it first, so
-# it overlaps the parallel tests instead. The lock still allows only one devnode
-# at a time.
+# it overlaps the parallel tests instead.
 #
 # A devnode runs a multithreaded node (a 4-thread pool, see
 # kTestDevnodeThreadpoolSize), but CTest counts every test as one slot, so
 # alongside a full set of parallel tests each devnode ran ~2.5x slower than
 # alone and the chain still ended up last. PROCESSORS reserves the slots it
 # actually uses.
+#
+# Even overlapped, one chain outlasted every other test in CI, so the tests
+# are split by name between two locks, which lets at most two devnodes run at
+# once: HogDevnode.DataDirR* (Rejects, Recovers, Replays, Resumes) is about
+# half of the chain's run time, and everything else takes the other half.
+# Each devnode has its own temp dir and ephemeral ports, so two don't collide.
 set(HOG_DEVNODE_TEST_COST 1000)
 set(HOG_DEVNODE_TEST_PROCESSORS 4)
+set(HOG_DEVNODE_SECOND_LOCK_TESTS "HogDevnode.DataDirR*")
 hogd_discover_tests(
   hog_devnode_test
+  TEST_FILTER "${HOG_DEVNODE_SECOND_LOCK_TESTS}"
+  PROPERTIES
+    RESOURCE_LOCK hog_devnode_2
+    COST ${HOG_DEVNODE_TEST_COST}
+    PROCESSORS ${HOG_DEVNODE_TEST_PROCESSORS}
+)
+hogd_discover_tests(
+  hog_devnode_test
+  TEST_FILTER "-${HOG_DEVNODE_SECOND_LOCK_TESTS}"
   PROPERTIES
     RESOURCE_LOCK hog_devnode
     COST ${HOG_DEVNODE_TEST_COST}
