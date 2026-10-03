@@ -382,11 +382,22 @@ load_log_file(
 
     if (skip) {
       if (hdr.storage == ItemStorage::kCommit) {
-        // if we see a commit record that we plan to skip, dump the buffered
-        // records immediately.  It might be a good idea to check the crc on
-        // the commit record just in case one comes into existence via
-        // corruption.
-        buf.take_buffer();
+        // A commit marker we plan to skip must belong to a batch whose change
+        // records were also skipped: honest WAL records carry the same LSN as
+        // their batch's commit marker, and a snapshot's records all precede its
+        // single end-LSN commit, so in both cases skipping the commit means the
+        // recovery buffer is empty. A non-empty buffer here means current-LSN
+        // records were buffered but this commit marker's stored LSN was
+        // tampered to fall outside the recovered range; accepting it would
+        // discard those durable records without CRC or expected-LSN validation
+        // and silently roll recovery back (#4320). Treat it as corruption
+        // instead.
+        if (buf.size() != 0) {
+          error("skipped commit marker in {} with {} buffered bytes awaiting a "
+                "commit; treating as corruption",
+                file.path_, buf.size());
+          return DBError(DBCode::kCorruption);
+        }
         uncommitted_records = false;
         uncommitted_off = r.offset();
       }
