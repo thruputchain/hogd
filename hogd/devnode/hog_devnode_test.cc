@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -3238,8 +3239,9 @@ TEST(HogDevnode, DataDirRejectsInvalidInheritedLockDescriptor)
                                    descriptor}});
     auto status = process.wait_for_exit_for_test(startup_timeout());
     ASSERT_TRUE(status.has_value());
-    EXPECT_TRUE(WIFEXITED(*status));
-    EXPECT_EQ(WEXITSTATUS(*status), EXIT_FAILURE);
+    const int exit_status = status.value();
+    EXPECT_TRUE(WIFEXITED(exit_status));
+    EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
     EXPECT_NE(process.read_remaining_stderr().find(
                   "inherited data-dir lock does not identify this chain"),
               std::string::npos);

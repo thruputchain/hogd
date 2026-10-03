@@ -235,7 +235,7 @@ parse_allocation(json::Value const &value, std::string_view context)
   auto nibble = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
   for (std::size_t i = 0; i < allocation.public_key.size(); ++i) {
     allocation.public_key[i] = static_cast<std::uint8_t>(
-        (nibble((*key)[2 + 2 * i]) << 4) | nibble((*key)[3 + 2 * i]));
+        (nibble((*key)[2 + (2 * i)]) << 4) | nibble((*key)[3 + (2 * i)]));
   }
   auto raw = require_string_field(value, "initialStorageTokens", context);
   if (!raw) {

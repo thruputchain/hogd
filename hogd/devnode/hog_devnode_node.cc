@@ -46,7 +46,6 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_hex.h"
-#include "hogd/devnode/manifest_parse.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_db/hog_age_reconciliation.h"

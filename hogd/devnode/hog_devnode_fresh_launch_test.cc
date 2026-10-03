@@ -168,10 +168,10 @@ main() // NOLINT(bugprone-exception-escape)
     char const *path;
     ~BootstrapCleanup() { unlink(path); }
   } bootstrap_cleanup{bootstrap_path};
-  constexpr std::string_view bootstrap =
+  constexpr std::string_view kBootstrap =
       R"({"schemaVersion":4,"kind":"groundhog-bootstrap","networkHash":"0000000000000000000000000000000000000000000000000000000000000000","profile":"local-dev","bootstrapFaucet":{"publicKey":"0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","initialStorageTokens":"10000000000000"},"bootstrapAccounts":[],"storageCostModel":{"profile":"hogd-default"}})";
-  if (write(bootstrap_fd, bootstrap.data(), bootstrap.size()) !=
-      static_cast<ssize_t>(bootstrap.size())) {
+  if (write(bootstrap_fd, kBootstrap.data(), kBootstrap.size()) !=
+      static_cast<ssize_t>(kBootstrap.size())) {
     fail_with_errno("write bootstrap");
   }
   close(bootstrap_fd);

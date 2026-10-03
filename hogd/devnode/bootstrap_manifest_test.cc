@@ -426,8 +426,8 @@ TEST(BootstrapManifest, RejectsFaucetInUserAllocations)
 
 TEST(BootstrapManifest, RejectsNoncanonicalKeys)
 {
-  for (auto key : {std::string(64, '1'), "0x" + std::string(64, 'A'),
-                   "0x" + std::string(64, 'g')}) {
+  for (const auto &key : {std::string(64, '1'), "0x" + std::string(64, 'A'),
+                          "0x" + std::string(64, 'g')}) {
     ManifestBuilder builder;
     builder.user_public_key = key;
     CleanupDefer cleanup;
@@ -438,7 +438,7 @@ TEST(BootstrapManifest, RejectsNoncanonicalKeys)
 
 TEST(BootstrapManifest, RejectsNoncanonicalAndOutOfRangeAmounts)
 {
-  for (auto amount : {"0", "01", "-1", "9223372036854775808"}) {
+  for (const auto *amount : {"0", "01", "-1", "9223372036854775808"}) {
     ManifestBuilder builder;
     builder.initial_storage_tokens = amount;
     CleanupDefer cleanup;

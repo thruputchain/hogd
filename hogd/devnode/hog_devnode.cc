@@ -4,6 +4,7 @@
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -33,7 +34,6 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
-#include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
