@@ -14,6 +14,15 @@ struct DBItem {
   OwningSpan<const std::byte> value;
 };
 
+// SizedDBItem holds an item's type and value size, plus its value. The value is
+// left empty when get_with_size() was told to skip materializing it (because
+// only the size is needed for that item type); see ScalableMap::get_with_size.
+struct SizedDBItem {
+  uint8_t type;
+  size_t size;
+  OwningSpan<const std::byte> value;
+};
+
 // DBCode is an enum of database error codes.
 enum class DBCode : uint8_t {
   // The item was not found.

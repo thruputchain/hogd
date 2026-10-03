@@ -347,6 +347,36 @@ TEST_F(DatabaseTest, SimpleInsertions)
   check_integrity();
 }
 
+TEST_F(DatabaseTest, GetWithSize)
+{
+  constexpr uint8_t kMetaOnlyType = 7;
+  constexpr uint8_t kOtherType = 3;
+  const std::string key = "get-with-size-key";
+  const std::string value = "hello world";
+  const auto key_span = std::as_bytes(std::span(key));
+
+  // A missing key is reported as not found.
+  EXPECT_EQ(db_->get_with_size(key_span, kMetaOnlyType).error(),
+            DBCode::kNotFound);
+
+  // For the metadata-only type, the size is reported but the value is not
+  // materialized.
+  ASSERT_TRUE(
+      db_->put(key_span, kMetaOnlyType, std::as_bytes(std::span(value))));
+  auto meta_only = db_->get_with_size(key_span, kMetaOnlyType);
+  ASSERT_TRUE(meta_only);
+  EXPECT_EQ(meta_only->type, kMetaOnlyType);
+  EXPECT_EQ(meta_only->size, value.size());
+  EXPECT_EQ(meta_only->value.size(), 0U);
+
+  // When the stored type differs from metadata_only_type, the value is copied.
+  auto with_value = db_->get_with_size(key_span, kOtherType);
+  ASSERT_TRUE(with_value);
+  EXPECT_EQ(with_value->type, kMetaOnlyType);
+  EXPECT_EQ(with_value->size, value.size());
+  EXPECT_EQ(to_string(with_value->value), value);
+}
+
 TEST_F(DatabaseTest, InsertUntilOOM)
 {
   DBError err = insert_until_failure();
