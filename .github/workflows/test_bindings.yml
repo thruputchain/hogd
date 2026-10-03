@@ -121,7 +121,7 @@ jobs:
           chmod u+x ./scripts/conf.sh
 
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=30G" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
           # Zero the persisted counters so "Show ccache stats" reports this run.
           CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 

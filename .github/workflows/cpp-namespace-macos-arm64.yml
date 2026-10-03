@@ -75,9 +75,9 @@ jobs:
           # the cache volume, so every run started cold (933 of 1010 compiles
           # missed). Point it at the cached path, as the Linux workflows do.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
-          # The profile's cache volume is ~53G and one Debug configuration
-          # filled the old 10G limit (a recent PR run: 57% hits, 56 cleanups).
-          echo "CCACHE_MAXSIZE=30G" >> "$GITHUB_ENV"
+          # 10G was full and evicting on every run (a recent PR run: 57% hits,
+          # 56 cleanups). The profile's cache volume is ~53G.
+          echo "CCACHE_MAXSIZE=20G" >> "$GITHUB_ENV"
 
           # cargo install writes to ~/.cargo/bin, which the cache volume does not
           # cover, so groundhog-cli and groundhog-rv32-lower were compiled from

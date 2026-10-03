@@ -191,11 +191,12 @@ jobs:
           echo 'NPROC=20' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # This job has its own cache volume (see runs-on), sized for one
-          # build configuration plus the churn from main and open PRs.
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=gcc-debug" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=30G" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
           # Zero the persisted counters so "Show ccache stats" reports this
           # run, not totals accumulated over every run on the volume.
           CCACHE_DIR="$HOME/.cache/ccache" ccache -z
@@ -327,11 +328,12 @@ jobs:
           echo 'NPROC=28' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # This job has its own cache volume (see runs-on), sized for one
-          # build configuration plus the churn from main and open PRs.
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=llvm-debug" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=30G" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
           # Zero the persisted counters so "Show ccache stats" reports this
           # run, not totals accumulated over every run on the volume.
           CCACHE_DIR="$HOME/.cache/ccache" ccache -z
@@ -444,11 +446,12 @@ jobs:
           echo 'NPROC=18' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # This job has its own cache volume (see runs-on), sized for one
-          # build configuration plus the churn from main and open PRs.
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=gcc-release" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=30G" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
           # Zero the persisted counters so "Show ccache stats" reports this
           # run, not totals accumulated over every run on the volume.
           CCACHE_DIR="$HOME/.cache/ccache" ccache -z
