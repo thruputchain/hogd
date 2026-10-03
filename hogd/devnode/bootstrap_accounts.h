@@ -41,11 +41,18 @@ void add_local_network_config_override(LocalNetworkConfigOverrides &overrides,
 NetworkConfig
 local_network_config(LocalNetworkConfigOverrides const &overrides);
 
+// Public intent for a nonce-zero native account. Signers belong to callers.
+struct LocalAccountAllocation {
+  Ed25519PublicKey public_key{};
+  std::uint64_t storage_tokens = kDefaultLocalUserStorageTokens;
+  bool operator==(LocalAccountAllocation const &) const = default;
+};
+
 struct LocalBootstrapConfig {
-  std::uint32_t user_account_count = 0;
-  std::string seed = "groundhog-dev-accounts";
-  std::uint64_t user_storage_tokens = kDefaultLocalUserStorageTokens;
+  Ed25519PublicKey faucet_public_key{};
+  std::vector<LocalAccountAllocation> accounts;
   LocalNetworkConfigOverrides network_config_overrides;
+  bool operator==(LocalBootstrapConfig const &) const = default;
 };
 
 enum class BootstrapAccountRole {

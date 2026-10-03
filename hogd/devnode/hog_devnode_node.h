@@ -49,7 +49,7 @@ public:
   HogDevnodeNode(
       std::string bind_host, std::uint16_t requested_scheduler_port,
       HogDevnodeDirectories directories,
-      LocalBootstrapConfig const &bootstrap_config = {},
+      LocalBootstrapConfig const &bootstrap_config,
       std::optional<std::filesystem::path> const &data_dir = std::nullopt,
       NetworkHash network_hash = {},
       std::size_t ramdb_bytes = kDefaultRamDbBytes);

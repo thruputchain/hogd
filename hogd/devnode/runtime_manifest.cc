@@ -126,7 +126,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{3});
+    w.field("schemaVersion", std::int64_t{4});
     w.field("kind", "hogd-dev-runtime");
     w.field("chainState",
             node.recovered_existing_chain() ? "recovered" : "fresh");
@@ -154,15 +154,10 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
               format_advertised_address(node.bind_host(),
                                         node.view_gateway_port()));
     });
-    w.object_field("bootstrapAccountDerivation", [&](json::Writer &w) {
-      w.field("scheme", "groundhog-bootstrap-account-v1");
-      w.field("seed", node.bootstrap_config().seed);
-    });
     w.array_field("bootstrapAccounts", [&](json::Writer &w) {
       for (BootstrapAccountMetadata const &account :
            node.bootstrap_accounts()) {
         w.object([&](json::Writer &w) {
-          w.field("index", static_cast<std::int64_t>(account.index));
           w.field("role", account.role == BootstrapAccountRole::kFaucet
                               ? "faucet"
                               : "local_user");
