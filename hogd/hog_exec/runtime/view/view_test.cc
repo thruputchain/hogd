@@ -1901,10 +1901,7 @@ TEST_F(ViewTest, ViewRejectsOversizedForwardedAuthTokenForest)
       });
   deploy_native(kCalleeAddr);
 
-  // Each forwarded token is a single leaf node, so the forest's node count
-  // equals its token count and the cap falls exactly between these two
-  // queries.
-  auto make_forest_query = [&](uint32_t token_count) {
+  auto forest_query = [&](AuthTokenNode const &root, uint32_t token_count) {
     Invocation invocation{
         .invoked_address = kCalleeAddr,
         .entrypoint = entrypoint_from_method_id(0),
@@ -1912,24 +1909,47 @@ TEST_F(ViewTest, ViewRejectsOversizedForwardedAuthTokenForest)
         .calldata = {},
     };
     auto query = make_query_with_parent(invocation, kParentAddr);
-    AuthTokenNode leaf{.consumer_address = kCalleeAddr,
-                       .payload = {},
-                       .child_nodes = {}};
     for (uint32_t i = 0; i < token_count; ++i) {
       query.forwarded_tokens.push_back(AuthToken{.mint_address = kParentAddr,
                                                  .expiry_height = 1'000'000,
-                                                 .root_node = leaf});
+                                                 .root_node = root});
     }
     return query;
   };
 
-  auto at_limit = run_view(make_forest_query(kMaxViewForwardedAuthTokenNodes),
-                           *setup.context);
+  // A full-depth 4-ary tree: many nodes per token, so the forest crosses the
+  // node cap with only a handful of tokens. This is what distinguishes an
+  // aggregate node cap from a mere limit on the number of forwarded tokens.
+  AuthTokenNode tree{.consumer_address = kCalleeAddr,
+                     .payload = {},
+                     .child_nodes = {}};
+  uint32_t tree_nodes = 1;
+  uint32_t level_nodes = 1;
+  for (uint32_t depth = 1; depth < uint32_t{kAuthTokenMaxDepth}; ++depth) {
+    AuthTokenNode parent{.consumer_address = kCalleeAddr,
+                         .payload = {},
+                         .child_nodes = {}};
+    for (uint32_t child = 0; child < uint32_t{kAuthTokenMaxChildNodes};
+         ++child) {
+      parent.child_nodes.push_back(tree);
+    }
+    level_nodes *= uint32_t{kAuthTokenMaxChildNodes};
+    tree_nodes += level_nodes;
+    tree = std::move(parent);
+  }
+
+  uint32_t ok_count = kMaxViewForwardedAuthTokenNodes / tree_nodes;
+  uint32_t over_count = ok_count + 1;
+  ASSERT_GT(ok_count, 0U);
+  ASSERT_LE(ok_count * tree_nodes, kMaxViewForwardedAuthTokenNodes);
+  ASSERT_GT(over_count * tree_nodes, kMaxViewForwardedAuthTokenNodes);
+  // Far fewer tokens than the node cap: a token-count limit would not reject.
+  ASSERT_LT(over_count, kMaxViewForwardedAuthTokenNodes);
+
+  auto at_limit = run_view(forest_query(tree, ok_count), *setup.context);
   EXPECT_EQ(at_limit.status(), TransactionViewStatus::Ok);
 
-  auto over_limit =
-      run_view(make_forest_query(kMaxViewForwardedAuthTokenNodes + 1),
-               *setup.context);
+  auto over_limit = run_view(forest_query(tree, over_count), *setup.context);
   EXPECT_EQ(over_limit.status(), TransactionViewStatus::InvalidInput);
   EXPECT_EQ(over_limit.error_code(),
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);

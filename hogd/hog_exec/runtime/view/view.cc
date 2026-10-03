@@ -66,25 +66,23 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     CHECK(!r.value());
   }
 
-  // Forwarded tokens arrive already decoded (under the process-wide budget),
-  // so bound their depth by walking them. forwarded_tokens is an unbounded
-  // wire array and admission below runs off the gas meter, so also cap the
-  // aggregate node count to keep an unauthenticated caller from forcing work
-  // proportional to the whole RPC message.
+  // Bound each forwarded token's depth and the forest's aggregate node count
+  // before admission (see kMaxViewForwardedAuthTokenNodes). Each walk gets the
+  // remaining budget, so an oversized tree is rejected without being walked in
+  // full.
   try {
-    uint64_t total_nodes = 0;
+    uint32_t remaining = kMaxViewForwardedAuthTokenNodes;
     for (auto const &token : query.forwarded_tokens) {
       auto node_count = AuthTokenRegistry::count_nodes_within_depth(
-          token.root_node,
-          syscall_handler.config_params().max_auth_token_depth);
-      total_nodes += node_count.value_or(0);
-      if (!node_count.has_value() ||
-          total_nodes > kMaxViewForwardedAuthTokenNodes) {
+          token.root_node, syscall_handler.config_params().max_auth_token_depth,
+          remaining);
+      if (!node_count.has_value()) {
         ExpectedViewResult result(TransactionViewStatus::InvalidInput);
         result.error_code() =
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
         co_return result;
       }
+      remaining -= *node_count;
     }
   } catch (...) {
     error("unrecoverable: failed to validate forwarded auth tokens");

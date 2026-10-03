@@ -17,12 +17,15 @@ bool
 AuthTokenRegistry::node_within_depth(AuthTokenNode const &root,
                                      uint32_t max_depth)
 {
-  return count_nodes_within_depth(root, max_depth).has_value();
+  return count_nodes_within_depth(root, max_depth,
+                                  std::numeric_limits<uint32_t>::max())
+      .has_value();
 }
 
 std::optional<uint32_t>
 AuthTokenRegistry::count_nodes_within_depth(AuthTokenNode const &root,
-                                            uint32_t max_depth)
+                                            uint32_t max_depth,
+                                            uint32_t max_nodes)
 {
   std::vector<std::pair<AuthTokenNode const *, uint32_t>> stack;
   stack.emplace_back(&root, uint32_t{1});
@@ -31,6 +34,9 @@ AuthTokenRegistry::count_nodes_within_depth(AuthTokenNode const &root,
     auto [node, depth] = stack.back();
     stack.pop_back();
     if (depth > max_depth) {
+      return std::nullopt;
+    }
+    if (count == max_nodes) {
       return std::nullopt;
     }
     ++count;
