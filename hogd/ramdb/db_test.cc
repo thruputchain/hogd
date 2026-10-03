@@ -592,11 +592,8 @@ TEST_F(DatabaseTest, RecoveryRejectsSkippedWalCommitMarker)
   EXPECT_EQ(checked.error(), DBCode::kCorruption);
 }
 
-// Restoring to an LSN that falls inside a snapshot's range is valid: the
-// snapshot commits its whole range at once, so recovery buffers its rows and
-// then skips that commit (it is >= target_lsn), discarding the buffer and
-// recovering the requested LSNs from the WAL. The #4320 guard must not mistake
-// this for tampering.
+// Restoring to an LSN inside a snapshot's range is legitimate (the snapshot's
+// commit is skipped as >= target_lsn); the #4320 guard must not reject it.
 TEST_F(DatabaseTest, RestoreToLsnInsideSnapshotRange)
 {
   const std::string key_a = "key-a";

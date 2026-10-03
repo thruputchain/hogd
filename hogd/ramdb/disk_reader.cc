@@ -382,14 +382,11 @@ load_log_file(
 
     if (skip) {
       if (hdr.storage == ItemStorage::kCommit) {
-        // A commit skipped because it precedes cur_lsn belongs to an
-        // already-recovered batch whose records were skipped too, so the buffer
-        // must be empty; a non-empty buffer means the commit's LSN was tampered
-        // below cur_lsn to skip it and drop buffered durable rows without CRC
-        // or expected-LSN validation (#4320). A commit skipped because it is
-        // >= target_lsn is instead a legitimate point-in-time restore
-        // truncating a batch, so there we drop the buffer and recover the
-        // requested LSNs from later files.
+        // A commit below cur_lsn belongs to an already-recovered batch, so its
+        // records were skipped too and the buffer must be empty; a non-empty
+        // buffer means its LSN was tampered to drop durable rows without
+        // validation (#4320). (A commit >= target_lsn is a legitimate
+        // point-in-time truncation and still drops the buffer below.)
         if (hdr.lsn < cur_lsn && buf.size() != 0) {
           error("skipped commit marker in {} precedes cur_lsn {} with {} "
                 "buffered bytes; treating as corruption",
