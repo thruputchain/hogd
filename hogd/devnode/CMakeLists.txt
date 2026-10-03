@@ -84,10 +84,19 @@ add_dependencies(
   all_riscv_contracts
   hog-devnode
 )
+# Every test that boots a devnode holds RESOURCE_LOCK hog_devnode (#1697), so
+# the ~90 of them run strictly one after another: 75-110s of serial work in CI.
+# CTest starts the highest-COST tests first, and a fresh build tree has no cost
+# history, so without a COST this chain starts last and runs alone on an idle
+# runner after every other test has finished. A high COST starts it first, so
+# it overlaps the parallel tests instead. The lock still allows only one devnode
+# at a time.
+set(HOG_DEVNODE_TEST_COST 1000)
 hogd_discover_tests(
   hog_devnode_test
   PROPERTIES
     RESOURCE_LOCK hog_devnode
+    COST ${HOG_DEVNODE_TEST_COST}
 )
 
 add_executable(
@@ -184,4 +193,5 @@ set_tests_properties(
   HogDevnode.FreshNonInteractiveLaunchEmitsReadiness
   PROPERTIES
     RESOURCE_LOCK hog_devnode
+    COST ${HOG_DEVNODE_TEST_COST}
 )
