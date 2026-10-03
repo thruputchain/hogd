@@ -538,11 +538,8 @@ TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
   EXPECT_EQ(file_size(), committed_size);
 }
 
-// A data-directory attacker can shrink a durable WAL batch's commit-marker LSN
-// to one a snapshot already covers. Before #4320 load_log_file's skip branch
-// discarded the batch's buffered rows via take_buffer() without validating the
-// commit CRC or the expected LSN, silently rolling recovery back to the
-// snapshot value. Recovery must now reject the tampered WAL as corruption.
+// Recovery must reject a WAL whose final commit marker's LSN was tampered below
+// cur_lsn to skip (and silently drop) its buffered durable batch (#4320).
 TEST_F(DatabaseTest, RecoveryRejectsSkippedWalCommitMarker)
 {
   const std::string key = "rollback-key";
@@ -566,8 +563,7 @@ TEST_F(DatabaseTest, RecoveryRejectsSkippedWalCommitMarker)
   db_.reset();
 
   // Rewrite only the final WAL commit marker's LSN to one the snapshot already
-  // covers, leaving its stored CRC untouched -- the skip path never validated
-  // it.
+  // covers, leaving its stored CRC untouched; the skip path never validated it.
   {
     ErrnoStatus<File> wal = dir_.openat("0.log", O_RDWR);
     ASSERT_TRUE(wal);
