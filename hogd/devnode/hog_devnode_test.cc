@@ -1,4 +1,6 @@
+#include <fcntl.h>
 #include <poll.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -51,6 +53,7 @@
 #include "header.hh"
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/cleanup.h"
+#include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -3222,6 +3225,53 @@ TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
       "already locked by another process");
 
   expect_clean_exit(first);
+}
+
+TEST(HogDevnode, DataDirRejectsInvalidInheritedLockDescriptor)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  for (const char *descriptor : {"0", "999999", "not-a-descriptor"}) {
+    HogDevnodeProcess process =
+        HogDevnodeProcess::start({"--data-dir", data_dir.string()},
+                                 {{"HOG_DEVNODE_DATA_DIR_LOCK_FD",
+                                   descriptor}});
+    auto status = process.wait_for_exit_for_test(startup_timeout());
+    ASSERT_TRUE(status.has_value());
+    EXPECT_TRUE(WIFEXITED(*status));
+    EXPECT_EQ(WEXITSTATUS(*status), EXIT_FAILURE);
+    EXPECT_NE(process.read_remaining_stderr().find(
+                  "inherited data-dir lock does not identify this chain"),
+              std::string::npos);
+  }
+}
+
+TEST(HogDevnode, DataDirRetainsInheritedLockAfterParentClosesDescriptor)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::create_directories(data_dir);
+  const int opened =
+      ::open((data_dir / ".hog-devnode.lock").c_str(), O_RDWR | O_CREAT, 0600);
+  ASSERT_GE(opened, 0);
+  const int descriptor = ::fcntl(opened, F_DUPFD, 100);
+  ::close(opened);
+  ASSERT_GE(descriptor, 100);
+  std::optional<File> parent_lock(std::in_place, descriptor);
+  ASSERT_EQ(::flock(descriptor, LOCK_EX | LOCK_NB), 0);
+  HogDevnodeProcess child =
+      HogDevnodeProcess::start({"--data-dir", data_dir.string()},
+                               {{"HOG_DEVNODE_DATA_DIR_LOCK_FD",
+                                 std::to_string(descriptor)}});
+  child.wait_for_readiness();
+  parent_lock.reset();
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "already locked by another process");
+  expect_clean_exit(child);
+  const int restored = ::open((data_dir / ".hog-devnode.lock").c_str(), O_RDWR);
+  ASSERT_GE(restored, 0);
+  File released_lock(restored);
+  EXPECT_EQ(::flock(restored, LOCK_EX | LOCK_NB), 0);
 }
 
 TEST(HogDevnode, DataDirRejectsCommittedChainWhenMetadataMissing)

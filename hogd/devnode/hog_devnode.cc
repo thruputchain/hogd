@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <sys/file.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -224,14 +225,35 @@ public:
     }
 
     const std::filesystem::path lock_path = *data_dir / ".hog-devnode.lock";
-    const int fd =
-        ::open(lock_path.c_str(),
-               O_RDWR | O_CREAT | O_CLOEXEC, // NOLINT(misc-include-cleaner)
-               0600);
+    const int fd = ::open(lock_path.c_str(),
+                          O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW |
+                              O_NONBLOCK, // NOLINT(misc-include-cleaner)
+                          0600);
     if (fd < 0) {
       throw std::runtime_error(
           std::format("failed to open hog-devnode data-dir lock '{}': {}",
                       lock_path.string(), std::strerror(errno)));
+    }
+    if (const char *inherited = std::getenv("HOG_DEVNODE_DATA_DIR_LOCK_FD")) {
+      const auto descriptor = hogd::try_parse_integer<int>(inherited);
+      struct stat expected{};
+      struct stat actual{};
+      if (!descriptor || *descriptor < 3 || ::fstat(fd, &expected) != 0 ||
+          ::fstat(*descriptor, &actual) != 0 || !S_ISREG(actual.st_mode) ||
+          expected.st_dev != actual.st_dev ||
+          expected.st_ino != actual.st_ino) {
+        ::close(fd);
+        throw std::runtime_error(
+            "inherited data-dir lock does not identify this chain's lock file");
+      }
+      ::close(fd);
+      // The supervisor holds the same open file description through exec.
+      // Rechecking the lock also rejects a descriptor without exclusive access.
+      lock_file_.emplace(*descriptor);
+      if (::flock(*descriptor, LOCK_EX | LOCK_NB) != 0) {
+        throw std::runtime_error("could not retain inherited data-dir lock");
+      }
+      return;
     }
     lock_file_.emplace(fd);
     if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
