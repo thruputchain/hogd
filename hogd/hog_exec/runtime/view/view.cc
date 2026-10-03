@@ -66,10 +66,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     CHECK(!r.value());
   }
 
-  // Bound each forwarded token's depth and the forest's aggregate node count
-  // before admission (see kMaxViewForwardedAuthTokenNodes). Each walk gets the
-  // remaining budget, so an oversized tree is rejected without being walked in
-  // full.
+  // Reject forwarded tokens over the depth limit or the aggregate node budget;
+  // each walk gets the remaining budget so an oversized tree stops early.
   try {
     uint32_t remaining = kMaxViewForwardedAuthTokenNodes;
     for (auto const &token : query.forwarded_tokens) {

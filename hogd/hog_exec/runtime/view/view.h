@@ -10,10 +10,8 @@
 
 namespace hogd {
 
-// Cap on the total auth-token nodes across a view query's forwarded tokens: a
-// DoS guard for an unauthenticated admission path that runs off the gas meter
-// (forwarded_tokens is unbounded), not a consensus rule. See the PR/#4314 for
-// the rationale.
+// DoS guard: cap on total auth-token nodes across a view query's forwarded
+// tokens. Not a consensus rule; admission runs off the gas meter.
 inline constexpr uint32_t kMaxViewForwardedAuthTokenNodes = 4096;
 
 class View {

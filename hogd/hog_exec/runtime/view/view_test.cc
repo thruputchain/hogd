@@ -1917,9 +1917,8 @@ TEST_F(ViewTest, ViewRejectsOversizedForwardedAuthTokenForest)
     return query;
   };
 
-  // A full-depth 4-ary tree: many nodes per token, so the forest crosses the
-  // node cap with only a handful of tokens. This is what distinguishes an
-  // aggregate node cap from a mere limit on the number of forwarded tokens.
+  // A full-depth 4-ary tree packs many nodes per token, so the forest crosses
+  // the node cap with far fewer tokens than the cap itself.
   AuthTokenNode tree{.consumer_address = kCalleeAddr,
                      .payload = {},
                      .child_nodes = {}};

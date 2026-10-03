@@ -18,9 +18,8 @@ public:
   // True iff every root-to-leaf path has at most max_depth nodes.
   static bool node_within_depth(AuthTokenNode const &root, uint32_t max_depth);
 
-  // The tree's node count when it is within max_depth and has at most max_nodes
-  // nodes; nullopt when either bound is exceeded. Stops as soon as a bound is
-  // crossed, so the walk is bounded by max_nodes.
+  // The tree's node count when within max_depth and at most max_nodes nodes;
+  // nullopt otherwise. The walk stops at the first breach, bounding its cost.
   static std::optional<uint32_t>
   count_nodes_within_depth(AuthTokenNode const &root, uint32_t max_depth,
                            uint32_t max_nodes);
