@@ -6,6 +6,7 @@
 #include <cstring>
 #include <span>
 
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
@@ -21,12 +22,32 @@
 
 namespace hogd {
 
+namespace {
+
+// Gas a read of [key] bills right now: storage access plus the cold-touch
+// database RPC. Checked before get_bytestring() so an unaffordable read cannot
+// force the fetch the wrapper would otherwise run and clamp (#4309).
+GasAmount
+cold_read_charge(SystemCallHandler &syscall_handler,
+                 const StorageKeyContractData &key)
+{
+  return kStorageAccessCost + syscall_handler.peek_cold_load_gas(key);
+}
+
+} // namespace
+
 MaybeAsyncSyscallInnerResult
 syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
+                            WrappedGasAmount remaining_gas,
                             const StorageKeyContractData &input_key,
                             std::span<std::byte> output_bytestring,
                             RuntimeMemoryLength &output_written_len)
 {
+  if (const GasAmount charge = cold_read_charge(syscall_handler, input_key);
+      remaining_gas.get() <= charge) {
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
+                                 WrappedGasAmount{charge}};
+  }
   auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status.has_value()) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
@@ -69,9 +90,15 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 
 MaybeAsyncSyscallInnerResult
 syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
+                               WrappedGasAmount remaining_gas,
                                const StorageKeyContractData &input_key,
                                RuntimeMemoryLength &output_length)
 {
+  if (const GasAmount charge = cold_read_charge(syscall_handler, input_key);
+      remaining_gas.get() <= charge) {
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
+                                 WrappedGasAmount{charge}};
+  }
   auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),

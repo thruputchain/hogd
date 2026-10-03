@@ -369,6 +369,12 @@ public:
                                                 uint32_t input_dst_index);
   [[nodiscard]] SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
 
+  // Per-transaction load gas a read of [storage_key] would bill now: kDBRPCCost
+  // on an unloaded first touch (block snapshot cache notwithstanding), else 0,
+  // computed without fetching or marking the key loaded. See #4309.
+  [[nodiscard]] GasAmount
+  peek_cold_load_gas(StorageKeyContractData const &storage_key);
+
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
   [[nodiscard]] x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
