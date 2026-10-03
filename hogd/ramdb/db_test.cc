@@ -538,6 +538,64 @@ TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
   EXPECT_EQ(file_size(), committed_size);
 }
 
+// A data-directory attacker can shrink a durable WAL batch's commit-marker LSN
+// to one a snapshot already covers. Before #4320 load_log_file's skip branch
+// discarded the batch's buffered rows via take_buffer() without validating the
+// commit CRC or the expected LSN, silently rolling recovery back to the
+// snapshot value. Recovery must now reject the tampered WAL as corruption.
+TEST_F(DatabaseTest, RecoveryRejectsSkippedWalCommitMarker)
+{
+  const std::string key = "rollback-key";
+  const std::string snapshot_value = "snapshot-value";
+  const std::string wal_value = "later-wal-value";
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(snapshot_value))));
+
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  const uint64_t snapshot_lsn = snapshot->first;
+  ASSERT_EQ(snapshot_lsn, 1);
+  ASSERT_TRUE(snapshot->second.get());
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(wal_value))));
+  DBStatus<uint64_t> synced_lsn = db_->sync();
+  ASSERT_TRUE(synced_lsn);
+  ASSERT_EQ(*synced_lsn, snapshot_lsn + 1);
+  db_.reset();
+
+  // Rewrite only the final WAL commit marker's LSN to one the snapshot already
+  // covers, leaving its stored CRC untouched -- the skip path never validated
+  // it.
+  {
+    ErrnoStatus<File> wal = dir_.openat("0.log", O_RDWR);
+    ASSERT_TRUE(wal);
+    ErrnoStatus<off_t> end =
+        wal->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
+    ASSERT_TRUE(end);
+    const off_t commit_offset = // NOLINT(misc-include-cleaner)
+        *end - static_cast<off_t>(sizeof(ItemHeader) + sizeof(uint32_t));
+    ASSERT_TRUE(wal->lseek(commit_offset, SEEK_SET));
+
+    ItemHeader commit;
+    ASSERT_TRUE(read_full(*wal, writable_byte_view(commit)));
+    ASSERT_EQ(commit.storage, ItemStorage::kCommit);
+    ASSERT_EQ(commit.lsn, snapshot_lsn);
+
+    commit.lsn = snapshot_lsn - 1;
+    ASSERT_TRUE(wal->lseek(commit_offset, SEEK_SET));
+    ASSERT_TRUE(write_full(*wal, byte_view(commit)));
+    ASSERT_TRUE(wal->sync());
+  }
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+}
+
 TEST_F(DatabaseTest, Compact)
 {
   insert_n(kInsertions);
