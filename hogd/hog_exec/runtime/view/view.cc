@@ -67,12 +67,19 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   }
 
   // Forwarded tokens arrive already decoded (under the process-wide budget),
-  // so bound their depth by walking them.
+  // so bound their depth by walking them. forwarded_tokens is an unbounded
+  // wire array and admission below runs off the gas meter, so also cap the
+  // aggregate node count to keep an unauthenticated caller from forcing work
+  // proportional to the whole RPC message.
   try {
+    uint64_t total_nodes = 0;
     for (auto const &token : query.forwarded_tokens) {
-      if (!AuthTokenRegistry::node_within_depth(
-              token.root_node,
-              syscall_handler.config_params().max_auth_token_depth)) {
+      auto node_count = AuthTokenRegistry::count_nodes_within_depth(
+          token.root_node,
+          syscall_handler.config_params().max_auth_token_depth);
+      total_nodes += node_count.value_or(0);
+      if (!node_count.has_value() ||
+          total_nodes > kMaxViewForwardedAuthTokenNodes) {
         ExpectedViewResult result(TransactionViewStatus::InvalidInput);
         result.error_code() =
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
@@ -80,7 +87,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
       }
     }
   } catch (...) {
-    error("unrecoverable: failed to validate forwarded auth token depth");
+    error("unrecoverable: failed to validate forwarded auth tokens");
     co_return ExpectedViewResult{TransactionViewStatus::InternalError};
   }
 

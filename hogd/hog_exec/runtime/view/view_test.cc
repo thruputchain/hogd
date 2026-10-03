@@ -1886,6 +1886,54 @@ TEST_F(ViewTest, ViewRcqConsumeDeleteInsert)
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
 }
 
+TEST_F(ViewTest, ViewRejectsOversizedForwardedAuthTokenForest)
+{
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  // Admission runs before the callee is invoked, so the callee need only
+  // return; the forwarded tokens are owned by the parent frame, not consumed.
+  NativeViewSetup setup(
+      0, [](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
+  deploy_native(kCalleeAddr);
+
+  // Each forwarded token is a single leaf node, so the forest's node count
+  // equals its token count and the cap falls exactly between these two
+  // queries.
+  auto make_forest_query = [&](uint32_t token_count) {
+    Invocation invocation{
+        .invoked_address = kCalleeAddr,
+        .entrypoint = entrypoint_from_method_id(0),
+        .gas_limit = UINT64_MAX,
+        .calldata = {},
+    };
+    auto query = make_query_with_parent(invocation, kParentAddr);
+    AuthTokenNode leaf{
+        .consumer_address = kCalleeAddr, .payload = {}, .child_nodes = {}};
+    for (uint32_t i = 0; i < token_count; ++i) {
+      query.forwarded_tokens.push_back(
+          AuthToken{.mint_address = kParentAddr,
+                    .expiry_height = 1'000'000,
+                    .root_node = leaf});
+    }
+    return query;
+  };
+
+  auto at_limit = run_view(make_forest_query(kMaxViewForwardedAuthTokenNodes),
+                           *setup.context);
+  EXPECT_EQ(at_limit.status(), TransactionViewStatus::Ok);
+
+  auto over_limit = run_view(
+      make_forest_query(kMaxViewForwardedAuthTokenNodes + 1), *setup.context);
+  EXPECT_EQ(over_limit.status(), TransactionViewStatus::InvalidInput);
+  EXPECT_EQ(over_limit.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)

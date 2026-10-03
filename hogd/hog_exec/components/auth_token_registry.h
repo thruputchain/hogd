@@ -18,6 +18,13 @@ public:
   // True iff every root-to-leaf path has at most max_depth nodes.
   static bool node_within_depth(AuthTokenNode const &root, uint32_t max_depth);
 
+  // The tree's total node count when every root-to-leaf path has at most
+  // max_depth nodes; nullopt when some path is deeper. The wire type bounds a
+  // node's direct children, so a within-depth tree's node count fits a
+  // uint32_t.
+  static std::optional<uint32_t>
+  count_nodes_within_depth(AuthTokenNode const &root, uint32_t max_depth);
+
   std::optional<uint32_t> register_auth_token(AuthToken auth_token);
   AuthToken const *lookup_auth_token(uint32_t token_id) const;
 

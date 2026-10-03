@@ -10,6 +10,16 @@
 
 namespace hogd {
 
+// The most auth-token nodes, summed across every forwarded token, a single
+// view query may carry. A view is local RPC, not consensus, and a public one
+// is unauthenticated, so this is a DoS guard rather than a consensus rule:
+// forwarded_tokens is an unbounded wire array, and the view admits each token
+// (depth walk + registry mint) off the gas meter, so without a cap a caller
+// could force work proportional to the whole RPC message. Depth is bounded per
+// path but the aggregate node count is not, hence this. Generous for honest
+// simulation (a full-depth token is 85 nodes), negligible as attack work.
+inline constexpr uint32_t kMaxViewForwardedAuthTokenNodes = 4096;
+
 class View {
 public:
   View() = delete;
