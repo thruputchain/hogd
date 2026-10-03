@@ -306,10 +306,20 @@ ExecutorContext::emit_and_release(SystemCallHandler &handler,
                                   ExecResult exec_res,
                                   ProposedTransaction proposed_tx)
 {
-  // co_await keeps the event coroutine owned here (so a later allocation can't
-  // destroy it mid-flight); log_event_return then releases the ledger.
-  log_event_return(
-      co_await handler.emit_events(exec_res, std::move(proposed_tx)));
+  // co_await keeps the event coroutine owned here, so a later allocation can't
+  // destroy it mid-flight. The emit_events and event-proxy ramps allocate their
+  // frames inside this detached body, where an escaping bad_alloc would
+  // terminate the executor; contain it so the failure is recorded as a block
+  // event error instead. A caught bad_alloc only ever fires before the RPC
+  // starts or after it has completed, never while one is in flight.
+  // log_event_return releases the ledger on every path.
+  try {
+    log_event_return(
+        co_await handler.emit_events(exec_res, std::move(proposed_tx)));
+  } catch (std::bad_alloc const &) {
+    log_event_return(
+        SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}});
+  }
 }
 
 void
@@ -320,8 +330,9 @@ ExecutorContext::spawn_event_emission(SystemCallHandler &handler,
   // Release: the bump must be visible before other threads see it; finish_block
   // drains the ledger at shutdown once acquire_reference() starts failing.
   pending_event_calls_.fetch_add(1, std::memory_order_release);
-  // The ramp allocates before anything is in flight, so on bad_alloc record a
-  // block event error and release the ledger; deeper failures stay fatal.
+  // emit_and_release's own ramp frame allocates here, before its body runs; on
+  // bad_alloc record a block event error and release the ledger. Allocations
+  // inside the body are contained there, so no path strands the ledger.
   try {
     emit_and_release(handler, exec_res, std::move(proposed_tx));
   } catch (std::bad_alloc const &) {
