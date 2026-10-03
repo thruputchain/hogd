@@ -1,0 +1,26 @@
+name: Cached rustup Home
+description: Keeps rustup's toolchains on the Namespace cache volume
+
+# Use after nscloud-cache-action, with ~/.cache/rustup among its paths.
+runs:
+  using: composite
+  steps:
+    - name: Point RUSTUP_HOME at the cache volume
+      shell: bash
+      run: |
+        # rustup keeps its toolchains in RUSTUP_HOME (~/.rustup), which is not
+        # on the cache volume, so every job downloaded the toolchains that the
+        # rust-toolchain.toml files pin all over again. Caching ~/.rustup in
+        # place would mount an empty directory over the image's, hiding its
+        # default toolchain (bare `cargo` and `cargo fmt` from the repo root
+        # use it), so use a separate cached directory, seeded once from the
+        # image's ~/.rustup.
+        cache="$HOME/.cache/rustup"
+        mkdir -p "$cache"
+        if [ ! -e "$cache/.seeded-from-image" ]; then
+          if [ -d "$HOME/.rustup" ]; then
+            cp -a "$HOME/.rustup/." "$cache/"
+          fi
+          touch "$cache/.seeded-from-image"
+        fi
+        echo "RUSTUP_HOME=$cache" >> "$GITHUB_ENV"

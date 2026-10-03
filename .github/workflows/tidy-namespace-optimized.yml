@@ -76,7 +76,10 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
             ~/.cargo
-            ~/.rustup
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Tidy Scope
         run: |
