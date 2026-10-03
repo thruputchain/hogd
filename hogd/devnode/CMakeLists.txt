@@ -91,12 +91,20 @@ add_dependencies(
 # runner after every other test has finished. A high COST starts it first, so
 # it overlaps the parallel tests instead. The lock still allows only one devnode
 # at a time.
+#
+# A devnode runs a multithreaded node (a 4-thread pool, see
+# kTestDevnodeThreadpoolSize), but CTest counts every test as one slot, so
+# alongside a full set of parallel tests each devnode ran ~2.5x slower than
+# alone and the chain still ended up last. PROCESSORS reserves the slots it
+# actually uses.
 set(HOG_DEVNODE_TEST_COST 1000)
+set(HOG_DEVNODE_TEST_PROCESSORS 4)
 hogd_discover_tests(
   hog_devnode_test
   PROPERTIES
     RESOURCE_LOCK hog_devnode
     COST ${HOG_DEVNODE_TEST_COST}
+    PROCESSORS ${HOG_DEVNODE_TEST_PROCESSORS}
 )
 
 add_executable(
@@ -194,4 +202,5 @@ set_tests_properties(
   PROPERTIES
     RESOURCE_LOCK hog_devnode
     COST ${HOG_DEVNODE_TEST_COST}
+    PROCESSORS ${HOG_DEVNODE_TEST_PROCESSORS}
 )
