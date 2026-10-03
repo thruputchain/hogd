@@ -1912,13 +1912,13 @@ TEST_F(ViewTest, ViewRejectsOversizedForwardedAuthTokenForest)
         .calldata = {},
     };
     auto query = make_query_with_parent(invocation, kParentAddr);
-    AuthTokenNode leaf{
-        .consumer_address = kCalleeAddr, .payload = {}, .child_nodes = {}};
+    AuthTokenNode leaf{.consumer_address = kCalleeAddr,
+                       .payload = {},
+                       .child_nodes = {}};
     for (uint32_t i = 0; i < token_count; ++i) {
-      query.forwarded_tokens.push_back(
-          AuthToken{.mint_address = kParentAddr,
-                    .expiry_height = 1'000'000,
-                    .root_node = leaf});
+      query.forwarded_tokens.push_back(AuthToken{.mint_address = kParentAddr,
+                                                 .expiry_height = 1'000'000,
+                                                 .root_node = leaf});
     }
     return query;
   };
@@ -1927,8 +1927,9 @@ TEST_F(ViewTest, ViewRejectsOversizedForwardedAuthTokenForest)
                            *setup.context);
   EXPECT_EQ(at_limit.status(), TransactionViewStatus::Ok);
 
-  auto over_limit = run_view(
-      make_forest_query(kMaxViewForwardedAuthTokenNodes + 1), *setup.context);
+  auto over_limit =
+      run_view(make_forest_query(kMaxViewForwardedAuthTokenNodes + 1),
+               *setup.context);
   EXPECT_EQ(over_limit.status(), TransactionViewStatus::InvalidInput);
   EXPECT_EQ(over_limit.error_code(),
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
