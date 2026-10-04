@@ -286,6 +286,58 @@ TEST(RpcDispatch, AllocationFailureDuringDecodeDoesNotInvokeHandler)
   EXPECT_EQ(logs.replies, 1U);
 }
 
+namespace {
+
+// Decodes its arguments under a nesting bound the test picks.
+struct BoundedServer {
+  using rpc_service = myvers;
+  size_t limit_;
+
+  size_t deserialization_recursion_limit() const { return limit_; }
+
+  void null() {}
+  int takes_int(int i) { return i; }
+  int takes_two_ints(int a, int b) { return a + b; }
+  coloru takes_recursive(test_recursive, fix_12)
+  {
+    coloru ret;
+    ret.c(color::RED);
+    return ret;
+  }
+  intvec takes_vec(intvec v) { return v; }
+};
+
+test_recursive
+make_recursive_chain(size_t depth)
+{
+  test_recursive root;
+  test_recursive *current = &root;
+  for (size_t i = 1; i < depth; ++i) {
+    current->next.emplace();
+    current = &*current->next;
+  }
+  return root;
+}
+
+} // namespace
+
+TEST(RpcDispatch, ImplementationSetsArgumentRecursionLimit)
+{
+  const size_t depth = deserialization_recursion_limit + 4;
+  auto call = call_msg<myvers::proc_meta<5>>();
+  auto args = serialize(make_recursive_chain(depth), fix_12{});
+  for (auto [limit, status] :
+       {std::pair{depth, accept_stat::SUCCESS},
+        std::pair{depth - 1, accept_stat::GARBAGE_ARGS}}) {
+    BoundedServer server{.limit_ = limit};
+    RpcDispatcher<myvers, BoundedServer *, RpcNoLogger> dispatcher(&server, {});
+    check_reply(dispatcher.serve(call, args)(), call.xid, status);
+    SRpcDispatcher<myvers, BoundedServer *, RpcNoLogger> sync_dispatcher(
+        &server, {});
+    check_reply(sync_dispatcher.serve(call, args), call.xid, status);
+  }
+}
+
 TEST(SrpcDispatch, AllocationFailureDuringDecodeReturnsSystemError)
 {
   Context context;

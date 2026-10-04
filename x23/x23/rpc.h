@@ -260,7 +260,7 @@ private:
     arg_type args(BufViewEnd argbytes)
     {
       arg_type args;
-      deserialize(&args, argbytes);
+      deserialize(&args, argbytes, arg_recursion_limit(*d_.impl_));
       d_.logger_.template log_server<ProcMeta>(*callmsg_, args);
       // callmsg_ non-null is used to detect that an exception was
       // thrown during deserialization of arguments.  Also, if we

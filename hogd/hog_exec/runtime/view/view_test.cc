@@ -6,7 +6,6 @@
 #include <cstring>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -21,10 +20,7 @@
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
-#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
-#include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -39,7 +35,6 @@
 #include "hogd/hog_exec/runtime/view/view.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
-#include "network_config.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
@@ -49,7 +44,6 @@
 #include "view.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -66,8 +60,6 @@ public:
   static constexpr ContractAddress kReadOnlyAddress =
       NativeContractTestFramework::make_contract_address(2);
 
-  ViewTest() : ViewTest(stock_network_config()) {}
-
   void SetUp() override
   {
     auto fib_contract = fibonacci_meta::load_rv32();
@@ -82,12 +74,6 @@ public:
   }
 
 protected:
-  // For a chain whose genesis states `network_config`.
-  explicit ViewTest(NetworkConfig const &network_config)
-    : framework_(false, BlockExecutionMode::kBlockExecutionModeProposal,
-                 TestDB::kHogDb, true, std::nullopt, network_config)
-  {}
-
   ExpectedViewResult run_view(TransactionViewQuery const &query)
   {
     static auto context = make_hog_exec_context();
@@ -193,7 +179,8 @@ protected:
     framework_.setup_grant_storage_token(addr, 1'000'000'000);
   }
 
-  NativeContractTestFramework framework_;
+  NativeContractTestFramework framework_{
+      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb};
 
   x23::Defer<> force_syscallhandler_commit_ =
       SystemCallHandler::force_commit_or_abort();
@@ -1481,93 +1468,6 @@ TEST_F(ViewTest, ViewForwardedTokenAtMaxDepthSucceeds)
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
   EXPECT_EQ(result.result().output.status_code(),
             InvocationFrameStatusCode::Return);
-}
-
-// A chain whose genesis allows auth tokens as deep as kAuthTokenDepthCeiling.
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-class ViewAtAuthTokenDepthCeilingTest : public ViewTest {
-protected:
-  ViewAtAuthTokenDepthCeilingTest() : ViewTest(ceiling_network_config()) {}
-
-private:
-  static NetworkConfig ceiling_network_config()
-  {
-    NetworkConfig config = stock_network_config();
-    NetworkConfigParams::set_param(config,
-                                   ConfigParamID::kConfigParamMaxAuthTokenDepth,
-                                   kAuthTokenDepthCeiling);
-    return config;
-  }
-};
-
-// Whatever depth a chain allows, a view query has to carry a token that deep:
-// through the RPC layer's decode, which runs before the executor knows the
-// chain's depth, and on into a frame that consumes it.
-TEST_F(ViewAtAuthTokenDepthCeilingTest, ForwardedTokenAtCeilingDecodesAndRuns)
-{
-  static constexpr ContractAddress kCalleeAddr =
-      NativeContractTestFramework::make_contract_address(10);
-  static constexpr ContractAddress kParentAddr =
-      NativeContractTestFramework::make_contract_address(20);
-
-  AuthTokenNode node{.consumer_address = kCalleeAddr,
-                     .payload = {},
-                     .child_nodes = {}};
-  for (uint32_t i = 1; i < kAuthTokenDepthCeiling; ++i) {
-    node = AuthTokenNode{.consumer_address = kCalleeAddr,
-                         .payload = {},
-                         .child_nodes = {node}};
-  }
-
-  NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        std::array<std::byte, 64> payload_buf{};
-        ContractAddress minter{};
-        RuntimeMemoryLength payload_written_len = 0;
-        uint32_t child_start = 0;
-        uint32_t child_count = 0;
-        auto r = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
-            0U, std::span<std::byte>{payload_buf}, minter, payload_written_len,
-            child_start, child_count);
-        if (!r.has_value()) {
-          ADD_FAILURE() << "consume_auth_token syscall failed";
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-        EXPECT_EQ(child_count, 1U);
-        co_return InvokeStatus<void>{};
-      });
-
-  deploy_native(kCalleeAddr);
-
-  Invocation invocation{
-      .invoked_address = kCalleeAddr,
-      .entrypoint = entrypoint_from_method_id(0),
-      .gas_limit = UINT64_MAX,
-      .calldata = {},
-  };
-
-  auto query = make_query_with_parent(invocation, kParentAddr);
-  query.forwarded_tokens.push_back(AuthToken{.mint_address = kParentAddr,
-                                             .expiry_height = 1'000'000,
-                                             .root_node = node});
-
-  // The executor sees what the RPC layer decodes from the caller's bytes,
-  // under x23's default recursion limit.
-  TransactionViewQuery decoded;
-  x23::deserialize(&decoded, x23::serialize(query));
-  auto result = run_view(decoded, *setup.context);
-  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
-  EXPECT_EQ(result.result().output.status_code(),
-            InvocationFrameStatusCode::Return);
-
-  // One level deeper no longer decodes, which is why genesis stops here.
-  query.forwarded_tokens.front().root_node =
-      AuthTokenNode{.consumer_address = kCalleeAddr,
-                    .payload = {},
-                    .child_nodes = {node}};
-  EXPECT_THROW(x23::deserialize(&decoded, x23::serialize(query)),
-               x23::XdrException);
 }
 
 TEST_F(ViewTest, RootManualRevertOmitsEvents)

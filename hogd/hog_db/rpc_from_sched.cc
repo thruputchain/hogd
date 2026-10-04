@@ -436,16 +436,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, kBytestringCeilingLen);
     co_return DbSchedResult::DbSchedResultError;
   }
-  // A view query carries forwarded tokens only as deep as the RPC layer
-  // decodes, so a genesis naming more would let contracts mint tokens no view
-  // could carry.
-  if (const uint32_t stated = config_params.max_auth_token_depth;
-      stated > kAuthTokenDepthCeiling) {
-    error("genesis max_auth_token_depth {} exceeds the {} a view query can "
-          "carry",
-          stated, kAuthTokenDepthCeiling);
-    co_return DbSchedResult::DbSchedResultError;
-  }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);
   ctx_.set_network_config(genesis_configuration.network_config);
   ctx_.initialize_cost_model(

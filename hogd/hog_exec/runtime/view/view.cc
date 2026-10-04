@@ -66,9 +66,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     CHECK(!r.value());
   }
 
-  // Forwarded tokens arrive already decoded, under x23's default recursion
-  // limit; genesis caps the chain's depth at that (kAuthTokenDepthCeiling), so
-  // walking them here is the check that binds.
+  // Forwarded tokens arrive already decoded (the gateway admits every depth the
+  // chain does), so bound their depth by walking them.
   try {
     for (auto const &token : query.forwarded_tokens) {
       if (!AuthTokenRegistry::node_within_depth(

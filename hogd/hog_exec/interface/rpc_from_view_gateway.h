@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -21,6 +22,7 @@
 #include "view_gateway.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -51,6 +53,15 @@ public:
   }
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
+
+  // x23 decodes a view's query under this before the view runs, so it admits
+  // every auth-token depth the chain does; the view checks the chain's limit.
+  std::size_t deserialization_recursion_limit() const
+  {
+    return std::max<std::size_t>(x23::deserialization_recursion_limit,
+                                 max_auth_token_depth_.load(
+                                     std::memory_order_relaxed));
+  }
 
 private:
   static constexpr std::uint32_t kMaxViewAttempts = 3;
@@ -103,6 +114,12 @@ private:
 
   x23::Async<void> gc_view_state(BlockID block_id);
 
+  // The chain's config is fixed at genesis, so any tip carries it.
+  void note_network_config(DbTip const &tip);
+  // Learns it before the first view: x23 decodes a query before the view can
+  // pin a tip of its own.
+  x23::Async<void> learn_network_config();
+
   void refresh_worker(std::stop_token const &stoken);
   x23::Async<void> probe_refresh_tip();
   x23::Async<void> close_all_view_states();
@@ -110,6 +127,8 @@ private:
 
   std::atomic<bool> shutdown_flag_ = false;
   std::atomic<bool> refresh_flag_ = false;
+  std::atomic<bool> network_config_known_ = false;
+  std::atomic<std::uint32_t> max_auth_token_depth_ = 0;
   DatabaseProxy db_proxy_;
   EventServerProxy event_server_proxy_;
 
