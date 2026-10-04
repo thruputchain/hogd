@@ -17,6 +17,7 @@
 #include "built_contracts/view_gateway_test.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
