@@ -470,11 +470,16 @@ TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
   auto client =
       make_rpc_client<ViewGateway1>(x23::HostPort{"localhost", port})().value();
 
-  ViewGatewayResult ok =
+  // read_value takes no auth handles, so its entrypoint refuses any forwarded
+  // token; a token at the chain's depth must get the answer a shallow one does.
+  ViewGatewayResult shallow =
+      client.viewgateway_view(make_query_forwarding(1))();
+  ViewGatewayResult deep =
       client.viewgateway_view(make_query_forwarding(kChainDepth))();
-  ASSERT_EQ(ok.outcome(), ViewGatewayOutcome::ViewGatewayOk);
-  EXPECT_EQ(ok.payload().output.status_code(),
-            InvocationFrameStatusCode::Return);
+  ASSERT_EQ(shallow.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  ASSERT_EQ(deep.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(deep.payload().output.status_code(),
+            shallow.payload().output.status_code());
 
   EXPECT_THROW(client.viewgateway_view(
                    make_query_forwarding(kChainDepth + 1))(),
