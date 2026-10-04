@@ -110,6 +110,13 @@ struct ThreadedMachinePreInstantiationTestPeer {
   {
     return p.initial_memory_seed_.size();
   }
+
+  // Bytes the retained seed buffer keeps allocated (#4327).
+  static size_t
+  retained_image_capacity(const ThreadedMachinePreInstantiation &p)
+  {
+    return p.initial_memory_seed_.capacity();
+  }
 };
 
 namespace {
@@ -252,6 +259,14 @@ TEST(Rv32Threaded, preInstantiationStoresSeedSparselyNotFullDeclaredImage)
   ASSERT_TRUE(pre.has_value());
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::retained_image_bytes(*pre),
             kSeed.size());
+  // Allocation, not just size: a full-image reserve would regress the fix even
+  // with size() unchanged. Bound the retained buffer by a small constant that
+  // does not scale with declared memory.
+  constexpr size_t kMaxRetainedCapacity = 1024;
+  static_assert(kMaxRetainedCapacity < kDeclaredMemory);
+  EXPECT_LE(ThreadedMachinePreInstantiationTestPeer::retained_image_capacity(
+                *pre),
+            kMaxRetainedCapacity);
 
   // The materialized machine still exposes the full declared image: zeros
   // everywhere except the seed at its placement.
