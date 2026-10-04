@@ -110,8 +110,10 @@ fi
 #   - 1.96.0             pre-staged for the planned stable-Rust unification
 #   - CONTRACTS_NIGHTLY  built_contracts (rv32 + build-std), read from its
 #                        rust-toolchain.toml so this list cannot go stale
-CONTRACTS_NIGHTLY=$(sed -n 's/^channel = "\(.*\)"$/\1/p' \
-  "$PROJECT_ROOT/built_contracts/rust-toolchain.toml")
+# TOML allows spaces around '=', either quote style and a trailing comment.
+CONTRACTS_NIGHTLY=$(sed -n -E \
+  "s/^[[:space:]]*channel[[:space:]]*=[[:space:]]*[\"']([^\"']+)[\"'].*/\1/p" \
+  "$PROJECT_ROOT/built_contracts/rust-toolchain.toml" | head -n 1)
 if [ -z "$CONTRACTS_NIGHTLY" ]; then
   echo "ERROR: no channel in built_contracts/rust-toolchain.toml"
   exit 1
