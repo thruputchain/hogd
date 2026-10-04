@@ -72,8 +72,15 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
+          # ~/.cache/rustup holds the toolchains (1.93.0, 1.96.0, the contracts
+          # nightly; see .github/actions/cached-rustup-home). Uncached, every
+          # job downloaded them again (~20s of each Cargo Fetch).
           path: |
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       # No submodules needed - format.sh formats files in main repo only
 
@@ -151,6 +158,10 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -288,6 +299,10 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -406,6 +421,10 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Git for Submodule Caching
         run: |

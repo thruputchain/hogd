@@ -71,6 +71,7 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
             ~/.cache/cargo-install
+            ~/.cache/rustup
 
       - name: Configure Build Caches
         run: |
@@ -91,6 +92,9 @@ jobs:
           mkdir -p "$HOME/.cache/cargo-install/bin"
           echo "Cached cargo-install binaries:"
           ls -l "$HOME/.cache/cargo-install/bin"
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Git for Submodule Caching
         run: |
