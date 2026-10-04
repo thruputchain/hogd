@@ -655,6 +655,9 @@ template<typename X>
 concept contains_recursive_xdr =
     is_xdr_type<X> && detail::xdr_contains_recursive<X>();
 
+// Initial value of deserialization_recursion_limit.
+constexpr inline size_t kDefaultDeserializationRecursionLimit = 16;
+
 // Default maximum nesting depth of recursive structs/unions during decoding.
 // Non-recursive wrappers do not count. Override per call when needed; changes
 // to this process-wide default must not race with deserialization.

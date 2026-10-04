@@ -5,6 +5,6 @@
 
 namespace x23 {
 
-size_t deserialization_recursion_limit = 16;
+size_t deserialization_recursion_limit = kDefaultDeserializationRecursionLimit;
 
 } // namespace x23

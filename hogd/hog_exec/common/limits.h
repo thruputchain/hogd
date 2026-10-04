@@ -4,9 +4,11 @@
 
 #include <cstddef>
 
+#include "auth_token.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "integration.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -19,6 +21,16 @@ static_assert(kMaxBytesTransaction < kMaxBytesSignedTransaction);
 // depth those stacks are sized for.
 inline constexpr uint32_t kSavepointDepthCeiling =
     static_cast<uint32_t>(kMaxSavepointDepth);
+
+// Ceiling on kConfigParamMaxAuthTokenDepth, checked at genesis load. A view
+// query's forwarded tokens are decoded by the RPC layer, under x23's default
+// recursion limit (one level per AuthTokenNode), before the executor knows the
+// chain's depth; a chain allowing deeper tokens would mint tokens no view query
+// could carry. It also bounds how deep MintAuthToken's decode recurses.
+inline constexpr uint32_t kAuthTokenDepthCeiling =
+    static_cast<uint32_t>(x23::kDefaultDeserializationRecursionLimit);
+static_assert(static_cast<uint32_t>(kAuthTokenMaxDepth) <=
+              kAuthTokenDepthCeiling);
 
 // The budget the executor holds itself to on the HogDb link (pinned to
 // kBulkRpcMaxMessageSize). Raising it changes which transactions abort.
