@@ -108,8 +108,17 @@ fi
 # rust-toolchain.toml files and .devcontainer/Dockerfile:
 #   - 1.93.0             hogd/rust + CMakeLists Rust_TOOLCHAIN
 #   - 1.96.0             pre-staged for the planned stable-Rust unification
-#   - nightly-2026-02-12 built_contracts (rv32 + build-std)
-RUST_TOOLCHAINS=("1.93.0" "1.96.0" "nightly-2026-02-12")
+#   - CONTRACTS_NIGHTLY  built_contracts (rv32 + build-std), read from its
+#                        rust-toolchain.toml so this list cannot go stale
+# TOML allows spaces around '=', either quote style and a trailing comment.
+CONTRACTS_NIGHTLY=$(sed -n -E \
+  "s/^[[:space:]]*channel[[:space:]]*=[[:space:]]*[\"']([^\"']+)[\"'].*/\1/p" \
+  "$PROJECT_ROOT/built_contracts/rust-toolchain.toml" | head -n 1)
+if [ -z "$CONTRACTS_NIGHTLY" ]; then
+  echo "ERROR: no channel in built_contracts/rust-toolchain.toml"
+  exit 1
+fi
+RUST_TOOLCHAINS=("1.93.0" "1.96.0" "$CONTRACTS_NIGHTLY")
 for tc in "${RUST_TOOLCHAINS[@]}"; do
   if ! rustup toolchain list | grep -q "^$tc"; then
     echo "Installing Rust toolchain: $tc"
@@ -118,9 +127,9 @@ for tc in "${RUST_TOOLCHAINS[@]}"; do
 done
 
 # Install rust-src for build-std
-if ! rustup component list --installed --toolchain nightly-2026-02-12 | grep -q rust-src; then
-  echo "Installing rust-src component for nightly..."
-  rustup component add rust-src --toolchain nightly-2026-02-12
+if ! rustup component list --installed --toolchain "$CONTRACTS_NIGHTLY" | grep -q rust-src; then
+  echo "Installing rust-src component for $CONTRACTS_NIGHTLY..."
+  rustup component add rust-src --toolchain "$CONTRACTS_NIGHTLY"
 fi
 
 # Install the rv32 contract backend for 1.96 (the planned stable unification)

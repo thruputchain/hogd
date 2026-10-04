@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -28,6 +29,9 @@ namespace hogd {
 
 class Scheduler {
 public:
+  static constexpr BlockHeight kTransactionOutcomeBlockLifetime = 50;
+  static constexpr size_t kMaxTransactionOutcomes = 50'000'000;
+
   Scheduler(BlockHeight current_block,
             std::shared_ptr<db_sched_client_t> db_sched_client)
     : current_block_(current_block),
@@ -61,12 +65,13 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  void schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
-                x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<void> schedule(size_t num_txs,
+                            x23::XdrVec<TransactionHash> &tx_hashes,
+                            x23::XdrVec<SignedTransaction> &txs);
 
   void start_pending_nomination(BlockID block_id);
-  void commit_pending_nomination(BlockID block_id);
-  void abandon_pending_nomination(BlockID block_id);
+  x23::Async<void> commit_pending_nomination(BlockID block_id);
+  x23::Async<void> abandon_pending_nomination(BlockID block_id);
   x23::Async<void>
   apply_committed_block_hog_ages(const x23::XdrVec<SignedTransaction> &txs,
                                  BlockHeight block_height);
@@ -81,6 +86,18 @@ public:
     }
     return {};
   }
+
+  x23::Async<SchedulerTransactionOutcome>
+  lookup_transaction_outcome(const TransactionHash &tx_hash);
+
+  x23::Async<void> record_transaction_outcome(
+      const TransactionHash &tx_hash, SchedulerTransactionStatus status,
+      SchedulerTransactionErrorSource error_source =
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+      int32_t error_code = 0);
+
+  x23::Async<void> clear_transaction_outcome_if_not_already_committed(
+      const TransactionHash &tx_hash);
 
   void get_txs_for_account(const ContractAddress &address,
                            TransactionHashBatch &tx_hashes,
@@ -180,9 +197,10 @@ public:
   {
     return current_block_.load(std::memory_order_relaxed);
   }
-  void increment_current_block()
+  x23::Async<void> increment_current_block()
   {
     current_block_.fetch_add(1, std::memory_order_relaxed);
+    co_await prune_transaction_outcomes();
   }
   void set_current_block(BlockHeight height)
   {
@@ -210,6 +228,14 @@ public:
   x23::CoroLock global_lock_;
 
 private:
+  struct TransactionOutcomeEntry {
+    TransactionHash tx_hash;
+    SchedulerTransactionOutcome outcome;
+    // We record the height since we use the height to evict tx outcomes that
+    // are at least [kTransactionOutcomeBlockLifetime] blocks old.
+    BlockHeight processed_height;
+  };
+
   struct TxKey {
     BlockHeight expiry_block_height;
     TransactionHash tx_hash;
@@ -268,13 +294,13 @@ private:
 
   AccountKey get_account_key(const ContractAddress &account);
 
-  bool account_is_ready(const ContractAddress &account,
-                        bool remove_expired_txs);
+  x23::Async<bool> account_is_ready(const ContractAddress &account,
+                                    bool remove_expired_txs);
 
-  bool add_txs_helper(const SignedTransaction &tx,
-                      const TransactionHash &tx_hash);
+  x23::Async<bool> add_txs_helper(const SignedTransaction &tx,
+                                  const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
-  void cycle_accounts_during_schedule_helper(
+  x23::Async<void> cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
       const TxKey &lower_bound);
 
@@ -307,11 +333,12 @@ private:
       AccountState &account_state, const ContractAddress &account);
   const HogAge &get_hog_age_from_pending_nomination_if_exists(
       const AccountState &account_state, const ContractAddress &account) const;
-  void refresh_ready_accounts(
+  x23::Async<void> refresh_ready_accounts(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts);
-  void refresh_accounts_excluded_from_block();
+  x23::Async<void> refresh_accounts_excluded_from_block();
   bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
+  x23::Async<void> prune_transaction_outcomes();
 
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
@@ -335,6 +362,13 @@ private:
   std::atomic<ssize_t> size_ = 0;
   std::atomic<ssize_t> tx_cache_size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
+
+  x23::CoroLock transaction_outcomes_lock_;
+  std::list<TransactionOutcomeEntry> transaction_outcomes_order_;
+  std::unordered_map<TransactionHash,
+                     std::list<TransactionOutcomeEntry>::iterator,
+                     SipHash24Hasher>
+      transaction_outcomes_;
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for

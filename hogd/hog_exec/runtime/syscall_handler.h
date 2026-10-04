@@ -415,6 +415,10 @@ public:
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
+  // The load cost get_native_token_balance() would charge now, without loading.
+  // The two must agree on what counts as a cold touch.
+  [[nodiscard]] GasAmount
+  peek_native_token_balance_load_gas(ContractAddress const &contract_address);
   [[nodiscard]] x23::Async<SystemStatus<StorageRead<int128_t>>>
   get_native_token_balance(ContractAddress const &contract_address);
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
