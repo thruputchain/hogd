@@ -6,6 +6,12 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.18)
 # Configuration parameters
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Nothing here uses C++20 modules. Without this, CMake scans every source
+# of a project that declares cmake_minimum_required(VERSION 3.28) or newer
+# (x23) for module imports: an extra preprocessing step per file, and with GCC
+# a -fmodules-ts flag that ccache refuses to cache ("unsupported compiler
+# option"), so CI recompiled all of x23 (~155 files) on every GCC build.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_COLOR_MAKEFILE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
