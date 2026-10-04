@@ -259,9 +259,7 @@ TEST(Rv32Threaded, preInstantiationStoresSeedSparselyNotFullDeclaredImage)
   ASSERT_TRUE(pre.has_value());
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::retained_image_bytes(*pre),
             kSeed.size());
-  // Allocation, not just size: a full-image reserve would regress the fix even
-  // with size() unchanged. Bound the retained buffer by a small constant that
-  // does not scale with declared memory.
+  // Capacity too, so a full-image reserve can't sneak past the size check.
   constexpr size_t kMaxRetainedCapacity = 1024;
   static_assert(kMaxRetainedCapacity < kDeclaredMemory);
   EXPECT_LE(ThreadedMachinePreInstantiationTestPeer::retained_image_capacity(
