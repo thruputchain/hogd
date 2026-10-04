@@ -56,17 +56,20 @@ slice_parts(const std::vector<std::vector<T>> &parts, size_t begin,
   return pieces;
 }
 
-// One worker of a run: on the thread pool, takes the next unsent chunk,
-// builds it, and awaits its call, until the run is exhausted or a call has
-// failed. A call's exception is the worker's result.
+// One worker of a run: takes the next unsent chunk, builds it on the thread
+// pool, and awaits its call, until the run is exhausted or a call has failed.
+// A reply resumes this coroutine on the thread that read it, a connection's
+// reader, so it hops back to the pool before every chunk: serializing there
+// would stall every other reply on that connection. A call's exception is the
+// worker's result.
 template<typename T, typename Call>
 x23::Async<void>
 send_chunks(ChunkRun<T, Call> *run)
 {
-  co_await default_coropoll().pool_.bg();
   for (size_t index = run->next_chunk.fetch_add(1, std::memory_order_relaxed);
        index < run->chunk_count && !run->failed.load(std::memory_order_relaxed);
        index = run->next_chunk.fetch_add(1, std::memory_order_relaxed)) {
+    co_await default_coropoll().pool_.bg();
     const std::vector<std::span<const T>> pieces =
         slice_parts(run->parts, index * run->max_items_per_chunk,
                     run->max_items_per_chunk);

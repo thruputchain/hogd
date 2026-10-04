@@ -17,6 +17,7 @@
 #include "hogd/base/coropoll.h"
 #include "x23/async.h"
 #include "x23/serialize.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -224,6 +225,49 @@ TEST(ChunkItems, EmptyChunkSerializesLikeAnEmptyVector)
   const ChunkItems<std::uint32_t> items(pieces);
   EXPECT_EQ(x23::serialize(items),
             x23::serialize(x23::XdrVec<std::uint32_t>{}));
+}
+
+namespace {
+
+// A call whose reply arrives from a thread outside the pool, the way a reply a
+// connection's reader decodes resumes the caller on the reader's thread.
+x23::Async<void>
+reply_off_pool(std::vector<std::jthread> *repliers, std::mutex *repliers_mutex)
+{
+  x23::Awaitable<void> reply;
+  reply.launch();
+  {
+    const std::lock_guard<std::mutex> lock(*repliers_mutex);
+    repliers->emplace_back([&reply] { reply.set_result(); });
+  }
+  co_await reply;
+}
+
+} // namespace
+
+TEST(CallInChunks, EveryChunkIsSentFromThePoolWhateverThreadRepliesArriveOn)
+{
+  std::atomic<unsigned> calls{0};
+  std::atomic<unsigned> calls_on_pool{0};
+  std::vector<std::jthread> repliers;
+  std::mutex repliers_mutex;
+  // Eight chunks over two workers: six of the calls follow a reply that came
+  // in on a replier's thread, and each must still start on the pool.
+  call_in_chunks<std::uint32_t>(
+      Parts{{0, 1, 2, 3, 4, 5, 6, 7}}, /*max_items_per_chunk=*/1,
+      [&calls, &calls_on_pool, &repliers,
+       &repliers_mutex](ChunkPosition /*position*/,
+                        ChunkItems<std::uint32_t> /*items*/) {
+        calls.fetch_add(1);
+        if (x23::in_thread_pool()) {
+          calls_on_pool.fetch_add(1);
+        }
+        return reply_off_pool(&repliers, &repliers_mutex);
+      },
+      /*max_in_flight=*/2)();
+  repliers.clear();
+  EXPECT_EQ(calls.load(), 8U);
+  EXPECT_EQ(calls_on_pool.load(), 8U);
 }
 
 } // namespace hogd
