@@ -27,6 +27,9 @@ env:
   CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
+  # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
+  # is cached by `cache: rust`); see built_contracts/build_risc.sh.
+  HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
 
 jobs:
   # Fast format check - gates all other jobs

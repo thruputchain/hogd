@@ -22,6 +22,9 @@ env:
   CARGO_REGISTRIES_GROUNDHOG_INDEX: sparse+https://crates.thruput.network/api/v1/crates/
   CARGO_REGISTRIES_GROUNDHOG_SOURCE: sparse+https://crates.thruput.network/api/v1/crates/
   CARGO_BUILD_JOBS: "6"
+  # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
+  # is cached by `cache: rust`); see built_contracts/build_risc.sh.
+  HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
 
 jobs:
   # Clang Debug build + tests
