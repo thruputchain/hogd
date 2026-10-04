@@ -3238,7 +3238,10 @@ TEST(HogDevnode, DataDirRejectsInvalidInheritedLockDescriptor)
                                  {{"HOG_DEVNODE_DATA_DIR_LOCK_FD",
                                    descriptor}});
     auto status = process.wait_for_exit_for_test(startup_timeout());
-    ASSERT_TRUE(status.has_value());
+    if (!status.has_value()) {
+      FAIL() << "hog-devnode did not exit";
+      return;
+    }
     const int exit_status = status.value();
     EXPECT_TRUE(WIFEXITED(exit_status));
     EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
