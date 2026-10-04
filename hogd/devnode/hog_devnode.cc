@@ -234,6 +234,7 @@ public:
           std::format("failed to open hog-devnode data-dir lock '{}': {}",
                       lock_path.string(), std::strerror(errno)));
     }
+    // Inherit the supervisor's lock held while preparing private state.
     if (const char *inherited = std::getenv("HOG_DEVNODE_DATA_DIR_LOCK_FD")) {
       const auto descriptor = hogd::try_parse_integer<int>(inherited);
       struct stat expected{};
@@ -297,7 +298,8 @@ Options:
   --data-dir <dir>               Persist node state under this directory.
                                  Reusing a populated directory recovers the
                                  committed chain and requires the same
-                                 public bootstrap allocations. Omit for an ephemeral node.
+                                 public bootstrap allocations. Omit for an
+                                 ephemeral node.
   --readiness stdout             Emit one readiness JSON line on stdout
                                  [default: stdout]
   --contract-artifacts-dir <dir> Search this directory before default contract
