@@ -1696,6 +1696,92 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
                           ProposedTransaction{.signed_tx = handler_tx})());
 }
 
+// Regression for #4210: an underfunded read must fault before loading; a later
+// funded read of the same address still pays the cold price (it would run warm
+// if the starved read had loaded it for free).
+TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
+{
+  constexpr static ContractAddress kCallerAddr = make_contract_address(214);
+  constexpr static ContractAddress kFreshAddr = make_contract_address(215);
+  constexpr static GasAmount kTwoGas = 2;
+  constexpr static GasAmount kCappedCharge = kSyscallBaseCost + kTwoGas;
+  // The two reads of kFreshAddr, in order: starved then funded.
+  constexpr static std::array<GasAmount, 2> kGasLimits{kTwoGas, UINT64_MAX};
+
+  std::array<GasAmount, kGasLimits.size()> charges{};
+  std::array<InvocationFrameStatusCode, kGasLimits.size()> statuses{};
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kFreshAddr);
+        for (size_t i = 0; i < kGasLimits.size(); ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+              .gas_limit = kGasLimits[i],
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto const before = ctx.total_gas_consumed();
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          charges[i] = ctx.total_gas_consumed() - before;
+
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "get_balance_of invoke " << i
+                          << " was rejected before its child frame ran";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          statuses[i] = outputs.frame_status;
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kCallerNativeId = 19;
+  contract_map.emplace(kCallerNativeId,
+                       std::make_unique<NativeContract>(std::move(fns)));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddr, caller_xdr);
+
+  auto tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, *runtime_context);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  // The starved read faulted, paying only the capped child allowance.
+  EXPECT_EQ(statuses[0], InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(charges[0], kCappedCharge);
+  EXPECT_LT(charges[0], kDBRPCCost);
+
+  // The funded read of the same address still pays the cold-load price, proving
+  // the starved read did not load the key for free.
+  EXPECT_EQ(statuses[1], InvocationFrameStatusCode::Return);
+  EXPECT_GE(charges[1], kDBRPCCost);
+}
+
 // Regression for #4270: warm native-token balance reads skipped the flat
 // kStorageAccessCost once the view was loaded and load_gas dropped to zero.
 TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)

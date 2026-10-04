@@ -2194,6 +2194,35 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
 
 // == Native token syscalls ==
 
+GasAmount
+SystemCallHandler::peek_native_token_balance_load_gas(
+    ContractAddress const &contract_address)
+{
+  AddressAndKey addrkey{.address = contract_address,
+                        .key =
+                            StorageKey(StorageKeyType::FreeNativeTokenBalance)};
+  const FrameItemKey item_key = FrameItemKey::from(addrkey);
+
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
+  assert(item_view);
+
+  // Mirrors get_native_token_balance()'s pricing but must not record the load:
+  // free unless this is a cold first touch, which pays kDBRPCCost.
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (unmodified_item->is_loaded()) {
+      return 0;
+    }
+  }
+  else {
+    auto const *balance_item = item_view->get<NativeTokenBalanceItem>();
+    assert(balance_item);
+    if (balance_item->base_value_.has_value()) {
+      return 0;
+    }
+  }
+  return loaded_keys_.contains(item_key) ? 0 : kDBRPCCost;
+}
+
 x23::Async<SystemStatus<StorageRead<int128_t>>>
 SystemCallHandler::get_native_token_balance(
     ContractAddress const &contract_address)
