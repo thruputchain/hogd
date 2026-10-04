@@ -104,6 +104,14 @@ struct ThreadedMachinePreInstantiationTestPeer {
   {
     return program.exec_[i].handler;
   }
+
+  // Bytes the pre-instantiation retains for the initial memory image. The seed
+  // is stored sparsely, so this is the seeded byte count -- not the declared
+  // total_memory_size (#4327).
+  static size_t retained_image_bytes(const ThreadedMachinePreInstantiation &p)
+  {
+    return p.initial_memory_seed_.size();
+  }
 };
 
 namespace {
@@ -227,6 +235,37 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
                                                     /*trace=*/false)
                 .error(),
             ProgramError::kUnsupportedSystemInstruction);
+}
+
+TEST(Rv32Threaded, preInstantiationStoresSeedSparselyNotFullDeclaredImage)
+{
+  using test_program::addi;
+  // A contract may declare a large memory while seeding only a few bytes. The
+  // cached pre-instantiation must retain just the seed, so a block-scoped cold
+  // contract cache does not grow by the full declared image per contract
+  // (#4327). Each machine still materializes the full zero-padded image.
+  memory_slot_pool() = MemorySlotPool{};
+  constexpr uint32_t kDeclaredMemory = 1024 * 1024;
+  constexpr uint32_t kSeedStart = 8;
+  constexpr std::array<uint8_t, 4> kSeed = {0xde, 0xad, 0xbe, 0xef};
+  const auto code = words_to_bytes(std::array{addi(0, 0, 0)});
+
+  auto pre = ThreadedMachinePreInstantiation::create(
+      code, kSeed, kSeedStart, kDeclaredMemory, /*trace=*/false);
+  ASSERT_TRUE(pre.has_value());
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::retained_image_bytes(*pre),
+            kSeed.size());
+
+  // The materialized machine still exposes the full declared image: zeros
+  // everywhere except the seed at its placement.
+  ThreadedMachine machine(*pre, /*gas=*/10);
+  ASSERT_EQ(machine.memory().size(), kDeclaredMemory);
+  EXPECT_TRUE(std::ranges::equal(
+      machine.memory().subspan(kSeedStart, kSeed.size()), kSeed));
+  EXPECT_EQ(machine.memory()[kSeedStart - 1], 0U);
+  EXPECT_EQ(machine.memory()[kSeedStart + kSeed.size()], 0U);
+  EXPECT_EQ(machine.memory().back(), 0U);
+  memory_slot_pool() = MemorySlotPool{};
 }
 
 TEST(Rv32Threaded, decodeRejectVerdictMatchesCanonicalOnMultiErrorPrograms)
