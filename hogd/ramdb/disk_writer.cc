@@ -123,8 +123,15 @@ DiskWriter::write_worker(const std::stop_token &stoken)
         // Persist the checksum in a fixed (little-endian) byte order rather
         // than the host's native uint32_t representation (#1816).
         uint32_t crc_le = cpu_to_le(crc);
+        // The CRC bytes trail the commit header inside commit_buf. Derive the
+        // destination from commit_buf itself rather than commit_hdr->get_key():
+        // get_key() forms the pointer by advancing past the ItemHeader object,
+        // and only a pointer carrying commit_buf's provenance is guaranteed to
+        // reach the bytes beyond that object (#4329).
         std::ranges::copy(writable_byte_view(crc_le),
-                          commit_hdr->get_key().begin());
+                          std::as_writable_bytes(std::span(commit_buf))
+                              .subspan(sizeof(ItemHeader), sizeof(uint32_t))
+                              .begin());
         crc = 0;
 
         // write the commit record and sync everything to disk.
