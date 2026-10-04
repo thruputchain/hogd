@@ -1814,7 +1814,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
 
   return ThreadedMachinePreInstantiation(std::move(exec),
                                          std::move(initial_memory_seed),
-                                         memory_start, total_memory_size, trace);
+                                         memory_start, total_memory_size,
+                                         trace);
 }
 
 inline MachineView

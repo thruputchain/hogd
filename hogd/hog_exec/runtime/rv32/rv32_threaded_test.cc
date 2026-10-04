@@ -250,8 +250,9 @@ TEST(Rv32Threaded, preInstantiationStoresSeedSparselyNotFullDeclaredImage)
   constexpr std::array<uint8_t, 4> kSeed = {0xde, 0xad, 0xbe, 0xef};
   const auto code = words_to_bytes(std::array{addi(0, 0, 0)});
 
-  auto pre = ThreadedMachinePreInstantiation::create(
-      code, kSeed, kSeedStart, kDeclaredMemory, /*trace=*/false);
+  auto pre =
+      ThreadedMachinePreInstantiation::create(code, kSeed, kSeedStart,
+                                              kDeclaredMemory, /*trace=*/false);
   ASSERT_TRUE(pre.has_value());
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::retained_image_bytes(*pre),
             kSeed.size());
@@ -260,8 +261,9 @@ TEST(Rv32Threaded, preInstantiationStoresSeedSparselyNotFullDeclaredImage)
   // everywhere except the seed at its placement.
   ThreadedMachine machine(*pre, /*gas=*/10);
   ASSERT_EQ(machine.memory().size(), kDeclaredMemory);
-  EXPECT_TRUE(std::ranges::equal(
-      machine.memory().subspan(kSeedStart, kSeed.size()), kSeed));
+  EXPECT_TRUE(
+      std::ranges::equal(machine.memory().subspan(kSeedStart, kSeed.size()),
+                         kSeed));
   EXPECT_EQ(machine.memory()[kSeedStart - 1], 0U);
   EXPECT_EQ(machine.memory()[kSeedStart + kSeed.size()], 0U);
   EXPECT_EQ(machine.memory().back(), 0U);
