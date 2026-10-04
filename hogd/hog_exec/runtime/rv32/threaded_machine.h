@@ -76,11 +76,9 @@ struct alignas(16) Slot {
 static_assert(sizeof(Slot) == 16);
 static_assert(alignof(Slot) == 16);
 // Immutable, decode-once form of a contract: the baked Slot handler array plus
-// the contract's seeded initial memory bytes and their placement. The seed is
-// kept sparse -- not zero-padded out to total_memory_size -- so a cold contract
-// cached for the block retains only its seeded bytes rather than a full
-// declared-memory image (#4327). Each ThreadedMachine materializes the full
-// zero-padded image into its own memory_ at construction/reset.
+// the seeded initial bytes and their placement, kept sparse so cached contracts
+// do not hold a full declared-memory image (#4327). Each ThreadedMachine
+// materializes the full zero-padded image into its own memory_.
 class ThreadedMachinePreInstantiation {
 public:
   // `memory` is the initial seeded image (e.g. an artifact's initial_memory);
@@ -123,9 +121,7 @@ private:
   {}
 
   std::vector<Slot> exec_;
-  // The contract's seeded initial bytes, laid at `memory_start_` with zeros
-  // filling the rest of `total_memory_size_`. Stored sparsely so a cached cold
-  // contract retains only these bytes, not the full declared-memory image.
+  // Seeded bytes, laid at memory_start_ within total_memory_size_.
   std::vector<uint8_t> initial_memory_seed_;
   uint32_t memory_start_ = 0;
   uint32_t total_memory_size_ = 0;
@@ -221,11 +217,8 @@ public:
       exec_traced_(pre_instantiation.trace_)
   {
     assert(pre_instantiation.total_memory_size_ <= kMemoryCeilingBytes);
-    // memory_ acquired its slot from the pool on construction. The recycled
-    // slot is dirty, so size it to the full image and zero it, then lay the
-    // sparse seed at its placement. The reserved capacity means no allocation
-    // on a pool hit, and zeroing the whole image is what the sparse seed trades
-    // against keeping a full zero-padded copy in the pre-instantiation.
+    // Recycled slot is dirty: resize-and-zero, then lay the seed at its
+    // placement. Reserved capacity means no allocation on a pool hit.
     auto &bytes = memory_.bytes();
     bytes.assign(pre_instantiation.total_memory_size_, 0);
     std::ranges::copy(pre_instantiation.initial_memory_seed_,
@@ -1684,9 +1677,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }
 
-  // Keep the seed sparse: the full zero-padded image is materialized per
-  // machine at instantiation, so the cached pre-instantiation holds only the
-  // seeded bytes and their placement (#4327).
+  // Sparse seed; the full image is materialized per machine (#4327).
   std::vector<uint8_t> initial_memory_seed(memory.begin(), memory.end());
 
   std::vector<Slot> exec;

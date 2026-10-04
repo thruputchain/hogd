@@ -105,9 +105,7 @@ struct ThreadedMachinePreInstantiationTestPeer {
     return program.exec_[i].handler;
   }
 
-  // Bytes the pre-instantiation retains for the initial memory image. The seed
-  // is stored sparsely, so this is the seeded byte count -- not the declared
-  // total_memory_size (#4327).
+  // Seeded byte count retained by the pre-instantiation (#4327).
   static size_t retained_image_bytes(const ThreadedMachinePreInstantiation &p)
   {
     return p.initial_memory_seed_.size();
@@ -240,10 +238,8 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
 TEST(Rv32Threaded, preInstantiationStoresSeedSparselyNotFullDeclaredImage)
 {
   using test_program::addi;
-  // A contract may declare a large memory while seeding only a few bytes. The
-  // cached pre-instantiation must retain just the seed, so a block-scoped cold
-  // contract cache does not grow by the full declared image per contract
-  // (#4327). Each machine still materializes the full zero-padded image.
+  // Large declared memory, tiny seed: the cache keeps only the seed, while the
+  // machine still materializes the full image (#4327).
   memory_slot_pool() = MemorySlotPool{};
   constexpr uint32_t kDeclaredMemory = 1024 * 1024;
   constexpr uint32_t kSeedStart = 8;
