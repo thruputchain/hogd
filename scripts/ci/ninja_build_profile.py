@@ -26,20 +26,16 @@ def category(outputs):
     return "other"
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(__doc__.strip(), file=sys.stderr)
-        return 2
-    log = Path(sys.argv[1]) / ".ninja_log"
-    top_n = int(sys.argv[2]) if len(sys.argv) > 2 else 15
-    if not log.is_file():
-        print(f"no ninja log at {log}")
-        return 0
+def ninja_runs(log):
+    """Split the log into ninja invocations.
 
-    # Lines are "start_ms end_ms mtime output cmdhash"; outputs of one edge
-    # share start, end and hash. A later entry for an output supersedes an
-    # earlier one, as when ninja itself reads the log.
-    latest = {}
+    Lines are "start_ms end_ms mtime output cmdhash", with times relative to
+    the start of the invocation that ran the edge. Each invocation appends
+    its lines as edges finish, so end times never decrease within one; a
+    drop marks the next invocation, as when a job runs `cmake --build` more
+    than once in the same build tree.
+    """
+    runs, current, last_end = [], [], -1
     for line in log.read_text(errors="replace").splitlines():
         fields = line.split("\t")
         if line.startswith("#") or len(fields) < 4:
@@ -48,14 +44,22 @@ def main():
             start, end = int(fields[0]), int(fields[1])
         except ValueError:
             continue
+        if end < last_end:
+            runs.append(current)
+            current = []
+        last_end = end
         cmdhash = fields[4] if len(fields) > 4 else ""
-        latest[fields[3]] = (start, end, cmdhash)
+        current.append((start, end, fields[3], cmdhash))
+    if current:
+        runs.append(current)
+    return runs
+
+
+def summarize(label, entries, top_n):
+    # Outputs of one edge share start, end and hash.
     edges = defaultdict(list)
-    for output, key in latest.items():
-        edges[key].append(output)
-    if not edges:
-        print(f"{log} has no entries")
-        return 0
+    for start, end, output, cmdhash in entries:
+        edges[(start, end, cmdhash)].append(output)
 
     totals = defaultdict(lambda: [0, 0.0])
     for (start, end, _), outputs in edges.items():
@@ -65,7 +69,7 @@ def main():
     first = min(start for start, _, _ in edges)
     wall = (max(end for _, end, _ in edges) - first) / 1000
     summed = sum(seconds for _, seconds in totals.values())
-    print(f"{log}: {len(edges)} edges, {wall:.0f}s wall, {summed:.0f}s summed")
+    print(f"{label}: {len(edges)} edges, {wall:.0f}s wall, {summed:.0f}s summed")
     by_time = sorted(totals.items(), key=lambda kv: -kv[1][1])
     for name, (count, seconds) in by_time:
         print(f"  {name:15s} {count:5d} edges {seconds:8.0f}s")
@@ -76,6 +80,27 @@ def main():
         more = f" (+{len(outputs) - 1} more)" if len(outputs) > 1 else ""
         span = f"{(start - first) / 1000:.0f}..{(end - first) / 1000:.0f}"
         print(f"  {(end - start) / 1000:7.1f}s  {span:>11s}  {outputs[0]}{more}")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    log = Path(sys.argv[1]) / ".ninja_log"
+    top_n = int(sys.argv[2]) if len(sys.argv) > 2 else 15
+    if not log.is_file():
+        print(f"no ninja log at {log}")
+        return 0
+
+    runs = ninja_runs(log)
+    if not runs:
+        print(f"{log} has no entries")
+        return 0
+    for index, entries in enumerate(runs, 1):
+        label = str(log)
+        if len(runs) > 1:
+            label += f", ninja run {index} of {len(runs)}"
+        summarize(label, entries, top_n)
     return 0
 
 
