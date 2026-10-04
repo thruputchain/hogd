@@ -101,7 +101,12 @@ jobs:
 
   # GCC Debug build + tests
   gcc-debug:
-    runs-on: namespace-profile-hogd-linux-2604
+    # Each build job gets its own cache volume. Every job forks the volume at
+    # start and, if it succeeds, commits its copy back; the last commit wins.
+    # When all jobs shared the profile's volume, each run kept only the cache
+    # of whichever job finished last, so the other configurations kept losing
+    # their ccache entries.
+    runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-gcc-debug
     permissions:
       contents: read
       actions: read
@@ -186,10 +191,15 @@ jobs:
           echo 'NPROC=20' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with namespace to avoid contention between parallel jobs
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=gcc-debug" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          # Zero the persisted counters so "Show ccache stats" reports this
+          # run, not totals accumulated over every run on the volume.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
@@ -223,7 +233,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          python3 scripts/ci/ninja_build_profile.py build/gcc
 
       - name: Print Log Download Instructions
         if: always()
@@ -231,7 +243,7 @@ jobs:
 
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-llvm-debug
     permissions:
       contents: read
       actions: read
@@ -316,10 +328,15 @@ jobs:
           echo 'NPROC=28' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with namespace to avoid contention between parallel jobs
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=llvm-debug" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          # Zero the persisted counters so "Show ccache stats" reports this
+          # run, not totals accumulated over every run on the volume.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
@@ -334,7 +351,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          python3 scripts/ci/ninja_build_profile.py build/llvm
 
       - name: Print Log Download Instructions
         if: always()
@@ -342,7 +361,7 @@ jobs:
 
   # GCC Release build (parallel with debug builds)
   gcc-release:
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-gcc-release
     permissions:
       contents: read
       actions: read
@@ -427,10 +446,15 @@ jobs:
           echo 'NPROC=18' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with namespace to avoid contention between parallel jobs
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=gcc-release" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          # Zero the persisted counters so "Show ccache stats" reports this
+          # run, not totals accumulated over every run on the volume.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
@@ -440,7 +464,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          python3 scripts/ci/ninja_build_profile.py build/gcc_release
 
       - name: Print Log Download Instructions
         if: always()

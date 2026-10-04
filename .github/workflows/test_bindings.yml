@@ -22,7 +22,8 @@ env:
 
 jobs:
   build:
-    runs-on: namespace-profile-hogd-linux-2604
+    # Own cache volume, as for the build jobs in cpp-namespace-optimized.yml.
+    runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-test-bindings
     permissions:
       contents: read
       actions: read
@@ -119,6 +120,11 @@ jobs:
           echo 'NPROC=30' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+          # Zero the persisted counters so "Show ccache stats" reports this run.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
+
       - name: Configure Build
         run: |
           ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -n
@@ -147,7 +153,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          python3 scripts/ci/ninja_build_profile.py build
 
       - name: Print Log Download Instructions
         if: always()
