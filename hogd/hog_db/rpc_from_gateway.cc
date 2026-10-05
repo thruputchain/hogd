@@ -13,6 +13,7 @@
 #include "types.hh"
 
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -150,6 +151,37 @@ HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
     return DbGatewayIntroOutcome::DbGatewayIntroMismatchedProtocol;
   }
   return DbGatewayIntroOutcome::DbGatewayIntroSuccess;
+}
+
+x23::Async<DbGatewayConfigResult>
+HogDbGatewayRpc::dbgateway_get_config()
+{
+  constexpr int kMaxAttempts = 5;
+  for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+    co_await ctx_.co_wait_for_no_commit_publishing();
+    DbTip tip = ctx_.get_tip();
+    auto cost_model = ctx_.get_db().read_cost_model();
+    if (ctx_.is_committed_read_stale(tip)) {
+      continue;
+    }
+    if (tip.value.proposal_header.block_height < 0) {
+      co_return DbGatewayConfigResult(RPCError::kRPCNotFound);
+    }
+    if (!cost_model) {
+      co_return DbGatewayConfigResult(RPCError::kRPCUnrecoverable);
+    }
+    if (tip.network_config.v() != 0 ||
+        !NetworkConfigParams::is_canonical(tip.network_config.v0())) {
+      co_return DbGatewayConfigResult(RPCError::kRPCUnrecoverable);
+    }
+    DbGatewayConfigResult result(RPCError::kRPCNone);
+    result.config().effective_config =
+        NetworkConfigParams(tip.network_config.v0()).to_network_config();
+    result.config().storage_cost_model = cost_model->to_xdr();
+    result.config().tip = std::move(tip);
+    co_return result;
+  }
+  co_return DbGatewayConfigResult(RPCError::kRPCUnrecoverable);
 }
 
 x23::Async<DbGatewayResult>

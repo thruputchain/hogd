@@ -70,6 +70,9 @@ struct NetworkConfigParams {
   // default, so the defaults above are the only place those values live.
   static NetworkConfig stated_defaults();
 
+  // A complete reading of the values execution uses, including defaults.
+  NetworkConfig to_network_config() const;
+
 private:
   // The value the list states for `id`, or nullopt past its end. Canonical
   // form puts it at its own index, so a mismatch is a bug: CHECK, don't hide
@@ -309,6 +312,18 @@ NetworkConfigParams::set_param(NetworkConfig &config, ConfigParamID id,
                    param_id == id ? value : params.in_force(param_id)));
   }
   config = std::move(rebuilt);
+}
+
+inline NetworkConfig
+NetworkConfigParams::to_network_config() const
+{
+  NetworkConfig config;
+  config.v(0);
+  for (int32_t i = 0; i <= std::to_underlying(kHighestConfigParamID); ++i) {
+    const auto id = static_cast<ConfigParamID>(i);
+    config.v0().params.push_back(make_param(id, in_force(id)));
+  }
+  return config;
 }
 
 inline NetworkConfig
