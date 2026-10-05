@@ -28,6 +28,7 @@
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -390,7 +391,7 @@ IndexerPullController::fail_event_client()
     client = event_client_;
   }
   if (client) {
-    client->__send_call.get()->fail();
+    x23::client_handle(*client).get()->fail();
   }
 }
 

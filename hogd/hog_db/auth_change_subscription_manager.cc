@@ -204,7 +204,7 @@ AuthChangeSubscriptionManager::start_forward_key_changes(
         ForwardKeyChangeChunk{.client = client, .height = height});
     x23::Async<void> future = sender->send();
     pending.push_back(PendingPublish{.card = card,
-                                     .client_ref = client.__send_call,
+                                     .client_ref = x23::client_handle(client),
                                      .sender = std::move(sender),
                                      .future = std::move(future)});
   }
@@ -219,7 +219,7 @@ AuthChangeSubscriptionManager::erase_client_if_stale(
   co_await guard(lock_);
   auto it = auth_db_clients_.find(card);
   if (it != auth_db_clients_.end() &&
-      it->second.__send_call.get() == expected_client_id) {
+      x23::client_handle(it->second).get() == expected_client_id) {
     auth_db_clients_.erase(it);
   }
 }

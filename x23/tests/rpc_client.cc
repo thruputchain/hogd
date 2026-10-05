@@ -1,4 +1,5 @@
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <string_view>
 #include <utility>
@@ -11,6 +12,7 @@
 #include "tests/xdrtest.hh"
 #include "x23/fileio.h"
 #include "x23/rpc.h"
+#include "x23/x23.h"
 
 using namespace x23;
 
@@ -111,4 +113,27 @@ TEST(RpcClient, VoidReplyRejectsUnexpectedBody)
       EXPECT_NO_THROW(pending());
     stream->fail();
   }
+}
+
+TEST(RpcClient, ClientHandleIsTheClientRef)
+{
+  ThreadPool pool(8);
+  CoroPoll cp(pool);
+  int fds[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  UniqueFd peer(fds[1]);
+  auto stream = rpc_stream(cp, fds[0]);
+  auto client = stream->client(blank_rpc_v1{});
+  auto copy = client;
+
+  using ClientRef = RpcStream<>::ClientRef;
+  static_assert(std::same_as<decltype(client_handle(client)), ClientRef &>);
+  static_assert(std::same_as<decltype(client_handle(std::as_const(client))),
+                             const ClientRef &>);
+  static_assert(
+      std::same_as<decltype(client_handle(std::move(client))), ClientRef &&>);
+
+  EXPECT_EQ(client_handle(client).get(), stream.get());
+  EXPECT_EQ(client_handle(copy).get(), stream.get());
+  stream->fail();
 }

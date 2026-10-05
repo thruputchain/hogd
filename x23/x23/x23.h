@@ -763,6 +763,19 @@ struct VacuousSendCall {
   }
 };
 
+// Returns the handle a generated client sends calls through (e.g., the
+// RpcStream::ClientRef from RpcStream::client()), with the client's
+// constness and value category.  The generated member's name is reserved
+// so that it can't collide with a procedure name; use this rather than
+// naming the member.
+template<typename Client>
+requires requires(Client &&c) { std::forward<Client>(c).__send_call; }
+constexpr decltype(auto)
+client_handle(Client &&c) noexcept
+{
+  return (std::forward<Client>(c).__send_call);
+}
+
 // The code generator doesn't necessarily know what is and is not an
 // enum, so regardless of whether or not T is an enum, you can always
 // try to import the enum tags to the local namespace with:
