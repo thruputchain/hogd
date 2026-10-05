@@ -90,13 +90,6 @@ public:
     co_return coord_->scheduler()->size();
   }
 
-  x23::Async<SchedulerTransactionOutcomeBatch>
-  schedgateway_lookup_transaction_outcomes(TransactionHashBatch tx_hashes)
-  {
-    co_return co_await coord_->schedcoord_lookup_transaction_outcomes(
-        tx_hashes);
-  }
-
   void shut_down() { shutdown_flag_ = true; }
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
