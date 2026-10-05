@@ -21,6 +21,7 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/startup_validation.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -271,6 +272,35 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUnregisteredContractType)
   ASSERT_TRUE(recovered.has_value());
   EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
                                                   cost_model_));
+}
+
+// A CRC-valid tip rewrite can set max_savepoint_depth outside the genesis
+// bounds, and recovery must reapply them: a recovered zero would brick the
+// first root subtransaction push with kRPCUnrecoverable, and a value above the
+// ceiling would overrun the executor stacks (#4336).
+TEST_F(RecoveredTipTest, RejectsMaxSavepointDepthOutsideGenesisBounds)
+{
+  for (uint32_t depth : {0U, kSavepointDepthCeiling + 1}) {
+    HogDbDAO db = reopen();
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value());
+
+    NetworkConfigParams::set_param(tip->network_config,
+                                   ConfigParamID::kConfigParamMaxSavepointDepth,
+                                   depth);
+    // Recompute so the config-hash guard passes and the bound is what bites.
+    tip->value.proposal_header.config_hash = compute_config_hash(
+        make_config_hash_preimage(cost_model_, tip->network_config,
+                                  tip->default_wallet));
+    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+    ASSERT_TRUE(db.commit().has_value());
+
+    HogDbDAO recovered_db = reopen();
+    const HogDbStatus<DbTip> recovered = recovered_db.read_dbtip();
+    ASSERT_TRUE(recovered.has_value());
+    EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
+                                                    cost_model_));
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
