@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -27,6 +28,16 @@ struct Tracked {
   ~Tracked() { --live; }
 
   int value;
+};
+
+// A type whose operator& does not return its address.
+struct HidesItsAddress {
+  HidesItsAddress *operator&() // NOLINT(google-runtime-operator)
+  {
+    return nullptr;
+  }
+
+  int value = 0;
 };
 
 class RcTest : public ::testing::Test {
@@ -149,6 +160,15 @@ TEST_F(RcTest, SelfAssignmentKeepsTheValue)
   a = std::move(alias);
   EXPECT_EQ(a->value, 5);
   EXPECT_EQ(a.use_count(), 1U);
+}
+
+TEST_F(RcTest, GetIgnoresAnOverloadedAddressOperator)
+{
+  auto a = make_rc<HidesItsAddress>();
+  ASSERT_NE(a.get(), nullptr);
+  EXPECT_EQ(a.get(), std::addressof(*a));
+  a->value = 1;
+  EXPECT_EQ((*a).value, 1);
 }
 
 TEST_F(RcTest, ConstructsInPlace)

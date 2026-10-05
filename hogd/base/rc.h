@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <memory>
 #include <utility>
 
 namespace hogd {
@@ -56,7 +57,7 @@ public:
     return box_->value_;
   }
   T *operator->() const { return get(); }
-  T *get() const { return box_ ? &box_->value_ : nullptr; }
+  T *get() const { return box_ ? std::addressof(box_->value_) : nullptr; }
 
   explicit operator bool() const { return box_ != nullptr; }
 
