@@ -115,7 +115,7 @@ create_tx_bodies(std::size_t n)
 {
   ProposedTransactionBatch bodies;
   for (std::size_t i = 0; i < n; i++) {
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     bodies.emplace_back(std::move(body));
   }
@@ -252,7 +252,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   ContractAddress root_addr;
   std::ranges::fill(root_addr, 0xCC);
 
-  ProposedTransaction body;
+  ProposedTransaction body{};
   body.signed_tx.tx.uniquifier.nonce = 42;
   body.signed_tx.tx.invocation.invoked_address = root_addr;
 
@@ -293,7 +293,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   std::ranges::fill(root_a, 0xA1);
   std::ranges::fill(emitter_b, 0xB2);
 
-  ProposedTransaction body;
+  ProposedTransaction body{};
   body.signed_tx.tx.invocation.invoked_address = root_a;
   SHA256Hash tx_hash;
   std::ranges::fill(tx_hash, 0x44);
@@ -346,7 +346,7 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
 
   std::vector<SHA256Hash> hashes;
   for (uint8_t i = 0; i < 3; i++) {
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     body.signed_tx.tx.invocation.invoked_address = addr;
     SHA256Hash h;
@@ -390,12 +390,12 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
   std::ranges::fill(addr, 0xD5);
 
   auto ingest = [&](BlockHeight height, uint8_t fill) {
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = fill;
     body.signed_tx.tx.invocation.invoked_address = addr;
     TxEventLog log{};
     std::ranges::fill(log.tx_hash, fill);
-    TxEmittedEvent event;
+    TxEmittedEvent event{};
     event.contract_address = addr;
     log.events.push_back(event);
     ingest_legacy_events(height, TxEventLogBatch{log},
@@ -484,7 +484,7 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     log.tx_hash = h;
     logs.push_back(log); // present, but emits no events
 
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     body.signed_tx.tx.invocation.invoked_address = addr;
     bodies.push_back(body);
@@ -543,7 +543,7 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
   for (BlockHeight h = 100; h <= 105; h++) {
     TxEventLog log{};
     std::ranges::fill(log.tx_hash, static_cast<uint8_t>(h));
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = h;
     ingest_legacy_events(h, TxEventLogBatch{log},
                          ProposedTransactionBatch{body})();
@@ -590,7 +590,7 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
     ev.serialized_event.resize(4);
     log.events.push_back(std::move(ev));
 
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.invocation.invoked_address = addr;
 
     ingest_legacy_events(height, TxEventLogBatch{log},
