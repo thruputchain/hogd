@@ -29,11 +29,8 @@ add_library(base_test_objects OBJECT
   bits_test.cc
   block_id_test.cc
   chunk_items_test.cc
-<<<<<<< HEAD
   chunk_run_assembler_test.cc
   chunked_call_test.cc
-=======
->>>>>>> origin/main
   cli_test.cc
   cpputil_test.cc
   io_test.cc
