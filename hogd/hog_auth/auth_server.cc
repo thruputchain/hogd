@@ -143,8 +143,13 @@ AuthServer::register_auth_data_updates(
   co_await Health::instance().set_current_block_height(height);
 
   if (mempool_client_) {
-    co_await mempool_client_->mempoolauth_auth_data_changed(
-        height, std::move(key_changes).join());
+    // The mempool's proc still takes the height as one batch.
+    KeyChangeBatch batch;
+    batch.reserve(key_changes.size());
+    for (const KeyChange &key_change : key_changes) {
+      batch.push_back(key_change);
+    }
+    co_await mempool_client_->mempoolauth_auth_data_changed(height, batch);
   }
 }
 

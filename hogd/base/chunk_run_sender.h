@@ -34,16 +34,15 @@ concept parts_of =
     };
 
 // Sends a message too large for one RPC record as a run of chunks (see
-// ChunkPosition). The items come as parts, one contiguous container per
-// producer, such as per thread, and are numbered across the parts in order
-// into chunks of at most [max_items_per_chunk] items; a run always has at
-// least one chunk, so an empty message makes one call with no items. The
-// sender views the parts rather than owning them, so one message's parts can
-// feed a sender per subscriber; they must outlive the send.
-// [call](ChunkPosition, ChunkItems<T>) returns the x23::Async<void> that
-// issues one chunk's call. It runs on pool threads, several at a time, and its
-// items are spans into the parts, valid until that Async resolves, so a call
-// serializes them in place.
+// ChunkPosition). The items come as one contiguous container per producer,
+// such as per thread, and are numbered across those parts in order into
+// chunks of at most [max_items_per_chunk] items; a run always has at least one
+// chunk, so an empty message makes one call with no items. The sender views
+// the parts rather than owning them, so they must outlive the send and one
+// message's parts can feed a sender per subscriber. [call](ChunkPosition,
+// ChunkItems<T>) returns the x23::Async<void> that issues one chunk's call. It
+// runs on pool threads, several at a time, and its items are spans into the
+// parts, valid until that Async resolves, so a call serializes them in place.
 template<typename T, typename Call> class ChunkRunSender {
 public:
   template<parts_of<T> Parts>

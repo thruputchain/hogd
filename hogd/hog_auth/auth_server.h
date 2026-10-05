@@ -116,21 +116,16 @@ public:
   // Collects the run of chunks hog_db sends for a committed block and hands
   // the auth server the whole height once, so its ordered-height gate keeps
   // seeing one update per height. Chunks may arrive in any order and the runs
-  // of several heights may interleave; assembler_lock_ serializes the
-  // assembler and is not held while the height is applied.
+  // of several heights may interleave.
   x23::Async<void> authdb_forward_key_changes_chunk(KeyChangeChunk chunk)
   {
     CHECK_PTR(auth_server_);
 
-    std::optional<KeyChangeRunAssembler::Run> run;
-    {
-      x23::CoroGuard cg;
-      co_await cg(assembler_lock_);
-      run = run_assembler_.push(chunk.height,
-                                ChunkPosition{.index = chunk.chunk_index,
-                                              .count = chunk.chunk_count},
-                                std::move(chunk.changes));
-    }
+    std::optional<KeyChangeRunAssembler::Run> run =
+        run_assembler_.push(chunk.height,
+                            ChunkPosition{.index = chunk.chunk_index,
+                                          .count = chunk.chunk_count},
+                            std::move(chunk.changes));
     if (run.has_value()) {
       co_await auth_server_->register_auth_data_updates(run->key,
                                                         std::move(run->parts));
@@ -148,7 +143,6 @@ private:
   using KeyChangeRunAssembler = ChunkRunAssembler<BlockHeight, KeyChangeBatch>;
 
   AuthServer *auth_server_ = nullptr;
-  x23::CoroLock assembler_lock_;
   KeyChangeRunAssembler run_assembler_;
 };
 

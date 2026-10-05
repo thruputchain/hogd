@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -12,15 +13,15 @@
 
 namespace hogd {
 
-// Reassembles messages a sender split into runs of chunks (see ChunkPosition)
-// whose chunks may arrive in any order. [Key] identifies the message a run
-// carries, such as a block height, and [Part] is one chunk's payload; the
-// parts stay separate, moved in as they arrive, so reassembly never copies an
-// item, and the run reads them as one sequence. The runs of several keys may
-// be pending at once and each completes on its own, so a sender may have
-// several messages in flight; the caller serializes push(). A chunk that
-// breaks its run's framing (a count that changes, an index seen twice) is a
-// sender bug and fail-stops.
+// Reassembles a message a sender split into a run of chunks (see
+// ChunkPosition) whose chunks may arrive in any order. [Key] identifies the
+// message a run carries, such as a block height, and [Part] is one chunk's
+// payload; the parts stay separate, moved in as they arrive, so reassembly
+// never copies an item, and the run reads them as one sequence. Runs of
+// several keys may be pending at once, each completing on its own, and
+// push() may be called from any thread: it takes a mutex and never suspends.
+// A chunk that breaks its run's framing (a count that changes, an index seen
+// twice) is a sender bug and fail-stops.
 template<typename Key, typename Part> class ChunkRunAssembler {
 public:
   // A reassembled message: its key and its parts in index order, read as one
@@ -36,6 +37,7 @@ public:
   {
     CHECK_GT(position.count, 0U);
     CHECK_LT(position.index, position.count);
+    std::scoped_lock lock(mutex_);
     auto [it, started] = pending_.try_emplace(key);
     Pending &pending = it->second;
     if (started) {
@@ -63,6 +65,7 @@ private:
     std::vector<bool> received;
     std::uint32_t remaining = 0;
   };
+  std::mutex mutex_;
   std::map<Key, Pending> pending_;
 };
 
