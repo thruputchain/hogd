@@ -79,14 +79,19 @@ private:
   // pool, and awaits its call, until the run is exhausted or a call has
   // failed. A reply resumes this coroutine on the thread that read it, a
   // connection's reader, so it hops back to the pool before every chunk:
-  // serializing there would stall every other reply on that connection. A
-  // call's exception is the worker's result.
+  // serializing there would stall every other reply on that connection.
+  // Another worker's call may fail while this one waits for the pool, so the
+  // failure check repeats after the hop. A call's exception is the worker's
+  // result.
   x23::Async<void> worker()
   {
     for (size_t index = next_chunk_.fetch_add(1, std::memory_order_relaxed);
          index < chunk_count_ && !failed_.load(std::memory_order_relaxed);
          index = next_chunk_.fetch_add(1, std::memory_order_relaxed)) {
       co_await default_coropoll().pool_.bg();
+      if (failed_.load(std::memory_order_relaxed)) {
+        co_return;
+      }
       const std::vector<std::span<const T>> pieces = pieces_of(index);
       const ChunkPosition position{.index = static_cast<std::uint32_t>(index),
                                    .count = static_cast<std::uint32_t>(

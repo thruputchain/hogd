@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <latch>
 #include <mutex>
 #include <span>
 #include <stdexcept>
@@ -15,6 +16,7 @@
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/threadpool.h"
 
@@ -183,6 +185,149 @@ TEST(ChunkRunSender, FailsWithACallsExceptionAndIssuesNoFurtherChunk)
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 1U);
   expect_position(sent[0], 0, 3);
+}
+
+namespace {
+
+// A call the test releases: it reports that it has started, awaits its
+// release, which arrives from off the pool, and then fails if [fail].
+struct Gate {
+  Gate() { reply.launch(); }
+
+  std::atomic<bool> started{false};
+  x23::Awaitable<void> reply;
+};
+
+x23::Async<void>
+gated(Gate *gate, bool fail)
+{
+  gate->started.store(true);
+  co_await gate->reply;
+  if (fail) {
+    throw std::runtime_error("chunk refused");
+  }
+}
+
+// Occupies one pool thread until [release] opens, counting itself in
+// [holding] once it has the thread.
+x23::Async<void>
+hold_pool_thread(std::atomic<size_t> *holding, std::latch *release)
+{
+  co_await default_coropoll().pool_.bg();
+  holding->fetch_add(1);
+  release->wait();
+}
+
+// Polls until [ready] holds, for at most ten seconds. On timeout it fails the
+// test, naming [what] it waited for, and returns false.
+bool
+wait_for(const auto &ready, const char *what)
+{
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!ready()) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      ADD_FAILURE() << "timed out waiting for " << what;
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return true;
+}
+
+} // namespace
+
+TEST(ChunkRunSender, IssuesNoChunkAfterAFailureEvenFromAWorkerMidHop)
+{
+  // Three one-item chunks over two workers. Chunk 0's call fails and chunk 1's
+  // call returns, each only when the test releases it. Before releasing chunk
+  // 1, the test fills the pool with blocked tasks, so chunk 1's worker takes
+  // chunk 2 and parks in its pool hop, past the loop's failure check. Chunk 0
+  // then fails. Once the pool is freed, that worker must drop chunk 2 rather
+  // than issue it.
+  Gate gate0;
+  Gate gate1;
+  ChunkRecorder issued;
+  ChunkRunSender sender(Parts{{0, 1, 2}}, /*max_items_per_chunk=*/1,
+                        [&gate0, &gate1,
+                         &issued](ChunkPosition position,
+                                  ChunkItems<std::uint32_t> items) {
+                          switch (position.index) {
+                          case 0:
+                            return gated(&gate0, /*fail=*/true);
+                          case 1:
+                            return gated(&gate1, /*fail=*/false);
+                          default:
+                            return record(&issued, position, items);
+                          }
+                        });
+  std::atomic<bool> failed{false};
+  std::jthread run([&sender, &failed] {
+    try {
+      sender.send(/*max_in_flight=*/2)();
+    } catch (const std::runtime_error &) {
+      failed.store(true);
+    }
+  });
+
+  const size_t nthreads = default_coropoll().pool_.nthreads_;
+  std::atomic<size_t> holding{0};
+  std::latch release(1);
+  std::vector<x23::Async<void>> holders;
+  bool released0 = false;
+  bool released1 = false;
+  bool released_pool = false;
+  // Frees everything the test holds, so a failed wait ends the test instead of
+  // hanging it.
+  const auto release_all = [&] {
+    if (!released1) {
+      gate1.reply.set_result();
+    }
+    if (!released0) {
+      gate0.reply.set_result();
+    }
+    if (!released_pool) {
+      release.count_down();
+    }
+    for (x23::Async<void> &holder : holders) {
+      holder();
+    }
+    run.join();
+  };
+
+  if (!wait_for([&] { return gate0.started.load() && gate1.started.load(); },
+                "both calls to be in flight")) {
+    release_all();
+    return;
+  }
+  for (size_t i = 0; i < nthreads; ++i) {
+    holders.push_back(hold_pool_thread(&holding, &release));
+  }
+  if (!wait_for([&] { return holding.load() == nthreads; },
+                "the pool to fill")) {
+    release_all();
+    return;
+  }
+
+  // Chunk 1 completes off the pool; its worker takes chunk 2 and hops, but
+  // the pool is full, so it parks there.
+  {
+    const std::jthread replier([&gate1] { gate1.reply.set_result(); });
+  }
+  released1 = true;
+  EXPECT_TRUE(issued.sent().empty());
+
+  // Chunk 0 fails while that worker is parked.
+  {
+    const std::jthread replier([&gate0] { gate0.reply.set_result(); });
+  }
+  released0 = true;
+
+  release.count_down();
+  released_pool = true;
+  release_all();
+  EXPECT_TRUE(failed.load());
+  EXPECT_TRUE(issued.sent().empty());
 }
 
 namespace {
