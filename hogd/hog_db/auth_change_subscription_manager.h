@@ -12,7 +12,6 @@
 #include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "types.hh"
@@ -26,6 +25,11 @@ namespace hogd {
 
 class AuthChangeSubscriptionManager {
 public:
+  // The most key changes one KeyChangeChunk carries. A KeyChange is 1.1 KB on
+  // the wire at most (21 signer slots), so a chunk stays under 9 MiB, below
+  // x23's 16 MiB default record cap.
+  static constexpr size_t kMaxKeyChangesPerChunk = size_t{1} << 13;
+
   // [max_key_changes_per_chunk] is a test seam; production uses the default.
   explicit AuthChangeSubscriptionManager(
       size_t max_key_changes_per_chunk = kMaxKeyChangesPerChunk)
