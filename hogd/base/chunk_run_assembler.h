@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -15,11 +17,11 @@ namespace hogd {
 // ChunkPosition) whose chunks may arrive in any order. [Key] identifies the
 // message a run carries, such as a block height, and [Part] is one chunk's
 // payload; the parts stay separate, moved in as they arrive, so reassembly
-// never copies an item, and the run reads them as one sequence. At most one
-// run is pending, because a sender starts its next run only after every chunk
-// of this one is acknowledged; the caller serializes push(). A chunk that
-// breaks its run's framing (another key while a run is pending, a count that
-// changes, an index seen twice) is a sender bug and fail-stops.
+// never copies an item, and the run reads them as one sequence. Runs of
+// several keys may be pending at once, each completing on its own, and
+// push() may be called from any thread: it takes a mutex and never suspends.
+// A chunk that breaks its run's framing (a count that changes, an index seen
+// twice) is a sender bug and fail-stops.
 template<typename Key, typename Part> class ChunkRunAssembler {
 public:
   // A reassembled message: its key and its parts in index order, read as one
@@ -35,38 +37,36 @@ public:
   {
     CHECK_GT(position.count, 0U);
     CHECK_LT(position.index, position.count);
-    if (!pending_.has_value()) {
-      Pending &started = pending_.emplace();
-      started.key = key;
-      started.parts.resize(position.count);
-      started.received.assign(position.count, false);
-      started.remaining = position.count;
+    std::scoped_lock lock(mutex_);
+    auto [it, started] = pending_.try_emplace(key);
+    Pending &pending = it->second;
+    if (started) {
+      pending.parts.resize(position.count);
+      pending.received.assign(position.count, false);
+      pending.remaining = position.count;
     }
     else {
-      CHECK(pending_->key == key);
-      CHECK_EQ(pending_->parts.size(), position.count);
+      CHECK_EQ(pending.parts.size(), position.count);
     }
-    Pending &pending = *pending_;
     CHECK(!pending.received[position.index]);
     pending.received[position.index] = true;
     pending.parts[position.index] = std::move(part);
     if (--pending.remaining != 0) {
       return std::nullopt;
     }
-    Run run{.key = std::move(pending.key),
-            .parts = ChunkedVector<Part>(std::move(pending.parts))};
-    pending_.reset();
+    Run run{.key = key, .parts = ChunkedVector<Part>(std::move(pending.parts))};
+    pending_.erase(it);
     return run;
   }
 
 private:
   struct Pending {
-    Key key;
     std::vector<Part> parts;
     std::vector<bool> received;
     std::uint32_t remaining = 0;
   };
-  std::optional<Pending> pending_;
+  std::mutex mutex_;
+  std::map<Key, Pending> pending_;
 };
 
 } // namespace hogd

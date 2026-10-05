@@ -86,6 +86,14 @@ public:
 
   ChunkedVector() = default;
 
+  // A sequence of the one chunk [chunk]. Implicit, so a consumer that reads
+  // its items through a ChunkedVector takes a plain chunk as readily.
+  ChunkedVector(Chunk chunk)
+  {
+    ends_.push_back(chunk.size());
+    chunks_.push_back(std::move(chunk));
+  }
+
   // Takes the chunks in the order their items are to be read.
   explicit ChunkedVector(std::vector<Chunk> chunks) : chunks_(std::move(chunks))
   {

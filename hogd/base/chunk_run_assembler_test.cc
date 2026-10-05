@@ -83,6 +83,19 @@ TEST(ChunkRunAssembler, ChunksLandInTheirSlotsWhateverTheirArrivalOrder)
   EXPECT_EQ(items_of(run), (Items{1, 2, 3, 4, 5}));
 }
 
+TEST(ChunkRunAssembler, RunsOfDifferentKeysInterleaveAndCompleteOnTheirOwn)
+{
+  Assembler assembler;
+  EXPECT_FALSE(assembler.push(7, at(0, 2), {1}).has_value());
+  EXPECT_FALSE(assembler.push(8, at(1, 2), {4}).has_value());
+  const Assembler::Run eight = completed(assembler.push(8, at(0, 2), {3}));
+  EXPECT_EQ(eight.key, 8U);
+  EXPECT_EQ(items_of(eight), (Items{3, 4}));
+  const Assembler::Run seven = completed(assembler.push(7, at(1, 2), {2}));
+  EXPECT_EQ(seven.key, 7U);
+  EXPECT_EQ(items_of(seven), (Items{1, 2}));
+}
+
 TEST(ChunkRunAssembler, AnEmptyChunkStillCountsTowardTheRun)
 {
   Assembler assembler;
@@ -107,14 +120,6 @@ TEST(ChunkRunAssembler, AnIndexAtOrPastTheCountFailStops)
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   Assembler assembler;
   X23_EXPECT_DEATH(assembler.push(7, at(2, 2), {1}), "CHECK FAILED");
-}
-
-TEST(ChunkRunAssembler, AnotherKeyWhileARunIsPendingFailStops)
-{
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-  Assembler assembler;
-  EXPECT_FALSE(assembler.push(7, at(0, 2), {1}).has_value());
-  X23_EXPECT_DEATH(assembler.push(8, at(1, 2), {2}), "CHECK FAILED");
 }
 
 TEST(ChunkRunAssembler, ACountThatChangesMidRunFailStops)
