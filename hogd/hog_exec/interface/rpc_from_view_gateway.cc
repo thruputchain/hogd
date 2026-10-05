@@ -473,17 +473,12 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
 
 // Normalize a caller-supplied view query for unauthenticated public use.
 // We strip auth_claim (no real signer) and invoke_flags (no TryInvoke /
-// DelegateCall) and clamp gas_limit to kMaxPublicViewGas, but intentionally
-// preserve parent_address and forwarded_tokens.  View queries are read-only
-// (no state commits), so letting the caller choose a parent_address — which
-// the invoked contract sees via GetMsgSender — is safe and gives off-chain
-// tooling the ability to simulate calls from any context.
-//
-// The gas clamp is the operational ceiling every public view shares: a public
-// request pays no fee, so an unclamped UINT64_MAX budget would let one request
-// occupy a shared worker on a syscall-free guest loop effectively without
-// bound (#4344).  Clamping here, before dispatch, bounds that occupation for
-// every public ViewGateway request.
+// DelegateCall) and clamp gas_limit (public views pay no fee; see
+// kMaxPublicViewGas), but intentionally preserve parent_address and
+// forwarded_tokens.  View queries are read-only (no state commits), so letting
+// the caller choose a parent_address -- which the invoked contract sees via
+// GetMsgSender -- is safe and gives off-chain tooling the ability to simulate
+// calls from any context.
 TransactionViewQuery
 normalize_public_view_query(TransactionViewQuery query)
 {

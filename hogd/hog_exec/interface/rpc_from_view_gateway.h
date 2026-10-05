@@ -141,16 +141,10 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw);
 
-// Operational ceiling on the gas an unauthenticated public view may request.
-// On-chain execution bounds gas economically -- the sending account must hold
-// enough hogs to cover gas_limit -- but a public view carries no fee, so
-// without a ceiling one request can pin a shared worker on a syscall-free
-// guest loop until a caller-chosen (up to UINT64_MAX) budget drains (#4344).
-// One gas is roughly one baseline RV32 instruction, so this bounds a worst-
-// case self-loop to order one second of worker time while leaving generous
-// headroom over any real read-only simulation (on-chain budgets run in the
-// millions). This is an operational, non-consensus limit: it never touches
-// block execution, only what the gateway admits.
+// Operational, non-consensus cap on gas for an unauthenticated public view,
+// which pays no fee (on-chain the sender's hog balance bounds gas; a public
+// view has none). Bounds a syscall-free guest loop to order one second of
+// worker time instead of a caller-chosen UINT64_MAX occupation (#4344).
 inline constexpr GasAmount kMaxPublicViewGas = 1'000'000'000;
 
 TransactionViewQuery normalize_public_view_query(TransactionViewQuery query);
