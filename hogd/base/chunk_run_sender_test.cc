@@ -13,7 +13,7 @@
 
 #include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
-#include "hogd/base/chunked_call.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/coropoll.h"
 #include "x23/async.h"
 #include "x23/threadpool.h"
@@ -86,12 +86,12 @@ expect_position(const SentChunk &chunk, std::uint32_t index,
 
 } // namespace
 
-TEST(CallInChunks, NumbersItemsAcrossPartsIntoChunksOfAtMostTheLimit)
+TEST(ChunkRunSender, NumbersItemsAcrossPartsIntoChunksOfAtMostTheLimit)
 {
   ChunkRecorder recorder;
-  call_in_chunks<std::uint32_t>(Parts{{0, 1, 2}, {3, 4}, {}, {5, 6}},
-                                /*max_items_per_chunk=*/3,
-                                recording(&recorder))();
+  ChunkRunSender sender(Parts{{0, 1, 2}, {3, 4}, {}, {5, 6}},
+                        /*max_items_per_chunk=*/3, recording(&recorder));
+  sender.send()();
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 3U);
   expect_position(sent[0], 0, 3);
@@ -102,12 +102,12 @@ TEST(CallInChunks, NumbersItemsAcrossPartsIntoChunksOfAtMostTheLimit)
   EXPECT_EQ(sent[2].items, (Items{6}));
 }
 
-TEST(CallInChunks, FullChunksCarryNoTrailingEmptyChunk)
+TEST(ChunkRunSender, FullChunksCarryNoTrailingEmptyChunk)
 {
   ChunkRecorder recorder;
-  call_in_chunks<std::uint32_t>(Parts{{0, 1}, {2, 3}},
-                                /*max_items_per_chunk=*/2,
-                                recording(&recorder))();
+  ChunkRunSender sender(Parts{{0, 1}, {2, 3}}, /*max_items_per_chunk=*/2,
+                        recording(&recorder));
+  sender.send()();
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 2U);
   expect_position(sent[0], 0, 2);
@@ -116,12 +116,13 @@ TEST(CallInChunks, FullChunksCarryNoTrailingEmptyChunk)
   EXPECT_EQ(sent[1].items, (Items{2, 3}));
 }
 
-TEST(CallInChunks, EmptyInputStillMakesOneCall)
+TEST(ChunkRunSender, EmptyInputStillMakesOneCall)
 {
   for (Parts parts : {Parts{}, Parts{{}, {}}}) {
     ChunkRecorder recorder;
-    call_in_chunks<std::uint32_t>(std::move(parts), /*max_items_per_chunk=*/3,
-                                  recording(&recorder))();
+    ChunkRunSender sender(std::move(parts), /*max_items_per_chunk=*/3,
+                          recording(&recorder));
+    sender.send()();
     const std::vector<SentChunk> sent = recorder.sent();
     ASSERT_EQ(sent.size(), 1U);
     expect_position(sent[0], 0, 1);
@@ -152,20 +153,19 @@ await_peers(std::atomic<unsigned> *in_flight, unsigned expected)
 
 } // namespace
 
-TEST(CallInChunks, SendsChunksConcurrently)
+TEST(ChunkRunSender, SendsChunksConcurrently)
 {
   std::atomic<unsigned> in_flight{0};
-  call_in_chunks<std::uint32_t>(
-      Parts{{0, 1, 2, 3}}, /*max_items_per_chunk=*/2,
-      [&in_flight](ChunkPosition /*position*/,
-                   ChunkItems<std::uint32_t> /*items*/) {
-        return await_peers(&in_flight, 2);
-      },
-      /*max_in_flight=*/2)();
+  ChunkRunSender sender(Parts{{0, 1, 2, 3}}, /*max_items_per_chunk=*/2,
+                        [&in_flight](ChunkPosition /*position*/,
+                                     ChunkItems<std::uint32_t> /*items*/) {
+                          return await_peers(&in_flight, 2);
+                        });
+  sender.send(/*max_in_flight=*/2)();
   EXPECT_EQ(in_flight.load(), 2U);
 }
 
-TEST(CallInChunks, FailsWithACallsExceptionAndIssuesNoFurtherChunk)
+TEST(ChunkRunSender, FailsWithACallsExceptionAndIssuesNoFurtherChunk)
 {
   ChunkRecorder recorder;
   auto failing_second = [&recorder](ChunkPosition position,
@@ -177,11 +177,9 @@ TEST(CallInChunks, FailsWithACallsExceptionAndIssuesNoFurtherChunk)
   };
   // One worker sends the chunks in order, so the failure on chunk 1 is what
   // stops chunk 2.
-  EXPECT_THROW(call_in_chunks<std::uint32_t>(Parts{{0, 1, 2}},
-                                             /*max_items_per_chunk=*/1,
-                                             failing_second,
-                                             /*max_in_flight=*/1)(),
-               std::runtime_error);
+  ChunkRunSender sender(Parts{{0, 1, 2}}, /*max_items_per_chunk=*/1,
+                        failing_second);
+  EXPECT_THROW(sender.send(/*max_in_flight=*/1)(), std::runtime_error);
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 1U);
   expect_position(sent[0], 0, 3);
@@ -205,7 +203,7 @@ reply_off_pool(std::vector<std::jthread> *repliers, std::mutex *repliers_mutex)
 
 } // namespace
 
-TEST(CallInChunks, EveryChunkIsSentFromThePoolWhateverThreadRepliesArriveOn)
+TEST(ChunkRunSender, EveryChunkIsSentFromThePoolWhateverThreadRepliesArriveOn)
 {
   std::atomic<unsigned> calls{0};
   std::atomic<unsigned> calls_on_pool{0};
@@ -213,18 +211,18 @@ TEST(CallInChunks, EveryChunkIsSentFromThePoolWhateverThreadRepliesArriveOn)
   std::mutex repliers_mutex;
   // Eight chunks over two workers: six of the calls follow a reply that came
   // in on a replier's thread, and each must still start on the pool.
-  call_in_chunks<std::uint32_t>(
-      Parts{{0, 1, 2, 3, 4, 5, 6, 7}}, /*max_items_per_chunk=*/1,
-      [&calls, &calls_on_pool, &repliers,
-       &repliers_mutex](ChunkPosition /*position*/,
-                        ChunkItems<std::uint32_t> /*items*/) {
-        calls.fetch_add(1);
-        if (x23::in_thread_pool()) {
-          calls_on_pool.fetch_add(1);
-        }
-        return reply_off_pool(&repliers, &repliers_mutex);
-      },
-      /*max_in_flight=*/2)();
+  ChunkRunSender sender(Parts{{0, 1, 2, 3, 4, 5, 6, 7}},
+                        /*max_items_per_chunk=*/1,
+                        [&calls, &calls_on_pool, &repliers,
+                         &repliers_mutex](ChunkPosition /*position*/,
+                                          ChunkItems<std::uint32_t> /*items*/) {
+                          calls.fetch_add(1);
+                          if (x23::in_thread_pool()) {
+                            calls_on_pool.fetch_add(1);
+                          }
+                          return reply_off_pool(&repliers, &repliers_mutex);
+                        });
+  sender.send(/*max_in_flight=*/2)();
   repliers.clear();
   EXPECT_EQ(calls.load(), 8U);
   EXPECT_EQ(calls_on_pool.load(), 8U);
