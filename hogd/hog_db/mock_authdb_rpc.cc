@@ -12,26 +12,23 @@ void
 MockAuthDBRpc::wait_for_changes(BlockHeight height)
 {
   std::unique_lock<std::mutex> lock(mutex_);
-  cv_.wait(lock, [this, height] { return received_changes_.contains(height); });
+  cv_.wait(lock, [this, height] {
+    auto it = received_.find(height);
+    return it != received_.end() && it->second.complete;
+  });
 }
 
 void
-MockAuthDBRpc::authdb_forward_key_changes(BlockHeight height,
-                                          KeyChangeBatch key_changes)
+MockAuthDBRpc::authdb_forward_key_changes_chunk(KeyChangeChunk chunk)
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // Append to existing changes for this height, or create new entry
-  auto it = received_changes_.find(height);
-  if (it != received_changes_.end()) {
-    // Append new changes to existing batch
-    it->second.append_range(key_changes);
+  Received &received = received_[chunk.height];
+  received.changes.append_range(chunk.changes);
+  if (++received.chunks == chunk.chunk_count) {
+    received.complete = true;
+    cv_.notify_all();
   }
-  else {
-    received_changes_[height] = std::move(key_changes);
-  }
-
-  cv_.notify_all();
 }
 
 } // namespace hogd

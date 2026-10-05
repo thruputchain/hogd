@@ -86,6 +86,14 @@ TEST(ChunkedVector, StillExposesTheChunks)
   EXPECT_EQ(chunked.chunks()[1], (Chunk{3}));
 }
 
+TEST(ChunkedVector, JoinMovesALoneChunkAndConcatenatesSeveral)
+{
+  EXPECT_EQ(Chunked(std::vector<Chunk>{{1, 2, 3}}).join(), (Chunk{1, 2, 3}));
+  EXPECT_EQ(Chunked(std::vector<Chunk>{{1}, {}, {2, 3}}).join(),
+            (Chunk{1, 2, 3}));
+  EXPECT_TRUE(Chunked().join().empty());
+}
+
 TEST(ChunkedVector, WorksWithStandardAlgorithms)
 {
   const Chunked chunked(std::vector<Chunk>{{5, 1}, {}, {4, 2, 3}});

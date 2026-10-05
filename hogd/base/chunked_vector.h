@@ -130,6 +130,25 @@ public:
   // The chunks, in item order; some may be empty.
   std::span<const Chunk> chunks() const { return chunks_; }
 
+  // Moves the items into one Chunk, in order, leaving this empty: a lone chunk
+  // is moved as is, the chunks of a longer sequence are copied into one.
+  Chunk join() &&
+  {
+    Chunk joined;
+    if (chunks_.size() == 1) {
+      joined = std::move(chunks_.front());
+    }
+    else {
+      joined.reserve(size());
+      for (const Chunk &chunk : chunks_) {
+        std::ranges::copy(chunk, std::back_inserter(joined));
+      }
+    }
+    chunks_.clear();
+    ends_.clear();
+    return joined;
+  }
+
 private:
   std::vector<Chunk> chunks_;
   // ends_[i] is the number of items in chunks_[0..i], so the position just

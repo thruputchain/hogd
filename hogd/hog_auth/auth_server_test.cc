@@ -65,6 +65,37 @@ TEST_F(AuthServerTest, BasicLookup)
   ASSERT_TRUE(result.value()->second.has_value());
 }
 
+// The AuthDB1 handler applies a height once every chunk of its run is in,
+// whatever order the chunks arrive in.
+TEST_F(AuthServerTest, ChunkedKeyChangesApplyOnceTheRunIsComplete)
+{
+  ContractAddress address = make_test_address(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
+
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, auth_data);
+  mock_db().increment_height(); // now at height 2
+  const BlockHeight height = mock_db().get_current_height();
+  ASSERT_EQ(height, 2);
+
+  AuthDBRpc rpc;
+  rpc.set_auth_server(auth_server());
+  // The empty second chunk arrives first; the run completes on the first.
+  rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{
+      .height = height, .chunk_index = 1, .chunk_count = 2, .changes = {}})();
+  rpc.authdb_forward_key_changes_chunk(
+      KeyChangeChunk{.height = height,
+                     .chunk_index = 0,
+                     .chunk_count = 2,
+                     .changes = mock_db().get_key_changes_at_height(1)})();
+
+  auto result = auth_server().lookup_auth_data(height, address)();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, height);
+  ASSERT_TRUE(result.value()->second.has_value());
+}
+
 // Test lookup of non-existent auth data
 TEST_F(AuthServerTest, LookupNonExistent)
 {
