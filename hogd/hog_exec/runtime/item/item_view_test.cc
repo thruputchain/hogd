@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -135,11 +136,11 @@ TEST_F(ItemViewTest, SetBytestring)
 
   const auto *get_res = proxy.template get<BytestringItem>();
   ASSERT_TRUE(get_res);
-  EXPECT_EQ(get_res->bytestring(), bytes);
+  EXPECT_TRUE(std::ranges::equal(get_res->bytes(), bytes));
 
   EXPECT_TRUE(proxy.set(BytestringItem(bytes2)));
   ASSERT_TRUE(get_res = proxy.template get<BytestringItem>());
-  EXPECT_EQ(get_res->bytestring(), bytes2);
+  EXPECT_TRUE(std::ranges::equal(get_res->bytes(), bytes2));
 }
 
 TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
@@ -353,7 +354,7 @@ TEST_F(ItemViewTest, CrossTypeOverwriteNNIntToBytestring)
   // BytestringItem should be present with the new value
   const auto *bs = proxy.template get<BytestringItem>();
   ASSERT_TRUE(bs);
-  EXPECT_EQ(bs->bytestring(), bytes);
+  EXPECT_TRUE(std::ranges::equal(bs->bytes(), bytes));
 
   // get_delta should produce a bytestring delta (not NNInt)
   auto [delta, flags] = proxy.get_delta();
@@ -436,21 +437,23 @@ TEST_F(ItemViewTest, FrameCopiesShareBytestring)
   // A frame's copy of its parent's view must not copy the bytestring, or a
   // metadata-only syscall in a fresh frame would copy an arbitrarily large
   // payload for fixed gas (#4303).
+  Bytestring const payload(4096, 0x5a);
   ItemView parent;
-  ASSERT_TRUE(parent.set(BytestringItem(Bytestring(4096, 0x5a))));
-  auto const &parent_bytes =
-      parent.template get<BytestringItem>()->bytestring();
+  ASSERT_TRUE(parent.set(BytestringItem(payload)));
+  auto const *parent_data =
+      parent.template get<BytestringItem>()->bytes().data();
 
   ItemView child = parent;
   child.clear_flags();
-  EXPECT_EQ(&child.template get<BytestringItem>()->bytestring(), &parent_bytes);
+  EXPECT_EQ(child.template get<BytestringItem>()->bytes().data(), parent_data);
 
   // Overwriting the child replaces its item and leaves the parent's alone.
   ASSERT_TRUE(child.set(BytestringItem(Bytestring{1})));
-  EXPECT_EQ(child.template get<BytestringItem>()->bytestring(), Bytestring{1});
-  EXPECT_EQ(&parent.template get<BytestringItem>()->bytestring(),
-            &parent_bytes);
-  EXPECT_EQ(parent_bytes, Bytestring(4096, 0x5a));
+  EXPECT_TRUE(std::ranges::equal(child.template get<BytestringItem>()->bytes(),
+                                 Bytestring{1}));
+  auto const parent_bytes = parent.template get<BytestringItem>()->bytes();
+  EXPECT_EQ(parent_bytes.data(), parent_data);
+  EXPECT_TRUE(std::ranges::equal(parent_bytes, payload));
 }
 
 TEST_F(ItemViewTest, FrameCopiesOfAuthDataChangeIndependently)

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <format>
 #include <memory>
 #include <span>
@@ -20,6 +21,7 @@
 #include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -414,15 +416,15 @@ TEST_F(InvocationFrameTest, ChildFramesShareParentBytestring)
   ASSERT_TRUE(stack.get_item_view(addrkey)->set(BytestringItem(payload)));
   finish_child(InvokeStatus<void>{}, false);
 
-  auto const *root_bytes =
-      &stack.get_item_view(addrkey)->get<BytestringItem>()->bytestring();
+  auto const *root_data =
+      stack.get_item_view(addrkey)->get<BytestringItem>()->bytes().data();
 
   for (int i = 0; i < 3; ++i) {
     ASSERT_TRUE(
         stack.start_frame(make_test_address(1), Calldata{}, 0, {}).has_value());
     auto *view = stack.get_item_view(addrkey);
     view->clear_flags();
-    EXPECT_EQ(&view->get<BytestringItem>()->bytestring(), root_bytes);
+    EXPECT_EQ(view->get<BytestringItem>()->bytes().data(), root_data);
     finish_child(InvokeStatus<void>{}, false);
   }
 
@@ -436,8 +438,8 @@ TEST_F(InvocationFrameTest, ChildFramesShareParentBytestring)
   finish_child(InvokeError{InvokeErrorCode::Deterministic}, true);
 
   auto const &root_item = *stack.get_item_view(addrkey)->get<BytestringItem>();
-  EXPECT_EQ(&root_item.bytestring(), root_bytes);
-  EXPECT_EQ(root_item.bytestring(), payload);
+  EXPECT_EQ(root_item.bytes().data(), root_data);
+  EXPECT_TRUE(std::ranges::equal(root_item.bytes(), payload));
 }
 
 } // namespace hogd

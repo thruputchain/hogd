@@ -371,7 +371,7 @@ public:
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
-  [[nodiscard]] x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<std::span<const uint8_t>>>>
   get_bytestring(StorageKeyContractData const &storage_key);
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_bytestring(StorageKeyContractData const &storage_key,

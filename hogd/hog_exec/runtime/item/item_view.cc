@@ -32,10 +32,10 @@ namespace hogd {
 namespace {
 
 StorageDelta
-make_bytestring_set(Bytestring const &string)
+make_bytestring_set(std::span<const uint8_t> bytes)
 {
   StorageDelta out(StorageDeltaType::kDeltaTypeBytestringSet);
-  out.bytestring() = string;
+  out.bytestring() = Bytestring(bytes.begin(), bytes.end());
   return out;
 }
 
@@ -92,7 +92,7 @@ ItemView::get_delta(std::span<QueueEntry const> observed_entries) const
 StorageDelta
 BytestringItem::get_delta() const
 {
-  return make_bytestring_set(*bytestring_);
+  return make_bytestring_set(bytes_.span());
 }
 
 StorageDelta
@@ -116,7 +116,7 @@ BytestringItem::validate() const
   // malloc to fail, but a contract could still adversarially waste system
   // resources.
   // The ceiling, not the limit in force: items outlive a lowered limit.
-  CHECK_LE(bytestring_->size(), static_cast<size_t>(kBytestringCeilingLen));
+  CHECK_LE(bytes_.size(), static_cast<size_t>(kBytestringCeilingLen));
 
   return {};
 }
