@@ -704,9 +704,8 @@ TEST_F(Rv32ProductionMappingTest,
             (kReadCount - 1) * kDBRPCCost);
 }
 
-// Regression test for #4354: the memory-image restore is metered before the
-// first instruction, so two contracts with identical code but different
-// declared memory differ in invocation gas by the restore-cost delta.
+// Regression test for #4354: with the restore metered, identical code with
+// larger declared memory costs the restore-cost delta.
 TEST_F(Rv32ProductionMappingTest, MemoryImageRestorationIsGasMetered)
 {
   constexpr uint32_t kSmallMemoryBytes = 64;
@@ -730,9 +729,8 @@ TEST_F(Rv32ProductionMappingTest, MemoryImageRestorationIsGasMetered)
             rv32_memory_restore_gas(kLargeMemoryBytes) -
                 rv32_memory_restore_gas(kSmallMemoryBytes));
 
-  // Too little gas for the restore faults before the copy; out-of-gas shows up
-  // as the whole limit consumed, not as a distinct fault code (see
-  // HostSyscallOutOfGasConsumesWholeLimit).
+  // Starved of restore gas, out-of-gas shows up as the whole limit consumed
+  // (see HostSyscallOutOfGasConsumesWholeLimit).
   const GasAmount large_restore_gas =
       rv32_memory_restore_gas(kLargeMemoryBytes);
   const auto starved_result =

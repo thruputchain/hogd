@@ -109,9 +109,7 @@ public:
   ThreadedMachinePreInstantiation &
   operator=(const ThreadedMachinePreInstantiation &) = delete;
 
-  // The zero-padded declared image (total_memory_size) that every
-  // instantiation copies into a fresh machine. The invocation layer meters
-  // restoring it before the first instruction runs.
+  // Size of the zero-padded declared image each instantiation copies.
   [[nodiscard]] uint32_t memory_image_size() const
   {
     return static_cast<uint32_t>(initial_memory_image_.size());
