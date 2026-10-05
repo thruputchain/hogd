@@ -204,6 +204,21 @@ public:
     internal_auth_data_->required_weight_ = w;
   }
 
+  // The full row this transaction's pending delta produces over [base], the
+  // committed row, or over an empty registration when [base] is nullptr
+  // because the address has no row. Mirrors AuthLock::build_result, which is
+  // what hog_db applies at commit: every changed slot replaces the base's (a
+  // null change clears it), a pending required weight replaces the base's,
+  // and the row is stamped with [executing_height], the height hog_db stamps
+  // it with when this block commits. A delta that writes nothing -- only
+  // clears of slots the base never held -- leaves the base untouched, as
+  // hog_db leaves the row untouched (AuthLock::writes_row).
+  [[nodiscard]] AddressAuthData compose(AddressAuthData const *base,
+                                        BlockHeight executing_height) const;
+
+  // Whether applying this delta writes a row, given whether one exists.
+  [[nodiscard]] bool writes_row(bool row_exists) const;
+
 private:
   struct InternalAuthData {
     std::unordered_map<uint32_t, PublicKeyConfigOpt> pk_changes_;

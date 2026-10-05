@@ -2401,6 +2401,71 @@ SystemCallHandler::set_address_required_weight(Weight required_weight)
                              });
 }
 
+namespace {
+// The committed row a snapshot item holds at an AuthData key, or nullptr when
+// the address has none. make_variant admits nothing else at this key type.
+AddressAuthData const *
+committed_auth_data(SnapshotStorageItem const &snapshot_item)
+{
+  auto type = snapshot_item.type();
+  if (!type.has_value()) {
+    return nullptr;
+  }
+  assert(*type == ItemViewType::kAddressAuthData);
+  return &snapshot_item.auth_data();
+}
+} // namespace
+
+x23::Async<SystemStatus<StorageRead<AddressAuthData>>>
+SystemCallHandler::get_address_auth_data()
+{
+  using Read = StorageRead<AddressAuthData>;
+
+  assert(!invocation_frame_stack_.empty());
+  const FrameItemKey item_key =
+      FrameItemKey::from(auth_data_addrkey(get_current_address()));
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
+  assert(item_view);
+
+  if (auto const *auth_data_item = item_view->get<AddressAuthDataItem>()) {
+    // A written view holds only this transaction's delta, so the committed
+    // row it applies to comes from the snapshot the same way
+    // UnmodifiedItem::load() fetches it, and is billed the same way.
+    const GasAmount load_gas = note_item_load(item_key);
+    auto snapshot_value =
+        co_await snapshot_cache_.try_get_snapshot_item(item_key);
+    if (!snapshot_value.has_value()) {
+      co_return snapshot_value.error();
+    }
+    co_return Read{auth_data_item->compose(committed_auth_data(
+                                               *snapshot_value.value()),
+                                           get_block_height()),
+                   load_gas};
+  }
+
+  if (item_view->get<DeletedItem>()) [[unlikely]] {
+    error("Unrecoverable: unexpected manual delete of authentication data");
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
+
+  auto const *unmodified_item = item_view->get<UnmodifiedItem>();
+  if (!unmodified_item) [[unlikely]] {
+    error("Unrecoverable: unexpected item type at an AuthData key");
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
+
+  // Prices the fetch ensure_loaded() is about to do, as get_nnint() does.
+  const GasAmount load_gas =
+      unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+  if (auto loaded =
+          co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+      !loaded.has_value()) {
+    co_return loaded.error();
+  }
+  auto const *base = committed_auth_data(unmodified_item->base_item());
+  co_return Read{base ? *base : AddressAuthData{}, load_gas};
+}
+
 const AuthClaim &
 SystemCallHandler::get_auth_claim() const
 {

@@ -47,3 +47,10 @@ syscalls:
     async: true
   WriteAddressRequiredWeight:
     async: true
+  # Both read the registration composed from the committed row in the block
+  # snapshot and this transaction's pending delta, so both may load from
+  # hog_db.
+  GetAddressAuthSummary:
+    async: true
+  GetAddressPublicKey:
+    async: true

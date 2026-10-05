@@ -3,6 +3,7 @@
 #include "auth_token.hh"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <span>
@@ -16,6 +17,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -135,6 +137,131 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
         SyscallGetAuthClaimOutputs{.auth_claim = claim});
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+namespace {
+
+// AddressAuthData without the keys, as GetAddressAuthSummary reports it.
+AddressAuthSummary
+summarize(AddressAuthData const &auth_data)
+{
+  AddressAuthSummary summary{};
+  for (size_t i = 0; i < kMaxSigners; ++i) {
+    auto const &slot = auth_data.public_keys[i];
+    if (!slot) {
+      continue;
+    }
+    summary.public_keys[i] =
+        PublicKeyConfigSummaryOpt{x23::Ptr<PublicKeyConfigSummary>{
+            new PublicKeyConfigSummary{.scheme = slot->key.scheme(),
+                                       .max_weight = slot->max_weight}}};
+  }
+  summary.required_weight = auth_data.required_weight;
+  summary.last_written_height = auth_data.last_written_height;
+  return summary;
+}
+
+// A registered key as the raw bytes of its scheme: the same bytes
+// ChangePublicKeyRegistration took as key_bytes.
+std::span<const std::byte>
+public_key_bytes(PublicKey const &key)
+{
+  switch (key.scheme()) {
+  case CryptographicScheme::Ed25519:
+    return std::as_bytes(
+        std::span<const uint8_t>{key.ed25519().data(), key.ed25519().size()});
+  }
+  panic("Unknown public key scheme in a registration: {}", key.scheme());
+}
+
+} // namespace
+
+MaybeAsyncSyscallInnerResult
+syscall_GetAddressAuthSummary_inner(SystemCallHandler &syscall_handler,
+                                    std::span<std::byte> output_buffer,
+                                    RuntimeMemoryLength &output_written_len)
+{
+  auto status = co_await syscall_handler.get_address_auth_data();
+  if (!status) {
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
+  }
+  // Priced like NonnegativeIntGet: the access and any load are paid whatever
+  // the outcome, since both happen before the read can answer.
+  auto &[result, load_gas] = *status;
+  const WrappedGasAmount gas{kStorageAccessCost + load_gas};
+  if (!result.has_value()) {
+    co_return SyscallInnerResult{result.error().code(), gas};
+  }
+
+  // The contract decodes the XDR itself; written_len reports the full
+  // encoding so a short buffer can be retried.
+  AddressAuthSummary summary = summarize(*result);
+  auto serialized = x23::serialize(summary);
+  output_written_len =
+      copy_to_guest_buffer(output_buffer,
+                           std::as_bytes(std::span(serialized.data(),
+                                                   serialized.size())));
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetAddressAuthSummary>()) {
+    trace_data->outputs.emplace(
+        SyscallGetAddressAuthSummaryOutputs{.summary = std::move(summary)});
+  }
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, gas};
+}
+
+MaybeAsyncSyscallInnerResult
+syscall_GetAddressPublicKey_inner(SystemCallHandler &syscall_handler,
+                                  uint32_t input_key_index,
+                                  std::span<std::byte> output_key,
+                                  RuntimeMemoryLength &output_written_len)
+{
+  // Checked before the read, as ChangePublicKeyRegistration checks its index:
+  // a slot number past the table reaches no storage and pays nothing beyond
+  // the crossing.
+  if (input_key_index >= kMaxSigners) {
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
+  }
+
+  auto status = co_await syscall_handler.get_address_auth_data();
+  if (!status) {
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
+  }
+  auto &[result, load_gas] = *status;
+  if (!result.has_value()) {
+    co_return SyscallInnerResult{result.error().code(),
+                                 WrappedGasAmount{kStorageAccessCost +
+                                                  load_gas}};
+  }
+
+  auto const &slot = result->public_keys[input_key_index];
+  if (!slot) {
+    // An empty slot is a BytestringGet miss: the row had to be read to tell,
+    // so the access and any load are paid.
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
+        WrappedGasAmount{kStorageAccessCost + load_gas}};
+  }
+
+  auto key_bytes = public_key_bytes(slot->key);
+  output_written_len = copy_to_guest_buffer(output_key, key_bytes);
+  // Charged on the bytes that reach the guest, as BytestringGet charges, so
+  // a scheme with large keys pays for its copy.
+  const size_t copied = std::min(output_key.size(), key_bytes.size());
+  const WrappedGasAmount gas{GasCost::bytestring_get(copied) + load_gas};
+
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetAddressPublicKey>()) {
+    trace_data->outputs.emplace(
+        SyscallGetAddressPublicKeyOutputs{.key = slot->key});
+  }
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, gas};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
