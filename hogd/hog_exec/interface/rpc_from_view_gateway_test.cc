@@ -537,6 +537,9 @@ TEST_F(ViewGatewayBatchTest, ReturnsOrderedResultsAtOneHeight)
   ASSERT_EQ(result.payload().results.size(), 2U);
   EXPECT_EQ(result.payload().height, first.payload().height);
   EXPECT_EQ(result.payload().results[0].output, first.payload().output);
+  EXPECT_EQ(result.payload().results[0].gas_consumed,
+            first.payload().gas_consumed);
+  EXPECT_GT(result.payload().results[0].gas_consumed, 0U);
   EXPECT_EQ(result.payload().results[1].output, second.payload().output);
   gateway.shut_down();
 }
@@ -653,6 +656,20 @@ TEST_F(ViewGatewayBatchTest, RejectsInvalidBatchBeforeExecution)
   }
   invalid(query);
   gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, InvalidCallRejectsTheWholeGroup)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  auto query = batch();
+  query.calls[1].parent_address = kAddr;
+  EXPECT_EQ(gateway.viewgateway_view_batch(query)().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
 }
 
 TEST_F(ViewGatewayBatchTest, IncludesEventsInTheAggregateResponseLimit)

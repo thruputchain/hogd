@@ -159,12 +159,15 @@ ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
       co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchAbandoned);
     case ViewGatewayOutcome::ViewGatewayInternalError:
       co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    case ViewGatewayOutcome::ViewGatewayInvalidInput:
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInvalidRequest);
     case ViewGatewayOutcome::ViewGatewayOk:
       break;
     }
     auto &payload = result.payload();
     batch.payload().results.push_back(
         TransactionViewResult{.output = std::move(payload.output),
+                              .gas_consumed = payload.gas_consumed,
                               .events = std::move(payload.events)});
     if (x23::xdr_size(batch) > kMaxViewBatchResponseBytes) {
       co_return ViewGatewayBatchResult(
