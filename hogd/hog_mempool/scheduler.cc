@@ -11,12 +11,16 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/chunk_items.h"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -108,6 +112,19 @@ try_move_hogs_to_already_scheduled_group(HogAge &hog_ages, uint128_t num_hogs,
   return true;
 }
 
+// Writes one record of a run of hog ages to the database. The position goes
+// unused: the database applies each record as its own write pass.
+struct WriteHogAgeRecord {
+  db_sched_client_t *client;
+
+  x23::Async<void> operator()(ChunkPosition /*position*/,
+                              ChunkItems<HogAge> ages) const
+  {
+    CHECK_EQ(co_await client->dbsched_write_hog_ages(ages),
+             DbSchedResult::DbSchedResultOK);
+  }
+};
+
 } // namespace
 
 x23::Async<void>
@@ -123,17 +140,18 @@ Scheduler::write_all_average_hog_ages_to_db()
         ages_by_thread->push_back(age);
       });
 
-  HogAgeBatch ages;
-  ages.reserve(accounts_.size());
+  // Each thread's batch is a part of the run; the records are serialized
+  // straight from the parts, so no batch is joined into one.
+  std::vector<HogAgeBatch> parts;
   {
     auto ul = ages_by_thread.lock_threads();
-    ages_by_thread.for_each(ul, [&ages](HogAgeBatch &per_thread_ages) {
-      ages += per_thread_ages;
+    ages_by_thread.for_each(ul, [&parts](HogAgeBatch &per_thread_ages) {
+      parts.push_back(std::move(per_thread_ages));
     });
   }
-  CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
-           DbSchedResult::DbSchedResultOK);
-  co_return;
+  ChunkRunSender sender(parts, max_hog_ages_per_record_,
+                        WriteHogAgeRecord{.client = db_sched_client_.get()});
+  co_await sender.send();
 }
 
 std::pair<HogAge *, std::unique_lock<std::mutex>>
@@ -277,23 +295,33 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
   ReadAverageHogAgesResult ret;
   ret.found.reserve(accounts.size());
 
-  HogAgeResults results =
-      co_await db_sched_client_->dbsched_get_hog_ages(accounts);
-  CHECK_EQ(results.size(), accounts.size());
-  for (size_t i = 0; i < results.size(); i++) {
-    const HogAgeResult &res = results[i];
-    if (res.result() != DbSchedResult::DbSchedResultOK) {
-      info("read_average_hog_ages did not return OK for address {}",
-           show_byte_array(accounts[i]));
-      ret.missing.insert(accounts[i]);
-      continue;
-    }
+  // The addresses go to the database a bounded record at a time, which
+  // bounds each reply the same way.
+  const std::span<const ContractAddress> all(accounts.data(), accounts.size());
+  for (size_t begin = 0; begin < all.size();
+       begin += max_hog_ages_per_record_) {
+    const std::span<const ContractAddress> batch =
+        all.subspan(begin,
+                    std::min(max_hog_ages_per_record_, all.size() - begin));
+    const std::array<std::span<const ContractAddress>, 1> pieces{batch};
+    HogAgeResults results = co_await db_sched_client_->dbsched_get_hog_ages(
+        ChunkItems<ContractAddress>(pieces));
+    CHECK_EQ(results.size(), batch.size());
+    for (size_t i = 0; i < results.size(); i++) {
+      const HogAgeResult &res = results[i];
+      if (res.result() != DbSchedResult::DbSchedResultOK) {
+        info("read_average_hog_ages did not return OK for address {}",
+             show_byte_array(batch[i]));
+        ret.missing.insert(batch[i]);
+        continue;
+      }
 
-    const HogAge &age = res.hog_age();
-    CHECK_EQ(age.address, accounts[i]);
-    ret.found.insert(age.address);
-    auto [account_state, lock] = accounts_[age.address];
-    account_state.hog_age = age;
+      const HogAge &age = res.hog_age();
+      CHECK_EQ(age.address, batch[i]);
+      ret.found.insert(age.address);
+      auto [account_state, lock] = accounts_[age.address];
+      account_state.hog_age = age;
+    }
   }
   co_return ret;
 }

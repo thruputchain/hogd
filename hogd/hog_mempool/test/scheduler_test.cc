@@ -94,6 +94,41 @@ TEST(Scheduler, ReadAge)
   EXPECT_EQ(ret->average_ages[kHogAgeGroupToSchedule], 0);
 }
 
+// Hog ages travel to and from the database in records under the bound, as
+// many as the accounts take.
+TEST(Scheduler, HogAgesOverTheRecordBoundRoundTrip)
+{
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->set_max_hog_ages_per_record(3);
+
+  x23::XdrVec<ContractAddress> accounts;
+  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
+    accounts.push_back(address);
+  }
+  const Scheduler::ReadAverageHogAgesResult read =
+      scheduler->read_average_hog_ages(accounts)();
+  EXPECT_EQ(read.found.size(), accounts.size());
+  EXPECT_TRUE(read.missing.empty());
+
+  for (size_t i = 0; i < accounts.size(); i++) {
+    auto [age, lock] = scheduler->get_cached_hog_age(accounts[i]);
+    age->average_ages[kHogAgeGroupToSchedule] =
+        static_cast<BlockHeight>(100 + i);
+  }
+  scheduler->write_all_average_hog_ages_to_db()();
+
+  // Reading again replaces the cached ages with what the database holds.
+  const Scheduler::ReadAverageHogAgesResult reread =
+      scheduler->read_average_hog_ages(accounts)();
+  EXPECT_EQ(reread.found.size(), accounts.size());
+  for (size_t i = 0; i < accounts.size(); i++) {
+    const auto [age, lock] = scheduler->get_cached_hog_age(accounts[i]);
+    EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule],
+              static_cast<BlockHeight>(100 + i));
+  }
+}
+
 TEST(Scheduler, AddVettedTx)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

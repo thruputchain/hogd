@@ -33,6 +33,10 @@ class Scheduler {
 public:
   static constexpr BlockHeight kTransactionOutcomeBlockLifetime = 50;
   static constexpr size_t kMaxTransactionOutcomes = 50'000'000;
+  // The most hog ages one DbSched1 record carries, requested or written. A
+  // HogAge is 104 bytes on the wire, so a record stays near 7 MiB, under
+  // x23's 16 MiB default record cap, whichever way it travels.
+  static constexpr size_t kMaxHogAgesPerRecord = size_t{1} << 16;
 
   Scheduler(BlockHeight current_block,
             std::shared_ptr<db_sched_client_t> db_sched_client)
@@ -224,6 +228,14 @@ public:
   get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void> write_all_average_hog_ages_to_db();
+
+  // Bounds the hog ages per DbSched1 record read or written; production
+  // keeps the default.
+  void set_max_hog_ages_per_record(size_t max_hog_ages_per_record)
+  {
+    CHECK_GT(max_hog_ages_per_record, size_t{0});
+    max_hog_ages_per_record_ = max_hog_ages_per_record;
+  }
 
   struct ReadAverageHogAgesResult {
     std::unordered_set<ContractAddress, SipHash24Hasher> found;
@@ -509,6 +521,7 @@ private:
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.
   std::shared_ptr<db_sched_client_t> db_sched_client_;
+  size_t max_hog_ages_per_record_ = kMaxHogAgesPerRecord;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 };
