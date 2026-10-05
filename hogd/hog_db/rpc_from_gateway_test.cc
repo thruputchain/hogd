@@ -14,6 +14,7 @@
 // xdr types
 #include "consensus.hh"
 #include "db_gateway.hh"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
