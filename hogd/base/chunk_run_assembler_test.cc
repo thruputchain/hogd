@@ -8,6 +8,7 @@
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_assembler.h"
 #include "hogd/base/chunked_vector.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd {
 namespace {
@@ -90,6 +91,46 @@ TEST(ChunkRunAssembler, AnEmptyChunkStillCountsTowardTheRun)
   ASSERT_EQ(run.parts.chunks().size(), 2U);
   EXPECT_EQ(items_of(run), (Items{1}));
   EXPECT_TRUE(run.parts.chunks()[1].empty());
+}
+
+// The framing violations below are sender bugs, and each fail-stops.
+
+TEST(ChunkRunAssembler, AZeroCountFailStops)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  Assembler assembler;
+  X23_EXPECT_DEATH(assembler.push(7, at(0, 0), {}), "CHECK FAILED");
+}
+
+TEST(ChunkRunAssembler, AnIndexAtOrPastTheCountFailStops)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  Assembler assembler;
+  X23_EXPECT_DEATH(assembler.push(7, at(2, 2), {1}), "CHECK FAILED");
+}
+
+TEST(ChunkRunAssembler, AnotherKeyWhileARunIsPendingFailStops)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  Assembler assembler;
+  EXPECT_FALSE(assembler.push(7, at(0, 2), {1}).has_value());
+  X23_EXPECT_DEATH(assembler.push(8, at(1, 2), {2}), "CHECK FAILED");
+}
+
+TEST(ChunkRunAssembler, ACountThatChangesMidRunFailStops)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  Assembler assembler;
+  EXPECT_FALSE(assembler.push(7, at(0, 3), {1}).has_value());
+  X23_EXPECT_DEATH(assembler.push(7, at(1, 2), {2}), "CHECK FAILED");
+}
+
+TEST(ChunkRunAssembler, AnIndexSeenTwiceFailStops)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  Assembler assembler;
+  EXPECT_FALSE(assembler.push(7, at(0, 2), {1}).has_value());
+  X23_EXPECT_DEATH(assembler.push(7, at(0, 2), {2}), "CHECK FAILED");
 }
 
 } // namespace hogd
