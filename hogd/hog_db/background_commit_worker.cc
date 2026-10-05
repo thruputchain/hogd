@@ -14,7 +14,7 @@
 #include "auth_rpc.hh"
 #include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
-#include "hogd/base/chunked_call.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
@@ -90,7 +90,7 @@ send_transfer_chunk(BackgroundCommitWorker::sched_db_client_t *sched_db_client,
 }
 
 // Sends a committed block's balance deltas to the scheduler as a run of
-// chunks, several in flight at once (call_in_chunks). The mempool completes
+// chunks, several in flight at once (ChunkRunSender). The mempool completes
 // the block once every chunk is in, and this returns only once every chunk
 // is acknowledged, so the next block's run cannot start before that.
 void
@@ -107,14 +107,15 @@ dispatch_balance_deltas(
       parts.push_back(std::move(thread_deltas));
     });
   }
-  call_in_chunks<Delta>(std::move(parts), max_deltas_per_chunk,
+  ChunkRunSender sender(std::move(parts), max_deltas_per_chunk,
                         [&sched_db_client,
                          block_height](ChunkPosition position,
                                        ChunkItems<Delta> deltas) {
                           return send_transfer_chunk(&sched_db_client,
                                                      block_height, position,
                                                      deltas);
-                        })();
+                        });
+  sender.send()();
 }
 } // namespace
 

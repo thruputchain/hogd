@@ -9,7 +9,7 @@ namespace hogd {
 // each index in [0, count) is sent exactly once, and a run always has at
 // least one record, so an empty message is a run of one empty record. The
 // sender may issue a run's calls concurrently and over several connections
-// (call_in_chunks); the receiver places each record by index and treats the
+// (ChunkRunSender); the receiver places each record by index and treats the
 // message as complete only once every index has arrived (ChunkRunAssembler),
 // so the records of a run may arrive in any order.
 struct ChunkPosition {
