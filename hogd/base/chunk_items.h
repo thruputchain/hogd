@@ -12,12 +12,11 @@
 
 namespace hogd {
 
-// The items of one chunk of a run (see ChunkPosition), as spans into the
-// vectors they were produced in, so a call serializes them in place instead
-// of copying them into a vector first. Serializes exactly like an XDR vector
-// of T: a length prefix, then the items piece by piece. It is valid only
-// until the call it was handed to resolves; call_in_chunks keeps the parts
-// alive until then.
+// A span of spans over items of T, such as slices of several vectors, that
+// serializes exactly like one XDR vector of those items: a length prefix,
+// then the items piece by piece. It owns nothing, so a message can be
+// serialized straight from the buffers its items were produced in instead of
+// copying them into a vector first; the spans must outlive every use of it.
 template<typename T> class ChunkItems {
 public:
   explicit ChunkItems(std::span<const std::span<const T>> pieces)

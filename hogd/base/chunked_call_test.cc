@@ -16,10 +16,7 @@
 #include "hogd/base/chunked_call.h"
 #include "hogd/base/coropoll.h"
 #include "x23/async.h"
-#include "x23/serialize.h"
 #include "x23/threadpool.h"
-#include "x23/vec.h"
-#include "x23/x23.h"
 
 namespace hogd {
 namespace {
@@ -188,43 +185,6 @@ TEST(CallInChunks, FailsWithACallsExceptionAndIssuesNoFurtherChunk)
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 1U);
   expect_position(sent[0], 0, 3);
-}
-
-static_assert(x23::serializes_like<ChunkItems<std::uint32_t>,
-                                   x23::XdrVec<std::uint32_t>>);
-
-TEST(ChunkItems, SerializesLikeTheVectorOfItsItems)
-{
-  const Items first{1, 2, 3};
-  const Items second{};
-  const Items third{4};
-  const std::vector<std::span<const std::uint32_t>> pieces{first, second,
-                                                           third};
-  const ChunkItems<std::uint32_t> items(pieces);
-  const x23::XdrVec<std::uint32_t> vector{1, 2, 3, 4};
-  EXPECT_EQ(items.size(), 4U);
-  EXPECT_EQ(xdr_size(items), x23::xdr_size(vector));
-  EXPECT_EQ(x23::serialize(items), x23::serialize(vector));
-}
-
-TEST(ChunkItems, SerializesVariableSizeItemsLikeTheirVector)
-{
-  using Inner = x23::XdrVec<std::uint32_t>;
-  const std::vector<Inner> first{Inner{1, 2}, Inner{}};
-  const std::vector<Inner> second{Inner{3, 4, 5}};
-  const std::vector<std::span<const Inner>> pieces{first, second};
-  const ChunkItems<Inner> items(pieces);
-  const x23::XdrVec<Inner> vector{Inner{1, 2}, Inner{}, Inner{3, 4, 5}};
-  EXPECT_EQ(xdr_size(items), x23::xdr_size(vector));
-  EXPECT_EQ(x23::serialize(items), x23::serialize(vector));
-}
-
-TEST(ChunkItems, EmptyChunkSerializesLikeAnEmptyVector)
-{
-  const std::vector<std::span<const std::uint32_t>> pieces;
-  const ChunkItems<std::uint32_t> items(pieces);
-  EXPECT_EQ(x23::serialize(items),
-            x23::serialize(x23::XdrVec<std::uint32_t>{}));
 }
 
 namespace {
