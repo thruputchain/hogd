@@ -646,8 +646,8 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
         .calldata = {},
     };
     child.invocation.calldata = inner_calldata;
-    // The 1000-gas child can no longer afford its memory-image restore, so it
-    // faults out of gas before any syscall and its trace is empty (#4354).
+    // The 1000-gas child pays 896 gas to restore its memory image, then runs
+    // out before its first syscall, leaving its trace empty (#4354).
     child.status = InvocationFrameOutput(InvocationFrameStatusCode::Fault);
     body.invoke().outputs =
         SyscallInvokeOutputs{.child_trace = std::move(child)};
