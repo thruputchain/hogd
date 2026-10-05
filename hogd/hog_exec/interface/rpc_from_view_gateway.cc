@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -488,9 +489,8 @@ normalize_public_view_query(TransactionViewQuery query)
 {
   query.auth_claim = make_public_view_auth_claim();
   query.invoke_flags = std::to_underlying(InvokeFlag::None);
-  if (query.invocation.gas_limit > kMaxPublicViewGas) {
-    query.invocation.gas_limit = kMaxPublicViewGas;
-  }
+  query.invocation.gas_limit =
+      std::min(query.invocation.gas_limit, kMaxPublicViewGas);
   return query;
 }
 
