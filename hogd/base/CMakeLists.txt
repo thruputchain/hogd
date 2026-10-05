@@ -39,6 +39,7 @@ add_library(base_test_objects OBJECT
   network_config_params_test.cc
   perthread_arc_test.cc
   perthread_test.cc
+  rc_test.cc
   status_test.cc
   string_test.cc
   unique_function_test.cc
