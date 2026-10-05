@@ -549,6 +549,28 @@ InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
   return get_item_view(frame_item_key(data_key));
 }
 
+StorageDeltaFlagSet
+InvocationFrameStack::get_item_view_flags(FrameItemKey const &key) const
+{
+  assert(!frame_stack_.empty());
+
+  // The active frame first, then parents outward: the nearest view's flags
+  // apply, matching get_item_view's copy-from-parent order.
+  for (auto const &frame : std::ranges::reverse_view(frame_stack_)) {
+    if (auto const *view = frame.get_item_view(key)) {
+      return view->flags();
+    }
+  }
+  return std::to_underlying(StorageDeltaFlags::None);
+}
+
+StorageDeltaFlagSet
+InvocationFrameStack::get_item_view_flags(
+    StorageKeyContractData const &data_key) const
+{
+  return get_item_view_flags(frame_item_key(data_key));
+}
+
 AuthToken const *
 InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
 {

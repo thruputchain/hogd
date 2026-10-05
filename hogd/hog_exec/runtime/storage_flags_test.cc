@@ -59,21 +59,22 @@ constexpr std::string_view kOtherKey = "c";
 // Token methods. Each takes one calldata byte: the value to write, the entry
 // to insert or expect, the flags to expect, or the error code to expect.
 enum TokenMethod : Runtime::MethodID {
-  kWrite = 0,             // BytestringSet(k, [arg])
-  kWriteLocked = 1,       // BytestringSet(k, [arg]), SetStorageFlags(k, Excl)
-  kLockExpecting = 2,     // SetStorageFlags(k, Excl) must return arg
-  kExpectFlags = 3,       // GetStorageFlags(k) must return arg
-  kClear = 4,             // ClearStorageFlags(k)
-  kWriteLockedRevert = 5, // kWriteLocked, then revert
-  kClearRevert = 6,       // ClearStorageFlags(k), then revert
-  kDelete = 7,            // DeleteObject(k)
-  kFailedWrite = 8,       // NNIntSetAdd(k, 0, -1), which must fail
-  kSetFlagsExpecting = 9, // SetStorageFlags(k, arg) must return InvalidInput
-  kAddNoFlags = 10,       // SetStorageFlags(k, None) must succeed
-  kInsert = 11,           // RetrocausalQueueInsert(k, [arg])
-  kConsumeExpecting = 12, // RetrocausalQueueConsume(k) must return [arg]
-  kWriteOther = 13,       // BytestringSet(c, [arg])
-  kClearWriteOther = 14,  // ClearStorageFlags(k), BytestringSet(c, [arg])
+  kWrite = 0,              // BytestringSet(k, [arg])
+  kWriteLocked = 1,        // BytestringSet(k, [arg]), SetStorageFlags(k, Excl)
+  kLockExpecting = 2,      // SetStorageFlags(k, Excl) must return arg
+  kExpectFlags = 3,        // GetStorageFlags(k) must return arg
+  kClear = 4,              // ClearStorageFlags(k)
+  kWriteLockedRevert = 5,  // kWriteLocked, then revert
+  kClearRevert = 6,        // ClearStorageFlags(k), then revert
+  kDelete = 7,             // DeleteObject(k)
+  kFailedWrite = 8,        // NNIntSetAdd(k, 0, -1), which must fail
+  kSetFlagsExpecting = 9,  // SetStorageFlags(k, arg) must return InvalidInput
+  kAddNoFlags = 10,        // SetStorageFlags(k, None) must succeed
+  kInsert = 11,            // RetrocausalQueueInsert(k, [arg])
+  kConsumeExpecting = 12,  // RetrocausalQueueConsume(k) must return [arg]
+  kWriteOther = 13,        // BytestringSet(c, [arg])
+  kClearWriteOther = 14,   // ClearStorageFlags(k), BytestringSet(c, [arg])
+  kExpectFlagsNoCopy = 15, // kExpectFlags, and k must not be copied into frame
 };
 
 uint8_t
@@ -217,6 +218,31 @@ make_token()
                     flags != expected) {
                   ADD_FAILURE() << "GetStorageFlags returned " << flags
                                 << ", expected " << expected;
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                co_return InvokeStatus<void>{};
+              });
+  fns.emplace(kExpectFlagsNoCopy,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto const expected =
+                    static_cast<StorageDeltaFlagSet>(calldata_arg(ctx));
+                auto key = NativeContractTestFramework::make_storage_key(kKey);
+                StorageDeltaFlagSet flags = -1;
+                auto res =
+                    co_await ctx.syscall<SyscallNo::kGetStorageFlags>(key,
+                                                                      flags);
+                if (!res.has_value() ||
+                    res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                    flags != expected) {
+                  ADD_FAILURE() << "GetStorageFlags returned " << flags
+                                << ", expected " << expected;
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                // The read is metadata-only: it must not have copied k's
+                // parent-frame item into this fresh sibling frame.
+                if (ctx.handler().active_frame_holds_storage_item(key)) {
+                  ADD_FAILURE()
+                      << "GetStorageFlags copied k into the active frame";
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
                 co_return InvokeStatus<void>{};
@@ -529,6 +555,17 @@ TEST_F(StorageFlagsTest, LaterWritesAndFramesKeepFlags)
                 {.method = kFailedWrite},
                 {.method = kWrite, .arg = 3},
                 {.method = kExpectFlags, .arg = kExclusive},
+            }),
+            kExclusive);
+}
+
+// GetStorageFlags is metadata-only: reading a sibling frame's flags must not
+// copy k's parent-frame item into the active frame (#4303).
+TEST_F(StorageFlagsTest, GetStorageFlagsDoesNotCopyParentItem)
+{
+  EXPECT_EQ(run_script({
+                {.method = kWriteLocked, .arg = 1},
+                {.method = kExpectFlagsNoCopy, .arg = kExclusive},
             }),
             kExclusive);
 }

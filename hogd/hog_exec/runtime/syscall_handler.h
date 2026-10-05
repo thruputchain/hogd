@@ -159,6 +159,15 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
+  // Testing-only: whether the active frame already holds a materialized view
+  // for `storage_key`, to confirm a metadata-only read did not copy one in.
+  bool active_frame_holds_storage_item(
+      StorageKeyContractData const &storage_key) const
+  {
+    return invocation_frame_stack_.active_frame_holds_item_view(
+        invocation_frame_stack_.frame_item_key(storage_key));
+  }
+
   // Admission checks a new invocation frame must pass, in the order their
   // error codes take precedence, grouped by the question each answers:
   //
