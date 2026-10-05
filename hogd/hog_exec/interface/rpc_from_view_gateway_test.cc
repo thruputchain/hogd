@@ -16,6 +16,7 @@
 #include "auth_token.hh"
 #include "built_contracts/manual_revert_test.h"
 #include "built_contracts/view_gateway_test.h"
+#include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
@@ -652,7 +653,7 @@ TEST_F(ViewGatewayBatchTest, RejectsInvalidBatchBeforeExecution)
   invalid(query);
   query = batch();
   for (auto &call : query.calls) {
-    call.invocation.calldata.resize(kMaxViewBatchCalldataBytes / 2 + 1);
+    call.invocation.calldata.resize((kMaxViewBatchCalldataBytes / 2) + 1);
   }
   invalid(query);
   gateway.shut_down();

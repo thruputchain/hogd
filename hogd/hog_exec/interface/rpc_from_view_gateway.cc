@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -34,7 +35,7 @@
 #include "view_gateway.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
-#include "x23/x23.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -121,8 +122,8 @@ ViewGatewayRpc::viewgateway_view_batch(ViewGatewayBatchQuery query)
     co_return ViewGatewayBatchResult(
         ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
   }
-  uint64_t gas = 0;
-  size_t calldata_bytes = 0;
+  std::uint64_t gas = 0;
+  std::size_t calldata_bytes = 0;
   for (auto &call : query.calls) {
     if (call.invocation.gas_limit > kMaxViewBatchGas - gas ||
         call.invocation.calldata.size() >
@@ -186,7 +187,7 @@ ViewGatewayRpc::run_batch_with_retries(ViewGatewayBatchQuery const &query,
 {
   using Outcome = ViewGatewayBatchOutcome;
   bool refreshed_for_height = false;
-  for (uint32_t attempt = 0; attempt < kMaxViewAttempts; ++attempt) {
+  for (std::uint32_t attempt = 0; attempt < kMaxViewAttempts; ++attempt) {
     if (std::chrono::steady_clock::now() >= deadline) {
       co_return ViewGatewayBatchResult(
           Outcome::ViewGatewayBatchDeadlineExceeded);
@@ -223,7 +224,8 @@ ViewGatewayRpc::run_batch_with_retries(ViewGatewayBatchQuery const &query,
       }
       else if (query.min_height && height < *query.min_height) {
         result.outcome(Outcome::ViewGatewayBatchHeightUnavailable);
-        result.height_unavailable() = {*query.min_height, height};
+        result.height_unavailable() = {.requested = *query.min_height,
+                                       .observed = height};
       }
       else {
         result = co_await run_batch_attempt(query, state->get(), deadline);
