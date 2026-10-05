@@ -293,6 +293,7 @@ protected:
   constexpr static int32_t kReturnSyscallNo = 6;
   constexpr static int32_t kExitSyscallNo = 8;
   constexpr static int32_t kBytestringGetLenSyscallNo = 13;
+  constexpr static int32_t kBytestringGetSyscallNo = 14;
   constexpr static int32_t kBytestringSetSyscallNo = 15;
 
   ContractAddress
@@ -702,6 +703,49 @@ TEST_F(Rv32ProductionMappingTest,
   EXPECT_GT(distinct_result.gas_consumed_, same_result.gas_consumed_);
   EXPECT_EQ(distinct_result.gas_consumed_ - same_result.gas_consumed_,
             (kReadCount - 1) * kDBRPCCost);
+}
+
+TEST_F(Rv32ProductionMappingTest,
+       UnaffordableColdBytestringReadSkipsDatabaseFetch)
+{
+  // An unaffordable cold read must be rejected before the database fetch
+  // (#4309). Affords the storage access but not the cold DB RPC.
+  constexpr GasAmount kGasLimit = kStorageAccessCost + (kDBRPCCost / 2);
+
+  auto expect_read_skips_db = [&](std::vector<uint32_t> const &program,
+                                  uint64_t seed) {
+    const auto addr = deploy_words(program, seed);
+    const auto result = invoke_deployed(addr, kGasLimit);
+    // Out of gas consumes the whole limit (see
+    // HostSyscallOutOfGasConsumesWholeLimit).
+    ASSERT_FALSE(result.is_root_success());
+    EXPECT_EQ(result.gas_consumed_, kGasLimit);
+
+    // No snapshot entry means the rejected read never hit the database. A miss
+    // returns the async arm, driven here so its eager coroutine is not
+    // destroyed mid-flight.
+    auto cache = get_storage_snapshot_cache();
+    StorageKey key(StorageKeyType::ContractData);
+    key.contract_data_key() = StorageKeyContractData{};
+    auto probe = cache->try_get_snapshot_item(
+        AddressAndKey{.address = addr, .key = key});
+    const bool fetched = probe.has_value();
+    auto driven = probe();
+    EXPECT_TRUE(driven.has_value());
+    EXPECT_FALSE(fetched);
+  };
+
+  // Get and GetLen share the preflight but each syscall body checks it on its
+  // own, so cover both.
+  std::vector<uint32_t> get_len;
+  append_syscall(get_len, {kBytestringGetLenSyscallNo, /*key_ptr=*/0,
+                           /*out_len_ptr=*/32});
+  expect_read_skips_db(get_len, 0);
+
+  std::vector<uint32_t> get;
+  append_syscall(get, {kBytestringGetSyscallNo, /*key_ptr=*/0, /*buf_ptr=*/64,
+                       /*buf_len=*/32, /*written_len_ptr=*/96});
+  expect_read_skips_db(get, 1);
 }
 
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)

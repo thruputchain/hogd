@@ -1642,6 +1642,24 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   co_return deploy_addr;
 }
 
+GasAmount
+SystemCallHandler::peek_cold_load_gas(StorageKeyContractData const &storage_key)
+{
+  const FrameItemKey item_key =
+      invocation_frame_stack_.frame_item_key(storage_key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
+  assert(item_view);
+
+  // Mirror note_item_load()'s per-tx dedup without mutating loaded_keys_: an
+  // unloaded first touch bills kDBRPCCost; anything already loaded bills 0.
+  auto const *unmodified_item = item_view->get<UnmodifiedItem>();
+  if (unmodified_item == nullptr || unmodified_item->is_loaded() ||
+      loaded_keys_.contains(item_key)) {
+    return 0;
+  }
+  return kDBRPCCost;
+}
+
 x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
