@@ -394,18 +394,6 @@ struct RpcNoLogger {
 
 extern size_t default_max_message_size;
 
-// The nesting bound a server decodes its arguments under: the implementation's
-// deserialization_recursion_limit() when it defines one (say, a bound it only
-// learns at run time), the process-wide default otherwise.
-size_t
-arg_recursion_limit(auto &impl)
-{
-  if constexpr (requires { impl.deserialization_recursion_limit(); })
-    return impl.deserialization_recursion_limit();
-  else
-    return deserialization_recursion_limit;
-}
-
 struct RpcTraceMode {
   enum Mode {
     kNone = 0,

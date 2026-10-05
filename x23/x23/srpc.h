@@ -224,7 +224,7 @@ private:
       typename ProcMeta::arg_type args;
       rpc_msg rmsg{.xid = callmsg_.xid};
       try {
-        deserialize(&args, argbytes_, arg_recursion_limit(*d_.impl_));
+        deserialize(&args, argbytes_);
       } catch (const XdrException &e) {
         msg_set_reply_stat(&rmsg, GARBAGE_ARGS);
         if constexpr (!std::same_as<Logger, RpcNoLogger>) {

@@ -35,7 +35,6 @@
 #include "view.hh"
 #include "view_gateway.hh"
 #include "x23/cleanup.h"
-#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 
@@ -114,7 +113,7 @@ TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
   ContractAddress caller{};
   TransactionViewQuery query = make_query();
   query.parent_address = caller;
-  query.forwarded_tokens.push_back(AuthToken{});
+  query.forwarded_tokens.push_back(x23::serialize(AuthToken{}));
   query.invoke_flags = std::to_underlying(InvokeFlag::TryInvoke) |
                        std::to_underlying(InvokeFlag::DelegateCall);
 
@@ -156,8 +155,8 @@ TEST(ViewGatewayRpc, NormalizationIntentionallyPreservesForwardedTokens)
 {
   TransactionViewQuery query = make_query();
   query.parent_address = ContractAddress{};
-  query.forwarded_tokens.push_back(AuthToken{});
-  query.forwarded_tokens.push_back(AuthToken{});
+  query.forwarded_tokens.push_back(x23::serialize(AuthToken{}));
+  query.forwarded_tokens.push_back(x23::serialize(AuthToken{}));
 
   TransactionViewQuery normalized =
       normalize_public_view_query(std::move(query));
@@ -440,15 +439,16 @@ public:
     }
     auto query = make_read_query();
     query.parent_address = kParentAddr;
-    query.forwarded_tokens.push_back(AuthToken{.mint_address = kParentAddr,
-                                               .expiry_height = 1'000'000,
-                                               .root_node = std::move(node)});
+    query.forwarded_tokens.push_back(
+        x23::serialize(AuthToken{.mint_address = kParentAddr,
+                                 .expiry_height = 1'000'000,
+                                 .root_node = std::move(node)}));
     return query;
   }
 };
 
-// Over RPC, a view carries a forwarded token as deep as the chain allows, past
-// x23's default decode bound, and is refused one level deeper.
+// Over RPC, a view takes a forwarded token exactly as deep as the chain allows,
+// past x23's default decode bound, and refuses one level deeper.
 TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
 {
   ASSERT_GT(kChainDepth, x23::deserialization_recursion_limit);
@@ -458,14 +458,6 @@ TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
   ViewGatewayServer server(std::format("localhost:{}",
                                        framework_.get_db_exec_port()),
                            "localhost", framework_.get_event_exec_port());
-  // The gateway reads the chain's depth off a tip in the background.
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (server.impl()->deserialization_recursion_limit() != kChainDepth &&
-         std::chrono::steady_clock::now() < deadline) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  ASSERT_EQ(server.impl()->deserialization_recursion_limit(), kChainDepth);
-
   uint16_t port = server.start_server(uint16_t{0});
   auto client =
       make_rpc_client<ViewGateway1>(x23::HostPort{"localhost", port})().value();
@@ -481,9 +473,11 @@ TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
   EXPECT_EQ(deep.payload().output.status_code(),
             shallow.payload().output.status_code());
 
-  EXPECT_THROW(client.viewgateway_view(
-                   make_query_forwarding(kChainDepth + 1))(),
-               x23::XdrCallFailed);
+  ViewGatewayResult too_deep =
+      client.viewgateway_view(make_query_forwarding(kChainDepth + 1))();
+  ASSERT_EQ(too_deep.outcome(), ViewGatewayOutcome::ViewGatewayInvalidInput);
+  EXPECT_EQ(too_deep.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
   server.impl()->shut_down();
 }

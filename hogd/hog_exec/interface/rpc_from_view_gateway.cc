@@ -16,7 +16,6 @@
 #include "auth_claim.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -161,32 +160,6 @@ ViewGatewayRpc::gc_view_state(BlockID block_id)
 }
 
 void
-ViewGatewayRpc::note_network_config(DbTip const &tip)
-{
-  max_auth_token_depth_.store(
-      NetworkConfigParams(tip.network_config.v0()).max_auth_token_depth,
-      std::memory_order_relaxed);
-  network_config_known_.store(true, std::memory_order_release);
-}
-
-x23::Async<void>
-ViewGatewayRpc::learn_network_config()
-{
-  auto res = co_await db_proxy_.open_viewing_snapshot();
-  if (!res.has_value()) {
-    // No tip to read yet; the next probe tries again.
-    co_return;
-  }
-  note_network_config(res.value().tip);
-  auto close_res =
-      co_await db_proxy_.close_viewing_snapshot(res.value().viewing_block_id);
-  if (!close_res.has_value()) {
-    warn("viewgateway: failed to close config probe snapshot {}",
-         res.value().viewing_block_id);
-  }
-}
-
-void
 ViewGatewayRpc::refresh_worker(std::stop_token const &stoken)
 {
   std::mutex cv_mutex;
@@ -202,9 +175,6 @@ ViewGatewayRpc::refresh_worker(std::stop_token const &stoken)
     }
     // The refresh loop owns this thread and is never an x23 ThreadPool
     // worker, so it blocks on the probe rather than awaiting it.
-    if (!network_config_known_.load(std::memory_order_acquire)) {
-      learn_network_config()();
-    }
     probe_refresh_tip()();
   }
 }
@@ -351,7 +321,6 @@ ViewGatewayRpc::get_current_view_state()
                              snapshot.viewing_block_id, snapshot.tip,
                              db_proxy_);
     current_view_block_id_ = snapshot.viewing_block_id;
-    note_network_config(snapshot.tip);
   }
   auto cur_it = view_states_.find(current_view_block_id_);
   if (cur_it == view_states_.end()) [[unlikely]] {

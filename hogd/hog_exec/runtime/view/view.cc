@@ -1,6 +1,7 @@
 #include "hogd/hog_exec/runtime/view/view.h"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <utility>
@@ -12,7 +13,6 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -25,6 +25,8 @@
 #include "types.hh"
 #include "view.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -66,30 +68,32 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     CHECK(!r.value());
   }
 
-  // Forwarded tokens arrive already decoded (the gateway admits every depth the
-  // chain does), so bound their depth by walking them.
+  // Forwarded tokens arrive serialized; decode them under the chain's depth
+  // limit, as MintAuthToken decodes the tokens it mints.
+  std::vector<AuthToken> forwarded_tokens;
   try {
-    for (auto const &token : query.forwarded_tokens) {
-      if (!AuthTokenRegistry::node_within_depth(
-              token.root_node,
-              syscall_handler.config_params().max_auth_token_depth)) {
-        ExpectedViewResult result(TransactionViewStatus::InvalidInput);
-        result.error_code() =
-            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
-        co_return result;
-      }
+    for (auto const &bytes : query.forwarded_tokens) {
+      x23::deserialize(
+          &forwarded_tokens.emplace_back(),
+          x23::BufView{bytes.data(), bytes.size()},
+          size_t{syscall_handler.config_params().max_auth_token_depth});
     }
+  } catch (x23::XdrException const &) {
+    ExpectedViewResult result(TransactionViewStatus::InvalidInput);
+    result.error_code() =
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+    co_return result;
   } catch (...) {
-    error("unrecoverable: failed to validate forwarded auth token depth");
+    error("unrecoverable: failed to decode forwarded auth tokens");
     co_return ExpectedViewResult{TransactionViewStatus::InternalError};
   }
 
   // No expiry_height validation here: a token that expired before the current
   // block can still legitimately appear in a frame's forwarded inputs.
   std::vector<uint32_t> forwarded_token_ids;
-  forwarded_token_ids.reserve(query.forwarded_tokens.size());
+  forwarded_token_ids.reserve(forwarded_tokens.size());
 
-  for (auto const &token : query.forwarded_tokens) {
+  for (auto const &token : forwarded_tokens) {
     auto token_id = syscall_handler.mint_auth_token(token);
     if (!token_id.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};

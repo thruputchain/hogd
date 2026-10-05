@@ -44,6 +44,7 @@
 #include "view.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -1305,11 +1306,11 @@ TEST_F(ViewTest, ViewForwardedTokenWithoutParentReturnsInvalidInput)
   auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U);
   auto query = make_query(invocation);
   query.forwarded_tokens.push_back(
-      AuthToken{.mint_address = kFibAddress,
-                .expiry_height = 100,
-                .root_node = {.consumer_address = kFibAddress,
-                              .payload = {},
-                              .child_nodes = {}}});
+      x23::serialize(AuthToken{.mint_address = kFibAddress,
+                               .expiry_height = 100,
+                               .root_node = {.consumer_address = kFibAddress,
+                                             .payload = {},
+                                             .child_nodes = {}}}));
 
   auto result = run_view(query);
   EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
@@ -1360,11 +1361,11 @@ TEST_F(ViewTest, ViewForwardedTokenWithParentSucceeds)
 
   auto query = make_query_with_parent(invocation, kParentAddr);
   query.forwarded_tokens.push_back(
-      AuthToken{.mint_address = kParentAddr,
-                .expiry_height = 1'000'000,
-                .root_node = {.consumer_address = kCalleeAddr,
-                              .payload = {},
-                              .child_nodes = {}}});
+      x23::serialize(AuthToken{.mint_address = kParentAddr,
+                               .expiry_height = 1'000'000,
+                               .root_node = {.consumer_address = kCalleeAddr,
+                                             .payload = {},
+                                             .child_nodes = {}}}));
 
   auto result = run_view(query, *setup.context);
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -1405,9 +1406,10 @@ TEST_F(ViewTest, ViewForwardedTokenExceedingMaxDepthReturnsInvalidInput)
   };
 
   auto query = make_query_with_parent(invocation, kParentAddr);
-  query.forwarded_tokens.push_back(AuthToken{.mint_address = kParentAddr,
-                                             .expiry_height = 1'000'000,
-                                             .root_node = node});
+  query.forwarded_tokens.push_back(
+      x23::serialize(AuthToken{.mint_address = kParentAddr,
+                               .expiry_height = 1'000'000,
+                               .root_node = node}));
 
   auto result = run_view(query, *setup.context);
   EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
@@ -1460,14 +1462,56 @@ TEST_F(ViewTest, ViewForwardedTokenAtMaxDepthSucceeds)
   };
 
   auto query = make_query_with_parent(invocation, kParentAddr);
-  query.forwarded_tokens.push_back(AuthToken{.mint_address = kParentAddr,
-                                             .expiry_height = 1'000'000,
-                                             .root_node = node});
+  query.forwarded_tokens.push_back(
+      x23::serialize(AuthToken{.mint_address = kParentAddr,
+                               .expiry_height = 1'000'000,
+                               .root_node = node}));
 
   auto result = run_view(query, *setup.context);
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
   EXPECT_EQ(result.result().output.status_code(),
             InvocationFrameStatusCode::Return);
+}
+
+// A forwarded token that does not decode is refused like one that is too deep.
+TEST_F(ViewTest, ViewForwardedTokenThatDoesNotDecodeReturnsInvalidInput)
+{
+  static constexpr ContractAddress kCalleeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(20);
+
+  NativeViewSetup setup(0,
+                        [](NativeSyscallContext & /*unused*/)
+                            -> x23::Async<InvokeStatus<void>> {
+                          ADD_FAILURE() << "contract should not be invoked";
+                          co_return InvokeStatus<void>{};
+                        });
+
+  deploy_native(kCalleeAddr);
+
+  Invocation invocation{
+      .invoked_address = kCalleeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  auto truncated =
+      x23::serialize(AuthToken{.mint_address = kParentAddr,
+                               .expiry_height = 1'000'000,
+                               .root_node = {.consumer_address = kCalleeAddr,
+                                             .payload = {},
+                                             .child_nodes = {}}});
+  truncated.resize(truncated.size() - 4);
+
+  auto query = make_query_with_parent(invocation, kParentAddr);
+  query.forwarded_tokens.push_back(std::move(truncated));
+
+  auto result = run_view(query, *setup.context);
+  EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
+  EXPECT_EQ(result.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 }
 
 TEST_F(ViewTest, RootManualRevertOmitsEvents)
@@ -1574,11 +1618,11 @@ TEST_F(ViewTest, ViewForwardedExpiredTokenConsumeReturnsError)
 
   auto query = make_query_with_parent(invocation, kParentAddr);
   query.forwarded_tokens.push_back(
-      AuthToken{.mint_address = kParentAddr,
-                .expiry_height = expired_height,
-                .root_node = {.consumer_address = kCalleeAddr,
-                              .payload = {},
-                              .child_nodes = {}}});
+      x23::serialize(AuthToken{.mint_address = kParentAddr,
+                               .expiry_height = expired_height,
+                               .root_node = {.consumer_address = kCalleeAddr,
+                                             .payload = {},
+                                             .child_nodes = {}}}));
 
   auto result = run_view(query, *setup.context);
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -1815,11 +1859,11 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
 
   auto query = make_query_with_parent(invocation, kParentAddr);
   query.forwarded_tokens.push_back(
-      AuthToken{.mint_address = kParentAddr,
-                .expiry_height = 1'000'000,
-                .root_node = {.consumer_address = kChildAddr,
-                              .payload = {},
-                              .child_nodes = {}}});
+      x23::serialize(AuthToken{.mint_address = kParentAddr,
+                               .expiry_height = 1'000'000,
+                               .root_node = {.consumer_address = kChildAddr,
+                                             .payload = {},
+                                             .child_nodes = {}}}));
 
   auto result = run_view(query, *setup.context);
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
