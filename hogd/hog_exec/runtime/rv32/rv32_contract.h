@@ -18,11 +18,9 @@ namespace hogd {
 
 class SystemCallHandler;
 
-// Gas charged for restoring `image_bytes` of an RV32 contract's declared
-// memory image before its first instruction runs. The restore is a byte copy,
-// so it is priced at the measured bytestring read-copy rate, rounded up to
-// whole blocks. Both constants are already folded into the RV32 gas-schedule
-// digest, so metering the restore adds no new committed constant (#4354).
+// Gas for restoring `image_bytes` of an RV32 contract's declared memory image,
+// priced at the bytestring read-copy rate (already in the gas-schedule digest,
+// so no new constant) and rounded up to whole blocks (#4354).
 [[nodiscard]] constexpr uint64_t
 rv32_memory_restore_gas(uint32_t image_bytes)
 {

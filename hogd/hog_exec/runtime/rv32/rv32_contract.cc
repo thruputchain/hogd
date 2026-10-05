@@ -73,11 +73,9 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 {
   using result_t = std::pair<InvokeStatus<void>, GasAmount>;
 
-  // Restoring the declared memory image is byte-proportional work done before
-  // the first metered instruction. Charge for it up front so a parent cannot
-  // drive a child to copy a large image for the same gas as a small one; a
-  // child that cannot afford the restore faults out of gas before the image is
-  // copied, consuming its whole limit like any other out-of-gas fault (#4354).
+  // Charge for the memory-image restore up front; a child that cannot afford
+  // it faults out of gas before the copy, so the bill scales with image size
+  // and a zero-gas child cannot copy a large image for free (#4354).
   const uint64_t memory_restore_gas = contract_->memory_restore_gas();
   if (memory_restore_gas > gas_limit) {
     return result_t{InvokeError{InvokeErrorCode::OutOfGas}, gas_limit};
