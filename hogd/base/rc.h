@@ -7,28 +7,20 @@
 
 namespace hogd {
 
-// Rc<T> is a reference-counted handle to a heap-allocated T, in the style of
-// Rust's Rc<T>. Copying an Rc shares the T: it costs one increment, not a copy
-// of the T.
+// Rc<T> is a std::shared_ptr<T> whose reference count is not atomic. Copying an
+// Rc shares the T. There are no weak references, custom deleters or aliasing
+// constructors. Construct one with make_rc<T>(args...). Use Rc<const T> for a
+// value that must not change after construction.
 //
-// The count is not atomic, which is why this exists instead of
-// std::shared_ptr (whose count is always atomic). Every Rc that shares a value
-// must be used by only one thread at a time. State owned by a single
-// transaction's execution meets that: it may resume on another thread after a
-// suspension, but it never runs on two at once. Never let an Rc reach state
-// that another thread can touch concurrently; use std::shared_ptr there.
-//
-// Access through a shared Rc is const. make_mut() gives mutable access, first
-// copying the T if any other Rc shares it (copy-on-write), so a change made
-// through one Rc is never seen through another.
-//
-// A moved-from Rc is empty. It may only be assigned to or destroyed.
+// std::shared_ptr's count is always atomic. An Rc's is not, so every Rc that
+// shares a value must be used by only one thread at a time. State owned by a
+// single transaction's execution meets that: it may resume on another thread
+// after a suspension, but it never runs on two at once. Never let an Rc reach
+// state that another thread can touch concurrently; use std::shared_ptr there.
 template<typename T> class Rc {
 public:
-  template<typename... Args> requires std::constructible_from<T, Args...>
-  explicit Rc(std::in_place_t /*unused*/, Args &&...args)
-    : box_(new Box(std::forward<Args>(args)...))
-  {}
+  // An empty Rc, which holds no value.
+  Rc() = default;
 
   Rc(Rc const &other) noexcept : box_(other.box_)
   {
@@ -58,29 +50,17 @@ public:
     }
   }
 
-  T const &operator*() const
+  T &operator*() const
   {
     assert(box_);
     return box_->value_;
   }
-  T const *operator->() const
-  {
-    assert(box_);
-    return &box_->value_;
-  }
+  T *operator->() const { return get(); }
+  T *get() const { return box_ ? &box_->value_ : nullptr; }
 
-  // Mutable access to a T that no other Rc shares. If another Rc shares it,
-  // this Rc first switches to a copy of its own.
-  T &make_mut() requires std::copy_constructible<T>
-  {
-    assert(box_);
-    if (box_->count_ != 1) {
-      Rc(std::in_place, box_->value_).swap(*this);
-    }
-    return box_->value_;
-  }
+  explicit operator bool() const { return box_ != nullptr; }
 
-  // The number of Rcs sharing this T (0 if this Rc is empty).
+  // The number of Rcs sharing this value (0 if this Rc is empty).
   size_t use_count() const { return box_ ? box_->count_ : 0; }
 
   void swap(Rc &other) noexcept { std::swap(box_, other.box_); }
@@ -95,7 +75,22 @@ private:
     T value_;
   };
 
-  Box *box_;
+  explicit Rc(Box *box) : box_(box) {}
+
+  template<typename U, typename... Args>
+  requires std::constructible_from<U, Args...>
+  friend Rc<U> make_rc(Args &&...args);
+
+  Box *box_ = nullptr;
 };
+
+// Allocates a T constructed from args, held by a new Rc.
+template<typename T, typename... Args>
+requires std::constructible_from<T, Args...>
+Rc<T>
+make_rc(Args &&...args)
+{
+  return Rc<T>(new typename Rc<T>::Box(std::forward<Args>(args)...));
+}
 
 } // namespace hogd
