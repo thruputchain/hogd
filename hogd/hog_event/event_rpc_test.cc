@@ -78,7 +78,7 @@ namespace {
 ProposedTransaction
 make_body(uint64_t nonce)
 {
-  ProposedTransaction body;
+  ProposedTransaction body{};
   body.signed_tx.tx.uniquifier.block_expiry_height = 1000 + nonce;
   body.signed_tx.tx.uniquifier.nonce = nonce;
   body.signed_tx.tx.invocation.gas_limit = 1'000'000 + nonce;
@@ -93,7 +93,7 @@ make_event(const ProposedTransaction &body, uint8_t marker)
 {
   TxEventLog event{};
   event.tx_hash = sha256(body.signed_tx.tx);
-  TxEmittedEvent emitted;
+  TxEmittedEvent emitted{};
   emitted.contract_address[0] = marker;
   emitted.serialized_event.push_back(marker);
   event.events.push_back(std::move(emitted));

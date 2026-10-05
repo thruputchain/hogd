@@ -67,7 +67,7 @@ make_origin(std::string_view protocol = "hogp/test",
 ProposedTransaction
 make_body(uint64_t nonce, uint8_t address_fill)
 {
-  ProposedTransaction body;
+  ProposedTransaction body{};
   body.signed_tx.tx.uniquifier.nonce = nonce;
   std::ranges::fill(body.signed_tx.tx.invocation.invoked_address, address_fill);
   body.nondeterministic_proposal_data.nondeterministic_bit_count =
@@ -81,7 +81,7 @@ make_log(const ProposedTransaction &body, std::optional<uint8_t> emitter_fill)
   TxEventLog log{};
   log.tx_hash = sha256(body.signed_tx.tx);
   if (emitter_fill) {
-    TxEmittedEvent event;
+    TxEmittedEvent event{};
     std::ranges::fill(event.contract_address, *emitter_fill);
     event.serialized_event.push_back(*emitter_fill);
     log.events.push_back(std::move(event));
@@ -115,7 +115,7 @@ make_block(BlockHeight height, ConsensusValueHash prev_hash,
                                               : std::nullopt));
   }
   ProposalTxs proposal = make_proposal_txs(canonical_bodies);
-  ConsensusValue value;
+  ConsensusValue value{};
   value.prev_hash = prev_hash;
   value.proposal_header.block_height = height;
   value.proposal_header.block_timepoint = 1000 + height;
