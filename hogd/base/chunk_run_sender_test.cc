@@ -8,6 +8,7 @@
 #include <span>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -15,14 +16,27 @@
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {
 
 using Items = std::vector<std::uint32_t>;
 using Parts = std::vector<Items>;
+
+struct NoCall {
+  x23::Async<void> operator()(ChunkPosition position,
+                              ChunkItems<std::uint32_t> items) const;
+};
+using Sender = ChunkRunSender<std::uint32_t, NoCall>;
+static_assert(std::is_constructible_v<Sender, const Parts &, size_t, NoCall>);
+static_assert(
+    std::is_constructible_v<Sender, std::span<const Items>, size_t, NoCall>);
+// A temporary owning container would dangle, so it does not compile.
+static_assert(!std::is_constructible_v<Sender, Parts, size_t, NoCall>);
 
 struct SentChunk {
   ChunkPosition position;
@@ -89,8 +103,8 @@ expect_position(const SentChunk &chunk, std::uint32_t index,
 TEST(ChunkRunSender, NumbersItemsAcrossPartsIntoChunksOfAtMostTheLimit)
 {
   ChunkRecorder recorder;
-  ChunkRunSender sender(Parts{{0, 1, 2}, {3, 4}, {}, {5, 6}},
-                        /*max_items_per_chunk=*/3, recording(&recorder));
+  const Parts parts{{0, 1, 2}, {3, 4}, {}, {5, 6}};
+  ChunkRunSender sender(parts, /*max_items_per_chunk=*/3, recording(&recorder));
   sender.send()();
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 3U);
@@ -105,8 +119,8 @@ TEST(ChunkRunSender, NumbersItemsAcrossPartsIntoChunksOfAtMostTheLimit)
 TEST(ChunkRunSender, FullChunksCarryNoTrailingEmptyChunk)
 {
   ChunkRecorder recorder;
-  ChunkRunSender sender(Parts{{0, 1}, {2, 3}}, /*max_items_per_chunk=*/2,
-                        recording(&recorder));
+  const Parts parts{{0, 1}, {2, 3}};
+  ChunkRunSender sender(parts, /*max_items_per_chunk=*/2, recording(&recorder));
   sender.send()();
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 2U);
@@ -116,11 +130,23 @@ TEST(ChunkRunSender, FullChunksCarryNoTrailingEmptyChunk)
   EXPECT_EQ(sent[1].items, (Items{2, 3}));
 }
 
+TEST(ChunkRunSender, TakesAnyContiguousContainerAsAPart)
+{
+  ChunkRecorder recorder;
+  const std::vector<x23::XdrVec<std::uint32_t>> parts{{0, 1}, {2}};
+  ChunkRunSender sender(parts, /*max_items_per_chunk=*/2, recording(&recorder));
+  sender.send()();
+  const std::vector<SentChunk> sent = recorder.sent();
+  ASSERT_EQ(sent.size(), 2U);
+  EXPECT_EQ(sent[0].items, (Items{0, 1}));
+  EXPECT_EQ(sent[1].items, (Items{2}));
+}
+
 TEST(ChunkRunSender, EmptyInputStillMakesOneCall)
 {
-  for (Parts parts : {Parts{}, Parts{{}, {}}}) {
+  for (const Parts &parts : {Parts{}, Parts{{}, {}}}) {
     ChunkRecorder recorder;
-    ChunkRunSender sender(std::move(parts), /*max_items_per_chunk=*/3,
+    ChunkRunSender sender(parts, /*max_items_per_chunk=*/3,
                           recording(&recorder));
     sender.send()();
     const std::vector<SentChunk> sent = recorder.sent();
@@ -156,7 +182,8 @@ await_peers(std::atomic<unsigned> *in_flight, unsigned expected)
 TEST(ChunkRunSender, SendsChunksConcurrently)
 {
   std::atomic<unsigned> in_flight{0};
-  ChunkRunSender sender(Parts{{0, 1, 2, 3}}, /*max_items_per_chunk=*/2,
+  const Parts parts{{0, 1, 2, 3}};
+  ChunkRunSender sender(parts, /*max_items_per_chunk=*/2,
                         [&in_flight](ChunkPosition /*position*/,
                                      ChunkItems<std::uint32_t> /*items*/) {
                           return await_peers(&in_flight, 2);
@@ -177,8 +204,8 @@ TEST(ChunkRunSender, FailsWithACallsExceptionAndIssuesNoFurtherChunk)
   };
   // One worker sends the chunks in order, so the failure on chunk 1 is what
   // stops chunk 2.
-  ChunkRunSender sender(Parts{{0, 1, 2}}, /*max_items_per_chunk=*/1,
-                        failing_second);
+  const Parts parts{{0, 1, 2}};
+  ChunkRunSender sender(parts, /*max_items_per_chunk=*/1, failing_second);
   EXPECT_THROW(sender.send(/*max_in_flight=*/1)(), std::runtime_error);
   const std::vector<SentChunk> sent = recorder.sent();
   ASSERT_EQ(sent.size(), 1U);
@@ -211,8 +238,8 @@ TEST(ChunkRunSender, EveryChunkIsSentFromThePoolWhateverThreadRepliesArriveOn)
   std::mutex repliers_mutex;
   // Eight chunks over two workers: six of the calls follow a reply that came
   // in on a replier's thread, and each must still start on the pool.
-  ChunkRunSender sender(Parts{{0, 1, 2, 3, 4, 5, 6, 7}},
-                        /*max_items_per_chunk=*/1,
+  const Parts parts{{0, 1, 2, 3, 4, 5, 6, 7}};
+  ChunkRunSender sender(parts, /*max_items_per_chunk=*/1,
                         [&calls, &calls_on_pool, &repliers,
                          &repliers_mutex](ChunkPosition /*position*/,
                                           ChunkItems<std::uint32_t> /*items*/) {

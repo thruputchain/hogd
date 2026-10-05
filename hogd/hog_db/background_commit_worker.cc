@@ -107,7 +107,7 @@ dispatch_balance_deltas(
       parts.push_back(std::move(thread_deltas));
     });
   }
-  ChunkRunSender sender(std::move(parts), max_deltas_per_chunk,
+  ChunkRunSender sender(parts, max_deltas_per_chunk,
                         [&sched_db_client,
                          block_height](ChunkPosition position,
                                        ChunkItems<Delta> deltas) {

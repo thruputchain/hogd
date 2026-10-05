@@ -33,6 +33,14 @@ TEST(ChunkedVector, IteratesTheItemsOfEveryChunkInOrder)
   EXPECT_EQ(std::distance(chunked.begin(), chunked.end()), 6);
 }
 
+TEST(ChunkedVector, APlainChunkIsASequenceOfOne)
+{
+  const Chunked chunked = Chunk{1, 2, 3};
+  EXPECT_EQ(chunked.size(), 3U);
+  EXPECT_EQ(chunked.chunks().size(), 1U);
+  EXPECT_EQ(collect(chunked), (Chunk{1, 2, 3}));
+}
+
 TEST(ChunkedVector, SkipsEmptyChunksWhereverTheyAre)
 {
   const Chunked chunked(std::vector<Chunk>{{}, {1}, {}, {}, {2, 3}, {}});

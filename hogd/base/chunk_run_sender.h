@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <concepts>
 #include <cstdint>
 #include <exception>
 #include <limits>
+#include <ranges>
 #include <span>
 #include <utility>
 #include <vector>
@@ -19,30 +21,50 @@
 
 namespace hogd {
 
+// A range of parts, each a contiguous container of T, such as a std::vector
+// or an x23::Vec per producing thread.
+template<typename Parts, typename T>
+concept parts_of =
+    std::ranges::forward_range<Parts> &&
+    std::same_as<std::ranges::range_value_t<std::ranges::range_value_t<Parts>>,
+                 T> &&
+    requires(const std::ranges::range_value_t<Parts> &part) {
+      { std::ranges::data(part) } -> std::convertible_to<const T *>;
+      { std::ranges::size(part) } -> std::convertible_to<size_t>;
+    };
+
 // Sends a message too large for one RPC record as a run of chunks (see
-// ChunkPosition). The items come as one vector per producer, such as per
-// thread, and are numbered across those parts in order into chunks of at most
-// [max_items_per_chunk] items; a run always has at least one chunk, so an
-// empty message makes one call with no items. [call](ChunkPosition,
+// ChunkPosition). The items come as one contiguous container per producer,
+// such as per thread, and are numbered across those parts in order into
+// chunks of at most [max_items_per_chunk] items; a run always has at least one
+// chunk, so an empty message makes one call with no items. The sender views
+// the parts rather than owning them, so they must outlive the send and one
+// message's parts can feed a sender per subscriber. [call](ChunkPosition,
 // ChunkItems<T>) returns the x23::Async<void> that issues one chunk's call. It
 // runs on pool threads, several at a time, and its items are spans into the
 // parts, valid until that Async resolves, so a call serializes them in place.
 template<typename T, typename Call> class ChunkRunSender {
 public:
-  ChunkRunSender(std::vector<std::vector<T>> parts, size_t max_items_per_chunk,
-                 Call call)
-    : parts_(std::move(parts)), max_items_per_chunk_(max_items_per_chunk),
-      call_(std::move(call))
+  template<parts_of<T> Parts>
+  ChunkRunSender(const Parts &parts, size_t max_items_per_chunk, Call call)
+    : max_items_per_chunk_(max_items_per_chunk), call_(std::move(call))
   {
     CHECK_GT(max_items_per_chunk, 0UL);
     size_t total = 0;
-    for (const std::vector<T> &part : parts_) {
-      total += part.size();
+    for (const auto &part : parts) {
+      parts_.emplace_back(std::ranges::data(part), std::ranges::size(part));
+      total += parts_.back().size();
     }
     chunk_count_ = std::max<size_t>(1, (total + max_items_per_chunk - 1) /
                                            max_items_per_chunk);
     CHECK_LE(chunk_count_, std::numeric_limits<std::uint32_t>::max());
   }
+
+  // A temporary owning container would leave the spans dangling once the
+  // statement ends; a view such as a std::span may still be passed by value.
+  template<parts_of<T> Parts> requires (!std::ranges::borrowed_range<Parts>)
+  ChunkRunSender(const Parts &&parts, size_t max_items_per_chunk,
+                 Call call) = delete;
 
   // Issues every chunk's call from coroutines on the thread pool, at most
   // [max_in_flight] at once. Resolves once every call has replied, or fails
@@ -110,7 +132,7 @@ private:
     const size_t end = begin + max_items_per_chunk_;
     std::vector<std::span<const T>> pieces;
     size_t part_begin = 0;
-    for (const std::vector<T> &part : parts_) {
+    for (const std::span<const T> &part : parts_) {
       if (part_begin >= end) {
         break;
       }
@@ -118,19 +140,23 @@ private:
       if (part_end > begin) {
         const size_t from = std::max(begin, part_begin) - part_begin;
         const size_t to = std::min(end, part_end) - part_begin;
-        pieces.push_back(std::span<const T>(part).subspan(from, to - from));
+        pieces.push_back(part.subspan(from, to - from));
       }
       part_begin = part_end;
     }
     return pieces;
   }
 
-  std::vector<std::vector<T>> parts_;
+  std::vector<std::span<const T>> parts_;
   size_t max_items_per_chunk_;
   size_t chunk_count_ = 0;
   Call call_;
   std::atomic<size_t> next_chunk_{0};
   std::atomic<bool> failed_{false};
 };
+
+template<typename Parts, typename Call>
+ChunkRunSender(const Parts &, size_t, Call) -> ChunkRunSender<
+    std::ranges::range_value_t<std::ranges::range_value_t<Parts>>, Call>;
 
 } // namespace hogd

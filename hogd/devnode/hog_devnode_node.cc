@@ -673,7 +673,7 @@ HogDevnodeNode::~HogDevnodeNode()
     // Note: unlike prepare_for_failed_construction(), we do not need to drain
     // [mempool_auth_server_] here. [ctx_.reset()] below tears down the DB's
     // auth-change subscription manager, whose destructor waits for in-flight
-    // [authdb_forward_key_changes] forwards -- and thus the downstream
+    // [authdb_forward_key_changes_chunk] forwards -- and thus the downstream
     // [auth_data_changed] callbacks -- to finish, before the member destructors
     // tear down [mempool_coord_server_]. Draining the auth server here would
     // instead close it while the subscription manager is still forwarding,

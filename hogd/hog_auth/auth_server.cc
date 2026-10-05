@@ -12,6 +12,7 @@
 #include "auth_rpc.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -81,8 +82,8 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 }
 
 x23::Async<void>
-AuthServer::register_auth_data_updates(BlockHeight height,
-                                       KeyChangeBatch key_changes)
+AuthServer::register_auth_data_updates(
+    BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes)
 {
   // TODO(geoff): this logic will break if there's a sharded db, and i.e.
   // multiple batches of updates from the same block height. Probably the
@@ -142,8 +143,13 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   co_await Health::instance().set_current_block_height(height);
 
   if (mempool_client_) {
-    co_await mempool_client_->mempoolauth_auth_data_changed(height,
-                                                            key_changes);
+    // The mempool's proc still takes the height as one batch.
+    KeyChangeBatch batch;
+    batch.reserve(key_changes.size());
+    for (const KeyChange &key_change : key_changes) {
+      batch.push_back(key_change);
+    }
+    co_await mempool_client_->mempoolauth_auth_data_changed(height, batch);
   }
 }
 

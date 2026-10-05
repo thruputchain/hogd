@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <span>
-#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -31,18 +30,27 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
     return update_existing_stream(index, data);
   }
 
-  auto it = streams_.find(index);
-  if (it == streams_.end()) {
-    if (streams_.size() >= max_buffers_) {
+  // Each lookup costs a keyed SipHash24 of the index, so hash it once: below
+  // the cap try_emplace both finds and inserts; at the cap only an existing
+  // slot can be reset.
+  Stream *stream = nullptr;
+  if (streams_.size() < max_buffers_) {
+    auto [it, inserted] = streams_.try_emplace(index);
+    stream = &it->second;
+    if (!inserted) {
+      *stream = Stream{};
+    }
+  }
+  else {
+    auto it = streams_.find(index);
+    if (it == streams_.end()) {
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
-    it = streams_.emplace(index, Stream{}).first;
+    stream = &it->second;
+    *stream = Stream{};
   }
-  else {
-    it->second = Stream{};
-  }
-  it->second.hasher.update(data);
+  stream->hasher.update(data);
   return {};
 }
 
@@ -56,20 +64,22 @@ HashBuffers::copy(uint32_t src_index, uint32_t dst_index)
   if (src_index == dst_index) {
     return {};
   }
+  // Hash dst_index once, as in update(). A rehash inside try_emplace
+  // invalidates iterators but not references to elements, so the copy source
+  // stays valid while the new node is constructed from it.
+  const Stream &src_stream = src->second;
+  if (streams_.size() < max_buffers_) {
+    auto [dst, inserted] = streams_.try_emplace(dst_index, src_stream);
+    if (!inserted) {
+      dst->second = src_stream;
+    }
+    return {};
+  }
   auto dst = streams_.find(dst_index);
   if (dst == streams_.end()) {
-    if (streams_.size() >= max_buffers_) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    }
-    // Copy to a local first: emplace may rehash, which would invalidate the
-    // src iterator mid-construction.
-    Stream copied = src->second;
-    streams_.emplace(dst_index, std::move(copied));
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  else {
-    dst->second = src->second;
-  }
+  dst->second = src_stream;
   return {};
 }
 
