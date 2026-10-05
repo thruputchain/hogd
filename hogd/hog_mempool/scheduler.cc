@@ -25,6 +25,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -328,7 +329,7 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
 }
 
 x23::Async<Scheduler::ReadAverageHogAgesResult>
-Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
+Scheduler::read_average_hog_ages(const BlockTransfers &transfers)
 {
   std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
   for (const Delta &delta : transfers.deltas) {
@@ -910,7 +911,7 @@ Scheduler::apply_committed_tx_hog_age(const SignedTransaction &tx,
 }
 
 x23::Async<void>
-Scheduler::process_transfers(const HogsTransferred &transfers)
+Scheduler::process_transfers(const BlockTransfers &transfers)
 {
   // We use [scheduler_->pending_hog_age_update_lock_] to synchronize hog age
   // updates with [MempoolDbRpc], which calls [scheduler_->process_transfers()].
@@ -961,7 +962,7 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back([](ChunkRange chunk, const HogsTransferred *transfers,
+    handles.push_back([](ChunkRange chunk, const BlockTransfers *transfers,
                          Scheduler *scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
       for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {

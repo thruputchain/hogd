@@ -3,12 +3,15 @@
 #include <limits>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/scheduler.h"
@@ -38,6 +41,16 @@ hash_txs(const SignedTransactionBatch &txs)
     hashes.push_back(sha256(tx.tx));
   }
   return hashes;
+}
+
+// A block's transfers as they arrive when hog_db sent them as one chunk.
+BlockTransfers
+one_chunk_transfer(BlockHeight block, DeltaChunk deltas)
+{
+  std::vector<DeltaChunk> chunks;
+  chunks.push_back(std::move(deltas));
+  return BlockTransfers{.block = block,
+                        .deltas = ChunkedVector<DeltaChunk>(std::move(chunks))};
 }
 
 } // namespace
@@ -645,11 +658,10 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
-  transfer.block = kBlock;
-  transfer.deltas.push_back(
-      Delta{.address = account,
-            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+  const BlockTransfers transfer = one_chunk_transfer(
+      kBlock,
+      {Delta{.address = account,
+             .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))}});
 
   scheduler->process_transfers(transfer)();
 
@@ -667,11 +679,10 @@ TEST(Scheduler, ProcessTransfersCreatesHogAgeForFirstTimeRecipient)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
-  transfer.block = kBlock;
-  transfer.deltas.push_back(
-      Delta{.address = account,
-            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+  const BlockTransfers transfer = one_chunk_transfer(
+      kBlock,
+      {Delta{.address = account,
+             .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))}});
 
   scheduler->process_transfers(transfer)();
 
@@ -821,12 +832,11 @@ TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
-  transfer.block = 10;
   const auto signed_gas = static_cast<int128_t>(kGas);
   const int128_t delta_value = -8 * signed_gas;
-  transfer.deltas.push_back(
-      Delta{.address = account, .hog_delta = to_xdr(delta_value)});
+  const BlockTransfers transfer =
+      one_chunk_transfer(10, {Delta{.address = account,
+                                    .hog_delta = to_xdr(delta_value)}});
 
   scheduler->process_transfers(transfer)();
 

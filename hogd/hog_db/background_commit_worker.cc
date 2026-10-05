@@ -1,47 +1,121 @@
 #include "background_commit_worker.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <stop_token>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "auth_rpc.hh"
+#include "hogd/base/chunk_items.h"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_sender.h"
+#include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
 BackgroundCommitWorker::BackgroundCommitWorker(
     AuthChangeSubscriptionManager &auth_change_subscription_manager,
-    std::shared_ptr<sched_db_client_t> sched_db_client)
+    std::shared_ptr<sched_db_client_t> sched_db_client,
+    size_t max_deltas_per_chunk)
   : auth_change_subscription_manager_(auth_change_subscription_manager),
-    sched_db_client_(std::move(sched_db_client))
-
+    sched_db_client_(std::move(sched_db_client)),
+    max_deltas_per_chunk_(max_deltas_per_chunk)
 {
+  CHECK_GT(max_deltas_per_chunk_, 0UL);
   background_worker_ =
       std::jthread([this](std::stop_token stoken) { commit_worker(stoken); });
 }
 
 namespace {
+// A HogsTransferredChunk whose deltas are still in the per-thread vectors
+// they were produced in. It serializes identically to the wire struct, so
+// the client sends it as one without copying a delta.
+struct TransferChunkView {
+  BlockHeight block;
+  std::uint32_t chunk_index;
+  std::uint32_t chunk_count;
+  ChunkItems<Delta> deltas;
+};
+
+size_t
+xdr_size(const TransferChunkView &view)
+{
+  return x23::xdr_size(view.block) + x23::xdr_size(view.chunk_index) +
+         x23::xdr_size(view.chunk_count) + xdr_size(view.deltas);
+}
+
+void
+xdr_serialize(auto &serializer, const TransferChunkView &view)
+{
+  serializer(view.block);
+  serializer(view.chunk_index);
+  serializer(view.chunk_count);
+  serializer(view.deltas);
+}
+} // namespace
+} // namespace hogd
+
+template<>
+struct x23::serialize_equiv<hogd::HogsTransferredChunk, hogd::TransferChunkView>
+  : std::true_type {};
+
+namespace hogd {
+namespace {
+// Issues one chunk of [block_height]'s run. The record is serialized from
+// [deltas] in place, before the call first suspends.
 x23::Async<void>
+send_transfer_chunk(BackgroundCommitWorker::sched_db_client_t *sched_db_client,
+                    BlockHeight block_height, ChunkPosition position,
+                    ChunkItems<Delta> deltas)
+{
+  const TransferChunkView view{.block = block_height,
+                               .chunk_index = position.index,
+                               .chunk_count = position.count,
+                               .deltas = deltas};
+  co_await sched_db_client->scheddb_hogs_transferred_chunk(view);
+}
+
+// Sends a committed block's balance deltas to the scheduler as a run of
+// chunks, several in flight at once (ChunkRunSender). The mempool completes
+// the block once every chunk is in, and this returns only once every chunk
+// is acknowledged, so the next block's run cannot start before that.
+void
 dispatch_balance_deltas(
     BlockHeight block_height, PerThread<std::vector<Delta>> balance_deltas,
+    size_t max_deltas_per_chunk,
     BackgroundCommitWorker::sched_db_client_t &sched_db_client)
 {
-  HogsTransferred transferred{.block = block_height, .deltas = {}};
+  std::vector<std::vector<Delta>> parts;
   // Release ul before calling the rpc client
   {
     auto ul = balance_deltas.lock_threads();
-    balance_deltas.for_each(ul, [&](const std::vector<Delta> &deltas) {
-      transferred.deltas.append_range(deltas);
+    balance_deltas.for_each(ul, [&parts](std::vector<Delta> &thread_deltas) {
+      parts.push_back(std::move(thread_deltas));
     });
   }
-  return sched_db_client.scheddb_hogs_transferred(std::move(transferred));
+  ChunkRunSender sender(std::move(parts), max_deltas_per_chunk,
+                        [&sched_db_client,
+                         block_height](ChunkPosition position,
+                                       ChunkItems<Delta> deltas) {
+                          return send_transfer_chunk(&sched_db_client,
+                                                     block_height, position,
+                                                     deltas);
+                        });
+  sender.send()();
 }
 } // namespace
 
@@ -60,11 +134,31 @@ BackgroundCommitWorker::submit_job(BlockHeight block_height,
 void
 BackgroundCommitWorker::commit_job(Job &job)
 {
-  auth_change_subscription_manager_.detached_publish_auth_changes(
-      job.block_height_, std::move(job.key_change_batch_));
-  if (sched_db_client_) {
-    dispatch_balance_deltas(job.block_height_, std::move(job.balance_deltas_),
-                            *sched_db_client_)();
+  // This runs on a std::jthread, where an escaping throw is std::terminate
+  // with no message. The scheduler callback is a post-commit side effect the
+  // mempool gates the next block on, so once it fails the chain stalls either
+  // way; fail stop with the height and the cause instead (issue #2332). The
+  // noexcept wrappers keep a throw from panic()'s own formatting inside the
+  // fail stop.
+  try {
+    auth_change_subscription_manager_.detached_publish_auth_changes(
+        job.block_height_, std::move(job.key_change_batch_));
+    if (sched_db_client_) {
+      dispatch_balance_deltas(job.block_height_, std::move(job.balance_deltas_),
+                              max_deltas_per_chunk_, *sched_db_client_);
+    }
+  } catch (const std::exception &e) {
+    [&]() noexcept {
+      panic("background commit of block {} failed; its scheduler callback is "
+            "lost: {}",
+            job.block_height_, e.what());
+    }();
+  } catch (...) {
+    [&]() noexcept {
+      panic("background commit of block {} failed; its scheduler callback is "
+            "lost",
+            job.block_height_);
+    }();
   }
 }
 

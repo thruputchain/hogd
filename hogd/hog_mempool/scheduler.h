@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/shared.h"
 #include "sched_db.hh"
 #include "sched_gateway.hh"
@@ -58,7 +59,7 @@ public:
   add_txs(const x23::XdrVec<SignedTransaction> &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes);
 
-  x23::Async<void> process_transfers(const HogsTransferred &transfer);
+  x23::Async<void> process_transfers(const BlockTransfers &transfer);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
   // the block that is being scheduled. [block_size] is the maximum number of
@@ -175,7 +176,7 @@ public:
   x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs);
   x23::Async<ReadAverageHogAgesResult>
-  read_average_hog_ages(const HogsTransferred &transfers);
+  read_average_hog_ages(const BlockTransfers &transfers);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:
