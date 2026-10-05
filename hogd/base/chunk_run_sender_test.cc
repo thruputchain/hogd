@@ -16,6 +16,7 @@
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
