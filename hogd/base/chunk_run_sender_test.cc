@@ -8,6 +8,7 @@
 #include <span>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -24,6 +25,17 @@ namespace {
 
 using Items = std::vector<std::uint32_t>;
 using Parts = std::vector<Items>;
+
+struct NoCall {
+  x23::Async<void> operator()(ChunkPosition position,
+                              ChunkItems<std::uint32_t> items) const;
+};
+using Sender = ChunkRunSender<std::uint32_t, NoCall>;
+static_assert(std::is_constructible_v<Sender, const Parts &, size_t, NoCall>);
+static_assert(
+    std::is_constructible_v<Sender, std::span<const Items>, size_t, NoCall>);
+// A temporary owning container would dangle, so it does not compile.
+static_assert(!std::is_constructible_v<Sender, Parts, size_t, NoCall>);
 
 struct SentChunk {
   ChunkPosition position;

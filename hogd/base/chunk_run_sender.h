@@ -60,6 +60,12 @@ public:
     CHECK_LE(chunk_count_, std::numeric_limits<std::uint32_t>::max());
   }
 
+  // A temporary owning container would leave the spans dangling once the
+  // statement ends; a view such as a std::span may still be passed by value.
+  template<parts_of<T> Parts> requires (!std::ranges::borrowed_range<Parts>)
+  ChunkRunSender(const Parts &&parts, size_t max_items_per_chunk,
+                 Call call) = delete;
+
   // Issues every chunk's call from coroutines on the thread pool, at most
   // [max_in_flight] at once. Resolves once every call has replied, or fails
   // with a call's exception once the other calls in flight have settled. A

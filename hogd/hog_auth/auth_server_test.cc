@@ -66,34 +66,43 @@ TEST_F(AuthServerTest, BasicLookup)
 }
 
 // The AuthDB1 handler applies a height once every chunk of its run is in,
-// whatever order the chunks arrive in.
+// whatever order the chunks arrive in. The run carries auth data the database
+// never held, so the lookup can only be served from the cache the run filled:
+// a handler that applied the empty chunk alone and dropped the other as stale
+// would fall through to the database's version.
 TEST_F(AuthServerTest, ChunkedKeyChangesApplyOnceTheRunIsComplete)
 {
   ContractAddress address = make_test_address(1);
-  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().increment_height(); // height 1
-  mock_db().set(address, auth_data);
+  mock_db().set(address, make_test_auth_data(1));
   mock_db().increment_height(); // now at height 2
   const BlockHeight height = mock_db().get_current_height();
   ASSERT_EQ(height, 2);
+
+  KeyChangeBatch changes;
+  x23::Ptr<AddressAuthData> run_auth_data;
+  run_auth_data.emplace(make_test_auth_data(2));
+  changes.push_back(
+      KeyChange{.address = address, .auth_data = std::move(run_auth_data)});
 
   AuthDBRpc rpc;
   rpc.set_auth_server(auth_server());
   // The empty second chunk arrives first; the run completes on the first.
   rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{
       .height = height, .chunk_index = 1, .chunk_count = 2, .changes = {}})();
-  rpc.authdb_forward_key_changes_chunk(
-      KeyChangeChunk{.height = height,
-                     .chunk_index = 0,
-                     .chunk_count = 2,
-                     .changes = mock_db().get_key_changes_at_height(1)})();
+  rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{.height = height,
+                                                      .chunk_index = 0,
+                                                      .chunk_count = 2,
+                                                      .changes = changes})();
 
   auto result = auth_server().lookup_auth_data(height, address)();
   ASSERT_TRUE(result.has_value());
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, height);
   ASSERT_TRUE(result.value()->second.has_value());
+  EXPECT_NE(result.value()->second->public_keys[2], nullptr);
+  EXPECT_EQ(result.value()->second->public_keys[1], nullptr);
 }
 
 // Test lookup of non-existent auth data
