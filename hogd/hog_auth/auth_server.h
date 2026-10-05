@@ -10,8 +10,10 @@
 #include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
+#include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_assembler.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/chunked_vector.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
@@ -35,10 +37,18 @@ using AuthCacheEntry =
 
 class AuthServer {
 public:
+  // The most key changes one KeyChangeChunk forwarded to the mempool carries.
+  // A KeyChange is 1.1 KB on the wire at most (21 signer slots), so a chunk
+  // stays under 9 MiB, below x23's 16 MiB default record cap.
+  static constexpr size_t kMaxKeyChangesPerChunk = size_t{1} << 13;
+
+  // [max_key_changes_per_chunk] is a test seam; production uses the default.
   explicit AuthServer(dbauth_client_t &&dbauth_client, NetworkHash network_hash,
-                      int bucket_size = 1'048'576)
+                      int bucket_size = 1'048'576,
+                      size_t max_key_changes_per_chunk = kMaxKeyChangesPerChunk)
     : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client)),
-      network_hash_(network_hash)
+      network_hash_(network_hash),
+      max_key_changes_per_chunk_(max_key_changes_per_chunk)
   {}
 
   NetworkHash const &network_hash() const { return network_hash_; }
@@ -57,8 +67,9 @@ public:
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
   // Applies a committed block's key changes to the cache, then forwards them
-  // to the mempool. [key_changes] is the run of chunks the block arrived in,
-  // or a plain batch. This method can be called in any order.  However, it is
+  // to the mempool as a run of KeyChangeChunk records, heights one after
+  // another. [key_changes] is the run of chunks the block arrived in, or a
+  // plain batch. This method can be called in any order.  However, it is
   // vital for cache integrity that batches of block updates are only added to
   // the auth cache in strictly increasing order, with no gaps. The CoroFutex
   // manages this. During initialization from an empty cache, if we get two
@@ -80,6 +91,21 @@ private:
   x23::Async<AuthStatus<AuthCacheEntry>>
   populate_auth_data(BlockHeight height, ContractAddress const &address);
 
+  // Issues one chunk of [height]'s run to the mempool.
+  struct ForwardKeyChangeChunk {
+    sched_auth_client_t client;
+    BlockHeight height;
+
+    x23::Async<void> operator()(ChunkPosition position,
+                                ChunkItems<KeyChange> changes);
+  };
+
+  // Sends [height]'s changes to the mempool as a run of KeyChangeChunk
+  // records, once every earlier height's run has been acknowledged.
+  x23::Async<void>
+  forward_key_changes(BlockHeight height,
+                      const ChunkedVector<KeyChangeBatch> &key_changes);
+
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.
   AuthDataCache auth_data_cache_;
@@ -96,9 +122,17 @@ private:
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
 
+  // The last height whose forward to the mempool finished, so forwards go out
+  // one height at a time, in order: the mempool applies a height as soon as
+  // its run is complete and requires the heights in sequence, which a later
+  // height's short run overtaking an earlier height's longer one would break.
+  // Set alongside current_height_futex_ when the cache initializes.
+  x23::CoroFutex<BlockHeight> forwarded_height_futex_{kUninitializedHeight};
+
   std::optional<sched_auth_client_t> mempool_client_;
 
   const NetworkHash network_hash_;
+  const size_t max_key_changes_per_chunk_;
 };
 
 class AuthDBRpc {

@@ -33,6 +33,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
@@ -147,6 +148,16 @@ commit_block(MempoolTestInfra &server, BlockID block_id, const DbTip &parent,
 {
   return server.mempool_coord_rpc().schedulercoord_commit_block(
       block_id, consensus_value(parent, proposal))();
+}
+
+// The run of one empty chunk a block that changed no auth data arrives as.
+KeyChangeChunk
+empty_height(BlockHeight height)
+{
+  return KeyChangeChunk{.height = height,
+                        .chunk_index = 0,
+                        .chunk_count = 1,
+                        .changes = {}};
 }
 
 } // namespace
@@ -616,11 +627,11 @@ TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
   std::vector<BlockHeight> callback_height;
   std::latch update_finished(1);
 
-  // We run [auth_rpc.mempoolauth_auth_data_changed()] in a separate thread as
-  // it blocks until a callback is registered.
+  // We run [auth_rpc.mempoolauth_auth_data_changed_chunk()] in a separate
+  // thread as it blocks until a callback is registered.
   [](MempoolAuthRpc &auth_rpc, std::latch &update_finished) -> x23::Detached {
     co_await default_threadpool().bg();
-    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{});
+    co_await auth_rpc.mempoolauth_auth_data_changed_chunk(empty_height(kDbTip));
     update_finished.count_down();
   }(auth_rpc, update_finished);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -628,14 +639,15 @@ TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
 
   auth_rpc.register_callback(
       [&callback_height](BlockHeight height,
-                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
+                         ChunkedVector<KeyChangeBatch> /*key_changes*/)
+          -> x23::Async<void> {
         callback_height.push_back(height);
         co_return;
       },
       [] {})();
 
   update_finished.wait();
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+  auth_rpc.mempoolauth_auth_data_changed_chunk(empty_height(kDbTip + 1))();
   EXPECT_EQ(callback_height.size(), 2);
   EXPECT_EQ(callback_height[0], kDbTip);
   EXPECT_EQ(callback_height[1], kDbTip + 1);
@@ -649,26 +661,26 @@ TEST(MempoolAuthRpc, StartupUpdatesDoNotCoalesce)
   x23::CoroLock callback_height_lock;
   std::latch updates_finished(2);
 
-  // We run [auth_rpc.mempoolauth_auth_data_changed()] in separate threads as
-  // they block until a callback is registered.
+  // We run [auth_rpc.mempoolauth_auth_data_changed_chunk()] in separate threads
+  // as they block until a callback is registered.
   [](MempoolAuthRpc &auth_rpc, std::latch &updates_finished) -> x23::Detached {
     co_await default_threadpool().bg();
-    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{});
+    co_await auth_rpc.mempoolauth_auth_data_changed_chunk(empty_height(kDbTip));
     updates_finished.count_down();
   }(auth_rpc, updates_finished);
   [](MempoolAuthRpc &auth_rpc, std::latch &updates_finished) -> x23::Detached {
     co_await default_threadpool().bg();
-    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1,
-                                                    KeyChangeBatch{});
+    co_await auth_rpc.mempoolauth_auth_data_changed_chunk(
+        empty_height(kDbTip + 1));
     updates_finished.count_down();
   }(auth_rpc, updates_finished);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   EXPECT_TRUE(callback_height.empty());
 
   auth_rpc.register_callback(
-      [&callback_height, &callback_height_lock](BlockHeight height,
-                                                KeyChangeBatch /*key_changes*/)
-          -> x23::Async<void> {
+      [&callback_height, &callback_height_lock](
+          BlockHeight height,
+          ChunkedVector<KeyChangeBatch> /*key_changes*/) -> x23::Async<void> {
         x23::CoroGuard cg;
         co_await cg(callback_height_lock);
 
@@ -693,7 +705,7 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   std::atomic<size_t> callback_count = 0;
 
   auth_rpc.register_callback(
-      [&](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+      [&](BlockHeight, ChunkedVector<KeyChangeBatch>) -> x23::Async<void> {
         callback_count.fetch_add(1, std::memory_order_relaxed);
         callback_started.count_down();
         allow_callback_finish.wait();
@@ -702,7 +714,7 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
       [] {})();
 
   std::thread callback_thread([&] {
-    auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+    auth_rpc.mempoolauth_auth_data_changed_chunk(empty_height(kDbTip + 1))();
   });
   callback_started.wait();
 

@@ -23,6 +23,7 @@
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network_hash.h"
@@ -404,7 +405,7 @@ public:
   BlockHeight auth_data_height() { return auth_data_height_.load(); }
 
   x23::Async<void> auth_data_changed(BlockHeight height,
-                                     KeyChangeBatch key_changes);
+                                     ChunkedVector<KeyChangeBatch> key_changes);
 
   x23::Async<void> wait_for_block_commit(BlockHeight expected_height)
   {
@@ -611,7 +612,7 @@ private:
         co_await MempoolAuthRpc::get_client());
     co_await db_rpc_->register_scheduler(scheduler_);
     co_await auth_rpc_->register_callback(
-        [this](BlockHeight height, KeyChangeBatch key_changes) {
+        [this](BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes) {
           return auth_data_changed(height, std::move(key_changes));
         },
         [this] { initialized_.store(true, std::memory_order_release); });
