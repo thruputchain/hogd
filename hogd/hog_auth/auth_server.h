@@ -56,14 +56,17 @@ public:
   x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
-  // This mentod can be called in any order.  However, it is vital for cache
-  // integrity that batches of block updates are only added to the auth cache in
-  // strictly increasing order, with no gaps. The CoroFutex manages this. During
-  // initialization from an empty cache, if we get two blocks of updates
-  // concurrently, we might process the second before the first.  In this case,
-  // the first will be dropped.
-  x23::Async<void> register_auth_data_updates(BlockHeight height,
-                                              KeyChangeBatch key_changes);
+  // Applies a committed block's key changes to the cache, then forwards them
+  // to the mempool. [key_changes] is the run of chunks the block arrived in,
+  // or a plain batch. This method can be called in any order.  However, it is
+  // vital for cache integrity that batches of block updates are only added to
+  // the auth cache in strictly increasing order, with no gaps. The CoroFutex
+  // manages this. During initialization from an empty cache, if we get two
+  // blocks of updates concurrently, we might process the second before the
+  // first.  In this case, the first will be dropped.
+  x23::Async<void>
+  register_auth_data_updates(BlockHeight height,
+                             ChunkedVector<KeyChangeBatch> key_changes);
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card);
 
@@ -129,8 +132,8 @@ public:
                                 std::move(chunk.changes));
     }
     if (run.has_value()) {
-      co_await auth_server_->register_auth_data_updates(
-          run->key, std::move(run->parts).join());
+      co_await auth_server_->register_auth_data_updates(run->key,
+                                                        std::move(run->parts));
     }
   }
 

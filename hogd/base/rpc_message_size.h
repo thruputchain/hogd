@@ -19,6 +19,11 @@ inline constexpr size_t kBulkRpcMaxMessageSize = 0x7fffffff;
 static_assert(kBulkRpcMaxMessageSize <= 0x7fffffffULL,
               "message-size cap must fit a single ONC RPC record fragment");
 
+// The most key changes one KeyChangeChunk carries. A KeyChange is 1.1 KB on
+// the wire at most (21 signer slots), so a chunk stays under 9 MiB, below
+// x23's 16 MiB default record cap.
+inline constexpr size_t kMaxKeyChangesPerChunk = size_t{1} << 13;
+
 // EventSched1 carries the full proposal payload so event can durably retain a
 // pre-commit candidate. Keep this cap scoped to that internal RPC surface.
 inline constexpr size_t kEventSchedulerRpcMaxMessageSize = 0x7fffffff;
