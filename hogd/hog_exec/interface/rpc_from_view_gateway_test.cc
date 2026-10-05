@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -14,6 +15,10 @@
 #include "auth_claim.hh"
 #include "auth_token.hh"
 #include "built_contracts/view_gateway_test.h"
+#include "hogd/base/network_config_params.h"
+#include "hogd/base/rpc_client.h"
+#include "hogd/base/types.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -21,6 +26,7 @@
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -29,6 +35,8 @@
 #include "view.hh"
 #include "view_gateway.hh"
 #include "x23/cleanup.h"
+#include "x23/serialize.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 namespace {
@@ -105,7 +113,7 @@ TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
   ContractAddress caller{};
   TransactionViewQuery query = make_query();
   query.parent_address = caller;
-  query.forwarded_tokens.push_back(AuthToken{});
+  query.forwarded_tokens.push_back(x23::serialize(AuthToken{}));
   query.invoke_flags = std::to_underlying(InvokeFlag::TryInvoke) |
                        std::to_underlying(InvokeFlag::DelegateCall);
 
@@ -147,8 +155,8 @@ TEST(ViewGatewayRpc, NormalizationIntentionallyPreservesForwardedTokens)
 {
   TransactionViewQuery query = make_query();
   query.parent_address = ContractAddress{};
-  query.forwarded_tokens.push_back(AuthToken{});
-  query.forwarded_tokens.push_back(AuthToken{});
+  query.forwarded_tokens.push_back(x23::serialize(AuthToken{}));
+  query.forwarded_tokens.push_back(x23::serialize(AuthToken{}));
 
   TransactionViewQuery normalized =
       normalize_public_view_query(std::move(query));
@@ -164,6 +172,14 @@ public:
 
   static constexpr ContractAddress kAddr =
       NativeContractTestFramework::make_contract_address(20);
+
+  ViewGatewayRefreshTest() : ViewGatewayRefreshTest(stock_network_config()) {}
+
+  // For a chain whose genesis states `network_config`.
+  explicit ViewGatewayRefreshTest(NetworkConfig const &network_config)
+    : framework_(false, BlockExecutionMode::kBlockExecutionModeProposal,
+                 TestDB::kHogDb, true, std::nullopt, network_config)
+  {}
 
   void SetUp() override
   {
@@ -204,8 +220,7 @@ public:
     };
   }
 
-  NativeContractTestFramework framework_{
-      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb};
+  NativeContractTestFramework framework_;
 
   x23::Defer<> force_commit_ = SystemCallHandler::force_commit_or_abort();
 };
@@ -392,6 +407,79 @@ TEST_F(ViewGatewayRefreshTest, ViewNormalizesFlagsEndToEnd)
             InvocationFrameStatusCode::Return);
 
   gateway.shut_down();
+}
+
+// A chain allowing auth tokens deeper than x23's default decode bound.
+class ViewGatewayDeepTokenTest : public ViewGatewayRefreshTest {
+public:
+  static constexpr uint32_t kChainDepth = 20;
+  static constexpr ContractAddress kParentAddr =
+      NativeContractTestFramework::make_contract_address(21);
+
+  ViewGatewayDeepTokenTest() : ViewGatewayRefreshTest(deep_token_config()) {}
+
+  static NetworkConfig deep_token_config()
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxAuthTokenDepth,
+                                   kChainDepth);
+    return config;
+  }
+
+  static TransactionViewQuery make_query_forwarding(uint32_t depth)
+  {
+    AuthTokenNode node{.consumer_address = kAddr,
+                       .payload = {},
+                       .child_nodes = {}};
+    for (uint32_t i = 1; i < depth; ++i) {
+      node = AuthTokenNode{.consumer_address = kAddr,
+                           .payload = {},
+                           .child_nodes = {node}};
+    }
+    auto query = make_read_query();
+    query.parent_address = kParentAddr;
+    query.forwarded_tokens.push_back(
+        x23::serialize(AuthToken{.mint_address = kParentAddr,
+                                 .expiry_height = 1'000'000,
+                                 .root_node = std::move(node)}));
+    return query;
+  }
+};
+
+// Over RPC, a view takes a forwarded token exactly as deep as the chain allows,
+// past x23's default decode bound, and refuses one level deeper.
+TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
+{
+  ASSERT_GT(kChainDepth, x23::deserialization_recursion_limit);
+  commit_bytestring("value");
+  framework_.advance_block();
+
+  ViewGatewayServer server(std::format("localhost:{}",
+                                       framework_.get_db_exec_port()),
+                           "localhost", framework_.get_event_exec_port());
+  uint16_t port = server.start_server(uint16_t{0});
+  auto client =
+      make_rpc_client<ViewGateway1>(x23::HostPort{"localhost", port})().value();
+
+  // read_value takes no auth handles, so its entrypoint refuses any forwarded
+  // token; a token at the chain's depth must get the answer a shallow one does.
+  ViewGatewayResult shallow =
+      client.viewgateway_view(make_query_forwarding(1))();
+  ViewGatewayResult deep =
+      client.viewgateway_view(make_query_forwarding(kChainDepth))();
+  ASSERT_EQ(shallow.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  ASSERT_EQ(deep.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(deep.payload().output.status_code(),
+            shallow.payload().output.status_code());
+
+  ViewGatewayResult too_deep =
+      client.viewgateway_view(make_query_forwarding(kChainDepth + 1))();
+  ASSERT_EQ(too_deep.outcome(), ViewGatewayOutcome::ViewGatewayInvalidInput);
+  EXPECT_EQ(too_deep.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  server.impl()->shut_down();
 }
 
 } // namespace
