@@ -166,6 +166,31 @@ TEST(ViewGatewayRpc, NormalizationIntentionallyPreservesForwardedTokens)
          "simulation context)";
 }
 
+// A public view carries no fee, so an unbounded caller-supplied gas budget
+// would let one request occupy a shared worker without bound (#4344).
+// Normalization clamps gas above the operational ceiling.
+TEST(ViewGatewayRpc, NormalizationClampsGasAboveCeiling)
+{
+  TransactionViewQuery query = make_query();
+  query.invocation.gas_limit = std::numeric_limits<GasAmount>::max();
+
+  TransactionViewQuery normalized =
+      normalize_public_view_query(std::move(query));
+
+  EXPECT_EQ(normalized.invocation.gas_limit, kMaxPublicViewGas);
+}
+
+TEST(ViewGatewayRpc, NormalizationPreservesGasBelowCeiling)
+{
+  TransactionViewQuery query = make_query();
+  query.invocation.gas_limit = kMaxPublicViewGas - 1;
+
+  TransactionViewQuery normalized =
+      normalize_public_view_query(std::move(query));
+
+  EXPECT_EQ(normalized.invocation.gas_limit, kMaxPublicViewGas - 1);
+}
+
 class ViewGatewayRefreshTest : public ::testing::Test {
 public:
   using vgt_meta = ContractTraitMeta<view_gateway_test::ViewGatewayTest>;
