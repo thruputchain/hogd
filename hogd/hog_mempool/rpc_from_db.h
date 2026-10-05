@@ -47,31 +47,30 @@ public:
 
   // Collects the run of chunks hog_db sends for a committed block and hands
   // the scheduler the whole block once, so it keeps seeing one update per
-  // height. The chunks may arrive in any order and on any connection;
-  // scheduler_lock_, held through [cg] until handle_transfer is done,
-  // serializes the assembler. A chunk's deltas move from the decoded record
-  // into the block without a copy.
+  // height. The chunks may arrive in any order; scheduler_lock_, held through
+  // [cg] until handle_transfer is done, serializes the assembler.
   x23::Async<void> scheddb_hogs_transferred_chunk(HogsTransferredChunk chunk)
   {
     auto cg = std::make_unique<x23::CoroGuard>();
     co_await (*cg)(scheduler_lock_);
 
-    if (!scheduler_) {
+    if (scheduler_) {
+      std::optional<TransferRunAssembler::Run> run =
+          run_assembler_.push(chunk.block,
+                              ChunkPosition{.index = chunk.chunk_index,
+                                            .count = chunk.chunk_count},
+                              std::move(chunk.deltas));
+      if (run.has_value()) {
+        // See the comment above if you change this.
+        handle_transfer(BlockTransfers{.block = run->key,
+                                       .deltas = std::move(run->parts)},
+                        std::move(cg));
+      }
+    }
+    else {
       info("[MempoolDbRpc::scheddb_hogs_transferred_chunk] failed. This is ok "
            "and expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
-      co_return;
-    }
-    std::optional<TransferRunAssembler::Run> run =
-        run_assembler_.push(chunk.block,
-                            ChunkPosition{.index = chunk.chunk_index,
-                                          .count = chunk.chunk_count},
-                            std::move(chunk.deltas));
-    if (run.has_value()) {
-      // See the comment above if you change this.
-      handle_transfer(BlockTransfers{.block = run->key,
-                                     .deltas = std::move(run->parts)},
-                      std::move(cg));
     }
     co_return;
   }

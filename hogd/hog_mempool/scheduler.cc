@@ -1,7 +1,5 @@
 #include "hogd/hog_mempool/scheduler.h"
 
-#include "hogd/hog_mempool/block_transfers.h"
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -27,6 +25,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -956,21 +955,22 @@ Scheduler::process_transfers(const BlockTransfers &transfers)
     account_state.hog_age.address = account;
   }
 
+  const std::vector<ChunkRange> chunks =
+      make_chunks(transfers.deltas.size(), available_parallelism());
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
-  for (const ChunkRange &range :
-       make_chunks(transfers.deltas.size(), available_parallelism())) {
-    handles.push_back([](ChunkRange range, const BlockTransfers *transfers,
+  handles.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    handles.push_back([](ChunkRange chunk, const BlockTransfers *transfers,
                          Scheduler *scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
-      auto delta = transfers->deltas.iterator_at(range.start);
-      for (size_t delta_idx = range.start; delta_idx < range.end;
-           ++delta_idx, ++delta) {
-        scheduler->process_transfers_helper(*delta, transfers->block);
+      for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {
+        scheduler->process_transfers_helper(transfers->deltas[delta_idx],
+                                            transfers->block);
       }
       co_return;
-    }(range, &transfers, this));
+    }(chunk, &transfers, this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

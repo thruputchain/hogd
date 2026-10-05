@@ -59,7 +59,7 @@ public:
   add_txs(const x23::XdrVec<SignedTransaction> &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes);
 
-  x23::Async<void> process_transfers(const BlockTransfers &transfers);
+  x23::Async<void> process_transfers(const BlockTransfers &transfer);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
   // the block that is being scheduled. [block_size] is the maximum number of

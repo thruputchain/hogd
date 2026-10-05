@@ -66,9 +66,8 @@ MempoolTestInfra::start(const Options &options)
 
   // Start the mempool RPC servers. All of the subsystems register with the
   // mempool, so the mempool RPC servers need to start first.
-  // HogDb's scheduler client sends HogsTransferredChunk with the bulk cap, so
-  // the DB-facing mempool receiver must match it (mirrors mempool_init in
-  // hog_mempool.cc).
+  // HogDb sends block-wide HogsTransferred with the bulk cap, so the DB-facing
+  // mempool receiver must match it (mirrors mempool_init in hog_mempool.cc).
   sched_db_server_->max_message_size_ = kBulkRpcMaxMessageSize;
   sched_db_server_.start_server(/*port=*/0);
   sched_event_server_.start_server(/*port=*/0);
