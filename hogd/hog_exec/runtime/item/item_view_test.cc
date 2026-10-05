@@ -119,8 +119,7 @@ TEST_F(ItemViewTest, Exists)
   const auto *get_res = proxy.template get<BytestringItem>();
   ASSERT_FALSE(get_res);
 
-  BytestringItem write1;
-  write1.bytestring_ = bytes;
+  BytestringItem write1(bytes);
 
   EXPECT_TRUE(proxy.set(write1));
 
@@ -136,11 +135,11 @@ TEST_F(ItemViewTest, SetBytestring)
 
   const auto *get_res = proxy.template get<BytestringItem>();
   ASSERT_TRUE(get_res);
-  EXPECT_EQ(get_res->bytestring_, bytes);
+  EXPECT_EQ(get_res->bytestring(), bytes);
 
   EXPECT_TRUE(proxy.set(BytestringItem(bytes2)));
   ASSERT_TRUE(get_res = proxy.template get<BytestringItem>());
-  EXPECT_EQ(get_res->bytestring_, bytes2);
+  EXPECT_EQ(get_res->bytestring(), bytes2);
 }
 
 TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
@@ -354,7 +353,7 @@ TEST_F(ItemViewTest, CrossTypeOverwriteNNIntToBytestring)
   // BytestringItem should be present with the new value
   const auto *bs = proxy.template get<BytestringItem>();
   ASSERT_TRUE(bs);
-  EXPECT_EQ(bs->bytestring_, bytes);
+  EXPECT_EQ(bs->bytestring(), bytes);
 
   // get_delta should produce a bytestring delta (not NNInt)
   auto [delta, flags] = proxy.get_delta();
@@ -430,6 +429,65 @@ TEST_F(ItemViewTest, FrameCopiesCarryFlags)
 
   parent = child;
   EXPECT_EQ(parent.flags(), kExclusive);
+}
+
+TEST_F(ItemViewTest, FrameCopiesShareBytestring)
+{
+  // A frame's copy of its parent's view must not copy the bytestring, or a
+  // metadata-only syscall in a fresh frame would copy an arbitrarily large
+  // payload for fixed gas (#4303).
+  ItemView parent;
+  ASSERT_TRUE(parent.set(BytestringItem(Bytestring(4096, 0x5a))));
+  auto const &parent_bytes =
+      parent.template get<BytestringItem>()->bytestring();
+
+  ItemView child = parent;
+  child.clear_flags();
+  EXPECT_EQ(&child.template get<BytestringItem>()->bytestring(), &parent_bytes);
+
+  // Overwriting the child replaces its item and leaves the parent's alone.
+  ASSERT_TRUE(child.set(BytestringItem(Bytestring{1})));
+  EXPECT_EQ(child.template get<BytestringItem>()->bytestring(), Bytestring{1});
+  EXPECT_EQ(&parent.template get<BytestringItem>()->bytestring(),
+            &parent_bytes);
+  EXPECT_EQ(parent_bytes, Bytestring(4096, 0x5a));
+}
+
+TEST_F(ItemViewTest, FrameCopiesOfAuthDataChangeIndependently)
+{
+  // A key change goes through the pointer get() returns, in the child frame's
+  // copy of the item. It must not show through the parent's copy, or the
+  // change would survive the child frame reverting. (So, unlike a
+  // BytestringItem, an AddressAuthDataItem cannot simply share its state.)
+  ItemView parent;
+  AddressAuthDataItem item;
+  item.change_public_key(0, PublicKeyConfigOpt{});
+  ASSERT_TRUE(parent.set(item));
+
+  ItemView child = parent;
+  auto *child_item = child.template get<AddressAuthDataItem>();
+  ASSERT_TRUE(child_item);
+  child_item->change_public_key(1, PublicKeyConfigOpt{});
+  child_item->set_required_weight(Weight{2});
+
+  auto parent_delta = parent.get_delta().first;
+  ASSERT_TRUE(parent_delta.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  EXPECT_EQ(parent_delta->auth_data_change().auth_data_change_signers.size(),
+            1U);
+  EXPECT_FALSE(parent_delta->auth_data_change().new_required_weight);
+
+  auto child_delta = child.get_delta().first;
+  ASSERT_TRUE(child_delta.has_value());
+  EXPECT_EQ(child_delta->auth_data_change().auth_data_change_signers.size(),
+            2U);
+  ASSERT_TRUE(child_delta->auth_data_change().new_required_weight);
+  EXPECT_EQ(*child_delta->auth_data_change().new_required_weight, Weight{2});
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  // The item that was set is a copy too, and is just as unaffected.
+  auto item_delta = item.get_delta();
+  EXPECT_EQ(item_delta.auth_data_change().auth_data_change_signers.size(), 1U);
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)

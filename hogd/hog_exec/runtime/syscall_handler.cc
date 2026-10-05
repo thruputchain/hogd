@@ -1655,7 +1655,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   // Everything up to the load below answers out of the frame stack, so it
   // reaches no database and costs no load gas.
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
-    co_return Read{&bytestring_item->bytestring_, 0};
+    co_return Read{&bytestring_item->bytestring(), 0};
   }
 
   if (item_view->get<DeletedItem>()) {

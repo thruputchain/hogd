@@ -92,7 +92,7 @@ ItemView::get_delta(std::span<QueueEntry const> observed_entries) const
 StorageDelta
 BytestringItem::get_delta() const
 {
-  return make_bytestring_set(bytestring_);
+  return make_bytestring_set(*bytestring_);
 }
 
 StorageDelta
@@ -116,7 +116,7 @@ BytestringItem::validate() const
   // malloc to fail, but a contract could still adversarially waste system
   // resources.
   // The ceiling, not the limit in force: items outlive a lowered limit.
-  CHECK_LE(bytestring_.size(), static_cast<size_t>(kBytestringCeilingLen));
+  CHECK_LE(bytestring_->size(), static_cast<size_t>(kBytestringCeilingLen));
 
   return {};
 }

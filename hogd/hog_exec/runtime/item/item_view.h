@@ -12,6 +12,7 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -40,14 +41,28 @@ class StorageSnapshotCache;
 //   The type of the item view.
 
 // Representing the internal state of a bytestring item.
+//
+// Copies of the item share the bytestring. A frame's first touch of a key
+// copies the parent frame's ItemView into the frame, and that copy must not
+// cost a copy of a bytestring up to max_bytestring_len long.
 class BytestringItem {
 public:
+  explicit BytestringItem(Bytestring bytestring)
+    : bytestring_(make_rc<const Bytestring>(std::move(bytestring)))
+  {}
+
+  Bytestring const &bytestring() const { return *bytestring_; }
+
   StorageDelta get_delta() const;
   [[nodiscard]] SyscallStatus<void> validate() const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
 
-  Bytestring bytestring_;
+private:
+  // Sharing is safe because the bytestring never changes: ItemView::get()
+  // returns only a const BytestringItem*, and a new value replaces the whole
+  // item through ItemView::set().
+  Rc<const Bytestring> bytestring_;
 };
 
 // State of an item that is a nonnegative int

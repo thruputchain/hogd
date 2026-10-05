@@ -15,6 +15,7 @@
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/item_view.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
@@ -385,6 +386,58 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
   // parent no longer owns the token (successful child keeps it)
   ASSERT_FALSE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
+}
+
+TEST_F(InvocationFrameTest, ChildFramesShareParentBytestring)
+{
+  // #4303: a write committed into the root frame, then fresh sibling frames
+  // that each touch the key without reading the value, as GetStorageFlags and
+  // ClearStorageFlags do. Each sibling's first touch copies the root's view
+  // into the sibling. That copy must share the bytestring, not copy it: the
+  // syscall's gas does not depend on the bytestring's size.
+  AddressAndKey const addrkey{.address = make_test_address(1),
+                              .key = StorageKey(StorageKeyType::ContractData)};
+  Bytestring const payload(32'768, 0x5a);
+
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+
+  auto finish_child = [&](InvokeStatus<void> status, bool expect_revert) {
+    auto result = stack.finish_frame(std::move(status), execution_mode_data_)();
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result.value().second, expect_revert);
+  };
+
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(1), Calldata{}, 0, {}).has_value());
+  ASSERT_TRUE(stack.get_item_view(addrkey)->set(BytestringItem(payload)));
+  finish_child(InvokeStatus<void>{}, false);
+
+  auto const *root_bytes =
+      &stack.get_item_view(addrkey)->get<BytestringItem>()->bytestring();
+
+  for (int i = 0; i < 3; ++i) {
+    ASSERT_TRUE(
+        stack.start_frame(make_test_address(1), Calldata{}, 0, {}).has_value());
+    auto *view = stack.get_item_view(addrkey);
+    view->clear_flags();
+    EXPECT_EQ(&view->get<BytestringItem>()->bytestring(), root_bytes);
+    finish_child(InvokeStatus<void>{}, false);
+  }
+
+  // A sibling that overwrites the key and then reverts leaves the root's
+  // bytestring as it was.
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(1), Calldata{}, 0, {}).has_value());
+  ASSERT_TRUE(stack.get_item_view(addrkey)->set(BytestringItem(Bytestring{1})));
+  stack.set_active_frame_return(
+      InvocationFrameOutput(InvocationFrameStatusCode::Fault));
+  finish_child(InvokeError{InvokeErrorCode::Deterministic}, true);
+
+  auto const &root_item = *stack.get_item_view(addrkey)->get<BytestringItem>();
+  EXPECT_EQ(&root_item.bytestring(), root_bytes);
+  EXPECT_EQ(root_item.bytestring(), payload);
 }
 
 } // namespace hogd
