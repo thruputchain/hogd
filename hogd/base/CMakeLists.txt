@@ -31,6 +31,7 @@ add_library(base_test_objects OBJECT
   chunk_items_test.cc
   chunk_run_assembler_test.cc
   chunked_call_test.cc
+  chunked_vector_test.cc
   cli_test.cc
   cpputil_test.cc
   io_test.cc

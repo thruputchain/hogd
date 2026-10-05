@@ -70,7 +70,7 @@ public:
     if (run.has_value()) {
       // See the comment above if you change this.
       handle_transfer(BlockTransfers{.block = run->key,
-                                     .delta_chunks = std::move(run->parts)},
+                                     .deltas = std::move(run->parts)},
                       std::move(cg));
     }
     co_return;

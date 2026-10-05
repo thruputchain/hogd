@@ -1,8 +1,7 @@
 #pragma once
 
-#include <vector>
-
 #include "hogd/base/chunk_run_assembler.h"
+#include "hogd/base/chunked_vector.h"
 #include "sched_db.hh"
 #include "types.hh"
 
@@ -15,11 +14,12 @@ using DeltaChunk = decltype(HogsTransferredChunk::deltas);
 using TransferRunAssembler = ChunkRunAssembler<BlockHeight, DeltaChunk>;
 
 // A committed block's native-token balance deltas, reassembled from the run of
-// chunks hog_db sent for it. The chunks stay separate vectors, moved in as they
-// arrived, so reassembly never copies a delta; consumers iterate the nesting.
+// chunks hog_db sent for it. The chunks stay the separate vectors x23 decoded,
+// moved in as they arrived, so reassembly never copies a delta; [deltas] reads
+// them as one sequence.
 struct BlockTransfers {
   BlockHeight block;
-  std::vector<DeltaChunk> delta_chunks;
+  ChunkedVector<DeltaChunk> deltas;
 };
 
 } // namespace hogd

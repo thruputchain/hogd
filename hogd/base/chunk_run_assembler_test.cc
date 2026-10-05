@@ -7,6 +7,7 @@
 
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_assembler.h"
+#include "hogd/base/chunked_vector.h"
 
 namespace hogd {
 namespace {
@@ -32,15 +33,11 @@ completed(std::optional<Assembler::Run> pushed)
   return std::move(*pushed);
 }
 
-// [run]'s items, part by part.
+// [run]'s items, read across its parts.
 Items
-items_by_slot(const Assembler::Run &run)
+items_of(const Assembler::Run &run)
 {
-  Items items;
-  for (const Items &part : run.parts) {
-    items.insert(items.end(), part.begin(), part.end());
-  }
-  return items;
+  return Items(run.parts.begin(), run.parts.end());
 }
 
 } // namespace
@@ -50,8 +47,8 @@ TEST(ChunkRunAssembler, SingleChunkRunCompletesAtOnce)
   Assembler assembler;
   const Assembler::Run run = completed(assembler.push(7, at(0, 1), {1, 2}));
   EXPECT_EQ(run.key, 7U);
-  ASSERT_EQ(run.parts.size(), 1U);
-  EXPECT_EQ(items_by_slot(run), (Items{1, 2}));
+  ASSERT_EQ(run.parts.chunks().size(), 1U);
+  EXPECT_EQ(items_of(run), (Items{1, 2}));
 }
 
 TEST(ChunkRunAssembler, RunCompletesOnceEveryChunkIsIn)
@@ -61,14 +58,15 @@ TEST(ChunkRunAssembler, RunCompletesOnceEveryChunkIsIn)
   EXPECT_FALSE(assembler.push(7, at(1, 3), {3, 4}).has_value());
   const Assembler::Run run = completed(assembler.push(7, at(2, 3), {5}));
   EXPECT_EQ(run.key, 7U);
-  ASSERT_EQ(run.parts.size(), 3U);
-  EXPECT_EQ(items_by_slot(run), (Items{1, 2, 3, 4, 5}));
+  ASSERT_EQ(run.parts.chunks().size(), 3U);
+  EXPECT_EQ(run.parts.size(), 5U);
+  EXPECT_EQ(items_of(run), (Items{1, 2, 3, 4, 5}));
 
   // The assembler is ready for the next run, including an empty one.
   const Assembler::Run next = completed(assembler.push(8, at(0, 1), {}));
   EXPECT_EQ(next.key, 8U);
-  ASSERT_EQ(next.parts.size(), 1U);
-  EXPECT_TRUE(next.parts[0].empty());
+  ASSERT_EQ(next.parts.chunks().size(), 1U);
+  EXPECT_TRUE(next.parts.empty());
 }
 
 TEST(ChunkRunAssembler, ChunksLandInTheirSlotsWhateverTheirArrivalOrder)
@@ -79,8 +77,9 @@ TEST(ChunkRunAssembler, ChunksLandInTheirSlotsWhateverTheirArrivalOrder)
   EXPECT_FALSE(assembler.push(7, at(0, 3), {1, 2}).has_value());
   const Assembler::Run run = completed(assembler.push(7, at(1, 3), {3, 4}));
   EXPECT_EQ(run.key, 7U);
-  ASSERT_EQ(run.parts.size(), 3U);
-  EXPECT_EQ(items_by_slot(run), (Items{1, 2, 3, 4, 5}));
+  ASSERT_EQ(run.parts.chunks().size(), 3U);
+  EXPECT_EQ(run.parts.chunks()[2], (Items{5}));
+  EXPECT_EQ(items_of(run), (Items{1, 2, 3, 4, 5}));
 }
 
 TEST(ChunkRunAssembler, AnEmptyChunkStillCountsTowardTheRun)
@@ -88,9 +87,9 @@ TEST(ChunkRunAssembler, AnEmptyChunkStillCountsTowardTheRun)
   Assembler assembler;
   EXPECT_FALSE(assembler.push(7, at(1, 2), {}).has_value());
   const Assembler::Run run = completed(assembler.push(7, at(0, 2), {1}));
-  ASSERT_EQ(run.parts.size(), 2U);
-  EXPECT_EQ(items_by_slot(run), (Items{1}));
-  EXPECT_TRUE(run.parts[1].empty());
+  ASSERT_EQ(run.parts.chunks().size(), 2U);
+  EXPECT_EQ(items_of(run), (Items{1}));
+  EXPECT_TRUE(run.parts.chunks()[1].empty());
 }
 
 } // namespace hogd

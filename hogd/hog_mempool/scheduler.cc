@@ -333,10 +333,8 @@ x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const BlockTransfers &transfers)
 {
   std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
-  for (const DeltaChunk &deltas : transfers.delta_chunks) {
-    for (const Delta &delta : deltas) {
-      accounts.insert(delta.address);
-    }
+  for (const Delta &delta : transfers.deltas) {
+    accounts.insert(delta.address);
   }
 
   // TODO(jhumphri): This is the same as the code above.
@@ -941,16 +939,14 @@ Scheduler::process_transfers(const BlockTransfers &transfers)
   // the received group at this block's height.
   std::unordered_map<ContractAddress, int128_t, SipHash24Hasher>
       missing_account_deltas;
-  for (const DeltaChunk &deltas : transfers.delta_chunks) {
-    for (const Delta &delta : deltas) {
-      if (!missing.contains(delta.address)) {
-        continue;
-      }
-      // Only one DB shard should report a delta for an account.
-      CHECK(!missing_account_deltas.contains(delta.address));
-      int128_t &total = missing_account_deltas[delta.address];
-      CHECK(!integer_add_overflow(total, from_xdr(delta.hog_delta), &total));
+  for (const Delta &delta : transfers.deltas) {
+    if (!missing.contains(delta.address)) {
+      continue;
     }
+    // Only one DB shard should report a delta for an account.
+    CHECK(!missing_account_deltas.contains(delta.address));
+    int128_t &total = missing_account_deltas[delta.address];
+    CHECK(!integer_add_overflow(total, from_xdr(delta.hog_delta), &total));
   }
   for (const ContractAddress &account : missing) {
     const auto delta_it = missing_account_deltas.find(account);
@@ -960,25 +956,21 @@ Scheduler::process_transfers(const BlockTransfers &transfers)
     account_state.hog_age.address = account;
   }
 
-  // Each chunk of the block is split across the pool on its own, so a block
-  // that arrived as one chunk parallelizes exactly as it did before chunking.
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
-  for (const DeltaChunk &deltas : transfers.delta_chunks) {
-    for (const ChunkRange &range :
-         make_chunks(deltas.size(), available_parallelism())) {
-      handles.push_back([](ChunkRange range, const DeltaChunk *deltas,
-                           BlockHeight block,
-                           Scheduler *scheduler) noexcept -> x23::Async<void> {
-        co_await default_coropoll().pool_.bg();
-        for (size_t delta_idx = range.start; delta_idx < range.end;
-             delta_idx++) {
-          scheduler->process_transfers_helper((*deltas)[delta_idx], block);
-        }
-        co_return;
-      }(range, &deltas, transfers.block, this));
-    }
+  for (const ChunkRange &range :
+       make_chunks(transfers.deltas.size(), available_parallelism())) {
+    handles.push_back([](ChunkRange range, const BlockTransfers *transfers,
+                         Scheduler *scheduler) noexcept -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
+      auto delta = transfers->deltas.iterator_at(range.start);
+      for (size_t delta_idx = range.start; delta_idx < range.end;
+           ++delta_idx, ++delta) {
+        scheduler->process_transfers_helper(*delta, transfers->block);
+      }
+      co_return;
+    }(range, &transfers, this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
