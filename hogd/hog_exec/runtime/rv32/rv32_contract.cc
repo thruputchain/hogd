@@ -74,7 +74,8 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
   using result_t = std::pair<InvokeStatus<void>, GasAmount>;
 
   // Charge the memory-image restore up front: the bill scales with image size,
-  // and a child that cannot afford it faults out of gas before the copy (#4354).
+  // and a child that cannot afford it faults out of gas before the copy
+  // (#4354).
   const uint64_t memory_restore_gas = contract_->memory_restore_gas();
   if (memory_restore_gas > gas_limit) {
     return result_t{InvokeError{InvokeErrorCode::OutOfGas}, gas_limit};
