@@ -704,6 +704,45 @@ TEST_F(Rv32ProductionMappingTest,
             (kReadCount - 1) * kDBRPCCost);
 }
 
+// Regression test for #4354: restoring a contract's declared memory image is
+// metered before its first instruction, so two contracts with identical code
+// but different declared memory do not cost the same to invoke -- the larger
+// image is billed for the larger restore.
+TEST_F(Rv32ProductionMappingTest, MemoryImageRestorationIsGasMetered)
+{
+  constexpr uint32_t kSmallMemoryBytes = 64;
+  constexpr uint32_t kLargeMemoryBytes = rv32::kDefaultMaxMemoryBytes;
+
+  std::vector<uint32_t> program;
+  append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+
+  const auto small_addr =
+      deploy_words(program, 0, std::vector<uint8_t>(kSmallMemoryBytes));
+  const auto large_addr =
+      deploy_words(program, 1, std::vector<uint8_t>(kLargeMemoryBytes));
+
+  const auto small_result = invoke_deployed(small_addr, 1'000'000);
+  const auto large_result = invoke_deployed(large_addr, 1'000'000);
+  ASSERT_TRUE(small_result.is_root_success());
+  ASSERT_TRUE(large_result.is_root_success());
+
+  // Identical code, so the gas gap is exactly the extra restore cost.
+  EXPECT_EQ(large_result.gas_consumed_ - small_result.gas_consumed_,
+            rv32_memory_restore_gas(kLargeMemoryBytes) -
+                rv32_memory_restore_gas(kSmallMemoryBytes));
+
+  // A contract given less gas than its own restore costs faults before the
+  // image is copied. Out-of-gas is distinguished by its gas signature -- the
+  // whole limit is consumed -- rather than by the fault code (see
+  // HostSyscallOutOfGasConsumesWholeLimit).
+  const GasAmount large_restore_gas =
+      rv32_memory_restore_gas(kLargeMemoryBytes);
+  const auto starved_result =
+      invoke_deployed(large_addr, large_restore_gas - 1);
+  ASSERT_FALSE(starved_result.is_root_success());
+  EXPECT_EQ(starved_result.gas_consumed_, large_restore_gas - 1);
+}
+
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
 {
   // A single straight-line run whose total gas exceeds the chunk cap is split

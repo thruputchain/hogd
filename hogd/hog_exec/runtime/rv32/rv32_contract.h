@@ -5,6 +5,7 @@
 
 #include "contract.hh"
 #include "hogd/base/network_config_params.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
@@ -16,6 +17,20 @@
 namespace hogd {
 
 class SystemCallHandler;
+
+// Gas charged for restoring `image_bytes` of an RV32 contract's declared
+// memory image before its first instruction runs. The restore is a byte copy,
+// so it is priced at the measured bytestring read-copy rate, rounded up to
+// whole blocks. Both constants are already folded into the RV32 gas-schedule
+// digest, so metering the restore adds no new committed constant (#4354).
+[[nodiscard]] constexpr uint64_t
+rv32_memory_restore_gas(uint32_t image_bytes)
+{
+  const uint64_t blocks =
+      (static_cast<uint64_t>(image_bytes) + kBytestringBlockBytes - 1) /
+      kBytestringBlockBytes;
+  return blocks * kBytestringReadBlockCost;
+}
 
 // A translated and ready-to-instantiate RV32 contract.
 class Rv32Contract {
@@ -29,6 +44,12 @@ public:
   Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation);
 
   rv32::ThreadedMachine instantiate(uint64_t gas) const;
+
+  // Gas to restore this contract's declared memory image on instantiation.
+  [[nodiscard]] uint64_t memory_restore_gas() const
+  {
+    return rv32_memory_restore_gas(pre_instantiation_.memory_image_size());
+  }
 
 private:
   rv32::ThreadedMachinePreInstantiation pre_instantiation_;
