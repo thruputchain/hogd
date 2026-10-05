@@ -20,6 +20,8 @@
 #include "hogd/hog_db/background_commit_worker.h"
 #include "sched_db.hh"
 #include "types.hh"
+#include "x23/rpc_common.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
 
 namespace hogd {
@@ -61,15 +63,18 @@ make_delta(uint64_t i)
 }
 
 // Runs a block of [num_deltas] deltas through a worker that chunks at
-// [max_deltas_per_chunk] and returns what the scheduler side received.
+// [max_deltas_per_chunk] and returns what the scheduler side received. Both
+// ends of the link cap a record at [max_message_size].
 std::vector<HogsTransferredChunk>
 run_block(size_t num_deltas, size_t max_deltas_per_chunk,
-          size_t expected_chunks)
+          size_t expected_chunks,
+          size_t max_message_size = x23::default_max_message_size)
 {
   RpcServer<ChunkRecordingSchedDbRpc> server;
+  server->max_message_size_ = max_message_size;
   const uint16_t port = server.start_server(x23::HostPort{"127.0.0.1", 0});
   auto client = make_rpc_client<SchedDb1>(x23::HostPort{"127.0.0.1", port},
-                                          /*retry=*/false)();
+                                          /*retry=*/false, max_message_size)();
   EXPECT_TRUE(client.has_value());
   if (!client.has_value()) {
     return {};
@@ -153,6 +158,33 @@ TEST(BackgroundCommitWorker, FullChunksCarryNoTrailingEmptyChunk)
                                 /*expected_chunks=*/2);
   ASSERT_EQ(chunks.size(), 2U);
   expect_run(chunks, 6, 3);
+}
+
+TEST(BackgroundCommitWorker, ABlockOverTheRecordCapGoesThroughAsChunks)
+{
+  // The scenario of #2332 at a smaller scale: as one record this block would
+  // be over the link's cap, so it would be refused at framing; split at the
+  // chunk bound, each record is under the cap and the whole block arrives.
+  constexpr size_t kMaxMessageSize = size_t{1} << 20;
+  constexpr size_t kNumDeltas = 40'000;
+  constexpr size_t kMaxDeltasPerChunk = 10'000;
+
+  HogsTransferredChunk as_one_record{.block = 9,
+                                     .chunk_index = 0,
+                                     .chunk_count = 1,
+                                     .deltas = {}};
+  for (uint64_t i = 0; i < kNumDeltas; ++i) {
+    as_one_record.deltas.push_back(make_delta(i));
+  }
+  ASSERT_GT(x23::xdr_size(as_one_record), kMaxMessageSize);
+
+  const auto chunks = run_block(kNumDeltas, kMaxDeltasPerChunk,
+                                /*expected_chunks=*/4, kMaxMessageSize);
+  ASSERT_EQ(chunks.size(), 4U);
+  for (const HogsTransferredChunk &chunk : chunks) {
+    EXPECT_LT(x23::xdr_size(chunk), kMaxMessageSize);
+  }
+  expect_run(chunks, kNumDeltas, kMaxDeltasPerChunk);
 }
 
 TEST(BackgroundCommitWorker, EmptyBlockStillSendsOneLastChunk)
