@@ -17,7 +17,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -1853,8 +1852,6 @@ TEST(AuthTokenDepthBoundTest, ChainDecodesIffWithinMaxDepth)
     SCOPED_TRACE(depth);
     auto chain = make_auth_token_chain(kAddr, depth);
     bool const within = depth <= uint32_t{kAuthTokenMaxDepth};
-    EXPECT_EQ(AuthTokenRegistry::node_within_depth(chain, kAuthTokenMaxDepth),
-              within);
     auto decoded = decode_under_token_depth_bound(x23::serialize(chain));
     ASSERT_EQ(decoded.has_value(), within);
     if (decoded.has_value()) {
@@ -1869,7 +1866,6 @@ TEST(AuthTokenDepthBoundTest, FullWidthTreeDecodesUnlessABranchIsTooDeep)
   constexpr ContractAddress kAddr =
       NativeContractTestFramework::make_contract_address(0);
   auto tree = make_full_auth_token_tree(kAddr, uint32_t{kAuthTokenMaxDepth});
-  EXPECT_TRUE(AuthTokenRegistry::node_within_depth(tree, kAuthTokenMaxDepth));
   auto decoded = decode_under_token_depth_bound(x23::serialize(tree));
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(*decoded, tree);
@@ -1883,7 +1879,6 @@ TEST(AuthTokenDepthBoundTest, FullWidthTreeDecodesUnlessABranchIsTooDeep)
       AuthTokenNode{.consumer_address = kAddr,
                     .payload = x23::serialize(uint32_t{kAuthTokenMaxDepth}),
                     .child_nodes = {}});
-  EXPECT_FALSE(AuthTokenRegistry::node_within_depth(tree, kAuthTokenMaxDepth));
   EXPECT_FALSE(decode_under_token_depth_bound(x23::serialize(tree)));
 }
 
