@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <stop_token>
 #include <string>
@@ -59,6 +60,9 @@ public:
 
 private:
   friend class ViewGatewayBatchTest;
+  // Installed before a test request; never changed while a request is running.
+  std::function<void(std::size_t, ViewGatewayResult const &)>
+      batch_call_finished_test_hook_;
   using ViewDeadline = std::chrono::steady_clock::time_point;
   static constexpr std::uint32_t kMaxViewAttempts = 3;
 

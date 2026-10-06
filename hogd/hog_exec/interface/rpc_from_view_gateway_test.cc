@@ -5,12 +5,14 @@
 #include <chrono>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
@@ -488,6 +490,22 @@ TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
 
 class ViewGatewayBatchTest : public ViewGatewayRefreshTest {
 public:
+  static void on_call_finished(
+      ViewGatewayRpc &gateway,
+      std::function<void(std::size_t, ViewGatewayResult const &)> hook)
+  {
+    gateway.batch_call_finished_test_hook_ = std::move(hook);
+  }
+
+  void commit_from_batch_hook(std::string_view value)
+  {
+    // The framework blocks on RPCs, which is forbidden on x23 pool threads.
+    std::thread([&] {
+      commit_bytestring(value);
+      framework_.advance_block();
+    }).join();
+  }
+
   static ViewGatewayBatchQuery batch()
   {
     auto first = normalize_public_view_query(make_read_query());
@@ -731,6 +749,107 @@ TEST_F(ViewGatewayBatchTest, DeadlineAndShutdownFailTheWholeGroup)
   gateway.shut_down();
   EXPECT_EQ(gateway.viewgateway_view_batch(batch())().outcome(),
             ViewGatewayBatchOutcome::ViewGatewayBatchInternalError);
+}
+
+TEST_F(ViewGatewayBatchTest, PublicBatchRestartsEveryCallAfterAbandonment)
+{
+  commit_bytestring("old-value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  std::vector<std::size_t> calls;
+  std::vector<ViewGatewayOutcome> outcomes;
+  std::vector<ViewGatewayPayload> first_results;
+  on_call_finished(gateway, [&](std::size_t index,
+                                ViewGatewayResult const &result) {
+    calls.push_back(index);
+    outcomes.push_back(result.outcome());
+    if (index == 0 && result.outcome() == ViewGatewayOutcome::ViewGatewayOk) {
+      first_results.push_back(result.payload());
+      if (first_results.size() == 1) {
+        commit_from_batch_hook("new-value");
+      }
+    }
+  });
+
+  auto result = gateway.viewgateway_view_batch(batch())();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_EQ(calls, (std::vector<std::size_t>{0, 1, 0, 1}));
+  EXPECT_EQ(outcomes, (std::vector<ViewGatewayOutcome>{
+                          ViewGatewayOutcome::ViewGatewayOk,
+                          ViewGatewayOutcome::ViewGatewayAbandoned,
+                          ViewGatewayOutcome::ViewGatewayOk,
+                          ViewGatewayOutcome::ViewGatewayOk}));
+  ASSERT_EQ(first_results.size(), 2U);
+  ASSERT_EQ(result.payload().results.size(), 2U);
+  EXPECT_GT(result.payload().height, first_results[0].height);
+  EXPECT_EQ(result.payload().height, first_results[1].height);
+  EXPECT_NE(result.payload().results[0].output, first_results[0].output);
+  EXPECT_EQ(result.payload().results[0].output, first_results[1].output);
+}
+
+TEST_F(ViewGatewayBatchTest, PublicBatchStopsAfterThreeAbandonedAttempts)
+{
+  commit_bytestring("value-0");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  std::vector<std::size_t> calls;
+  std::vector<BlockHeight> heights;
+  on_call_finished(gateway, [&](std::size_t index,
+                                ViewGatewayResult const &result) {
+    calls.push_back(index);
+    if (index == 0) {
+      ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+      heights.push_back(result.payload().height);
+      commit_from_batch_hook(std::format("value-{}", heights.size()));
+    }
+    else {
+      EXPECT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayAbandoned);
+    }
+  });
+
+  auto result = gateway.viewgateway_view_batch(batch())();
+  EXPECT_EQ(result.outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchAbandoned);
+  EXPECT_EQ(calls, (std::vector<std::size_t>{0, 1, 0, 1, 0, 1}));
+  ASSERT_EQ(heights.size(), 3U);
+  EXPECT_GT(heights[1], heights[0]);
+  EXPECT_GT(heights[2], heights[1]);
+}
+
+TEST_F(ViewGatewayBatchTest, PublicBatchStopsWhenBudgetExpiresAfterFirstCall)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  ASSERT_EQ(gateway.viewgateway_view(make_read_query())().outcome(),
+            ViewGatewayOutcome::ViewGatewayOk);
+  std::vector<std::size_t> calls;
+  on_call_finished(gateway, [&](std::size_t index,
+                                ViewGatewayResult const &result) {
+    calls.push_back(index);
+    EXPECT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    if (index == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    }
+  });
+  auto query = batch();
+  query.budget_millis = 1000;
+  auto result = gateway.viewgateway_view_batch(query)();
+  EXPECT_EQ(result.outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchDeadlineExceeded);
+  EXPECT_EQ(calls, (std::vector<std::size_t>{0}));
+  on_call_finished(gateway, {});
+  EXPECT_EQ(gateway.viewgateway_view_batch(batch())().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchOk);
 }
 
 } // namespace hogd
