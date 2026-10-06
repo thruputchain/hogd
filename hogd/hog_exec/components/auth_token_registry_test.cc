@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <optional>
 
 #include "auth_token.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -27,6 +29,13 @@ make_test_payload(uint32_t index)
 {
   return x23::serialize(index);
 }
+
+std::optional<uint32_t>
+register_token(AuthTokenRegistry &registry, AuthToken const &token)
+{
+  return registry.register_auth_token(token.mint_address, token.expiry_height,
+                                      make_auth_subtoken(token.root_node));
+}
 } // namespace
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -41,17 +50,17 @@ TEST(AuthTokenRegistryTest, BasicTest)
                     AuthTokenNode{.consumer_address = make_test_address(2),
                                   .payload = make_test_payload(0ULL),
                                   .child_nodes = {}}};
-  auto token_id_opt = registry.register_auth_token(auth_token);
+  auto token_id_opt = register_token(registry, auth_token);
   ASSERT_TRUE(token_id_opt.has_value());
   uint32_t token_id = token_id_opt.value();
   ASSERT_EQ(token_id, 0);
-  AuthSubtoken const *result = registry.lookup_auth_token(token_id);
+  RegisteredAuthToken const *result = registry.lookup_auth_token(token_id);
   ASSERT_NE(result, nullptr);
   ASSERT_EQ(result->mint_address, make_test_address(1));
   ASSERT_EQ(result->expiry_height, 100);
-  ASSERT_EQ(result->consumer_address, make_test_address(2));
-  ASSERT_EQ(result->payload, make_test_payload(0ULL));
-  ASSERT_EQ(result->children().size(), 0);
+  ASSERT_EQ(result->node->consumer_address, make_test_address(2));
+  ASSERT_EQ(result->node->payload, make_test_payload(0ULL));
+  ASSERT_EQ(result->node->children.size(), 0);
 }
 
 TEST(AuthTokenRegistryTest, UnwrapTest)
@@ -73,7 +82,7 @@ TEST(AuthTokenRegistryTest, UnwrapTest)
                         AuthTokenNode{.consumer_address = make_test_address(5),
                                       .payload = make_test_payload(3ULL),
                                       .child_nodes = {}}}}};
-  auto token_id_opt = registry.register_auth_token(auth_token);
+  auto token_id_opt = register_token(registry, auth_token);
   ASSERT_TRUE(token_id_opt.has_value());
   uint32_t token_id = token_id_opt.value();
   ASSERT_EQ(token_id, 0);
@@ -82,31 +91,31 @@ TEST(AuthTokenRegistryTest, UnwrapTest)
   AuthTokenUnwrapResult result = res.value();
   ASSERT_EQ(result.new_token_id_start, 1);
   ASSERT_EQ(result.new_token_id_count, 3);
-  AuthSubtoken const *result_1 =
+  RegisteredAuthToken const *result_1 =
       registry.lookup_auth_token(result.new_token_id_start);
   ASSERT_NE(result_1, nullptr);
   ASSERT_EQ(result_1->mint_address, make_test_address(1));
   ASSERT_EQ(result_1->expiry_height, 100);
-  ASSERT_EQ(result_1->consumer_address, make_test_address(3));
-  ASSERT_EQ(result_1->payload, make_test_payload(1ULL));
-  ASSERT_EQ(result_1->children().size(), 0);
-  AuthSubtoken const *result_2 =
+  ASSERT_EQ(result_1->node->consumer_address, make_test_address(3));
+  ASSERT_EQ(result_1->node->payload, make_test_payload(1ULL));
+  ASSERT_EQ(result_1->node->children.size(), 0);
+  RegisteredAuthToken const *result_2 =
       registry.lookup_auth_token(result.new_token_id_start + 1);
   ASSERT_NE(result_2, nullptr);
   ASSERT_EQ(result_2->mint_address, make_test_address(1));
   ASSERT_EQ(result_2->expiry_height, 100);
-  ASSERT_EQ(result_2->consumer_address, make_test_address(4));
-  ASSERT_EQ(result_2->payload, make_test_payload(2ULL));
-  ASSERT_EQ(result_2->children().size(), 0);
-  AuthSubtoken const *result_3 =
+  ASSERT_EQ(result_2->node->consumer_address, make_test_address(4));
+  ASSERT_EQ(result_2->node->payload, make_test_payload(2ULL));
+  ASSERT_EQ(result_2->node->children.size(), 0);
+  RegisteredAuthToken const *result_3 =
       registry.lookup_auth_token(result.new_token_id_start + 2);
   ASSERT_NE(result_3, nullptr);
   ASSERT_EQ(result_3->mint_address, make_test_address(1));
   ASSERT_EQ(result_3->expiry_height, 100);
-  ASSERT_EQ(result_3->consumer_address, make_test_address(5));
-  ASSERT_EQ(result_3->payload, make_test_payload(3ULL));
-  ASSERT_EQ(result_3->children().size(), 0);
-  AuthSubtoken const *result_4 =
+  ASSERT_EQ(result_3->node->consumer_address, make_test_address(5));
+  ASSERT_EQ(result_3->node->payload, make_test_payload(3ULL));
+  ASSERT_EQ(result_3->node->children.size(), 0);
+  RegisteredAuthToken const *result_4 =
       registry.lookup_auth_token(result.new_token_id_start + 3);
   ASSERT_EQ(result_4, nullptr);
 }
@@ -127,7 +136,7 @@ TEST(AuthTokenRegistryTest, UnwrapTwiceReturnsSameResult)
                         AuthTokenNode{.consumer_address = make_test_address(4),
                                       .payload = make_test_payload(2ULL),
                                       .child_nodes = {}}}}};
-  auto token_id_opt = registry.register_auth_token(auth_token);
+  auto token_id_opt = register_token(registry, auth_token);
   ASSERT_TRUE(token_id_opt.has_value());
 
   auto first_unwrap = registry.unwrap_auth_token(token_id_opt.value());
@@ -151,38 +160,40 @@ TEST(AuthTokenRegistryTest, UnwrapSharesChildrenWithTheParent)
   auto child = AuthTokenNode{.consumer_address = make_test_address(3),
                              .payload = make_test_payload(1ULL),
                              .child_nodes = {grandchild}};
-  auto root_id = registry.register_auth_token(
-      AuthToken{.mint_address = make_test_address(1),
-                .expiry_height = 100,
-                .root_node =
-                    AuthTokenNode{.consumer_address = make_test_address(2),
-                                  .payload = make_test_payload(0ULL),
-                                  .child_nodes = {child}}});
+  auto root_id =
+      register_token(registry,
+                     AuthToken{.mint_address = make_test_address(1),
+                               .expiry_height = 100,
+                               .root_node = AuthTokenNode{
+                                   .consumer_address = make_test_address(2),
+                                   .payload = make_test_payload(0ULL),
+                                   .child_nodes = {child}}});
   ASSERT_TRUE(root_id.has_value());
-  AuthSubtoken const *root = registry.lookup_auth_token(root_id.value());
+  RegisteredAuthToken const *root = registry.lookup_auth_token(root_id.value());
   ASSERT_NE(root, nullptr);
-  ASSERT_EQ(root->children().size(), 1U);
+  ASSERT_EQ(root->node->children.size(), 1U);
 
   // Each unwrapped id is the node inside its parent, not a copy of it.
   auto child_unwrap = registry.unwrap_auth_token(root_id.value());
   ASSERT_TRUE(child_unwrap.has_value());
-  AuthSubtoken const *child_subtoken =
+  RegisteredAuthToken const *child_subtoken =
       registry.lookup_auth_token(child_unwrap->new_token_id_start);
-  ASSERT_EQ(child_subtoken, root->children()[0].get());
+  ASSERT_EQ(child_subtoken->node.get(), root->node->children.nodes()[0].get());
 
   auto grandchild_unwrap =
       registry.unwrap_auth_token(child_unwrap->new_token_id_start);
   ASSERT_TRUE(grandchild_unwrap.has_value());
-  AuthSubtoken const *grandchild_subtoken =
+  RegisteredAuthToken const *grandchild_subtoken =
       registry.lookup_auth_token(grandchild_unwrap->new_token_id_start);
-  ASSERT_EQ(grandchild_subtoken, child_subtoken->children()[0].get());
+  ASSERT_EQ(grandchild_subtoken->node.get(),
+            child_subtoken->node->children.nodes()[0].get());
 
   // Every node carries the token's mint address and expiry.
   ASSERT_EQ(grandchild_subtoken->mint_address, make_test_address(1));
   ASSERT_EQ(grandchild_subtoken->expiry_height, 100);
-  ASSERT_EQ(grandchild_subtoken->consumer_address, make_test_address(4));
-  ASSERT_EQ(grandchild_subtoken->payload, make_test_payload(2ULL));
-  ASSERT_TRUE(grandchild_subtoken->children().empty());
+  ASSERT_EQ(grandchild_subtoken->node->consumer_address, make_test_address(4));
+  ASSERT_EQ(grandchild_subtoken->node->payload, make_test_payload(2ULL));
+  ASSERT_TRUE(grandchild_subtoken->node->children.empty());
 }
 
 // Pins the exact id-allocation contract that issue #2543 flagged (and that is
@@ -213,7 +224,7 @@ TEST(AuthTokenRegistryTest, UnwrapAndRegisterShareOneMonotonicIdSpace)
 
   // Root token gets id 0.
   auto root_id =
-      registry.register_auth_token(token_with_children({leaf(3), leaf(4)}));
+      register_token(registry, token_with_children({leaf(3), leaf(4)}));
   ASSERT_TRUE(root_id.has_value());
   ASSERT_EQ(root_id.value(), 0U);
 
@@ -226,7 +237,7 @@ TEST(AuthTokenRegistryTest, UnwrapAndRegisterShareOneMonotonicIdSpace)
 
   // A register issued after the unwrap continues from the advanced counter and
   // gets id 3 -- it does not reuse or collide with child ids 1 and 2.
-  auto mid_id = registry.register_auth_token(token_with_children({}));
+  auto mid_id = register_token(registry, token_with_children({}));
   ASSERT_TRUE(mid_id.has_value());
   ASSERT_EQ(mid_id.value(), 3U);
 
@@ -239,7 +250,7 @@ TEST(AuthTokenRegistryTest, UnwrapAndRegisterShareOneMonotonicIdSpace)
 
   // The idempotent re-unwrap left the counter untouched, so the next register
   // is id 4 -- immediately after mid_id, with no gap for re-allocated children.
-  auto next_id = registry.register_auth_token(token_with_children({}));
+  auto next_id = register_token(registry, token_with_children({}));
   ASSERT_TRUE(next_id.has_value());
   ASSERT_EQ(next_id.value(), 4U);
 }

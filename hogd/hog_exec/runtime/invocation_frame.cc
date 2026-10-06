@@ -549,7 +549,7 @@ InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
   return get_item_view(frame_item_key(data_key));
 }
 
-AuthSubtoken const *
+RegisteredAuthToken const *
 InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
 {
   assert(!frame_stack_.empty());
@@ -562,13 +562,16 @@ InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
 }
 
 SyscallStatus<uint32_t>
-InvocationFrameStack::mint_auth_token(AuthToken auth_token)
+InvocationFrameStack::mint_auth_token(ContractAddress const &mint_address,
+                                      BlockHeight expiry_height,
+                                      Rc<AuthSubtoken> root)
 {
   if (frame_stack_.empty()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   auto token_id =
-      auth_token_registry_.register_auth_token(std::move(auth_token));
+      auth_token_registry_.register_auth_token(mint_address, expiry_height,
+                                               std::move(root));
   if (!token_id.has_value()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -586,7 +589,7 @@ InvocationFrameStack::consume_auth_token(uint32_t token_id)
   auto const *token = auth_token_registry_.lookup_auth_token(token_id);
   CHECK_PTR(token);
 
-  if (token->consumer_address != frame_stack_.back().address()) {
+  if (token->node->consumer_address != frame_stack_.back().address()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -602,7 +605,7 @@ InvocationFrameStack::consume_auth_token(uint32_t token_id)
   frame_stack_.back().remove_auth_tokens(
       std::span<uint32_t const>{&token_id, 1});
 
-  return ConsumeAuthTokenResult{.payload = &token->payload,
+  return ConsumeAuthTokenResult{.payload = &token->node->payload,
                                 .mint_address = &token->mint_address,
                                 .new_token_id_start =
                                     unwrap_result->new_token_id_start,

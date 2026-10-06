@@ -4,15 +4,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "auth_token.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -25,7 +27,6 @@
 #include "types.hh"
 #include "view.hh"
 #include "x23/async.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -70,13 +71,13 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
 
   // Forwarded tokens arrive serialized; decode them under the chain's depth
   // limit, as MintAuthToken decodes the tokens it mints.
-  std::vector<AuthToken> forwarded_tokens;
+  std::vector<std::tuple<ContractAddress, BlockHeight, Rc<AuthSubtoken>>>
+      forwarded_tokens;
   try {
     for (auto const &bytes : query.forwarded_tokens) {
-      x23::deserialize(
-          &forwarded_tokens.emplace_back(),
-          x23::BufView{bytes.data(), bytes.size()},
-          size_t{syscall_handler.config_params().max_auth_token_depth});
+      forwarded_tokens.push_back(decode_auth_token(
+          std::as_bytes(std::span(bytes.data(), bytes.size())),
+          size_t{syscall_handler.config_params().max_auth_token_depth}));
     }
   } catch (x23::XdrException const &) {
     ExpectedViewResult result(TransactionViewStatus::InvalidInput);
@@ -93,8 +94,9 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   std::vector<uint32_t> forwarded_token_ids;
   forwarded_token_ids.reserve(forwarded_tokens.size());
 
-  for (auto &token : forwarded_tokens) {
-    auto token_id = syscall_handler.mint_auth_token(std::move(token));
+  for (auto &[mint_address, expiry_height, root] : forwarded_tokens) {
+    auto token_id = syscall_handler.mint_auth_token(mint_address, expiry_height,
+                                                    std::move(root));
     if (!token_id.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }

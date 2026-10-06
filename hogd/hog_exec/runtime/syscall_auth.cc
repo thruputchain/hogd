@@ -12,8 +12,10 @@
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
@@ -143,9 +145,6 @@ syscall_MintAuthToken_inner(
     std::span<const std::byte> input_serialized_auth_token,
     uint32_t &output_token_id)
 {
-  AuthToken auth_token{.mint_address = syscall_handler.get_current_address(),
-                       .expiry_height = input_expiry_height};
-
   // Check expiry height is in the future
   if (input_expiry_height < syscall_handler.get_block_height()) {
     return SyscallInnerResult{
@@ -154,18 +153,20 @@ syscall_MintAuthToken_inner(
   }
 
   // The wire type does not bound depth; decode under the chain's limit.
+  Rc<AuthSubtoken> root;
   try {
-    x23::deserialize(&auth_token.root_node,
-                     x23::BufView{input_serialized_auth_token},
-                     size_t{
-                         syscall_handler.config_params().max_auth_token_depth});
+    root = decode_auth_subtoken(
+        input_serialized_auth_token,
+        size_t{syscall_handler.config_params().max_auth_token_depth});
   } catch (x23::XdrException &e) {
     return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};
   }
 
-  auto status = syscall_handler.mint_auth_token(std::move(auth_token));
+  auto status =
+      syscall_handler.mint_auth_token(syscall_handler.get_current_address(),
+                                      input_expiry_height, std::move(root));
   if (!status) {
     return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }

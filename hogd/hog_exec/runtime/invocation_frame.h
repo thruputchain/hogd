@@ -19,10 +19,12 @@
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
@@ -441,8 +443,10 @@ public:
     return AddressAndKey{.address = frame_stack_.back().address(), .key = key};
   }
 
-  AuthSubtoken const *lookup_auth_token(uint32_t token_id) const;
-  [[nodiscard]] SyscallStatus<uint32_t> mint_auth_token(AuthToken auth_token);
+  RegisteredAuthToken const *lookup_auth_token(uint32_t token_id) const;
+  [[nodiscard]] SyscallStatus<uint32_t>
+  mint_auth_token(ContractAddress const &mint_address,
+                  BlockHeight expiry_height, Rc<AuthSubtoken> root);
 
   // payload and mint_address point into the registry, which keeps every token
   // for the rest of the transaction.

@@ -21,9 +21,11 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/container/flat_key_set.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -434,7 +436,9 @@ public:
   set_address_required_weight(Weight required_weight);
 
   // Auth token syscalls
-  [[nodiscard]] SyscallStatus<uint32_t> mint_auth_token(AuthToken auth_token);
+  [[nodiscard]] SyscallStatus<uint32_t>
+  mint_auth_token(ContractAddress const &mint_address,
+                  BlockHeight expiry_height, Rc<AuthSubtoken> root);
   [[nodiscard]] SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
