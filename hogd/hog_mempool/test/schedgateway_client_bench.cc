@@ -149,9 +149,8 @@ struct Account {
   Ed25519SecretKey secret;
 };
 
-// hog-devnode is bootstrapped from the public allocations this benchmark
-// emits, and never sees a signer. The seed stays here so [emit_manifest] and
-// [accounts_from_manifest] derive the same keys in the same build.
+// Shared seed so [emit_manifest] and [accounts_from_manifest] derive the
+// same keys.
 constexpr std::string_view kBootstrapSeed = "schedgateway-bench-accounts";
 
 // Write the public bootstrap intent hog-devnode needs for a run of

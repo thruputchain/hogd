@@ -60,9 +60,8 @@ def main():
                 "cpuCount": os.cpu_count(), "backendWorkers": args.workers,
                 "accounts": args.accounts, "ramdbBytes": 2147483648}
     (output / "host.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    # hog-devnode is bootstrapped from explicit public allocations and never
-    # sees a signer, so the benchmark emits the allocations for the accounts it
-    # holds the keys to and re-derives those keys when it runs.
+    # Emit the public allocations hog-devnode bootstraps from; the benchmark
+    # re-derives the keys.
     bootstrap = output / "bootstrap.json"
     subprocess.run([str(bench_bin), "--emit-bootstrap-manifest",
                     str(bootstrap), str(args.accounts)], env=env, check=True)
