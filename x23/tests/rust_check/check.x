@@ -2,6 +2,7 @@
 // generates Rust from this and type-checks it with the uses in src/lib.rs.
 
 const MAX_BATCH = 4;
+const SIG_SIZE = 64;
 
 enum Status {
   OK = 0,
@@ -15,7 +16,9 @@ struct Tx {
   unsigned hyper seq;
   opaque memo<16>;
   string note<32>;
-  Hash digest;
+  Hash hash;
+  opaque digest[32];
+  opaque sig[SIG_SIZE];
 };
 
 typedef Tx TxBatch<MAX_BATCH>;
