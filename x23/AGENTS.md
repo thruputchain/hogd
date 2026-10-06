@@ -49,6 +49,8 @@ ctest --test-dir build --output-on-failure --parallel  # run tests only
 
 Tests live in `tests/`. The `add_x23_test(name)` CMake macro creates `test_<name>` from `<name>.cc`, linked against libx23 and the xdrtest XDR library. GTest-based tests use `add_x23_gtest(name)` and require googletest (auto-detected from git submodules).
 
+x23c's Rust output is checked outside ctest, since it needs cargo and the groundhog registry: `tests/rust_check/check.sh build/x23c/x23c` generates Rust from `tests/rust_check/check.x` and runs `cargo check` on it. CI runs it (`x23c_rust_check.yml`) when x23c changes.
+
 ## Code generation
 
 XDR files (`.x`) are compiled by x23c into `.hh` headers:

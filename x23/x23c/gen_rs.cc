@@ -525,10 +525,8 @@ impl {0}_{1}_Client {{
     }}
 )",
         prog_name, vers.id, prog_id, vers.val);
-  // Scalars are passed by value.  Anything else is borrowed as any type that
-  // encodes like it, so callers can send from borrowed or shared storage (e.g.
-  // a slice of Arcs where the wire type is a vector) instead of building an
-  // owned copy.  ?Sized admits slices.
+  // Scalars go by value; anything else is borrowed as any type that encodes
+  // like it.  ?Sized admits slices, e.g. of Arcs where the wire type is a Vec.
   auto arg_type = [](const string &type) -> string {
     const static std::set<string_view> scalar_types = {"hyper",
                                                        "unsigned hyper", "bool",
