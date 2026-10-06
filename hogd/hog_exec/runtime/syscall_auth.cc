@@ -165,7 +165,7 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
-  auto status = syscall_handler.mint_auth_token(auth_token);
+  auto status = syscall_handler.mint_auth_token(std::move(auth_token));
   if (!status) {
     return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }

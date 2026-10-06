@@ -93,8 +93,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   std::vector<uint32_t> forwarded_token_ids;
   forwarded_token_ids.reserve(forwarded_tokens.size());
 
-  for (auto const &token : forwarded_tokens) {
-    auto token_id = syscall_handler.mint_auth_token(token);
+  for (auto &token : forwarded_tokens) {
+    auto token_id = syscall_handler.mint_auth_token(std::move(token));
     if (!token_id.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }

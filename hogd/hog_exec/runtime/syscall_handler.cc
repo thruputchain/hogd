@@ -2462,9 +2462,9 @@ SystemCallHandler::get_block_timepoint() const
 // == Auth token syscalls ==
 
 SyscallStatus<uint32_t>
-SystemCallHandler::mint_auth_token(AuthToken const &auth_token)
+SystemCallHandler::mint_auth_token(AuthToken auth_token)
 {
-  return invocation_frame_stack_.mint_auth_token(auth_token);
+  return invocation_frame_stack_.mint_auth_token(std::move(auth_token));
 }
 
 SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>

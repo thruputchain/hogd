@@ -434,8 +434,7 @@ public:
   set_address_required_weight(Weight required_weight);
 
   // Auth token syscalls
-  [[nodiscard]] SyscallStatus<uint32_t>
-  mint_auth_token(AuthToken const &auth_token);
+  [[nodiscard]] SyscallStatus<uint32_t> mint_auth_token(AuthToken auth_token);
   [[nodiscard]] SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 

@@ -441,10 +441,11 @@ public:
     return AddressAndKey{.address = frame_stack_.back().address(), .key = key};
   }
 
-  AuthToken const *lookup_auth_token(uint32_t token_id) const;
-  [[nodiscard]] SyscallStatus<uint32_t>
-  mint_auth_token(AuthToken const &auth_token);
+  AuthSubtoken const *lookup_auth_token(uint32_t token_id) const;
+  [[nodiscard]] SyscallStatus<uint32_t> mint_auth_token(AuthToken auth_token);
 
+  // payload and mint_address point into the registry, which keeps every token
+  // for the rest of the transaction.
   struct ConsumeAuthTokenResult {
     AuthTokenPayload const *payload;
     ContractAddress const *mint_address;
