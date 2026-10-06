@@ -392,11 +392,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
 
 TEST_F(InvocationFrameTest, ChildFramesShareParentBytestring)
 {
-  // #4303: a write committed into the root frame, then fresh sibling frames
-  // that each touch the key without reading the value, as GetStorageFlags and
-  // ClearStorageFlags do. Each sibling's first touch copies the root's view
-  // into the sibling. That copy must share the bytestring, not copy it: the
-  // syscall's gas does not depend on the bytestring's size.
+  // #4303: a sibling frame's first touch must share the root's bytestring.
   AddressAndKey const addrkey{.address = make_test_address(1),
                               .key = StorageKey(StorageKeyType::ContractData)};
   Bytestring const payload(32'768, 0x5a);

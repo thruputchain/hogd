@@ -434,9 +434,7 @@ TEST_F(ItemViewTest, FrameCopiesCarryFlags)
 
 TEST_F(ItemViewTest, FrameCopiesShareBytestring)
 {
-  // A frame's copy of its parent's view must not copy the bytestring, or a
-  // metadata-only syscall in a fresh frame would copy an arbitrarily large
-  // payload for fixed gas (#4303).
+  // #4303: a frame's copy of its parent's view shares the bytestring.
   Bytestring const payload(4096, 0x5a);
   ItemView parent;
   ASSERT_TRUE(parent.set(BytestringItem(payload)));
@@ -458,10 +456,8 @@ TEST_F(ItemViewTest, FrameCopiesShareBytestring)
 
 TEST_F(ItemViewTest, FrameCopiesOfAuthDataChangeIndependently)
 {
-  // A key change goes through the pointer get() returns, in the child frame's
-  // copy of the item. It must not show through the parent's copy, or the
-  // change would survive the child frame reverting. (So, unlike a
-  // BytestringItem, an AddressAuthDataItem cannot simply share its state.)
+  // Auth-data changes go through a mutable pointer, so copies must not share
+  // state (unlike BytestringItem).
   ItemView parent;
   AddressAuthDataItem item;
   item.change_public_key(0, PublicKeyConfigOpt{});

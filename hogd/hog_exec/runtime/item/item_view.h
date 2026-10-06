@@ -41,10 +41,6 @@ class StorageSnapshotCache;
 //   The type of the item view.
 
 // Representing the internal state of a bytestring item.
-//
-// Copies of the item share the bytes. A frame's first touch of a key copies the
-// parent frame's ItemView into the frame, and that copy must not cost a copy of
-// a bytestring up to max_bytestring_len long.
 class BytestringItem {
 public:
   explicit BytestringItem(std::span<const uint8_t> bytes) : bytes_(bytes) {}
@@ -57,9 +53,8 @@ public:
   constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
 
 private:
-  // Sharing is safe because the bytes never change: ItemView::get() returns
-  // only a const BytestringItem*, and a new value replaces the whole item
-  // through ItemView::set().
+  // Frame copies share the bytes (#4303). Safe: they are never changed in
+  // place.
   RcBytes bytes_;
 };
 

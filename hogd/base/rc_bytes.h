@@ -10,12 +10,8 @@
 
 namespace hogd {
 
-// RcBytes is an immutable byte string with a non-atomic reference count, held
-// in one allocation: the count and the length sit just before the bytes.
-// Copying an RcBytes shares the bytes.
-//
-// As with Rc, every RcBytes that shares a buffer must be used by only one
-// thread at a time.
+// Immutable bytes with a non-atomic reference count, in one allocation. Copies
+// share the bytes, so all of them must stay on one thread at a time.
 class RcBytes {
 public:
   // An empty RcBytes, which allocates nothing.

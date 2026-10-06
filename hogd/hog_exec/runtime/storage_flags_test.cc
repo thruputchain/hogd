@@ -74,7 +74,16 @@ enum TokenMethod : Runtime::MethodID {
   kConsumeExpecting = 12, // RetrocausalQueueConsume(k) must return [arg]
   kWriteOther = 13,       // BytestringSet(c, [arg])
   kClearWriteOther = 14,  // ClearStorageFlags(k), BytestringSet(c, [arg])
+  kWriteObserved = 15,    // kWrite, then observe_bytes()
+  kFlagsObserved = 16,    // the FlagsSyscall [arg] on k, then observe_bytes()
 };
+
+// The storage flags syscall kFlagsObserved makes.
+enum class FlagsSyscall : uint8_t { kGet, kSet, kClear };
+
+// Where the active frame's bytes for k live, as each observe_bytes() found
+// them. A copy of the bytes shows up as a new address.
+std::vector<uint8_t const *> observed_bytes;
 
 uint8_t
 calldata_arg(NativeSyscallContext &ctx)
@@ -165,6 +174,40 @@ clear(NativeSyscallContext &ctx)
     co_return false;
   }
   co_return true;
+}
+
+x23::Async<bool>
+observe_bytes(NativeSyscallContext &ctx)
+{
+  auto key = NativeContractTestFramework::make_storage_key(kKey);
+  auto read = co_await ctx.handler().get_bytestring(key);
+  if (!read.has_value() || !read.value().result.has_value()) {
+    ADD_FAILURE() << "get_bytestring failed";
+    co_return false;
+  }
+  observed_bytes.push_back(read.value().result.value().data());
+  co_return true;
+}
+
+x23::Async<bool>
+flags_syscall(NativeSyscallContext &ctx, FlagsSyscall syscall)
+{
+  switch (syscall) {
+  case FlagsSyscall::kGet:
+  {
+    auto key = NativeContractTestFramework::make_storage_key(kKey);
+    StorageDeltaFlagSet flags = kNoFlags;
+    auto res = co_await ctx.syscall<SyscallNo::kGetStorageFlags>(key, flags);
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+  }
+  case FlagsSyscall::kSet:
+    co_return co_await lock(ctx);
+  case FlagsSyscall::kClear:
+    co_return co_await clear(ctx);
+  }
+  ADD_FAILURE() << "unknown FlagsSyscall";
+  co_return false;
 }
 
 InvokeStatus<void>
@@ -298,6 +341,18 @@ make_token()
                 co_return ok_or_fail(
                     co_await clear(ctx) &&
                     co_await write(ctx, calldata_arg(ctx), kOtherKey));
+              });
+  fns.emplace(kWriteObserved,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                co_return ok_or_fail(co_await write(ctx, calldata_arg(ctx)) &&
+                                     co_await observe_bytes(ctx));
+              });
+  fns.emplace(kFlagsObserved,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                co_return ok_or_fail(
+                    co_await flags_syscall(ctx, static_cast<FlagsSyscall>(
+                                                    calldata_arg(ctx))) &&
+                    co_await observe_bytes(ctx));
               });
   return std::make_unique<NativeContract>(std::move(fns));
 }
@@ -646,6 +701,28 @@ TEST_F(StorageFlagsTest, UnlockedWriteLeavesOtherWritersIn)
   EXPECT_EQ(write_from_another_transaction(1), ExecResult::ExecResultOK);
   advance_block();
   EXPECT_EQ(stored_value(), 1);
+}
+
+// #4303: a flags syscall in a fresh token frame copies the root's view of k
+// into that frame, and must share the bytestring rather than copy it.
+TEST_F(StorageFlagsTest, FlagsSyscallsDoNotCopyTheBytestring)
+{
+  observed_bytes.clear();
+  auto flags_step = [](FlagsSyscall syscall) {
+    return Step{.method = kFlagsObserved, .arg = std::to_underlying(syscall)};
+  };
+  EXPECT_EQ(run_script({
+                {.method = kWriteObserved, .arg = 1},
+                flags_step(FlagsSyscall::kGet),
+                flags_step(FlagsSyscall::kSet),
+                flags_step(FlagsSyscall::kClear),
+            }),
+            kNoFlags);
+
+  ASSERT_EQ(observed_bytes.size(), 4U);
+  for (size_t i = 1; i < observed_bytes.size(); ++i) {
+    EXPECT_EQ(observed_bytes[i], observed_bytes[0]) << "token frame " << i;
+  }
 }
 
 // A TryInvoke that returns pushes its frame's changes, flags included, before
