@@ -11,6 +11,7 @@
 #include <ios>
 #include <iterator>
 #include <latch>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <print>
@@ -40,6 +41,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/block_driver.h"
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/init.h"
@@ -147,32 +149,82 @@ struct Account {
   Ed25519SecretKey secret;
 };
 
+// hog-devnode is bootstrapped from the public allocations this benchmark
+// emits, and never sees a signer. The seed stays here so [emit_manifest] and
+// [accounts_from_manifest] derive the same keys in the same build.
+constexpr std::string_view kBootstrapSeed = "schedgateway-bench-accounts";
+
+// Write the public bootstrap intent hog-devnode needs for a run of
+// [accounts] signing accounts, which [accounts_from_manifest] then re-derives.
+void
+emit_manifest(const char *path, std::uint32_t accounts)
+{
+  std::string output;
+  json::Writer(output).object([&](json::Writer &w) {
+    w.field("schemaVersion", std::int64_t{4});
+    w.field("kind", "groundhog-bootstrap");
+    w.field("networkHash", std::string(64, '0'));
+    w.field("profile", "local-dev");
+    w.object_field("bootstrapFaucet", [&](json::Writer &w) {
+      w.field("publicKey",
+              hex_string(
+                  derive_bootstrap_account_keypair(kBootstrapSeed, 0).first));
+      w.field("initialStorageTokens",
+              std::to_string(kLocalFaucetStorageTokens));
+    });
+    w.array_field("bootstrapAccounts", [&](json::Writer &w) {
+      for (std::uint32_t i = 1; i <= accounts; ++i) {
+        w.object([&](json::Writer &w) {
+          w.field("publicKey",
+                  hex_string(derive_bootstrap_account_keypair(kBootstrapSeed, i)
+                                 .first));
+          w.field("initialStorageTokens",
+                  std::to_string(kDefaultLocalUserStorageTokens));
+        });
+      }
+    });
+    w.object_field("storageCostModel", [&](json::Writer &w) {
+      w.field("profile", "hogd-default");
+    });
+  });
+  std::ofstream out(path, std::ios::out | std::ios::noreplace);
+  require(out.good(), "cannot create bootstrap manifest");
+  out << output << '\n';
+  out.close();
+  require(out.good(), "cannot write bootstrap manifest");
+}
+
 std::vector<Account>
 accounts_from_manifest(const json::Value &manifest)
 {
-  const auto &derivation = field(manifest, "bootstrapAccountDerivation");
-  require(str(field(derivation, "scheme")) == "groundhog-bootstrap-account-v1",
-          "unsupported bootstrap account derivation");
-  const auto seed = str(field(derivation, "seed"));
+  // The runtime manifest carries only public allocations, so recover each
+  // signer by re-deriving this run's keys and matching on the public key.
+  const auto allocations = field(manifest, "bootstrapAccounts").as_array();
+  const auto is_local_user = [](const json::Value &account) {
+    return str(field(account, "role")) == "local_user";
+  };
+  const auto local_users = std::ranges::count_if(allocations, is_local_user);
+  std::map<Ed25519PublicKey, Ed25519SecretKey> signers;
+  for (std::uint32_t i = 1; std::cmp_less_equal(i, local_users); ++i) {
+    auto [public_key, secret] =
+        derive_bootstrap_account_keypair(kBootstrapSeed, i);
+    signers.emplace(public_key, secret);
+  }
   std::vector<Account> accounts;
-  for (const auto &account : field(manifest, "bootstrapAccounts").as_array()) {
-    if (str(field(account, "role")) != "local_user")
+  for (const auto &account : allocations) {
+    if (!is_local_user(account))
       continue;
-    const auto index = field(account, "index").as_integer();
-    if (!index || *index < 1 ||
-        !std::cmp_less_equal(*index, kMaxBootstrapAccounts))
-      throw std::runtime_error("invalid bootstrap account index");
-    auto [public_key, secret] = derive_bootstrap_account_keypair(seed, *index);
-    require(public_key ==
-                hex_value<Ed25519PublicKey>(field(account, "publicKey")),
-            "bootstrap public key mismatch");
+    auto public_key = hex_value<Ed25519PublicKey>(field(account, "publicKey"));
+    auto signer = signers.find(public_key);
+    require(signer != signers.end(), "bootstrap account is not ours to sign");
     accounts.push_back(
         {.address = hex_value<ContractAddress>(field(account, "walletAddress")),
          .public_key = public_key,
-         .secret = secret});
+         .secret = signer->second});
   }
   require(accounts.size() >= 2,
-          "start a fresh devnode with --dev-accounts >= 2");
+          "devnode must be bootstrapped from an emitted manifest of >= 2 "
+          "accounts");
   return accounts;
 }
 
@@ -404,13 +456,29 @@ write_result(const char *path, const Config &config,
 int
 run_benchmark(int argc, char **argv)
 {
+  if (argc == 4 && std::string_view(argv[1]) == "--emit-bootstrap-manifest") {
+    try {
+      // Key derivation runs through the crypto subsystem, same as a run.
+      if (hogd_init(argc, argv, false, LogLevel::kError))
+        return 2;
+      emit_manifest(argv[2], static_cast<std::uint32_t>(
+                                 number(argv[3], static_cast<int>(
+                                                     kMaxBootstrapAccounts))));
+      return 0;
+    } catch (const std::exception &e) {
+      std::println(stderr, "{}", e.what());
+      return 1;
+    }
+  }
   if (argc < 3 || argc > 8) {
     std::println(
         stderr,
-        "Usage: {} MANIFEST OUTPUT [CONNECTIONS=4 [SECONDS=5 [WARMUP=1 "
+        "Usage: {0} MANIFEST OUTPUT [CONNECTIONS=4 [SECONDS=5 [WARMUP=1 "
         "[TRANSACTIONS=60000 [BLOCK_MS=500]]]]]\n"
-        "Uses a fresh hog-devnode and submits native-token transfers. "
-        "Run under a process timeout.",
+        "       {0} --emit-bootstrap-manifest OUTPUT ACCOUNTS\n"
+        "Uses a fresh hog-devnode bootstrapped from the manifest the second "
+        "form emits, and submits native-token transfers. Run under a process "
+        "timeout.",
         argv[0]);
     return 2;
   }
@@ -426,7 +494,7 @@ run_benchmark(int argc, char **argv)
     if (hogd_init(argc, argv, false, LogLevel::kError))
       return 2;
     auto manifest = read_manifest(argv[1]);
-    require(field(manifest, "schemaVersion").as_integer() == 3 &&
+    require(field(manifest, "schemaVersion").as_integer() == 4 &&
                 str(field(manifest, "kind")) == "hogd-dev-runtime" &&
                 str(field(manifest, "chainState")) == "fresh",
             "requires a fresh hog-devnode runtime manifest");
