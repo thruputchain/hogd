@@ -534,7 +534,7 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
         .error_source =
             SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
         .error_code = 0,
-        .height = 0,
+        .height = current_block(),
     };
   }
   co_return SchedulerTransactionOutcome{

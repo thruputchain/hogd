@@ -227,7 +227,14 @@ TEST(Scheduler, LatestFailedTransactionOutcomeWins)
   EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().status,
             SchedulerTransactionStatus::SchedulerTransactionPending);
 
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().height, 0);
+
   scheduler->set_current_block(43);
+  const SchedulerTransactionOutcome pending =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(pending.status,
+            SchedulerTransactionStatus::SchedulerTransactionPending);
+  EXPECT_EQ(pending.height, 43);
   const TransactionHashBatch tx_hashes{tx_hash};
   scheduler->remove_from_scheduler(
       x23::span<const TransactionHash>(tx_hashes))();
