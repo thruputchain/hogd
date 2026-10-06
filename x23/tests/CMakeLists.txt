@@ -207,3 +207,10 @@ add_test(NAME rust_serde_hex
     "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/rust-serde-hex-test"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/rust_serde_hex.cmake")
 set_tests_properties(rust_serde_hex PROPERTIES TIMEOUT 30)
+
+add_test(NAME rust_client_args
+  COMMAND ${CMAKE_COMMAND}
+    "-DX23C=${X23C_EXECUTABLE}"
+    "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/rust-client-args-test"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/rust_client_args.cmake")
+set_tests_properties(rust_client_args PROPERTIES TIMEOUT 30)
