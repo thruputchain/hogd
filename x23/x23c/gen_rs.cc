@@ -147,7 +147,8 @@ struct GenRs {
   void show_server_dispatch(VersDef const &vers, std::string const &prog_name,
                             std::string const &prog_id);
 
-  void show_decl(const Declaration &d, string const &name_prefix)
+  void show_decl(const Declaration &d, string const &name_prefix,
+                 bool derives_schema)
   {
     if (d.qual == Declaration::kVoid) {
       return;
@@ -155,10 +156,22 @@ struct GenRs {
 
     show_comment(d.comment, false);
 
-    if (get_opaque_array_size(d).has_value()) {
+    if (optional<string> size = get_opaque_array_size(d)) {
       // type is a byte array
       prtop("{}", feature_attr("serde", "serde(with = "
                                         "\"xdr_common::serde_hex\")"));
+      // schemars takes serde(with) to name a type to borrow the schema from,
+      // so describe the hex string itself, as the newtype impl does.
+      if (derives_schema) {
+        prtop("{}",
+              feature_attr(
+                  "schema",
+                  std::format(R"(schemars(with = "String", )"
+                              R"(length(equal = 2 * ({} as usize)), )"
+                              R"(extend("contentEncoding" = "hex", )"
+                              R"("contentMediaType" = "application/binary")))",
+                              *size)));
+      }
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -650,7 +663,7 @@ GenRs::show_type(const StructBody &s, string const &tname, RustMarkers markers)
       scopes_.push_back(tname);
 
       for (const auto &d : s) {
-        show_decl(d, tname);
+        show_decl(d, tname, !array_size);
       }
     }
 
