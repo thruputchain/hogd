@@ -164,19 +164,19 @@ TEST(HogDbGatewayRpcTest, ConfigWaitsForPublishedTipAndPrices)
       std::make_unique<RPCContext::CommitPublicationGuard>(ctx, BlockTXID{0});
 
   auto pending = gateway.dbgateway_get_config();
-  EXPECT_FALSE(pending.await_ready());
+  EXPECT_FALSE(pending.operator co_await().await_ready());
 
   // Publish genesis while the read is suspended. Neither the pre-genesis tip
   // nor the missing cost model may be returned before publication finishes.
   const auto costs = StorageCostModel::default_cost_model();
-  ASSERT_TRUE(ctx.get_db().write_cost_model(costs));
+  EXPECT_TRUE(ctx.get_db().write_cost_model(costs));
   DbTip tip{};
   tip.id = BlockTXID{0};
   tip.value.proposal_header.block_height = BlockHeight{0};
   tip.value.proposal_header.config_hash[0] = 42;
   tip.network_config.v(0);
   ctx.set_tip(tip);
-  EXPECT_FALSE(pending.await_ready());
+  EXPECT_FALSE(pending.operator co_await().await_ready());
   publication_guard.reset();
 
   const auto result = pending();
