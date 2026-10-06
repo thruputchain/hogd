@@ -708,14 +708,6 @@ TEST(RecoveryTests, RecoveredCorruptRCQMetadataDiesOnFirstTouch)
       "corrupt persisted state under key");
 }
 
-// Regression test for issue #3695: ReplayCacheMetadata persists the total live
-// nonce count as a signed hyper, but replay-cache storage-cost pricing takes a
-// size_t and multiplies it by a recovered coefficient in signed int128_t. A
-// CRC-valid recovered row with a negative size used to convert to a
-// near-SIZE_MAX size_t and overflow that product on the first replay-cache
-// lock. Admission bounds every legitimate count, so a negative (or over-cap)
-// size is corrupt on-disk state; loading the metadata now rejects it -- in
-// every build, release included -- before any cost arithmetic runs.
 TEST(RecoveryTests, RecoveredNegativeReplayCacheSizeRejectedOnLoad)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
