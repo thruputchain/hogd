@@ -39,10 +39,10 @@ def main():
     parser.add_argument("--accounts", type=int, default=100)
     args = parser.parse_args()
     for key, low, limit in (("connections", 1, 64), ("seconds", 1, 60),
-                           ("warmup", 1, 10), ("transactions", 1, 1000000),
-                           ("block_ms", 1, 10000), ("workers", 1, 256),
-                           # A transfer needs a distinct sender and recipient.
-                           ("accounts", 2, 1000)):
+                            ("warmup", 1, 10), ("transactions", 1, 1000000),
+                            ("block_ms", 1, 10000), ("workers", 1, 256),
+                            # A transfer needs a distinct sender and recipient.
+                            ("accounts", 2, 1000)):
         if not low <= getattr(args, key) <= limit:
             parser.error(f"{key} must be between {low} and {limit}")
     build = args.build.resolve()
