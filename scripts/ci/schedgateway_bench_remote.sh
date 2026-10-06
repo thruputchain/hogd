@@ -63,6 +63,9 @@ collect)
     for log in "$LOCAL_OUTPUT"/c*/{client,node}.log; do
       [ -f "$log" ] || continue
       echo "--- $log"
+      # hog-devnode prints a rejected launch's "error:" line ahead of a usage
+      # text that alone fills the tail, so show those lines first.
+      grep -m 5 '^error:' "$log" || true
       tail -n 50 "$log"
     done
     exit "$status"
