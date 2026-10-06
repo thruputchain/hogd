@@ -445,7 +445,8 @@ Scheduler::prune_transaction_outcomes()
 x23::Async<void>
 Scheduler::record_transaction_outcome(
     const TransactionHash &tx_hash, SchedulerTransactionStatus status,
-    SchedulerTransactionErrorSource error_source, int32_t error_code)
+    BlockHeight height, SchedulerTransactionErrorSource error_source,
+    int32_t error_code)
 {
   co_await prune_transaction_outcomes();
 
@@ -483,6 +484,7 @@ Scheduler::record_transaction_outcome(
               .status = status,
               .error_source = error_source,
               .error_code = error_code,
+              .height = height,
           },
       .processed_height = current_block(),
   });
@@ -532,6 +534,7 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
         .error_source =
             SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
         .error_code = 0,
+        .height = 0,
     };
   }
   co_return SchedulerTransactionOutcome{
@@ -539,6 +542,7 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
       .error_source =
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
       .error_code = 0,
+      .height = 0,
   };
 }
 
@@ -643,6 +647,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
           co_await scheduler.record_transaction_outcome(
               tx_hashes[tx_idx],
               /*status=*/SchedulerTransactionStatus::SchedulerTransactionRetry,
+              scheduler.current_block(),
               /*error_source=*/
               SchedulerTransactionErrorSource::
                   SchedulerTransactionErrorScheduler,
@@ -1055,6 +1060,7 @@ Scheduler::account_is_ready(const ContractAddress &account,
       const TransactionHash &tx_hash = it->first.tx_hash;
       co_await record_transaction_outcome(
           tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+          current_block(),
           SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
           static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
       // [txs_.remove()] acquires a lock, so the subtraction from
@@ -1151,8 +1157,10 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
              it_remove++) {
           const TransactionHash &tx_hash = it_remove->first.tx_hash;
           co_await record_transaction_outcome(
-              tx_hash, /*status=*/
+              tx_hash,
+              /*status=*/
               SchedulerTransactionStatus::SchedulerTransactionDropped,
+              current_block(),
               /*error_source=*/
               SchedulerTransactionErrorSource::
                   SchedulerTransactionErrorScheduler,
@@ -1231,8 +1239,10 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // the perspective of anyone accessing the tx in [txs_].
           tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
           co_await record_transaction_outcome(
-              tx_hash, /*status=*/
+              tx_hash,
+              /*status=*/
               SchedulerTransactionStatus::SchedulerTransactionDropped,
+              current_block(),
               /*error_source=*/
               SchedulerTransactionErrorSource::
                   SchedulerTransactionErrorScheduler,

@@ -354,6 +354,7 @@ public:
               .error_source = SchedulerTransactionErrorSource::
                   SchedulerTransactionErrorNone,
               .error_code = 0,
+              .height = 0,
           });
       co_return ret;
     }

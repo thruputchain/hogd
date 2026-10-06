@@ -534,8 +534,10 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                 SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
 
             co_await scheduler_->record_transaction_outcome(
-                tx_hash, /*status=*/
+                tx_hash,
+                /*status=*/
                 SchedulerTransactionStatus::SchedulerTransactionRetry,
+                scheduler_->current_block(),
                 /*error_source=*/
                 SchedulerTransactionErrorSource::
                     SchedulerTransactionErrorScheduler,
@@ -3169,8 +3171,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
           for (const TransactionHash &hash :
                nominated_block_cache_.result_tx_hashes) {
             co_await scheduler_->record_transaction_outcome(
-                hash, /*status=*/
+                hash,
+                /*status=*/
                 SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                /*height=*/
+                expected_value.proposal_header.block_height,
                 /*error_source=*/
                 SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
                 /*error_code=*/0);
@@ -3184,6 +3189,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
             co_await scheduler_->record_transaction_outcome(
                 /*tx_hash=*/nominated_block_cache_.failed_tx_hashes[i],
                 /*status=*/transaction_status_for_exec(result),
+                /*height=*/expected_value.proposal_header.block_height,
                 /*error_source=*/
                 SchedulerTransactionErrorSource::
                     SchedulerTransactionErrorExecutor,
@@ -3194,8 +3200,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
           // We committed a block we validated.
           for (const TransactionHash &hash : *remove_from_scheduler) {
             co_await scheduler_->record_transaction_outcome(
-                hash, /*status=*/
+                hash,
+                /*status=*/
                 SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                /*height=*/
+                expected_value.proposal_header.block_height,
                 /*error_source=*/
                 SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
                 /*error_code=*/0);
