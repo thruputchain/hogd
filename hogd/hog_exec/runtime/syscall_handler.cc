@@ -1642,10 +1642,10 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   co_return deploy_addr;
 }
 
-x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
+x23::Async<SystemStatus<StorageRead<std::span<const uint8_t>>>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
-  using Read = StorageRead<const Bytestring *>;
+  using Read = StorageRead<std::span<const uint8_t>>;
 
   const FrameItemKey item_key =
       invocation_frame_stack_.frame_item_key(storage_key);
@@ -1655,7 +1655,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   // Everything up to the load below answers out of the frame stack, so it
   // reaches no database and costs no load gas.
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
-    co_return Read{&bytestring_item->bytestring_, 0};
+    co_return Read{bytestring_item->bytes(), 0};
   }
 
   if (item_view->get<DeletedItem>()) {
@@ -1687,7 +1687,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
           SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
           load_gas};
     }
-    co_return Read{&base_item.bytestring(), load_gas};
+    co_return Read{base_item.bytestring(), load_gas};
   }
 
   co_return Read{SyscallError{
@@ -1709,17 +1709,9 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
-  Bytestring new_string;
-  new_string.resize_uninitialized(input_bytestring.size());
-  if (!input_bytestring.empty()) {
-    assert(new_string.data() != nullptr);
-    assert(input_bytestring.data() != nullptr);
-    std::memcpy(new_string.data(),
-                reinterpret_cast<const uint8_t *>(input_bytestring.data()),
-                input_bytestring.size());
-  }
-
-  co_return item_view->set(BytestringItem(std::move(new_string)));
+  co_return item_view->set(BytestringItem(
+      {reinterpret_cast<const uint8_t *>(input_bytestring.data()),
+       input_bytestring.size()}));
 }
 
 GasAmount
