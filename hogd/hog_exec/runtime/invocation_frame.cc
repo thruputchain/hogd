@@ -11,15 +11,16 @@
 #include <variant>
 #include <vector>
 
-#include "auth_token.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"

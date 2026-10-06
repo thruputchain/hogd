@@ -204,12 +204,12 @@ TEST(AuthSubtokenTest, DecodesMutatedInputsLikeAuthTokenNode)
   size_t accepted = 0;
   for (int i = 0; i < 20'000; ++i) {
     Bytes bytes = encode(tokens[rng() % tokens.size()]);
-    for (int n = rng() % 3 + 1; n > 0 && !bytes.empty(); --n) {
+    for (int n = (rng() % 3) + 1; n > 0 && !bytes.empty(); --n) {
       size_t at = rng() % bytes.size();
       if (rng() % 2) {
         bytes[at] = static_cast<uint8_t>(rng());
       }
-      else if (at / 4 * 4 + 4 <= bytes.size()) {
+      else if ((at / 4 * 4) + 4 <= bytes.size()) {
         // A small value in a whole word, as a length or count would hold.
         put32(bytes, at / 4 * 4, rng() % 8);
       }
@@ -217,7 +217,9 @@ TEST(AuthSubtokenTest, DecodesMutatedInputsLikeAuthTokenNode)
     if (rng() % 4 == 0) {
       bytes.resize(rng() % (bytes.size() + 1));
     }
-    accepted += decode_as_node(bytes, kDepth).has_value();
+    if (decode_as_node(bytes, kDepth).has_value()) {
+      ++accepted;
+    }
     expect_same_decode(bytes);
   }
   // Enough mutations decode for the comparison to cover accepted inputs too.

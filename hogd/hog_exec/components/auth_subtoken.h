@@ -30,6 +30,7 @@ public:
   static constexpr size_t kMaxSize = kAuthTokenMaxChildNodes;
   static constexpr size_t max_size() { return kMaxSize; }
 
+  // NOLINTNEXTLINE(readability-identifier-naming)
   class const_iterator;
 
   AuthSubtokenChildren() = default;
@@ -62,7 +63,7 @@ public:
 
   // The vector interface x23's decoder uses. As with x23::Vec, growing past
   // kMaxSize throws x23::XdrLengthError.
-  void reserve(size_t n) const { check_size(n); }
+  static void reserve(size_t n) { check_size(n); }
   void resize(size_t n);
   void resize_uninitialized(size_t n) { resize(n); }
 
@@ -194,6 +195,7 @@ struct std::tuple_element<I, hogd::AuthSubtoken> {
   using type = decltype(auto(get<I>(hogd::AuthSubtoken{})));
 };
 
+// NOLINTBEGIN(readability-identifier-naming)
 template<> struct x23::xdr_meta<hogd::AuthSubtoken> {
   static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
   static constexpr const char *type_name = "AuthTokenNode";
@@ -207,3 +209,4 @@ template<> struct x23::xdr_meta<hogd::AuthSubtoken> {
 template<> struct x23::xdr_meta<hogd::AuthSubtokenChildren> {
   static constexpr x23::XdrCategory category = x23::XdrCategory::kVec;
 };
+// NOLINTEND(readability-identifier-naming)
