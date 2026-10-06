@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -156,7 +157,9 @@ ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
     }
     auto result = co_await run_view_attempt(call, state.tip, state);
     if (batch_call_finished_test_hook_) {
-      batch_call_finished_test_hook_(batch.payload().results.size(), result);
+      co_await default_threadpool().async(batch_call_finished_test_hook_,
+                                          batch.payload().results.size(),
+                                          std::cref(result));
     }
     switch (result.outcome()) {
     case ViewGatewayOutcome::ViewGatewayAbandoned:

@@ -497,15 +497,6 @@ public:
     gateway.batch_call_finished_test_hook_ = std::move(hook);
   }
 
-  void commit_from_batch_hook(std::string_view value)
-  {
-    // The framework blocks on RPCs, which is forbidden on x23 pool threads.
-    std::thread([&] {
-      commit_bytestring(value);
-      framework_.advance_block();
-    }).join();
-  }
-
   static ViewGatewayBatchQuery batch()
   {
     auto first = normalize_public_view_query(make_read_query());
@@ -769,7 +760,8 @@ TEST_F(ViewGatewayBatchTest, PublicBatchRestartsEveryCallAfterAbandonment)
     if (index == 0 && result.outcome() == ViewGatewayOutcome::ViewGatewayOk) {
       first_results.push_back(result.payload());
       if (first_results.size() == 1) {
-        commit_from_batch_hook("new-value");
+        commit_bytestring("new-value");
+        framework_.advance_block();
       }
     }
   });
@@ -806,7 +798,8 @@ TEST_F(ViewGatewayBatchTest, PublicBatchStopsAfterThreeAbandonedAttempts)
     if (index == 0) {
       ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk);
       heights.push_back(result.payload().height);
-      commit_from_batch_hook(std::format("value-{}", heights.size()));
+      commit_bytestring(std::format("value-{}", heights.size()));
+      framework_.advance_block();
     }
     else {
       EXPECT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayAbandoned);

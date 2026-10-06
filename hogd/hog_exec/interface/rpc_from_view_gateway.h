@@ -61,6 +61,7 @@ public:
 private:
   friend class ViewGatewayBatchTest;
   // Installed before a test request; never changed while a request is running.
+  // Runs outside the pool so synchronous test RPCs cannot block its workers.
   std::function<void(std::size_t, ViewGatewayResult const &)>
       batch_call_finished_test_hook_;
   using ViewDeadline = std::chrono::steady_clock::time_point;
