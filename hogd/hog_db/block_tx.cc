@@ -28,10 +28,10 @@
 #include "hogd/hog_db/item_lock/deletion_lock.h"
 #include "hogd/hog_db/item_lock/pointer_lock.h"
 #include "hogd/hog_db/status.h"
-#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
+#include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -94,6 +94,10 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
   auto snapshot_cost =
       db_.get_charged_storage_cost_and_cache_data(key, &cost_model_);
   if (!snapshot_cost) {
+    // Corrupt persisted state: fail-stop here, with the key, rather than
+    // after the executor round trip in the mempool's Unrecoverable CHECK.
+    if (snapshot_cost.error() == HogDbCode::kCorruption)
+      panic("corrupt persisted state under key {}", key);
     if (snapshot_cost.error() != HogDbCode::kNotFound) {
       return snapshot_cost.error();
     }
@@ -229,7 +233,7 @@ BlockTX::commit_change(const ItemKey &key, ItemChange change)
   return r;
 }
 
-HogDbStatus<std::optional<QueueEntry>>
+HogDbStatus<std::optional<x23::BufView>>
 BlockTX::get_concurrent_rcq_entry(const ItemKey &key, uint32_t index)
 {
   auto *lock = item_locks_.get(key);
@@ -310,7 +314,17 @@ BlockTX::commit(WorkerPool &pool)
   // restart recovers cleanly at the parent block.
   try {
     if (auto r = db_.apply(*changeset_, pool); !r) {
-      return r.error();
+      // An error status has the same no-rollback consequence as an exception:
+      // a failure partway through a multi-key ChangeSet (e.g. an allocator
+      // kNoMemory after an earlier put is already live) leaves a prefix of this
+      // block's writes in the DAO while the published DbTip stays at the
+      // parent. Returning the error would let a later block close from that
+      // stale parent and compute a hash inconsistent with the live DAO (issue
+      // #3930). Fail stop just like the handlers below; a throw while panic()
+      // formats is caught by them and still terminates.
+      panic("BlockTX::commit(): db_.apply() failed ({}); RAMDB has no rollback "
+            "and may be ahead of the published DB tip",
+            r.error());
     }
     changeset_.reset();
 
@@ -326,10 +340,13 @@ BlockTX::commit(WorkerPool &pool)
           if (v.first.is_address_auth_data()) {
             if (auto const *inner =
                     v.second.get_inner<PointerLock<AuthLock>>()) {
-              key_changes->emplace_back(
-                  v.first.to_contract_address(),
-                  x23::Ptr<AddressAuthData>(new AddressAuthData(
-                      inner->get()->build_result(block_height_))));
+              // A lock that wrote no row changed nothing auth can see.
+              if (inner->get()->writes_row()) {
+                key_changes->emplace_back(
+                    v.first.to_contract_address(),
+                    x23::Ptr<AddressAuthData>(new AddressAuthData(
+                        inner->get()->build_result(block_height_))));
+              }
             }
             else if (v.second.get_inner<DeletionLock>()) {
               key_changes->emplace_back(v.first.to_contract_address(), nullptr);
@@ -395,13 +412,13 @@ BlockTX::commit(WorkerPool &pool)
 }
 
 HogDbStatus<void>
-BlockTX::close_skip_hash_for_testing()
+BlockTX::close_skip_hash_for_testing(WorkerPool &pool)
 {
   if (is_poisoned()) {
     return HogDbError(HogDbCode::kInternal);
   }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/false);
-  if (auto r = stage_locks(changes); !r) {
+  if (auto r = stage_locks(changes, pool); !r) {
     return r;
   }
   changeset_ = std::move(changes);
@@ -409,13 +426,13 @@ BlockTX::close_skip_hash_for_testing()
 }
 
 HogDbStatus<StorageLongHash>
-BlockTX::close(const StorageLongHash &base_hash)
+BlockTX::close(const StorageLongHash &base_hash, WorkerPool &pool)
 {
   if (is_poisoned()) {
     return HogDbError(HogDbCode::kInternal);
   }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/true);
-  if (auto r = stage_locks(changes); !r) {
+  if (auto r = stage_locks(changes, pool); !r) {
     return r.error();
   }
 
@@ -428,7 +445,7 @@ BlockTX::close(const StorageLongHash &base_hash)
 }
 
 HogDbStatus<void>
-BlockTX::stage_locks(ChangeSet &changes)
+BlockTX::stage_locks(ChangeSet &changes, WorkerPool &pool)
 {
   std::mutex err_lock;
   HogDbStatus<void> status;
@@ -444,7 +461,8 @@ BlockTX::stage_locks(ChangeSet &changes)
           std::scoped_lock guard(err_lock);
           status = r;
         }
-      });
+      },
+      pool);
 
   if (!status) {
     return status;
@@ -463,7 +481,8 @@ BlockTX::stage_locks(ChangeSet &changes)
           std::scoped_lock guard(err_lock);
           status = r;
         }
-      });
+      },
+      pool);
 
   return status;
 }

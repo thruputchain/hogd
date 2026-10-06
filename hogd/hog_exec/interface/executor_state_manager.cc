@@ -52,7 +52,8 @@ ExecutorStateManager::get_executor_context_slow(BlockID block_id)
 }
 
 x23::Async<ExecResult>
-ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
+ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
+                                 BlockExecutionContext block_execution)
 {
   x23::CoroGuard g;
   co_await g(active_blocks_lock_);
@@ -60,6 +61,18 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   if (auto it = active_blocks_.find(new_block_id); it != active_blocks_.end()) {
     // Increase the refcount on an existing block
     if (it->second.context.get().mode() != mode) {
+      co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+      panic("unreachable");
+    }
+    // Two opens disagreeing about the block's facts is a scheduler bug, not
+    // a refcount bump.
+    if (auto const &open = it->second.context.get().block_execution();
+        open.block_height != block_execution.block_height ||
+        open.block_timepoint != block_execution.block_timepoint) {
+      error("Tried to reopen block {} with a different execution context "
+            "(height {} vs {}, timepoint {} vs {})",
+            new_block_id, open.block_height, block_execution.block_height,
+            open.block_timepoint, block_execution.block_timepoint);
       co_await g.reset_and_return(ExecResult::ExecResultSystemError);
       panic("unreachable");
     }
@@ -83,13 +96,20 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   assert(event_server_proxy_);
 
   std::unique_ptr<StorageSnapshotCache> snapshot_cache =
-      get_snapshot_cache(new_block_id, g);
+      get_snapshot_cache(new_block_id, block_execution, g);
+
+  auto load_db_tip_res = co_await snapshot_cache->load_db_tip();
+  if (!load_db_tip_res.has_value()) [[unlikely]] {
+    error("Failed to load db tip for block {}: {}", new_block_id,
+          load_db_tip_res.error());
+    co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+    panic("unreachable");
+  }
 
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
       std::forward_as_tuple(mode, new_block_id, *db_proxy_,
-                            std::move(snapshot_cache), *event_server_proxy_,
-                            worker_pool_));
+                            std::move(snapshot_cache), *event_server_proxy_));
   assert(inserted);
 
   // Notify event server that we've opened a block
@@ -110,15 +130,19 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
 }
 
 x23::Async<ExecResult>
-ExecutorStateManager::open_proposal(BlockID new_proposal_id)
+ExecutorStateManager::open_proposal(BlockID new_proposal_id,
+                                    BlockExecutionContext block_execution)
 {
-  return open_block(new_proposal_id, ExecutionMode::kProposing);
+  return open_block(new_proposal_id, ExecutionMode::kProposing,
+                    block_execution);
 }
 
 x23::Async<ExecResult>
-ExecutorStateManager::open_validation(BlockID new_validation_id)
+ExecutorStateManager::open_validation(BlockID new_validation_id,
+                                      BlockExecutionContext block_execution)
 {
-  return open_block(new_validation_id, ExecutionMode::kValidating);
+  return open_block(new_validation_id, ExecutionMode::kValidating,
+                    block_execution);
 }
 
 x23::Async<ExecResult>
@@ -269,15 +293,19 @@ ExecutorStateManager::stash_snapshot_cache(
 }
 
 std::unique_ptr<StorageSnapshotCache>
-ExecutorStateManager::get_snapshot_cache(BlockID block_id,
-                                         x23::CoroGuard const & /*unused*/)
+ExecutorStateManager::get_snapshot_cache(
+    BlockID block_id, BlockExecutionContext const &block_execution,
+    x23::CoroGuard const & /*unused*/)
 {
   if (free_snapshot_caches_.empty()) {
-    return std::make_unique<StorageSnapshotCache>(block_id, *db_proxy_);
+    return std::make_unique<StorageSnapshotCache>(block_id, block_execution,
+                                                  *db_proxy_);
   }
   auto out = std::move(free_snapshot_caches_.back());
   CHECK(out != nullptr);
   out->set_block_id(block_id);
+  // A recycled cache still carries the previous block's context.
+  out->set_block_execution_context(block_execution);
   free_snapshot_caches_.pop_back();
   return out;
 }

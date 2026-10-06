@@ -3,13 +3,16 @@
 //
 // `StorageDeltaFlags::ExclusiveLock` is defined by the protocol as a flag on a
 // *delta*: "forces the delta to acquire an exclusive lock on the item at the
-// storage key" (protocol/storage_item.x).  A transaction that writes a key
+// storage key" (protocol/storage_item.x).  A transaction that pushes a key
 // twice -- once with the flag, then again without it -- is not asking for the
-// key to stay frozen; its second write superseded the first, flag included.
-// Both layers implement that same last-write-wins rule:
+// key to stay frozen; it withdrew the request before committing.  Both layers
+// implement that same rule, that the last push's flags decide:
 //
-//   - executor: `ItemView::set()` overwrites `flags_` on every write, so only
-//     the final write's flags reach the database at all.
+//   - executor: an `ItemView` keeps one `flags_` value for its key.  Writes
+//     leave it alone; SetStorageFlags adds to it and ClearStorageFlags empties
+//     it, so each push carries the flags the transaction requests at that
+//     point.  An unflagged push after a flagged one means a TryInvoke pushed
+//     the flag and the transaction cleared it afterwards.
 //   - hog_db:   `ItemChange::narrow()` merges the earlier reservation into the
 //     later change, promoting it to ordinary `exclusive_`, but it does not
 //     carry `permanent_exclusive_` forward.  `InvokeTX::request_change()` then
@@ -17,8 +20,8 @@
 //     `ItemLock::commit_change()` publishes `kFinalizedPermamentExclusiveLock`
 //     only when that final version still carries the bit.
 //
-// Consequence, exercised below: an `ExclusiveLock` write followed by an
-// unflagged write to the same key in the same `InvokeTX` finalizes as an
+// Consequence, exercised below: an `ExclusiveLock` push followed by an
+// unflagged push to the same key in the same `InvokeTX` finalizes as an
 // ordinary `kFinalized` lock, so a later transaction in the same block can
 // still modify the key.
 //
@@ -29,11 +32,10 @@
 //     rollback to the flagged version always succeeds (see
 //     RollbackToSavepointRestoresPermanentExclusiveReservation).  The only
 //     thing dropped is the post-commit freeze, and the only party that can
-//     drop it is the writer itself, by superseding its own delta.
-//   - Propagating the bit would be the actual defect: it would let a
-//     transaction freeze a key against every other transaction for the rest of
-//     the block from a delta that never requested it, purely as a side effect
-//     of a superseded earlier write.
+//     drop it is the writer itself, by clearing its own request.
+//   - Propagating the bit here would be the actual defect: hog_db would freeze
+//     a key against every other transaction for the rest of the block after
+//     the transaction had withdrawn the request.
 //   - Storage cost stays coupled to the request.  Only a permanent-exclusive
 //     change may reserve a negative marginal cost (`snapshot_cost_transform()`
 //     refunds the item's snapshot cost, since nothing else may re-grow the
@@ -52,7 +54,7 @@
 // The flag does exactly what it says when it is on the delta that commits:
 // each admission test below is paired with a control in which the final write
 // keeps the flag and the later transaction is rejected with
-// `kDbConflictExclusiveLock`.
+// `ExclusiveLockDenied`.
 //
 // See: https://github.com/groundhogchain/hogd/issues/3006
 
@@ -73,6 +75,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/status.h"
@@ -293,7 +296,8 @@ protected:
     ASSERT_TRUE(db_.write_address_metadata(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("seed"))),
-                             .contract_size = 10}));
+                             .contract_size = 10,
+                             .contract_type = ContractType::kRv32}));
   }
 
   HogDbDAO db_;
@@ -329,7 +333,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
   StorageLongHash base_hash = db_.compute_full_db_hash();
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -385,7 +390,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -412,7 +418,7 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
                                             kNoFlags);
     ASSERT_FALSE(admitted.has_value());
     EXPECT_EQ(invoke_tx.conflict_reason_for(admitted.error().code()),
-              DbConflictCode::kDbConflictExclusiveLock);
+              DbConflictCode::ExclusiveLockDenied);
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
@@ -434,7 +440,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -478,7 +485,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -501,7 +509,7 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
                                                /*delta=*/1, kNoFlags);
     ASSERT_FALSE(admitted.has_value());
     EXPECT_EQ(invoke_tx.conflict_reason_for(admitted.error().code()),
-              DbConflictCode::kDbConflictExclusiveLock);
+              DbConflictCode::ExclusiveLockDenied);
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
@@ -523,7 +531,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -570,7 +579,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
 
   PerThreadARC<BlockTX> block_tx(
       db_, cost_model_, background_commit_worker_, 1,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
 
   {
     ASSERT_TRUE(block_tx.try_acquire_reference());
@@ -602,7 +612,7 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
     ASSERT_FALSE(admitted.has_value())
         << "the restored version is the flagged one, so the freeze applies";
     EXPECT_EQ(invoke_tx.conflict_reason_for(admitted.error().code()),
-              DbConflictCode::kDbConflictExclusiveLock);
+              DbConflictCode::ExclusiveLockDenied);
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());

@@ -241,6 +241,30 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
 };
 template<typename T> Ptr(T &&) -> Ptr<T>;
 
+// An owning pointer that serializes as an XDR optional -- a 4-byte presence
+// tag followed by the object -- exactly as [x23::Ptr] does, but from a
+// [std::shared_ptr].
+//
+// [x23::Ptr] is a [std::unique_ptr], so its value constructor takes the object
+// *by value*: building a reply out of [x23::Ptr] deep-copies whatever it is
+// pointing at.  Where the object is already owned by a [std::shared_ptr] --
+// which is how a lookup into a shared cache hands one back -- that copy buys
+// nothing.  Holding the [std::shared_ptr] in the reply keeps the object alive
+// on its own, and x23 serializes a handler's return value while it is still in
+// scope (the [make_record] calls in x23/rpc.h), so the reference outlives the
+// bytes being written.
+//
+// The pointee must not be mutated while a reply holding it is in flight.
+template<typename T> struct XdrSharedPtr : std::shared_ptr<const T> {
+  using super = std::shared_ptr<const T>;
+  using value_type = T;
+
+  using super::super;
+
+  XdrSharedPtr() = default;
+  explicit XdrSharedPtr(super p) : super(std::move(p)) {}
+};
+
 template<typename T> struct Box : private std::unique_ptr<T> {
   using super = std::unique_ptr<T>;
   using element_type = T;
@@ -801,6 +825,13 @@ struct serialize_equiv<std::array<X, N>, std::array<T, N>> : std::true_type {};
 template<typename X, serializes_like<X> T>
 struct serialize_equiv<Ptr<X>, Ptr<T>> : std::true_type {};
 
+// Declares that an [XdrSharedPtr] may stand in wherever the wire type is a
+// [Ptr].  x23 composes this through vectors itself, so declaring it for the
+// element type is enough for a vector of them to answer an RPC whose declared
+// return is a vector of optionals.
+template<typename X>
+struct serialize_equiv<Ptr<X>, XdrSharedPtr<X>> : std::true_type {};
+
 // Concept for types you can pass to an RPC function expecting type X.
 template<typename T, typename X>
 concept satisfies_rpc_arg = serializes_like<T, X> || std::convertible_to<T, X>;
@@ -869,6 +900,10 @@ template<typename T, typename Xdr,
          template<typename> typename RetTrans = std::type_identity_t>
 concept satisfies_rpc_return =
     std::convertible_to<T, RetTrans<Xdr>> ||
+    // A wire-equivalent plain return, e.g. a reply borrowing bytes it already
+    // holds, but only where the transform admits an untransformed value:
+    // RetTrans = Async must still reject one.
+    (std::convertible_to<Xdr, RetTrans<Xdr>> && serializes_like<T, Xdr>) ||
     serializes_like<untransform_t<RetTrans, T>, Xdr> ||
     (std::convertible_to<T, RetTrans<untransform_auto_t<T>>> &&
      serializes_like<untransform_auto_t<T>, Xdr>) ||

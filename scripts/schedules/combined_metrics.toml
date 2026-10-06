@@ -21,6 +21,9 @@ echo 'configure'
 
 echo 'build'
 cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
+# EXCLUDE_FROM_ALL, so the full build above skips it; the metrics job runs it
+# on a bench host through [schedgateway_bench_remote.sh].
+cmake --build release --parallel "$(nproc)" --target schedgateway_client_bench > build2b.log 2>&1 || (cat build2b.log && exit 1)
 # These build scripts place the binaries in the current working directory, so we
 # [pushd release] so that the binaries are placed in the [release] directory.
 pushd release >/dev/null
@@ -31,16 +34,14 @@ popd >/dev/null
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
-echo 'reap any control_server left over from a previous run'
+echo 'reap whatever is holding the control port'
 # A control_server from a previous run can still be alive and holding the
 # deterministic control port, failing this run's bind with "address already in
 # use". The end-of-run shutdown RPC is sent, but the server can fail to actually
-# come down. Reap it by name before we start, matching the killall cleanup idiom
-# the benchmark scripts already use. Fail loudly if killall is missing, so a
-# stale server can't silently slip through and recreate the bind failure.
-command -v killall >/dev/null || { echo 'killall not found (install psmisc)'; exit 1; }
-killall -TERM control_server 2>/dev/null && sleep 3 || true
-killall -KILL control_server 2>/dev/null || true
+# come down. Reap the port's holder before we start, and fail loudly naming it
+# if the port cannot be freed, so a stale server can't silently slip through
+# and recreate the bind failure as a core dump.
+./scripts/ci/reap_control_server.sh $CI_CONTROL_PORT
 
 echo 'run bench server'
 mkdir -p ci_work_dir/
@@ -64,8 +65,12 @@ GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
 CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
+# Published crates and pinned submodules retain the legacy registry identity.
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 [jobs.host]
 bench_1 = "hog6"
@@ -114,7 +119,7 @@ source ./scripts/ci/bench_harness.sh
 ci_reset_bench_failures
 
 ALL_BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
-BENCH_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
+BENCH_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool hog-devnode chuckd chuckd.dev scpd scpd.dev"
 CONTROL_CLI=./release/hogd/hog_exec/bench/control_cli
 
 kill_stale_benchmark_processes() {
@@ -127,23 +132,21 @@ shutdown_bench_servers() {
 }
 trap shutdown_bench_servers EXIT
 
-echo 'reap any control_server left over from a previous run'
+echo 'reap whatever is holding the control port'
 # A control_server from a previous run can still be alive and holding the
 # deterministic control port, failing this run's bind with "address already in
 # use". The end-of-run shutdown RPC is sent, but the server can fail to actually
-# come down. Reap it by name before we start, matching the killall cleanup idiom
-# the benchmark scripts already use. Fail loudly if killall is missing, so a
-# stale server can't silently slip through and recreate the bind failure.
-command -v killall >/dev/null || { echo 'killall not found (install psmisc)'; exit 1; }
-killall -TERM control_server 2>/dev/null && sleep 3 || true
-killall -KILL control_server 2>/dev/null || true
+# come down. Reap the port's holder before we start, and fail loudly naming it
+# if the port cannot be freed, so a stale server can't silently slip through
+# and recreate the bind failure as a core dump.
+./scripts/ci/reap_control_server.sh $CI_CONTROL_PORT
 
 echo 'run local bench server for hog10-hosted services'
 mkdir -p ci_work_dir/
 ./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/ &
 
 # Each step's output is streamed as usual and also captured under
-# [bench_logs/]. This job runs five suites back to back, so its log is long
+# [bench_logs/]. This job runs six suites back to back, so its log is long
 # enough that GitHub only serves a bounded tail of it: a suite that dies early
 # has its crash output evicted by the thousands of lines [metrics.sh] emits
 # afterwards. [ci_report_failed_bench_steps] replays the tail of whatever
@@ -164,16 +167,26 @@ ci_run_bench_step mempool_multi_node_bench \
   env MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 \
   ./scripts/ci/mempool_multi_node_bench.sh
 
-echo 'release hog4, hog5, hog6, hog7, and hog9'
-ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog9
+echo 'release hog4, hog5, hog6, and hog9'
+# hog7 stays up to run the schedgateway benchmark alongside [metrics.sh].
+ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog9
 
 echo 'run event server benchmarks'
 kill_stale_benchmark_processes
 ci_run_bench_step event_bench ./scripts/ci/event_bench.sh
 
-echo 'run metrics'
+echo 'run metrics, with the schedgateway benchmark on otherwise idle hog7'
+# [metrics.sh] runs on hog10, hog11, and hog8 only, so hog7 is free. The
+# benchmark stays on hog7's loopback and touches none of those hosts.
 kill_stale_benchmark_processes
+ci_run_bench_step schedgateway_bench_start \
+  ./scripts/ci/schedgateway_bench_remote.sh start hog7
 ci_run_bench_step metrics ./scripts/ci/metrics.sh
+ci_run_bench_step schedgateway_bench \
+  ./scripts/ci/schedgateway_bench_remote.sh collect hog7
+
+echo 'release hog7'
+ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog7
 
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
@@ -183,7 +196,7 @@ echo 'bench servers will be shut down by EXIT trap'
 echo 'check for failures'
 # [ci_report_failed_bench_steps] names each failed suite with its exit status
 # and replays the tail of its captured output; [ci_report_bench_failures]
-# replays the command that killed each suite. This job runs five suites into
+# replays the command that killed each suite. This job runs six suites into
 # one log and GitHub serves only its tail, so an early failure is past the end
 # of the retrievable window by the time the job finishes; these two reports are
 # the surviving evidence.
@@ -206,8 +219,12 @@ GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
 CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
+# Published crates and pinned submodules retain the legacy registry identity.
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 
 [jobs.host]

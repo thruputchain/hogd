@@ -29,6 +29,7 @@
 #include "hogd/hog_db/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hog_db/status.h"
 #include "x23/testlock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -84,7 +85,10 @@ public:
   HogDbStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 
-  std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
+  // A view of the concurrently-inserted entry at [index], or nullopt if this
+  // lock is unfinalized or holds no RCQ.  See
+  // RetrocausalQueueLock::get_concurrent_entry.
+  std::optional<x23::BufView> get_concurrent_entry(uint32_t index) const;
 
   bool is_finalized() const
   {

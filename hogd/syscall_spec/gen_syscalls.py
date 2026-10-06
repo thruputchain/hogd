@@ -51,6 +51,37 @@ def validate_and_extract_error_codes(syscall: dict) -> list[str]:
     return error_codes
 
 
+# Populated from hog_exec_syscalls.yaml before generation (see
+# load_hog_exec_spec); that file documents both flags.
+ASYNC_SYSCALLS = frozenset()
+NEEDS_GAS_SYSCALLS = frozenset()
+
+# Per-syscall properties recognized in hog_exec_syscalls.yaml.
+HOG_EXEC_PROPERTIES = frozenset({"needs_gas", "async"})
+
+
+def load_hog_exec_spec(path: str, known_syscall_names: set) -> dict:
+    """Load hog_exec_syscalls.yaml into {name: {property: value}}.
+
+    Validates that every entry names a real syscall and only sets recognized
+    properties, so a stale or misspelled entry fails the build.
+    """
+    raw = yaml.load(open(path, 'r').read(), Loader=Loader)
+    entries = (raw or {}).get("syscalls") or {}
+    result = {}
+    for name, props in entries.items():
+        if name not in known_syscall_names:
+            raise ValueError(
+                f"hog_exec_syscalls.yaml names unknown syscall '{name}'")
+        props = props or {}
+        for key in props:
+            if key not in HOG_EXEC_PROPERTIES:
+                raise ValueError(
+                    f"hog_exec syscall '{name}': unknown property '{key}'")
+        result[name] = props
+    return result
+
+
 """
 Each syscall generates a
 syscall_{callname}_inner(...); declaration.
@@ -262,7 +293,7 @@ def gen_inner_outer(
     if user_arg_count > syscall_input_count:
         raise ValueError("too many syscall args")
 
-    if "needs_gas" in syscall and syscall["needs_gas"]:
+    if name in NEEDS_GAS_SYSCALLS:
         inner_arg_decl_strs = [
             "WrappedGasAmount remaining_gas"
         ] + inner_arg_decl_strs
@@ -278,11 +309,21 @@ def gen_inner_outer(
 
     inner_arg_decls = ", ".join(inner_arg_decl_strs)
 
-    inner = f"""std::pair<{inner_return_type}, WrappedGasAmount>
+    if name in ASYNC_SYSCALLS:
+        if inner_return_type != "HostFnStatus<SyscallErrorCode>":
+            raise ValueError(
+                f"Syscall {name}: async syscalls must use the standard inner "
+                f"return type, got {inner_return_type}"
+            )
+        result_type = "MaybeAsyncSyscallInnerResult"
+    else:
+        result_type = f"std::pair<{inner_return_type}, WrappedGasAmount>"
+
+    inner = f"""{result_type}
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
 """
-    frame = f"""std::pair<{inner_return_type}, WrappedGasAmount>
+    frame = f"""{result_type}
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls})
 {{
   throw std::runtime_error("unimplemented");
@@ -507,6 +548,11 @@ parser.add_argument(
     required=True,
     help="input yaml")
 parser.add_argument(
+    '--hog_exec_yaml',
+    type=str,
+    required=True,
+    help="hog_exec/C++-specific syscall properties yaml")
+parser.add_argument(
     '--output_dir',
     type=str,
     default=".",
@@ -528,6 +574,15 @@ spec = spec_full["syscalls"]
 
 # Validate syscall numbering and order early to provide a clear error message
 validate_syscall_numbers_in_order(spec_full)
+
+# Load and validate hog_exec flags before any code is generated.
+hog_exec_spec = load_hog_exec_spec(args.hog_exec_yaml,
+                                   {s["name"] for s in spec})
+ASYNC_SYSCALLS = frozenset(
+    name for name, props in hog_exec_spec.items() if props.get("async", False))
+NEEDS_GAS_SYSCALLS = frozenset(
+    name for name, props in hog_exec_spec.items()
+    if props.get("needs_gas", False))
 
 cpp_to_rust_typenames = load_cpp_to_rust_map(spec_full)
 primitive_types = load_known_primitive_types(spec_full)

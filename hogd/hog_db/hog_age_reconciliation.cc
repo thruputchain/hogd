@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <utility>
 
@@ -38,19 +40,85 @@ is_prefixed_address_key(std::span<const std::byte> key, Prefix prefix)
          static_cast<Prefix>(key.front()) == prefix;
 }
 
-uint128_t
+// Returns std::nullopt if the three group counts do not fit in a uint128_t.
+//
+// Neither durable-state check upstream of here catches this. The RAMDB log
+// CRC covers accidental corruption but is unkeyed, so it is recomputed by any
+// deliberate rewrite; and the consensus db_hash does not cover the row at all,
+// because Prefix::kHogAge returns false from is_state_item(). A tampered hog
+// age row therefore reaches reconciliation with both checks satisfied.
+//
+// If the wrapped total happens to equal the balance, reconciliation below
+// would then accept the row as already reconciled and leave it in place. The
+// corruption would only surface much later, on an ordinary transfer into the
+// account, as a fatal denominator check inside the mempool scheduler's
+// compute_average_age() -- a different process, arbitrarily later, with
+// nothing pointing back at the row. Detect it here instead, at startup, where
+// it can be reported against the address that carries it (#3683).
+std::optional<uint128_t>
 sum_hogs(const HogAge &age)
 {
-  return from_xdr(age.num_hogs[kHogAgeGroupToSchedule]) +
-         from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) +
-         from_xdr(age.num_hogs[kHogAgeGroupReceived]);
+  constexpr uint128_t kMax = std::numeric_limits<uint128_t>::max();
+  const uint128_t to_schedule = from_xdr(age.num_hogs[kHogAgeGroupToSchedule]);
+  const uint128_t already_scheduled =
+      from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const uint128_t received = from_xdr(age.num_hogs[kHogAgeGroupReceived]);
+
+  if (already_scheduled > kMax - to_schedule) {
+    return std::nullopt;
+  }
+  const uint128_t partial = to_schedule + already_scheduled;
+  if (received > kMax - partial) {
+    return std::nullopt;
+  }
+  return partial + received;
 }
 
+// [address] is the address the row was keyed and read under. Diagnostics must
+// use it rather than the embedded age.address: the two can disagree on a
+// tampered row while the XDR stays valid, and read_address_average_hog_age()
+// does not cross-check them, so trusting the payload could send an operator
+// to repair an address that is not the corrupt one.
 HogDbStatus<void>
-reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
+reconcile_address_hog_age_helper(const Address &address,
+                                 const uint128_t balance, const HogAge &age,
                                  HogDbDAO &db)
 {
-  const uint128_t existing_total = sum_hogs(age);
+  const std::optional<uint128_t> summed = sum_hogs(age);
+  if (!summed.has_value()) {
+    error("address 0x{} has a corrupt hog age row: group counts {}, {}, {} "
+          "overflow uint128 when summed. Refusing to reconcile; the durable "
+          "hog age state for this address must be repaired or the volume "
+          "replaced.",
+          encode_hex(address.as_bytes()),
+          from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
+          from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+          from_xdr(age.num_hogs[kHogAgeGroupReceived]));
+    return HogDbError(HogDbCode::kInternal);
+  }
+  // average_ages are block heights since genesis, but BlockHeight is a signed
+  // hyper, so a tampered row can carry a negative average that XDR and the
+  // count checks above accept. Left in place, the mempool scheduler copies the
+  // signed to-schedule average straight into its ascending ready-account key
+  // (get_account_key), where a negative value sorts ahead of every valid
+  // nonnegative age and silently steals scheduling priority. Reject it here,
+  // at startup, against the address that carries it, rather than letting the
+  // corruption surface later in a different process (#3934).
+  for (size_t group = 0; group < kHogAgeNumGroups; ++group) {
+    if (age.average_ages[group] < 0) {
+      error("address 0x{} has a corrupt hog age row: average ages {}, {}, {} "
+            "contain a negative value. Refusing to reconcile; the durable hog "
+            "age state for this address must be repaired or the volume "
+            "replaced.",
+            encode_hex(address.as_bytes()),
+            age.average_ages[kHogAgeGroupToSchedule],
+            age.average_ages[kHogAgeGroupAlreadyScheduled],
+            age.average_ages[kHogAgeGroupReceived]);
+      return HogDbError(HogDbCode::kInternal);
+    }
+  }
+
+  const uint128_t existing_total = *summed;
   if (existing_total == balance) {
     return {};
   }
@@ -119,7 +187,7 @@ reconcile_address_hog_age(HogDbDAO &db, const Address &address)
     return age.error();
   }
 
-  return reconcile_address_hog_age_helper(*balance, *age, db);
+  return reconcile_address_hog_age_helper(address, *balance, *age, db);
 }
 
 } // namespace

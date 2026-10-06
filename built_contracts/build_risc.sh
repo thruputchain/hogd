@@ -12,9 +12,10 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.10.2"
+EXPECTED_VERSION="groundhog 0.19.0"
 ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
-if [ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]; then
+ACTUAL_RELEASE_VERSION="${ACTUAL_VERSION%% (*}"
+if [ "${ACTUAL_RELEASE_VERSION}" != "${EXPECTED_VERSION}" ]; then
     echo "error: expected '${EXPECTED_VERSION}', got '${ACTUAL_VERSION:-not installed}'. Run scripts/fetch.sh" >&2
     exit 1
 fi
@@ -48,12 +49,41 @@ TARGET_DIR="$(CDPATH= cd -- "${TARGET_DIR}" && pwd)"
 
 # Keep cargo/groundhog intermediates in the build tree instead of the source tree.
 INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
+# CI sets HOGD_RV32_TARGET_DIR to a directory on its cache volume, so that a
+# fresh build tree doesn't recompile the contracts' dependencies and
+# build-std's core/alloc from scratch on every run. Each output directory gets
+# its own subdirectory: ninja builds the contracts and the RV32 smoke artifact
+# in parallel, and they would otherwise wait on each other's cargo lock.
+if [ -n "${HOGD_RV32_TARGET_DIR:-}" ]; then
+    INTERNAL_TARGET_DIR="${HOGD_RV32_TARGET_DIR}/$(basename "${TARGET_DIR}")"
+    # A fresh checkout gives every source file a new mtime, so cargo's default
+    # mtime-based freshness would still rebuild every contract. Compare file
+    # contents instead; this is nightly-only, as is the contract toolchain.
+    export CARGO_UNSTABLE_CHECKSUM_FRESHNESS=true
+fi
 
 # Build with groundhog-cli (built-in RV32 lowerer). groundhog must run inside
 # the groundhog project, so run from this script's directory regardless of the
 # caller's working directory. Pass remaining args through to cargo.
 cd "${SCRIPT_DIR}"
-OUTPUT=$(groundhog build -p "${TARGET_NAME}" --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@")
+
+# Disable errexit so a build failure reports the contract name below.
+# Redirect stderr so cargo progress output doesn't break the jq parse.
+BUILD_ERR="$(mktemp)"
+trap 'rm -f "${BUILD_ERR}"' EXIT
+
+set +e
+OUTPUT=$(groundhog build -p "${TARGET_NAME}" --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@" 2>"${BUILD_ERR}")
+STATUS=$?
+set -e
+
+cat "${BUILD_ERR}" >&2
+
+if [ "${STATUS}" -ne 0 ]; then
+    echo "error: groundhog build failed for ${TARGET_NAME} (exit ${STATUS})" >&2
+    printf '%s' "$OUTPUT" | jq -r '.error.message // empty' >&2
+    exit 1
+fi
 
 # Parse output paths from JSON
 RV32_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.rv32')

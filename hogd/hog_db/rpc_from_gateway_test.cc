@@ -8,6 +8,7 @@
 #include <memory>
 #include <thread>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "consensus.hh"
@@ -16,6 +17,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -33,6 +35,10 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/rpc.h"
+#include "x23/rpc_msg.hh"
+#include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -83,7 +89,7 @@ TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
   batch.push_back(make_balance_query(addr));
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -108,7 +114,7 @@ TEST(HogDbGatewayRpcTest, GetItemsMissingBalanceIsNotFound)
   batch.push_back(make_balance_query(addr));
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -138,7 +144,8 @@ TEST(HogDbGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
     StorageLongHash base_hash = dao.compute_full_db_hash();
     PerThreadARC<BlockTX> block_tx(
         dao, cost_model, background_commit_worker, BlockHeight{1},
-        BlockExecutionMode::kBlockExecutionModeProposal);
+        BlockExecutionMode::kBlockExecutionModeProposal,
+        static_cast<uint32_t>(kMaxSavepointDepth));
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX invoke_tx(block_tx);
 
@@ -162,7 +169,7 @@ TEST(HogDbGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
   batch.push_back(query);
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -175,8 +182,8 @@ TEST(HogDbGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
 }
 
 // Exercises the wait-out-publication path. While a commit is mid-publication
-// (commit_publishing_ held), a committed-tip read blocks in
-// wait_for_no_commit_publishing() instead of reading a tip that is
+// (commit_publishing_ held), a committed-tip read suspends in
+// co_wait_for_no_commit_publishing() instead of reading a tip that is
 // inconsistent with the just-applied ramdb data; once the publication
 // finishes the read proceeds and returns kRPCNone.
 //
@@ -211,7 +218,7 @@ TEST(HogDbGatewayRpcTest, GetItemsWaitsOutCommitPublication)
     publication_guard.reset(); // finish_commit_publication
   });
 
-  DbGatewayResult result = gateway.dbgateway_get_items(batch);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
   releaser.join();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
@@ -219,6 +226,118 @@ TEST(HogDbGatewayRpcTest, GetItemsWaitsOutCommitPublication)
   ASSERT_EQ(result.payload().items[0].error(), RPCError::kRPCNone);
   EXPECT_EQ(from_xdr(result.payload().items[0].item().nnint()),
             int128_t{12345});
+}
+
+// A batch at the cap is serviced; one item over the cap is rejected
+// wholesale before any reads (issue #4056).
+TEST(HogDbGatewayRpcTest, GetItemsRejectsBatchesOverCap)
+{
+  HogDbDAO dao = make_dao();
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+
+  // Zero address: nothing is seeded, so each item is a cheap miss.
+  ContractAddress addr{};
+
+  AddressAndKeyBatch batch;
+  for (std::size_t i = 0; i < HogDbGatewayRpc::kMaxBatchItems; ++i)
+    batch.push_back(make_balance_query(addr));
+
+  DbGatewayResult ok = gateway.dbgateway_get_items(batch)();
+  ASSERT_EQ(ok.error(), RPCError::kRPCNone);
+  EXPECT_EQ(ok.payload().items.size(), HogDbGatewayRpc::kMaxBatchItems);
+
+  // One more item exceeds the cap; the call above took its own copy.
+  batch.push_back(make_balance_query(addr));
+  DbGatewayResult rejected = gateway.dbgateway_get_items(batch)();
+  EXPECT_EQ(rejected.error(), RPCError::kRPCUnrecoverable);
+}
+
+// Item count alone doesn't bound response size; an oversized response is
+// rejected even when the item count stays under kMaxBatchItems (#4056).
+TEST(HogDbGatewayRpcTest, GetItemsRejectsResponseOverByteBudget)
+{
+  HogDbDAO dao = make_dao();
+
+  ContractAddress addr{};
+  addr[0] = 0x33;
+  StorageKey storage_key(StorageKeyType::ContractData);
+  storage_key.contract_data_key()[0] = 9;
+  AddressAndKey query{.address = addr, .key = storage_key};
+
+  // One large bytestring, duplicated just past the byte budget but under
+  // the count cap, so this exercises the byte budget, not the count cap.
+  constexpr std::size_t kValueBytes = 60000;
+  std::vector<std::byte> value(kValueBytes, std::byte{0xAB});
+  ASSERT_TRUE(dao.write_bytes(make_item_key(query), value).has_value());
+
+  const std::size_t count =
+      (HogDbGatewayRpc::kMaxResponseBytes / kValueBytes) + 2;
+  ASSERT_LT(count, HogDbGatewayRpc::kMaxBatchItems);
+
+  AddressAndKeyBatch batch;
+  for (std::size_t i = 0; i < count; ++i)
+    batch.push_back(query);
+
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
+}
+
+// Regression for #4060: dispatch owns the decoded argument only until serve
+// returns. A handler suspended on commit publication must own its batch.
+TEST(HogDbGatewayRpcTest, DispatchedGetItemsOwnsBatchAcrossCommitPublication)
+{
+  HogDbDAO dao = make_dao();
+  ContractAddress first{};
+  first[0] = 1;
+  ContractAddress second{};
+  second[0] = 2;
+  ASSERT_TRUE(dao.write_address_balance(first, int128_t{12345}));
+  ASSERT_TRUE(dao.write_address_balance(second, int128_t{67890}));
+
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  x23::RpcDispatcher<DbGateway1, HogDbGatewayRpc *> dispatcher(&gateway, {});
+  auto call = x23::call_msg<DbGateway1::proc_meta<1>>();
+  call.xid = 4060;
+  auto publication_guard =
+      std::make_unique<RPCContext::CommitPublicationGuard>(ctx, BlockTXID{1});
+
+  auto pending = [&] {
+    AddressAndKeyBatch batch{make_balance_query(first),
+                             make_balance_query(ContractAddress{}),
+                             make_balance_query(second)};
+    auto args = x23::serialize(batch);
+    return dispatcher.serve(call, args);
+  }();
+  // The held publication forces suspension without sleeps or a timing race.
+  EXPECT_FALSE(pending.await_ready());
+  publication_guard.reset();
+  auto reply = pending();
+
+  ASSERT_GE(reply.size(), 4U);
+  x23::rpc_msg msg;
+  auto header_size =
+      x23::deserialize_from(&msg, x23::BufView(reply).subspan(4));
+  EXPECT_EQ(msg.xid, call.xid);
+  ASSERT_EQ(msg.body.mtype(), x23::msg_type::REPLY);
+  ASSERT_EQ(msg.body.rbody().stat(), x23::reply_stat::MSG_ACCEPTED);
+  ASSERT_EQ(msg.body.rbody().areply().reply_data.stat(),
+            x23::accept_stat::SUCCESS);
+  DbGatewayResult result;
+  x23::deserialize(&result, x23::BufView(reply).subspan(4 + header_size));
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items.size(), 3U);
+  auto const &items = result.payload().items;
+  ASSERT_EQ(items[0].error(), RPCError::kRPCNone);
+  ASSERT_EQ(items[0].item().type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(items[0].item().nnint()), int128_t{12345});
+  EXPECT_EQ(items[1].error(), RPCError::kRPCNotFound);
+  ASSERT_EQ(items[2].error(), RPCError::kRPCNone);
+  ASSERT_EQ(items[2].item().type(), StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(items[2].item().nnint()), int128_t{67890});
 }
 
 // is_committed_read_stale must report a snapshot as stale once the tip has

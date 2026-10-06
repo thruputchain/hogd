@@ -5,12 +5,12 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <string_view>
 #include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/version.h"
@@ -23,6 +23,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -43,18 +44,16 @@ public:
   static x23::Async<SchedGatewayIntroOutcome>
   schedgateway_intro(ProtocolCommit protocol)
   {
-    if (std::string_view(protocol) !=
-        std::string_view(version::kHogdProtocol())) {
+    if (protocol != version::kHogdProtocol()) {
       co_return SchedGatewayIntroOutcome::SchedGatewayIntroMismatchedProtocol;
     }
     co_return SchedGatewayIntroOutcome::SchedGatewayIntroSuccess;
   }
 
-  x23::Async<void>
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
   schedgateway_submit_tx_batch(ParallelSignedTransactionBatch batch)
   {
-    co_await coord_->schedulercoord_submit_unvetted(std::move(batch));
-    co_return;
+    co_return co_await coord_->submit_unvetted_with_outcomes(std::move(batch));
   }
 
   x23::Async<ExpectedDBTip> schedgateway_get_tip()
@@ -70,10 +69,18 @@ public:
     co_return ExpectedDBTip(RPCError::kRPCNotFound);
   }
 
-  x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   schedgateway_lookup_tx(TransactionHashBatch tx_hashes)
   {
     co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);
+  }
+
+  x23::Async<SchedulerTransactionOutcomeBatch>
+  schedgateway_lookup_transaction_outcomes(
+      const TransactionHashBatch &tx_hashes)
+  {
+    co_return co_await coord_->schedcoord_lookup_transaction_outcomes(
+        tx_hashes);
   }
 
   x23::Async<PendingTxCount> schedgateway_pending_tx_count()

@@ -39,19 +39,21 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -113,39 +115,45 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
   std::vector<uint8_t> observed_values;
 
   auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
-          auto res = ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               key, std::as_bytes(std::span(&val, 1)));
           if (!res.has_value())
-            return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
         }
-        return {};
+        co_return InvokeStatus<void>{};
       },
       [&observed_values](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        QueueEntry entry;
+        entry.resize(kQueueEntryMaxLen);
+        RuntimeMemoryLength entry_len = 0;
+        auto peek_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::as_writable_bytes(std::span(entry)), entry_len);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
+        if (peek_res.value() != SyscallErrorCode::kSyscallErrorCodeNone)
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        entry.resize(entry_len);
 
-        QueueEntry const &entry = peek_res.value().value();
         if (entry.size() != 1)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         observed_values.push_back(entry[0]);
 
-        auto [ws, _wg] = syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("result"),
-            std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("result"),
+            std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -159,19 +167,19 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
   NondeterministicProposalData insert_10_p, insert_20_p, peek_p;
   {
     auto h10 = make_new_system_call_handler(tx_insert_10, *ctx);
-    ASSERT_TRUE(h10.root_invoke().is_root_success());
+    ASSERT_TRUE(h10.root_invoke()().is_root_success());
     insert_10_p = h10.get_proposal_data();
-    ASSERT_EQ(h10.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h10.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h20 = make_new_system_call_handler(tx_insert_20, *ctx);
-    ASSERT_TRUE(h20.root_invoke().is_root_success());
+    ASSERT_TRUE(h20.root_invoke()().is_root_success());
     insert_20_p = h20.get_proposal_data();
-    ASSERT_EQ(h20.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h20.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hpeek = make_new_system_call_handler(tx_peek, *ctx);
-    ASSERT_TRUE(hpeek.root_invoke().is_root_success());
+    ASSERT_TRUE(hpeek.root_invoke()().is_root_success());
     peek_p = hpeek.get_proposal_data();
-    ASSERT_EQ(hpeek.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(hpeek.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_EQ(observed_values, (std::vector<uint8_t>{10}));
@@ -187,19 +195,19 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
   {
     auto h10 = make_new_system_call_handler_validation(tx_insert_10, *ctx,
                                                        insert_10_p);
-    ASSERT_TRUE(h10.root_invoke().is_root_success());
-    ASSERT_EQ(h10.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h10.root_invoke()().is_root_success());
+    ASSERT_EQ(h10.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h20 = make_new_system_call_handler_validation(tx_insert_20, *ctx,
                                                        insert_20_p);
-    ASSERT_TRUE(h20.root_invoke().is_root_success());
-    ASSERT_EQ(h20.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h20.root_invoke()().is_root_success());
+    ASSERT_EQ(h20.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hpeek =
         make_new_system_call_handler_validation(tx_peek, *ctx,
                                                 std::move(swapped_peek_p));
-    ASSERT_TRUE(hpeek.root_invoke().is_root_success());
-    ASSERT_EQ(hpeek.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hpeek.root_invoke()().is_root_success());
+    ASSERT_EQ(hpeek.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   EXPECT_EQ(observed_values, (std::vector<uint8_t>{20}))
@@ -233,39 +241,46 @@ TEST_F(RCQObservationByValueTest,
   std::vector<uint8_t> consumed_values;
 
   auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
-          auto res = ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               key, std::as_bytes(std::span(&val, 1)));
           if (!res.has_value())
-            return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
         }
-        return {};
+        co_return InvokeStatus<void>{};
       },
       [&consumed_values](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        QueueEntry entry;
+        entry.resize(kQueueEntryMaxLen);
+        RuntimeMemoryLength entry_len = 0;
+        auto consume_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, false, std::as_writable_bytes(std::span(entry)),
+                entry_len);
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
-        if (!consume_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              consume_res.error());
+        if (consume_res.value() != SyscallErrorCode::kSyscallErrorCodeNone)
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        entry.resize(entry_len);
 
-        auto const &entry = consume_res.value().value();
         if (entry.size() != 1)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         consumed_values.push_back(entry[0]);
 
-        auto [ws, _wg] = syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("result"),
-            std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("result"),
+            std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -278,16 +293,16 @@ TEST_F(RCQObservationByValueTest,
   NondeterministicProposalData insert_p, consume_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
     insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
     consume_p = hb.get_proposal_data();
     ASSERT_EQ(consume_p.observed_queue_entry_sequence.size(), 1U);
     EXPECT_EQ(consume_p.observed_queue_entry_sequence[0], QueueEntry{10});
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_EQ(consumed_values, (std::vector<uint8_t>{10}));
@@ -301,14 +316,14 @@ TEST_F(RCQObservationByValueTest,
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb =
         make_new_system_call_handler_validation(tx_consume, *ctx,
                                                 std::move(swapped_consume_p));
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   EXPECT_EQ(consumed_values, (std::vector<uint8_t>{20}))
@@ -340,36 +355,38 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
 {
   static constexpr uint8_t kEntry = 0xA7;
 
-  auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto key = make_storage_key("rcq0");
+  auto contract = make_contract([](NativeSyscallContext &ctx)
+                                    -> x23::Async<InvokeStatus<void>> {
+    auto key = make_storage_key("rcq0");
 
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
-        if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+    uint8_t peeked = 0;
+    RuntimeMemoryLength peeked_len = 0;
+    auto peek_res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        key, true, std::as_writable_bytes(std::span(&peeked, 1)), peeked_len);
+    if (!peek_res.has_value())
+      co_return NativeContractBuilder::host_fn_error_conversion(
+          peek_res.error());
+    if (peek_res.value() != SyscallErrorCode::kSyscallErrorCodeNone)
+      co_return InvokeError{InvokeErrorCode::Deterministic};
 
-        auto const &peeked = peek_res.value().value();
-        if (peeked.size() != 1 || peeked[0] != kEntry)
-          return InvokeError{InvokeErrorCode::Deterministic};
+    if (peeked_len != 1 || peeked != kEntry)
+      co_return InvokeError{InvokeErrorCode::Deterministic};
 
-        uint8_t entry = kEntry;
-        auto insert_res = ctx.handler().retrocausal_queue_insert(
-            key, std::as_bytes(std::span(&entry, 1)));
-        if (!insert_res.has_value())
-          return insert_res.error().to_invoke_error();
+    uint8_t entry = kEntry;
+    auto insert_res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+        key, std::as_bytes(std::span(&entry, 1)));
+    if (!insert_res.has_value())
+      co_return NativeContractBuilder::host_fn_error_conversion(
+          insert_res.error());
 
-        auto marker = std::string_view("ok");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("marker"),
-            std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!ws.has_value() ||
-            ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
-      });
+    auto marker = std::string_view("ok");
+    auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+        make_storage_key("marker"), std::as_bytes(std::span(marker)));
+    if (!ws.has_value() ||
+        ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeStatus<void>{};
+  });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(contract));
@@ -379,14 +396,14 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
   // Honest proposal: empty queue, peek sees nothing, contract fails.
   {
     auto handler = make_new_system_call_handler(tx, *ctx);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_FALSE(res.is_root_success())
         << "honest proposal on an empty RCQ cannot see the entry";
     auto honest_p = handler.get_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_p.observed_queue_entry_sequence.size(), 0U);
     EXPECT_EQ(honest_p.nondeterministic_bits[0] & uint8_t{1}, 0);
-    ASSERT_TRUE(handler.abort_transaction().has_value());
+    ASSERT_TRUE(handler.abort_transaction()().has_value());
   }
 
   EXPECT_FALSE(
@@ -403,8 +420,8 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(forged));
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "known anomaly: the later self-insert satisfies the earlier "
          "observation in value-based accounting (issue #2359)";
   ASSERT_NO_THROW(
@@ -430,35 +447,41 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
 {
   auto contract = make_contract(
       // method 0: peek and write what we see
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        QueueEntry entry;
+        entry.resize(kQueueEntryMaxLen);
+        RuntimeMemoryLength entry_len = 0;
+        auto peek_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::as_writable_bytes(std::span(entry)), entry_len);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
+        if (peek_res.value() != SyscallErrorCode::kSyscallErrorCodeNone)
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        entry.resize(entry_len);
 
-        auto const &entry = peek_res.value().value();
-        auto [ws, _wg] = syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("saw"),
-            std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("saw"),
+            std::as_bytes(std::span(entry.data(), entry.size())));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       },
       // method 1: insert calldata bytes as RCQ entries
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
-          auto res = ctx.handler().retrocausal_queue_insert(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               key, std::as_bytes(std::span(&val, 1)));
           if (!res.has_value())
-            return res.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -471,17 +494,17 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
   // Honest proposal: TX_A peeks an empty queue, fails.
   {
     auto handler = make_new_system_call_handler(tx_peek, *ctx);
-    ASSERT_FALSE(handler.root_invoke().is_root_success());
-    ASSERT_TRUE(handler.abort_transaction().has_value());
+    ASSERT_FALSE(handler.root_invoke()().is_root_success());
+    ASSERT_TRUE(handler.abort_transaction()().has_value());
   }
 
   // TX_B inserts {42} honestly.
   NondeterministicProposalData insert_p;
   {
     auto handler = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     insert_p = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Forge TX_A's ndet data: bit=true, observation={42}.
@@ -497,13 +520,13 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
   {
     auto ha = make_new_system_call_handler_validation(tx_peek, *ctx,
                                                       std::move(forged_peek));
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_NO_THROW(

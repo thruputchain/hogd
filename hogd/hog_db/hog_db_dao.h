@@ -109,6 +109,23 @@ public:
     return db_->sync().transform_error(to_hog_db_error);
   }
 
+  // commit_and_snapshot persists all pending changes and starts a full
+  // snapshot on ramdb's snapshot thread so disk cleanup can reclaim the WAL
+  // the snapshot covers. Returns the commit lsn without awaiting the
+  // snapshot; if the snapshot fails, snapshot_recommended() stays true and
+  // a later commit retries.
+  HogDbStatus<uint64_t> commit_and_snapshot()
+  {
+    return db_->sync_and_snapshot(0)
+        .transform([](auto &&ret) { return ret.first; })
+        .transform_error(to_hog_db_error);
+  }
+
+  // snapshot_recommended returns true when enough WAL has accumulated
+  // beyond snapshot coverage that commit_and_snapshot() would let disk
+  // cleanup reclaim it.
+  bool snapshot_recommended() const { return db_->snapshot_recommended(); }
+
   // disk_bytes_written returns the total bytes written to WAL log files since
   // the last database recovery.
   size_t disk_bytes_written() const { return db_->disk_bytes_written(); }
@@ -126,8 +143,8 @@ private:
 
 // Prefix is a prefix appended to each key to form an overall key that
 // indicates the category of data being stored. The rest of the key is normally
-// a contract address, except for kWasmCode, which uses the hash of the wasm
-// blob as the rest of its key.
+// a contract address, except for kContractCode, which uses the hash of the
+// contract code blob as the rest of its key.
 //
 // Warning: These key prefixes are persisted on disk so they cannot be changed
 // without migrating existing data.
@@ -150,8 +167,8 @@ enum class Prefix : uint8_t {
   kAddressAuthData = u8'D',
   kAddressMetadata = u8'M',
   kContractDataKey = u8'K',
-  kWasmCode = u8'C',
-  kWasmCodeRefcount = u8'R',
+  kContractCode = u8'C',
+  kContractRefcount = u8'R',
   kReplayCache = u8'U',
   kRetrocausalQueueBlock = u8'Q',
   // global info, like the db tip, have prefixes that begin with (and may
@@ -173,8 +190,8 @@ is_state_item(std::span<const std::byte> key)
   case Prefix::kAddressAuthData:
   case Prefix::kAddressMetadata:
   case Prefix::kContractDataKey:
-  case Prefix::kWasmCodeRefcount:
-  case Prefix::kWasmCode:
+  case Prefix::kContractRefcount:
+  case Prefix::kContractCode:
   case Prefix::kReplayCache:
   case Prefix::kRetrocausalQueueBlock:
     return true;
@@ -198,12 +215,12 @@ make_address_key(const Address &addr, Prefix p)
 }
 
 constexpr auto
-make_wasm_code_key(const SHA256Hash &hash)
+make_contract_code_key(const SHA256Hash &hash)
 {
   std::array<std::byte, hash.size() + 1> ret;
   std::ranges::copy(std::as_bytes(std::span(hash)),
                     std::begin(std::span(ret)) + 1);
-  ret[0] = static_cast<std::byte>(Prefix::kWasmCode);
+  ret[0] = static_cast<std::byte>(Prefix::kContractCode);
   return ret;
 }
 
@@ -218,78 +235,80 @@ make_wasm_code_key(const SHA256Hash &hash)
 // kNNInt128 since hog_db treats them like a special ItemKey for native
 // tokens).
 //
-// The kWasmCode* types mark Prefix::kWasmCode rows. A code row whose
-// serialized Contract fits one RAMDB item is stored inline (kWasmCodeInline)
-// -- the exact layout that predates chunking, so existing state and its
-// db_hash contribution are unchanged. A larger row is stored as a head item
-// (same 33-byte key, type kWasmCodeChunkedHead, value = XDR uint32 total
-// length) plus payload chunks at 34-byte keys (prefix || hash || chunk
-// index), type kWasmCodeChunk. The layout is a pure function of the
-// serialized size, so every node produces identical items (and identical
-// db_hash deltas).
+// The kContractCode* types mark Prefix::kContractCode rows. A code row whose
+// serialized Contract fits one RAMDB item is stored inline
+// (kContractCodeInline) -- the exact layout that predates chunking, so
+// existing state and its db_hash contribution are unchanged. A larger row is
+// stored as a head item (same 33-byte key, type kContractCodeChunkedHead,
+// value = XDR uint32 total length) plus payload chunks at 34-byte keys
+// (prefix || hash || chunk index), type kContractCodeChunk. The layout is a
+// pure function of the serialized size, so every node produces identical
+// items (and identical db_hash deltas).
 enum : uint8_t {
   // Predates chunking (and the other type identifiers); must stay 0.
-  kWasmCodeInline = 0,
+  kContractCodeInline = 0,
   kNNInt128 = 1,
   kBytes = 2,
   kRetrocausalQueue = 3,
-  // Chunked wasm code rows (#2569).
-  kWasmCodeChunkedHead = 4,
-  kWasmCodeChunk = 5,
+  // Chunked contract code rows (#2569).
+  kContractCodeChunkedHead = 4,
+  kContractCodeChunk = 5,
 };
 
 // Payload bytes per chunk item, sized so every chunk satisfies item_fits for
 // a 34-byte chunk key. This keeps the RAMDB item ceiling private to
 // ramdb/hog_db: callers above the DAO never see it.
-inline constexpr size_t kWasmCodeChunkPayloadSize = 63_KiB;
+inline constexpr size_t kContractCodeChunkPayloadSize = 63_KiB;
 static_assert(Database::item_fits(sizeof(SHA256Hash) + 2,
-                                  kWasmCodeChunkPayloadSize));
+                                  kContractCodeChunkPayloadSize));
 
 constexpr auto
-make_wasm_code_chunk_key(const SHA256Hash &hash, uint8_t chunk_index)
+make_contract_code_chunk_key(const SHA256Hash &hash, uint8_t chunk_index)
 {
   std::array<std::byte, hash.size() + 2> ret;
-  ret[0] = static_cast<std::byte>(Prefix::kWasmCode);
+  ret[0] = static_cast<std::byte>(Prefix::kContractCode);
   std::ranges::copy(std::as_bytes(std::span(hash)),
                     std::begin(std::span(ret)) + 1);
   ret[hash.size() + 1] = static_cast<std::byte>(chunk_index);
   return ret;
 }
 
-// Emits the RAMDB items that store one wasm code row, in write order, as
+// Emits the RAMDB items that store one contract code row, in write order, as
 // put(key_span, type, value_span) calls. Chunks are emitted before the
 // chunked head so a reader that finds a head always finds complete chunks
 // (code rows are content-addressed and never modified or deleted). Shared by
-// HogDbDAO::write_wasm_code and NewContractLock::stage_committed_changes so
+// HogDbDAO::write_contract_code and NewContractLock::stage_committed_changes so
 // the two write paths cannot diverge.
 template<typename PutFn>
 void
-for_each_wasm_code_item(const SHA256Hash &hash, std::span<const std::byte> buf,
-                        PutFn &&put)
+for_each_contract_code_item(const SHA256Hash &hash,
+                            std::span<const std::byte> buf, PutFn &&put)
 {
-  auto head_key = make_wasm_code_key(hash);
+  auto head_key = make_contract_code_key(hash);
   auto head_key_span = std::as_bytes(std::span(head_key));
   if (Database::item_fits(head_key.size(), buf.size())) {
-    put(head_key_span, kWasmCodeInline, buf);
+    put(head_key_span, kContractCodeInline, buf);
     return;
   }
 
-  const size_t chunk_count =
-      (buf.size() + kWasmCodeChunkPayloadSize - 1) / kWasmCodeChunkPayloadSize;
+  const size_t chunk_count = (buf.size() + kContractCodeChunkPayloadSize - 1) /
+                             kContractCodeChunkPayloadSize;
   // One-byte chunk indexes. InvokeTX::request_new_contract bounds production
   // rows far below this; only a buggy direct caller can exceed it.
   CHECK(chunk_count <= 255);
 
   for (size_t i = 0; i < chunk_count; ++i) {
-    auto chunk_key = make_wasm_code_chunk_key(hash, static_cast<uint8_t>(i));
-    const size_t off = i * kWasmCodeChunkPayloadSize;
-    put(std::as_bytes(std::span(chunk_key)), kWasmCodeChunk,
+    auto chunk_key =
+        make_contract_code_chunk_key(hash, static_cast<uint8_t>(i));
+    const size_t off = i * kContractCodeChunkPayloadSize;
+    put(std::as_bytes(std::span(chunk_key)), kContractCodeChunk,
         buf.subspan(off,
-                    std::min(kWasmCodeChunkPayloadSize, buf.size() - off)));
+                    std::min(kContractCodeChunkPayloadSize, buf.size() - off)));
   }
 
   auto total_len = x23::serialize(static_cast<uint32_t>(buf.size()));
-  put(head_key_span, kWasmCodeChunkedHead, std::as_bytes(std::span(total_len)));
+  put(head_key_span, kContractCodeChunkedHead,
+      std::as_bytes(std::span(total_len)));
 }
 
 constexpr auto
@@ -303,6 +322,12 @@ make_contract_data_key(std::span<const std::byte> key)
 }
 
 constexpr size_t kContractDataItemKeySize = 1 + kAddressSize + kItemKeySize;
+
+// Bytestrings are stored raw under a contract-data key, so the protocol's
+// ceiling has to fit a ramdb item. Raising it past this point would make every
+// large bytestring a kTooBig write rather than a rejected one.
+static_assert(Database::item_fits(kContractDataItemKeySize,
+                                  kBytestringCeilingLen));
 
 constexpr auto
 make_contract_data_key(const ItemKey &key)
@@ -448,6 +473,18 @@ public:
   // commit persists all pending changes in durable storage.
   HogDbStatus<uint64_t> commit() { return db_.commit(); }
 
+  // commit_and_snapshot persists all pending changes and starts a
+  // background full snapshot so disk cleanup can reclaim the WAL the
+  // snapshot covers. Returns the commit lsn without awaiting the snapshot.
+  HogDbStatus<uint64_t> commit_and_snapshot()
+  {
+    return db_.commit_and_snapshot();
+  }
+
+  // snapshot_recommended returns true when the WAL beyond snapshot
+  // coverage is worth reclaiming with commit_and_snapshot().
+  bool snapshot_recommended() const { return db_.snapshot_recommended(); }
+
   // disk_bytes_written returns the total bytes written to WAL log files since
   // the last database recovery.
   size_t disk_bytes_written() const { return db_.disk_bytes_written(); }
@@ -537,13 +574,13 @@ public:
   HogDbStatus<void> remove_retrocausal_queue_metadata(const ItemKey &key);
 
   //
-  // WASM Operations
+  // Contract Code Operations
   //
 
   HogDbStatus<OwningSpan<const std::byte>>
-  read_wasm_code(const SHA256Hash &hash);
-  HogDbStatus<void> write_wasm_code(const SHA256Hash &hash,
-                                    std::span<const std::byte> buf);
+  read_contract_code(const SHA256Hash &hash);
+  HogDbStatus<void> write_contract_code(const SHA256Hash &hash,
+                                        std::span<const std::byte> buf);
 
   //
   // ItemKey Operations

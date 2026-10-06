@@ -677,8 +677,8 @@ fibonacci_instruction_count()
   return static_cast<int64_t>(stats.instructions);
 }
 
-// Canonical switch interpreter via the production Machine::run() path (no
-// per-step instrumentation), for a fair comparison against the threaded run().
+// Canonical Machine::run() without per-step instrumentation, for comparison
+// with the threaded run().
 void
 bm_rv32_run_fibonacci_recursive_20(benchmark::State &state)
 {
@@ -721,11 +721,9 @@ bm_rv32_threaded_fibonacci_recursive_20(benchmark::State &state)
   state.SetItemsProcessed(state.iterations() * instructions);
 }
 
-// Per-invocation startup cost in isolation: machine construction (memory
-// buffer setup + initial-image copy + register init) plus method-id seeding,
-// no execution. This is the path the thread-local memory slot pool targets.
-// Uses full-size memory (kMaxMemoryBytes, not kBenchMemoryBytes): deployed
-// artifacts default to the maximum, so this is the production-shaped cost.
+// Startup cost at kDefaultMaxMemoryBytes: memory setup, register
+// initialization, and method-id seeding, with no guest execution. Exercises the
+// thread-local memory pool using an empty initial image.
 void
 bm_rv32_threaded_instantiate(benchmark::State &state)
 {
@@ -738,7 +736,7 @@ bm_rv32_threaded_instantiate(benchmark::State &state)
   const auto program =
       ThreadedMachinePreInstantiation::create(bytes, initial_memory,
                                               /*memory_start=*/0,
-                                              kMaxMemoryBytes,
+                                              kDefaultMaxMemoryBytes,
                                               /*trace=*/false)
           .value();
   for (auto _ : state) {
@@ -820,7 +818,7 @@ bm_rv32_threaded_compute_loop_independent(benchmark::State &state)
 ArtifactImage
 parse_artifact_or_abort(std::span<const uint8_t> artifact)
 {
-  auto parsed = parse_artifact(artifact);
+  auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   if (!parsed.has_value()) {
     std::abort();
   }

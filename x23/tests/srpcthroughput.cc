@@ -153,13 +153,12 @@ do_client(int port, const char *server)
 
   if constexpr (!MULTI) {
     for (unsigned i = 0; i < opt_connections; ++i) {
-      UniqueFd fd;
-      try {
-        fd = tcpconnect(server_addr);
-      } catch (std::exception &e) {
-        std::println("{}", e.what());
+      auto res = tcpconnect(server_addr);
+      if (!res) {
+        std::println("{}", res.error());
         continue;
       }
+      UniqueFd fd = std::move(*res);
       auto client = make_rpc_stream(fd.release())->client(blank_rpc_v1{});
       for (unsigned j = 0; j < opt_threads_per_connection; ++j)
         threads.emplace_back(call_loop<decltype(client)>, ss.get_token(),

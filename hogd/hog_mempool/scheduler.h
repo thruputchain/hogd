@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -14,8 +15,10 @@
 #include "hogd/base/types.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/shared.h"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/x23/async.h"
@@ -26,6 +29,9 @@ namespace hogd {
 
 class Scheduler {
 public:
+  static constexpr BlockHeight kTransactionOutcomeBlockLifetime = 50;
+  static constexpr size_t kMaxTransactionOutcomes = 50'000'000;
+
   Scheduler(BlockHeight current_block,
             std::shared_ptr<db_sched_client_t> db_sched_client)
     : current_block_(current_block),
@@ -40,29 +46,32 @@ public:
     co_return;
   }
 
-  // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
-  // scheduler detects and silently drops the duplicates rather than enqueue
-  // them.
+  // Adds txs to the scheduler and returns one admission outcome per tx, in
+  // input order. Adding the same tx multiple times is okay; a duplicate that
+  // is already pending is reported as admitted rather than enqueued again.
   //
   // This method will cycle the groups for an account if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  x23::Async<void> add_txs(const x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  add_txs(const x23::XdrVec<SignedTransaction> &txs,
+          const x23::XdrVec<TransactionHash> &tx_hashes);
 
-  x23::Async<void> process_transfers(const HogsTransferred &transfer);
+  x23::Async<void> process_transfers(const BlockTransfers &transfer);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  void schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
-                x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<void> schedule(size_t num_txs,
+                            x23::XdrVec<TransactionHash> &tx_hashes,
+                            x23::XdrVec<SignedTransaction> &txs);
 
   void start_pending_nomination(BlockID block_id);
-  void commit_pending_nomination(BlockID block_id);
-  void abandon_pending_nomination(BlockID block_id);
+  x23::Async<void> commit_pending_nomination(BlockID block_id);
+  x23::Async<void> abandon_pending_nomination(BlockID block_id);
   x23::Async<void>
   apply_committed_block_hog_ages(const x23::XdrVec<SignedTransaction> &txs,
                                  BlockHeight block_height);
@@ -77,6 +86,18 @@ public:
     }
     return {};
   }
+
+  x23::Async<SchedulerTransactionOutcome>
+  lookup_transaction_outcome(const TransactionHash &tx_hash);
+
+  x23::Async<void> record_transaction_outcome(
+      const TransactionHash &tx_hash, SchedulerTransactionStatus status,
+      SchedulerTransactionErrorSource error_source =
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+      int32_t error_code = 0);
+
+  x23::Async<void> clear_transaction_outcome_if_not_already_committed(
+      const TransactionHash &tx_hash);
 
   void get_txs_for_account(const ContractAddress &address,
                            TransactionHashBatch &tx_hashes,
@@ -103,9 +124,30 @@ public:
     size_t num_inserted = 0;
     for (auto it = begin; it != end; it++) {
       const TransactionHash &tx_hash = *it;
-      const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
-      CHECK_PTR(tx_value_ptr);
-      if (insert_tx_into_runqueue(tx_hash, *tx_value_ptr)) {
+      std::shared_ptr<TxValue> tx_value;
+      {
+        const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+        CHECK_PTR(tx_value_ptr);
+        tx_value = *tx_value_ptr;
+      }
+
+      const SignedTransaction &tx = tx_value->tx;
+      const ContractAddress &account = tx.tx.invocation.invoked_address;
+      const TxKey key{
+          .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+          .tx_hash = tx_hash,
+      };
+      auto [account_state, account_lock] = get_account_state(account);
+
+      // [schedule()] or the commit path may have removed the signed tx cache
+      // entry since the lookup above. Revalidate signed tx while holding both
+      // locks in account-then-cache order so a runqueue entry cannot outlive
+      // its cache entry. Use the newly cached signed tx value because a
+      // replacement signed tx may carry different signatures for the same
+      // transaction hash.
+      const auto [cached_value, txs_lock] = txs_.find(tx_hash);
+      if (cached_value &&
+          account_state->txs.insert({key, *cached_value}).second) {
         num_inserted++;
       }
     }
@@ -134,7 +176,7 @@ public:
   x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs);
   x23::Async<ReadAverageHogAgesResult>
-  read_average_hog_ages(const HogsTransferred &transfers);
+  read_average_hog_ages(const BlockTransfers &transfers);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:
@@ -155,19 +197,28 @@ public:
   {
     return current_block_.load(std::memory_order_relaxed);
   }
-  void increment_current_block()
+  x23::Async<void> increment_current_block()
   {
     current_block_.fetch_add(1, std::memory_order_relaxed);
+    co_await prune_transaction_outcomes();
   }
   void set_current_block(BlockHeight height)
   {
     current_block_.store(height, std::memory_order_relaxed);
   }
 
+  // Returns whether this transaction body is already pending in the account's
+  // runqueue or stranded set. Callers must authenticate the submitted signed
+  // encoding before treating an existing body as admitted.
+  bool is_pending(const SignedTransaction &tx, const TransactionHash &tx_hash);
+
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
-  size_t tx_cache_size() { return txs_.size(); }
+  size_t tx_cache_size()
+  {
+    return tx_cache_size_.load(std::memory_order_relaxed);
+  }
 
   // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age
   // updates.
@@ -177,6 +228,14 @@ public:
   x23::CoroLock global_lock_;
 
 private:
+  struct TransactionOutcomeEntry {
+    TransactionHash tx_hash;
+    SchedulerTransactionOutcome outcome;
+    // We record the height since we use the height to evict tx outcomes that
+    // are at least [kTransactionOutcomeBlockLifetime] blocks old.
+    BlockHeight processed_height;
+  };
+
   struct TxKey {
     BlockHeight expiry_block_height;
     TransactionHash tx_hash;
@@ -235,23 +294,13 @@ private:
 
   AccountKey get_account_key(const ContractAddress &account);
 
-  bool account_is_ready(const ContractAddress &account,
-                        bool remove_expired_txs);
+  x23::Async<bool> account_is_ready(const ContractAddress &account,
+                                    bool remove_expired_txs);
 
-  // Inserts the tx with [tx_hash] into the runqueue. Returns true if the
-  // insertion succeeded and false otherwise.
-  //
-  // This method does *not* modify [size_]! The caller must do this. Generally,
-  // the caller will often want to add multiple txs to the runqueue, so it is
-  // more efficient for the caller to do a single [fetch_add()] to [size_]
-  // rather than have [insert_tx_into_runqueue()] increment [size_] for every
-  // single tx.
-  bool insert_tx_into_runqueue(const TransactionHash &tx_hash,
-                               const std::shared_ptr<TxValue> &tx_value);
-  bool add_txs_helper(const SignedTransaction &tx);
-
+  x23::Async<bool> add_txs_helper(const SignedTransaction &tx,
+                                  const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
-  void cycle_accounts_during_schedule_helper(
+  x23::Async<void> cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
       const TxKey &lower_bound);
 
@@ -284,19 +333,19 @@ private:
       AccountState &account_state, const ContractAddress &account);
   const HogAge &get_hog_age_from_pending_nomination_if_exists(
       const AccountState &account_state, const ContractAddress &account) const;
-  void refresh_ready_accounts(
+  x23::Async<void> refresh_ready_accounts(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts);
-  void refresh_accounts_excluded_from_block();
+  x23::Async<void> refresh_accounts_excluded_from_block();
   bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
+  x23::Async<void> prune_transaction_outcomes();
 
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
-  // Tx cache.
-  // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
-  // free them automatically without too much overhead/garbage collection with
-  // smart pointers (e.g., [std::shared_ptr<>]).
+  // Tx cache. Entries are removed when transactions expire, are discarded, or
+  // appear in a committed/validated block. Shared ownership keeps an entry's
+  // transaction alive for in-flight lookups after it is removed from here.
   SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
@@ -311,7 +360,15 @@ private:
   //    now be less than 0.
   // 4. [add_txs()] increments [size_].
   std::atomic<ssize_t> size_ = 0;
+  std::atomic<ssize_t> tx_cache_size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
+
+  x23::CoroLock transaction_outcomes_lock_;
+  std::list<TransactionOutcomeEntry> transaction_outcomes_order_;
+  std::unordered_map<TransactionHash,
+                     std::list<TransactionOutcomeEntry>::iterator,
+                     SipHash24Hasher>
+      transaction_outcomes_;
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for

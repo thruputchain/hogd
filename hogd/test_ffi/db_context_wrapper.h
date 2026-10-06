@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 #include "auth_rpc.hh"
 #include "contract.hh"
@@ -23,11 +24,20 @@
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
+#include "x23/async.h"
 #include "x23/mvar.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
 namespace hogd {
+
+// A block was advanced with a timepoint earlier than the block it follows.
+// Its own type so the FFI layer can report a caller's bad argument as one,
+// rather than folding it in with the internal failures advancing can hit.
+class BackwardsTimepointError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 // Database-related context for the test environment.
 // Provides appropriate methods for manipulating the evolution
@@ -47,8 +57,28 @@ public:
             Contract const &genesis_root_contract,
             NetworkConfig const &network_config);
 
-  void advance_new_block(BlockExecutionMode mode =
-                             BlockExecutionMode::kBlockExecutionModeProposal);
+  // Height is the tip's plus one, read off the tip rather than a block id.
+  // The timepoint is whatever the advance that opened this block was given;
+  // unlike the height it is not derivable from the chain.
+  BlockExecutionContext block_execution_context() const;
+
+  // Opens the next block. `block_timepoint` is that block's timepoint in Unix
+  // nanoseconds; nullopt takes the current wall clock, which is what a caller
+  // with no opinion wants -- a contract reading GetBlockTimepoint then sees a
+  // plausible present-day value rather than a fixed one. Pass a value to pin
+  // it, which is how a test drives contract logic keyed on time: deadlines,
+  // expiry, vesting, rate limits.
+  //
+  // A block may not be older than the one it follows: a timepoint earlier
+  // than the open block's throws BackwardsTimepointError and advances
+  // nothing, so a refused advance leaves the DB exactly as it was. Equal is
+  // allowed -- two blocks sharing a nanosecond is implausible rather than
+  // incoherent. The wall clock is checked the same way as a pinned value; it
+  // is not normally capable of going backwards, and quietly clamping it would
+  // hide the clock stepping under a running test.
+  void advance_new_block(
+      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
+      std::optional<TimePoint> block_timepoint = std::nullopt);
 
   struct EphemeralTxIdentifier {
     BlockID block_id;
@@ -95,7 +125,9 @@ public:
   // state was admitted against state the operation then destroyed (issue
   // #3049). Both sides now decide under lifecycle_state_'s lock: a transition
   // is admitted only with no handler open and no other transition in flight,
-  // and a handler only with no transition in flight.
+  // and a handler only with no transition in flight. Entry points that touch
+  // DB state without owning a handler borrow for the length of that access
+  // (see Borrow; issues #2704, #2727, #2667).
 
   // Registers a handler's borrow of this DBContext. Returns false when a
   // lifecycle transition is in flight; the caller must not borrow DB state in
@@ -118,6 +150,35 @@ public:
       --state.open_handlers;
     });
   }
+
+  // Scoped borrow for an entry point that touches DB state without owning a
+  // handler: a snapshot read, a setup_* write (a base-DB put() must not overlap
+  // the sync() an advance commits with), or a handler open ahead of its guard.
+  // Non-throwing, so a noexcept FFI entry point can turn a refusal into a
+  // structured error.
+  class Borrow {
+  public:
+    explicit Borrow(DBContext &db)
+      : db_(&db), held_(db.try_register_open_handler())
+    {}
+    ~Borrow()
+    {
+      if (held_) {
+        db_->unregister_open_handler();
+      }
+    }
+
+    Borrow(Borrow const &) = delete;
+    Borrow &operator=(Borrow const &) = delete;
+    Borrow(Borrow &&) = delete;
+    Borrow &operator=(Borrow &&) = delete;
+
+    bool held() const { return held_; }
+
+  private:
+    DBContext *db_;
+    bool held_;
+  };
 
   bool has_open_handlers() const { return lifecycle_state_->open_handlers > 0; }
 
@@ -221,7 +282,22 @@ private:
   using db_sched_client_t =
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 
+  // Unix nanoseconds, as a real chain's header carries. Set by each
+  // advance_new_block() and read back by block_execution_context(): for an
+  // open block the timepoint is not on the tip (that one is the parent's), so
+  // unlike the height there is nothing to recompute it from.
+  TimePoint block_timepoint_ = 0;
+
   BlockID current_block_id_ = 0;
+  // The height of the last committed block; genesis commits at 0 before the
+  // first advance. Tracked rather than read off the tip so building the open
+  // block's execution context costs no rpc, and so nothing here assumes
+  // block ids equal heights.
+  BlockHeight committed_height_ = 0;
+  // The network this chain belongs to. Every committed value carries it, not
+  // just genesis: the commit path replaces the persisted tip wholesale, so a
+  // value that omits it puts the chain back on network zero.
+  NetworkHash network_hash_;
 
   HogdbWrapper hog_db_wrapper_;
 

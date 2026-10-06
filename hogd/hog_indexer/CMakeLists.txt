@@ -17,6 +17,7 @@ target_link_libraries(hog_indexer PUBLIC
 # Tests
 add_executable(hog_indexer_test
     indexer_test.cc
+    indexer_process_test.cc
     recent_tx_failure_cache_test.cc
     db_test.cc
     event_cursor_test.cc
@@ -26,12 +27,17 @@ add_executable(hog_indexer_test
     topic_layout_test.cc
 )
 
+target_compile_definitions(
+  hog_indexer_test
+  PRIVATE
+  HOG_INDEXER_BINARY="$<TARGET_FILE:hog-indexer>"
+)
 target_link_libraries(hog_indexer_test
     hog_indexer
     hog_event
     gtest
 )
-gtest_discover_tests(hog_indexer_test)
+hogd_discover_tests(hog_indexer_test)
 
 if(BUILD_BENCHMARKS)
     # Benchmark executable
@@ -58,3 +64,4 @@ target_link_libraries(
   metrics
   http
 )
+add_dependencies(hog_indexer_test hog-indexer)

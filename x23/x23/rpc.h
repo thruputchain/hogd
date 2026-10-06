@@ -199,7 +199,9 @@ private:
           return make_record(rmsg);
         }
         else {
-          return_type res = dispatch(argbytes);
+          // res outlives make_record, so a reply may borrow bytes it guards.
+          static_assert(serializes_like<dispatch_t, return_type>);
+          decltype(auto) res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
           return make_record(rmsg, res);
         }
@@ -560,7 +562,10 @@ protected:
     super2::populate(
         [&cp, &ss, logfd, max_message_size](
             const CpuSet & /*unused*/) -> RpcStream<Logger>::ClientRef {
-          UniqueFd fd = tcpconnect(ss);
+          auto conn = tcpconnect(ss);
+          if (!conn)
+            conn.error().raise("connect({})", HostPort(ss));
+          UniqueFd fd = std::move(*conn);
           int socketfd = fd.get();
           typename super2::value_type stream =
               *new RpcStream<Logger>(cp, std::move(fd),

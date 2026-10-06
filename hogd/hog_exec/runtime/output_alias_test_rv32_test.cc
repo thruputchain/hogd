@@ -62,7 +62,7 @@ TEST_F(OutputAliasTestRv32Test, NnintExactOverlap)
                                    .nonce = nonce_++}},
       *runtime_context_);
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   // An alias fault is a fault: it bumps the same counter a parse fault does.
   auto *stats = handler.get_transaction_stats();
@@ -82,7 +82,7 @@ TEST_F(OutputAliasTestRv32Test, NnintPartialOverlap)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // Non-overlapping outputs should not fault.
@@ -96,7 +96,7 @@ TEST_F(OutputAliasTestRv32Test, NnintNoOverlap)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // output_written_len pointer inside the output span must fault.
@@ -111,7 +111,7 @@ TEST_F(OutputAliasTestRv32Test, CalldataSpanWritableOverlap)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // Non-overlapping span and writable output should not fault.
@@ -125,7 +125,7 @@ TEST_F(OutputAliasTestRv32Test, CalldataNoOverlap)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // Two input pointers at the same address should fault
@@ -140,7 +140,7 @@ TEST_F(OutputAliasTestRv32Test, InputInputOverlapFault)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // Zero-length spans under the half-open alias predicate: strictly inside a
@@ -158,8 +158,8 @@ TEST_F(OutputAliasTestRv32Test, ZeroLenSpanAliasEdges)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}}};
   auto handler = make_new_system_call_handler(signed_tx, *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = signed_tx})());
@@ -177,7 +177,7 @@ TEST_F(OutputAliasTestRv32Test, InputOutputOverlapFault)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 } // namespace hogd

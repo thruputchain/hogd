@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -20,8 +21,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
-#include "x23/rpc_common.h"
 
 namespace hogd {
 
@@ -85,11 +84,13 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
       .delta = make_nnint_add_delta(cost_model_->get_nnint_cost()),
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
-  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
+  auto r =
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
-      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())
+      db_proxy
+          .commit_transaction(get_block_number(), 1, empty_contract_batch())()
           .has_value());
   advance_block();
 
@@ -131,7 +132,7 @@ TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
                   make_nnint_add_delta(cost_model_->get_nnint_cost()),
                   std::to_underlying(StorageDeltaFlags::None));
 
-  auto r = proxy.try_push_current_subtransaction();
+  auto r = proxy.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
 
@@ -147,10 +148,10 @@ TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
                   make_nnint_add_delta(0),
                   std::to_underlying(StorageDeltaFlags::None));
 
-  auto r2 = proxy.try_push_current_subtransaction();
+  auto r2 = proxy.try_push_current_subtransaction()();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
-  ASSERT_TRUE(proxy.commit_transaction().has_value());
+  ASSERT_TRUE(proxy.commit_transaction()().has_value());
 
   advance_block();
 
@@ -207,11 +208,13 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
                                     cost_model_->get_balance_cost()),
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
-  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
+  auto r =
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
-      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())
+      db_proxy
+          .commit_transaction(get_block_number(), 1, empty_contract_batch())()
           .has_value());
   advance_block();
 
@@ -249,7 +252,8 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                        .delta = make_nnint_set_add_delta(0, 1),
                                        .flags = std::to_underlying(
                                            StorageDeltaFlags::None)});
-  auto r1 = db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner);
+  auto r1 =
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner)();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
@@ -261,7 +265,7 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                           StorageDeltaFlags::None)});
   DbConflictResult conflict(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r2 = db_proxy.try_push_new_subtransaction(get_block_number(), 2, loser,
-                                                 &conflict);
+                                                 &conflict)();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
   // The fixture runs Proposal mode: hog_db selects All in debug builds,
@@ -270,13 +274,12 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
     ASSERT_EQ(conflict.conflicts().size(), 1U);
     EXPECT_EQ(conflict.conflicts()[0].addrkey, key);
-    EXPECT_EQ(conflict.conflicts()[0].code,
-              DbConflictCode::kDbConflictValueMismatch);
+    EXPECT_EQ(conflict.conflicts()[0].code, DbConflictCode::ValueMismatch);
   }
   else {
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
     EXPECT_EQ(conflict.first().addrkey, key);
-    EXPECT_EQ(conflict.first().code, DbConflictCode::kDbConflictValueMismatch);
+    EXPECT_EQ(conflict.first().code, DbConflictCode::ValueMismatch);
   }
 }
 
@@ -296,16 +299,12 @@ INSTANTIATE_TEST_SUITE_P(AllDBs, DirectStorageOrderingTest,
 // SystemErrorCode::Unrecoverable, which also lets the post-call clear run.
 TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
 {
-  // Shrink the SRPC record cap before constructing the framework so both the
-  // exec-side client and the DB-side server adopt it.
-  const std::size_t saved_max = x23::default_max_message_size;
-  x23::default_max_message_size = 1024;
-  x23::Defer restore{
-      [saved_max] { x23::default_max_message_size = saved_max; }};
-
+  // Shrink the exec-side client's record cap so the push exceeds it.
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false);
+      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*genesis_cost_model=*/std::nullopt,
+      /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/1024);
   fw.run_genesis_initialization(
       NativeContractTestFramework::make_compact_test_genesis_configuration());
 
@@ -324,7 +323,7 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
   }
 
   // Must not throw — the wrapper converts x23::XdrBadInput to Unrecoverable.
-  auto r = oversized_proxy.try_push_current_subtransaction();
+  auto r = oversized_proxy.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value());
   ASSERT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
 }
@@ -332,14 +331,11 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
 TEST(DirectStorageOversizedFinalCommitBatchTest,
      OversizedNewContractBatchYieldsUnrecoverable)
 {
-  const std::size_t saved_max = x23::default_max_message_size;
-  x23::default_max_message_size = 1024;
-  x23::Defer restore{
-      [saved_max] { x23::default_max_message_size = saved_max; }};
-
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false);
+      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*genesis_cost_model=*/std::nullopt,
+      /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/1024);
   fw.run_genesis_initialization(
       NativeContractTestFramework::make_compact_test_genesis_configuration());
 
@@ -361,17 +357,16 @@ TEST(DirectStorageOversizedFinalCommitBatchTest,
   tx.add_delta(addrkey, std::move(delta),
                std::to_underlying(StorageDeltaFlags::None));
 
-  auto push = tx.try_push_current_subtransaction();
+  auto push = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(push.has_value());
   ASSERT_TRUE(push.value());
 
   BorrowedContractBatch::hash_set_t hashes{deployed_contract_hash.hash};
   BorrowedContractBatch::contract_map_t contracts;
-  contracts.emplace(deployed_contract_hash.hash,
-                    std::make_unique<const Contract>(contract));
+  contracts.emplace(deployed_contract_hash.hash, &contract);
   BorrowedContractBatch new_contracts(hashes, contracts);
 
-  auto res = tx.commit_transaction(new_contracts);
+  auto res = tx.commit_transaction(new_contracts)();
   ASSERT_FALSE(res.has_value());
   EXPECT_EQ(res.error().code(), SystemErrorCode::Unrecoverable);
 }

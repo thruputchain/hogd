@@ -18,7 +18,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hosted_bootstrap_generator.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/init.h"
@@ -71,9 +70,7 @@ Generate hosted devnet bootstrap genesis and metadata without starting services.
 
 Options:
   --network-hash <hex>           32-byte network hash [default: all zeroes]
-  --dev-wallet-profile <name>    Built-in dev wallet profile
-                                 [default: hog-devnode-default]
-  --dev-accounts <count>         Deterministic dev accounts to bootstrap
+  --dev-accounts <count>         Native dev accounts to fund (16 total with faucet)
                                  [default: 10]
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
                                  [default: groundhog-dev-accounts]
@@ -142,16 +139,6 @@ parse_generate_args(int argc, char *argv[])
             argv, usage);
       }
       options.config.network_hash = *network_hash;
-      continue;
-    }
-    if (arg == "--dev-wallet-profile" && i + 1 < argc) {
-      options.config.bootstrap_config.dev_wallet_profile = argv[++i];
-      if (options.config.bootstrap_config.dev_wallet_profile.empty()) {
-        hogd::arg_error("Invalid dev wallet profile: profile must not be empty",
-                        argv, usage);
-      }
-      hogd::resolve_dev_wallet_profile(
-          options.config.bootstrap_config.dev_wallet_profile);
       continue;
     }
     if (arg == "--dev-accounts" && i + 1 < argc) {

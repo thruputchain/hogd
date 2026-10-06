@@ -38,13 +38,6 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
 
 ## Manual Installation (All Platforms)
 
-1. Install the `wat2wasm` utility from the [WebAssembly Binary
-   Toolkit](https://github.com/WebAssembly/wabt).  Most OS package
-   managers let you do this by installing a package called `wabt`.
-
-1. Install the `wasm-opt` utility from [Binaryen](https://github.com/WebAssembly/binaryen).
-   Most package managers let you do this by installing the `binaryen` package.
-
 1. Install python-yaml, either with your OS package manager (e.g.,
    `pacman -S python-yaml`) or with `pip install pyyaml`.
 
@@ -62,8 +55,9 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
 
 1. Install [`rustup`](https://rustup.rs/) if you haven't already.  It
    generally won't suffice to have your OS distribution's rust
-   packages installed, because they won't support WASM.  You can
-   install rustup with:
+   packages installed, because the contract fixtures need a pinned
+   nightly toolchain with the `riscv32im-unknown-none-elf` target.
+   You can install rustup with:
 
     ~~~~ .sh
     curl -sSf https://sh.rustup.rs | sh
@@ -80,7 +74,7 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
 
     ~~~~ .toml
     [registry]
-    global-credential-providers = ["env", "cargo:token"]
+    global-credential-providers = ["cargo:token"]
     ~~~~
 
    Then add your token to `~/.cargo/credentials.toml`:
@@ -91,7 +85,7 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     ~~~~
 
    You can get an access token by logging in at
-   [groundhog.dev/crates](https://groundhog.dev/crates).
+   [crates.thruput.network](https://crates.thruput.network).
 
    Alternatively, you can authenticate using environment variables (this
    is how CI is configured):
@@ -128,6 +122,44 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     * clippy (for rust)
     * flake8 (for python)
     * shfmt
+
+## Building `hog-devnode` for contract development
+
+Contract authors normally do not build this repository. The `groundhog` CLI
+(from [groundhog-rpc](https://github.com/groundhogchain/groundhog-rpc)) drives
+a local node through the `hog-devnode` binary, which ships in the
+`groundhog-client` release archive; see
+[Develop Locally](https://docs.groundhog.dev/tutorials/develop-locally/) on the
+developer docs site.
+
+If you do want to build `hog-devnode` from source, configure as above and build
+just that target:
+
+~~~~ .sh
+make devnode
+export GROUNDHOG_DEVNODE_BINARY="$PWD/build/hogd/devnode/hog-devnode"
+groundhog node
+~~~~
+
+`hog-devnode` itself serves only hogd's internal x23 RPC on loopback and prints
+one readiness line on stdout. The public JSON-RPC endpoint that clients and the
+CLI talk to (port 9545 by default) is served by `groundhog node`, which
+supervises the devnode process. Run `hog-devnode --help` for its options.
+Fresh local chains allow up to 256 KiB of RV32 code and 512 KiB per complete
+contract artifact by default; no network-config overrides are needed.
+
+Fresh local and hosted bootstrap accounts use the native default wallet at
+nonce zero. Genesis funds their public-key-derived addresses directly; runtime
+bundles need `genesis_root.rv32a` but no `dev_wallet.rv32a`. Bootstrap and runtime
+manifests use schema 3; hosted bootstrap metadata uses schema 2.
+
+Persistent local directories from the older dev-wallet bootstrap are not migrated
+in place. Keep the original CLI/runtime to open those directories, or explicitly
+choose a new data directory for a native-bootstrap chain. The new runtime refuses
+old metadata before opening the database; do not delete a directory to resolve
+that error unless you intend to discard its chain state. Deterministic signing
+keys remain the same, but fresh native account addresses differ from the old
+contract-wallet addresses.
 
 ## Update instructions
 
@@ -166,3 +198,17 @@ curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
 cargo install --force cbindgen
 ./scripts/fetch.sh
 ```
+
+### AMD server release artifacts
+
+Linux releases also publish `hogd-validator-linux-x86_64-znver5.tar.gz` in
+`SHA256SUMS`. Its server binaries target AMD Zen 5 explicitly in both C++ and
+embedded Rust (`BUILD_ARCHITECTURE=znver5`, `RUST_BUILD_CPU=znver5`). Use only
+on qualified Zen 5 hosts, such as EC2 C8a/M8a. Packaging must select this archive
+explicitly and qualify execution on the destination CPU before deployment.
+The regular x86_64 archives and public hog-devnode distributions retain their
+portable CPU baseline. There is no tuned standalone devnode distribution.
+
+Run `python3 scripts/test_package_hogd_validator_release.py` to check archive
+layout and profile validation. This fixture test does not validate machine code;
+the release build and a real Zen 5 runtime smoke remain required.

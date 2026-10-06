@@ -10,7 +10,6 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <utility>
 #include <vector>
 
@@ -156,13 +155,13 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       // any entries before, then some other transaction set delta.consume.
       // Hence, there would be two consumers for the block, which is a
       // conflict.
-      return ctx.conflict(DbConflictCode::kDbConflictQueueConsumer);
+      return ctx.conflict(DbConflictCode::QueueConsumer);
     }
 
     if (!this_tx_already_consumed) {
       bool expected = false;
       if (!consumed_.compare_exchange_strong(expected, true)) {
-        return ctx.conflict(DbConflictCode::kDbConflictQueueConsumer);
+        return ctx.conflict(DbConflictCode::QueueConsumer);
       }
       undo.push([this] { consumed_.store(false, std::memory_order_relaxed); });
     }
@@ -207,7 +206,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     // block-start snapshot keeps the decision deterministic across
     // concurrent transactions.
     if (meta.live_entries >= kMaxRetrocausalQueueLiveEntries) {
-      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+      return ctx.conflict(DbConflictCode::CapacityExceeded);
     }
 
     const size_t additional_entries =
@@ -225,7 +224,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
     if (reserved_before + additional_entries >
         kRetrocausalQueueBlockEntriesMaxLen) {
-      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+      return ctx.conflict(DbConflictCode::CapacityExceeded);
     }
   }
   else if (new_entries_count < previous_entries_count) {
@@ -463,10 +462,10 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     consume_delta_.emplace(std::move(*delta.consume));
   }
 
-  int64_t element_delta =
-      static_cast<int64_t>(elements_added) - change.consumed_past_entries_;
+  int64_t element_delta = static_cast<int64_t>(elements_added) -
+                          static_cast<int64_t>(change.consumed_past_entries_);
   if (has_consume) {
-    element_delta -= current_consumed_count;
+    element_delta -= static_cast<int64_t>(current_consumed_count);
   }
   committed_element_count_delta_ += element_delta;
 
@@ -519,35 +518,45 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
   // Build the new block by filtering out consumed entries BY VALUE.
   // This is necessary because ItemView prioritizes Self entries over Concurrent
   // entries, so the consumed entries may not be at the front of added_entries_.
+  // A sorted lockstep walk cancels one inserted copy per consumed copy and
+  // leaves the survivors sorted, so the block needs no separate sort.
   x23::Vec<QueueEntry> remaining_entries;
   if (consume_delta_ && !consume_delta_->current_block_consumed.empty()) {
-    std::multiset<QueueEntry> consumed_set(
+    std::vector<QueueEntry> sorted_added(added_entries_.begin(),
+                                         added_entries_.end());
+    std::ranges::sort(sorted_added);
+
+    std::vector<QueueEntry> sorted_consumed(
         consume_delta_->current_block_consumed.begin(),
         consume_delta_->current_block_consumed.end());
+    std::ranges::sort(sorted_consumed);
 
-    for (auto const &entry : added_entries_) {
-      auto it = consumed_set.find(entry);
-      if (it != consumed_set.end()) {
-        consumed_set.erase(it);
+    // has_unmatched_entries() guarantees consumed is a sub-multiset of added,
+    // so this cannot underflow.
+    CHECK_LE(sorted_consumed.size(), sorted_added.size());
+    remaining_entries.reserve(sorted_added.size() - sorted_consumed.size());
+
+    auto added_it = sorted_added.begin();
+    for (auto const &consumed : sorted_consumed) {
+      while (added_it != sorted_added.end() && *added_it < consumed) {
+        remaining_entries.push_back(*added_it);
+        ++added_it;
       }
-      else {
-        remaining_entries.push_back(entry);
-      }
+      // A matching insert must be sitting at added_it, for the same reason.
+      CHECK(added_it != sorted_added.end() && *added_it == consumed);
+      ++added_it;
     }
-    // consumed_set was already validated by has_unmatched_entries() in
-    // stage_committed_changes(). This CHECK guards against logic errors
-    // in the filtering — it should never fire.
-    CHECK(consumed_set.empty());
+    remaining_entries.append(added_it, sorted_added.end());
   }
   else {
     remaining_entries =
         x23::Vec<QueueEntry>(added_entries_.begin(), added_entries_.end());
+    std::ranges::sort(remaining_entries);
   }
 
   if (!remaining_entries.empty()) {
     RetrocausalQueueBlock new_block;
     new_block.entries = std::move(remaining_entries);
-    std::ranges::sort(new_block.entries);
     new_block.block_number = base_metadata.max_live_block_num + 1;
 
     auto block_key =
@@ -601,13 +610,16 @@ RetrocausalQueueLock::stage_committed_changes(const LockContext &ctx,
   return {};
 }
 
-std::optional<QueueEntry>
+std::optional<x23::BufView>
 RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 {
+  // Safe past the unlock: QueueEntry's buffer is heap-owned, so appending to
+  // added_entries_ relocates the QueueEntry objects but never the bytes.
   std::lock_guard lock(mtx_);
 
   if (index < added_entries_.size()) {
-    return added_entries_[index];
+    auto const &entry = added_entries_[index];
+    return x23::BufView(entry.data(), entry.size());
   }
   return std::nullopt;
 }

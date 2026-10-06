@@ -21,35 +21,20 @@
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
 
-// Direct-threaded, musttail RV32IM interpreter. Handlers take the current
-// instruction pointer `ip` and tail-call (ip + 1) in the common case, so there
-// is no instruction-index arithmetic and no per-instruction pc update; pc is
-// derived as (ip - base) * 4 only by the control-flow handlers and when
-// materializing observable state.
+// Direct-threaded RV32IM interpreter. Handlers tail-call the next Slot; the
+// guest PC is derived from the slot address at control-flow and observation
+// boundaries.
 //
-// Gas is metered at *start of run* (block granularity, like the wasm engines):
-// a "run" is a maximal straight-line sequence whose continuation is known at
-// lowering time. enter_run() charges the whole run's gas in one check; the
-// handlers inside do no gas work. Control-flow instructions and host-boundary
-// instructions (branches/jal/jalr/ecall/ebreak/unimp) are barriers and
-// self-charge.
-// Loads/stores stay in straight-line runs for performance; if one traps, the
-// run has already been charged past it, so trap_bad_memory refunds the run's
-// unexecuted suffix -- the trapped state charges exactly the instructions
-// through the faulting one, matching the per-instruction Machine. An
-// unaffordable run still executes, speculatively, on a zero balance with the
-// shortfall recorded out-of-band in gas_deficit_ (so budgets keep the full
-// uint64 domain); the deficit settles as kOutOfGas with zero gas at the run's
-// exit seam (enter_run / op_ecall / trap_at), before any effect can escape
-// the frame. The consensus-visible pair (trap classification, gas_remaining)
-// thus matches the per-instruction Machine at every budget; the speculative
-// run's register/memory writes and the trap pc are frame-local state a trap
-// discards and may differ (as may traced intermediate gas past the OOG
-// fence).
+// enter_run() charges a straight-line run, including its terminating barrier
+// or chunk-break instruction. A memory fault refunds the unexecuted suffix.
+// An unaffordable run executes speculatively with its shortfall recorded in
+// gas_deficit_; run exits settle it before another run or host call can start.
+// Trap classification and remaining gas match the canonical Machine. After
+// out-of-gas, speculative registers, memory, trap PC, and intermediate traces
+// may differ; the failed invocation discards those effects.
 //
-// Tracing is a build-time choice: handlers are templated on a `Trace` bool, and
-// the executable Slot array is built (once, cached across reset()) with either
-// the untraced (production) or traced (records an ExecTrace) handler set.
+// Preparation selects traced or untraced handlers. Traced handlers record each
+// retired instruction, including both instructions of a fused pair.
 namespace hogd::rv32 {
 
 struct Ctx;
@@ -57,42 +42,27 @@ struct Slot;
 using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
                                uint64_t);
 
-// Maximum gas any single run (chunk) may total. The lowering splits longer
-// straight-line runs at mid-run break carriers so no run's gas_to_run exceeds
-// this, which (a) keeps gas_to_run within its uint16 field and (b) bounds the
-// maximum speculative overdraft a deficit run can incur (enter_run_deficit),
-// since at most one run ever runs in deficit. A single instruction's gas is
-// <= 8 (kDivInstructionGas) << kMaxRunGas, so a valid split always exists.
+// Chunk limit: bounds gas_to_run's uint16 value and the speculative deficit.
+// Lowering splits longer runs; every individual instruction must fit.
 inline constexpr uint32_t kMaxRunGas = 10000;
+static_assert(kMaxInstructionGas <= kMaxRunGas);
+static_assert(kMaxRunGas <= UINT16_MAX);
 
-// The narrow-imm + rs2 arm of Slot's operand union (see Slot below for why the
-// two can share a word). Declared out of line rather than as an unnamed struct
-// inside the anonymous union: ISO C++ ([class.union.anon]) lets an anonymous
-// union define only non-static data members, so a nested type there is a
-// compiler extension (clang: -Wnested-anon-types).
+// Named outside the anonymous union because ISO C++ forbids defining a type
+// inside one. Instructions using rs2 need at most a 16-bit immediate.
 struct RbOperands {
   int16_t imm16; // store offset / branch slot-delta (fits int16)
   uint8_t rs2;   // R-type / store / branch
 };
 
-// Executable instruction, packed to 16 bytes (alignas(16) -- a power of two, so
-// `ip - base` (pc_of) and `ip + imm` (branch/jump targets) still lower to a
-// shift, and the exec_ array is half the size of the old 32-byte slot). Layout:
-//   handler (8) | gas_to_run (2) | rd (1) | rs1 (1) | union{imm;
-//   {imm16,rs2}}(4)
-// rd/rs1/rs2 are register indices. x0 writes are made unconditional by a trash
-// sink: rd==0 stays 0 and writes land harmlessly in regs_[0] (observable state
-// forces regs_[0] back to 0). x0 reads come from an always-zero register at
-// regs_[kRegisterCount], so PreInstantiation::create remaps rs1/rs2 0 ->
-// kRegisterCount. No per-op x0 branch either way. The union exploits that no
-// instruction needs rs2 together with a >16-bit imm: only lui/auipc/jal carry a
-// wide imm and none of them use rs2, while the rs2-users (R-type/store/branch)
-// need at most an int16 imm (store offset / branch slot-delta). So rs2 shares
-// the imm word with a narrow imm16. `gas_to_run` is the run's total gas (body
-// through terminating barrier), charged once by enter_run; uint16 -- the
-// lowering splits any run whose gas would exceed kMaxRunGas at a mid-run break
-// carrier, so a single run never overflows the field and no program is rejected
-// for run gas.
+// Power-of-two slot size makes PC and branch-target arithmetic shifts.
+// x0 writes go to regs_[0]; x0 reads are remapped to regs_[kRegisterCount],
+// which stays zero. Observers restore architectural x0.
+//
+// The operand union shares rs2 with the immediate: lui/auipc/jal need a wide
+// immediate but no rs2; R-type/store/branch need rs2 and at most int16.
+// gas_to_run holds the suffix cost through the next barrier or chunk break,
+// allowing any slot to become a run head after a branch.
 struct alignas(16) Slot {
   Handler handler = nullptr; // offset 0
   uint16_t gas_to_run = 0;   // offset 8
@@ -115,19 +85,20 @@ public:
   // it is placed at data-space VA `memory_start`, with zeros filling [0,
   // memory_start) and [memory_start+memory.size(), total_memory_size).
   // `total_memory_size` is the machine's full memory size and must be <=
-  // kMaxMemoryBytes; memory_start + memory.size() must be <= total_memory_size.
+  // kMemoryCeilingBytes; memory_start + memory.size() must be <=
+  // total_memory_size.
   // `max_run_gas` is the chunk cap the lowering splits runs at; production
   // always uses the default kMaxRunGas. Tests and the engine-diff fuzzer pass
   // smaller caps so break carriers (and their refund/deficit seams) appear in
   // short programs instead of requiring >kMaxRunGas of straight-line gas. It
-  // is clamped to [kDivInstructionGas, kMaxRunGas]: the floor keeps a valid
+  // is clamped to [kMaxInstructionGas, kMaxRunGas]: the floor keeps a valid
   // split for every single instruction, the ceiling keeps gas_to_run within
   // its uint16 field and the deficit overdraft bound.
   [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
                                      ProgramError>
   create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
          uint32_t memory_start, uint32_t total_memory_size, bool trace,
-         uint32_t max_run_gas = kMaxRunGas);
+         uint32_t max_run_gas = kMaxRunGas, bool fuse = true);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -154,20 +125,13 @@ private:
   friend class ThreadedMachine;
 };
 
-// Thread-local recycling pool for machine guest-memory buffers. A machine is
-// constructed per method invocation, and nested TryInvoke machines (up to
-// kMaxSavepointDepth deep) are live simultaneously on one thread -- so this
-// is a free list of *released* buffers, not a single slot: every live machine
-// owns its own buffer, and the pool only bounds how many freed buffers are
-// retained for reuse. Acquire reserves kMaxMemoryBytes so any recycled buffer
-// satisfies any artifact's memory size without reallocating; bursts deeper
-// than the cap fall back to plain allocation.
+// Recycle released guest-memory buffers per thread. Each live invocation owns
+// its buffer, including nested invocations. The cap limits retained buffers;
+// deeper nesting allocates normally. Reserve the default memory size up front;
+// larger admitted images grow the buffer on first use.
 inline constexpr size_t kMemorySlotPoolCap = 8;
 
-// Fixed-capacity LIFO: a std::array of vectors so the thread_local's
-// construction never allocates and release is a vector move-assignment --
-// both noexcept, which keeps release_memory_slot (called from the machine
-// destructor) provably non-throwing.
+// Fixed capacity keeps pool construction and buffer release non-allocating.
 struct MemorySlotPool {
   std::array<std::vector<uint8_t>, kMemorySlotPoolCap> slots;
   size_t count = 0;
@@ -188,7 +152,7 @@ acquire_memory_slot()
   if (pool.count != 0) {
     slot = std::move(pool.slots[--pool.count]);
   }
-  slot.reserve(kMaxMemoryBytes);
+  slot.reserve(kDefaultMaxMemoryBytes);
   return slot;
 }
 
@@ -201,28 +165,14 @@ release_memory_slot(std::vector<uint8_t> &&slot) noexcept
   }
 }
 
-// RAII owner of a single guest-memory pool slot. Acquires a buffer from the
-// thread-local pool on construction and returns it on destruction; moving a
-// slot hands the buffer to the target and resets the source to no allocation,
-// so a moved-from slot releases nothing. Keeping ownership in this one type
-// means the owning machine needs no destructor or custom move of its own.
+// Owns a guest-memory buffer across invocation suspension and moves.
+// Acquisition uses the current thread's pool; destruction returns the buffer to
+// the pool of the thread running the destructor. No reference to the acquiring
+// pool is retained.
 //
-// Ownership is encoded as "buf_ holds an allocation", i.e. capacity() != 0:
-// acquire_memory_slot reserves capacity up front, so an acquired slot owns its
-// buffer even before it is filled, while a moved-from slot is reset to an empty
-// vector (capacity 0). The release decision therefore never depends on the
-// *implicit* moved-from std::vector value -- the standard only guarantees a
-// moved-from library object is "valid but unspecified", not empty()/capacity()
-// == 0 -- because the move constructor makes the source's empty state explicit
-// (which also makes a double move safe: a second move sees a source with no
-// allocation). buf_ holds the slot directly so MemorySlot is exactly the width
-// of a std::vector, keeping ThreadedMachine's cache-line layout (the
-// static_assert after the class guards this). The pool is thread_local, so a
-// slot must be destroyed on its constructing thread while that thread is alive
-// (true for the per-invocation stack machines); do not give one static storage
-// duration.
-// Still holds with suspending syscalls: a slot is acquired and released within
-// one rv32 invocation. Re-check once the invoke loop itself co_awaits.
+// capacity() != 0 denotes ownership. Moves explicitly empty the source rather
+// than relying on std::vector's unspecified moved-from state. Keeping only the
+// vector preserves ThreadedMachine's cache-line layout.
 class MemorySlot {
 public:
   MemorySlot() : buf_(acquire_memory_slot()) {}
@@ -236,11 +186,7 @@ public:
   }
   MemorySlot(MemorySlot &&other) noexcept
     : buf_(std::exchange(other.buf_, std::vector<uint8_t>{}))
-  {
-    // std::exchange hands other's buffer to buf_ and leaves other holding a
-    // fresh empty vector (capacity 0), so ownership transfer does not depend on
-    // the unspecified moved-from std::vector state.
-  }
+  {}
   MemorySlot &operator=(MemorySlot &&) = delete;
   MemorySlot(const MemorySlot &) = delete;
   MemorySlot &operator=(const MemorySlot &) = delete;
@@ -255,13 +201,8 @@ private:
   std::vector<uint8_t> buf_;
 };
 
-// alignas(64): pin the base to a cache-line boundary so member offsets map
-// deterministically to cache lines. This is load-bearing for *consistent*
-// benchmarking (without it base-mod-64 varies per allocation and the same
-// layout measures differently run to run) and for the read-mostly / read-write
-// field split below to mean anything. Stated explicitly on the class rather
-// than relying on the alignas(64) on gas_remaining_ to bump alignof as a side
-// effect.
+// Align the machine so member offsets consistently separate the register file,
+// read-mostly fields, and gas balance into cache lines.
 class alignas(64) ThreadedMachine {
 public:
   ThreadedMachine(ThreadedMachinePreInstantiation const &pre_instantiation,
@@ -270,7 +211,7 @@ public:
       exec_traced_(pre_instantiation.trace_)
   {
     const auto &image = pre_instantiation.initial_memory_image_;
-    assert(image.size() <= kMaxMemoryBytes);
+    assert(image.size() <= kMemoryCeilingBytes);
     // memory_ acquired its slot from the pool on construction. The recycled
     // slot is dirty, but the image is full-size (zero-padded to
     // total_memory_size), so this assign fully overwrites it -- and the
@@ -286,10 +227,6 @@ public:
     gas_remaining_ = gas;
   }
 
-  // Defaulted move construction (and implicit destruction): the memory_ slot is
-  // a MemorySlot, which transfers ownership on move and returns the buffer to
-  // the pool on destruction, so the machine itself needs no special-member code
-  // and the cleanup never depends on the moved-from std::vector value.
   ThreadedMachine(ThreadedMachine &&) noexcept = default;
 
   // exec_ borrows the pre-instantiation's Slot array (not owned), so the
@@ -330,10 +267,8 @@ public:
   }
   [[nodiscard]] MachineView view();
 
-  // v4 guest-side dispatch: seed the invoked method id into a0/a1 so the
-  // guest's _start dispatcher routes to the right entrypoint. Call after
-  // construction/reset and before start()/run(); mirrors
-  // Machine::seed_method_id.
+  // Seed the method ID for guest dispatch. Call after construction/reset and
+  // before start()/run().
   void seed_method_id(uint64_t method_id)
   {
     regs_[10] = static_cast<uint32_t>(method_id);       // a0 = low 32 bits
@@ -363,36 +298,18 @@ public:
   }
 
 private:
-  // Internal seam primitives (not part of the public API; the free-function
-  // handlers below never call these). drive re-enters the musttail dispatch
-  // chain at pc_, returning the first terminal StepResult (kEcall/kHalted/
-  // kTrap). apply_ecall is the apply-only complete half of the ecall: it debits
-  // host gas and commits the result, but does not run on. Both are defined
-  // out-of-line below (they call enter_run/trap_at).
+  // drive resumes dispatch at pc_; apply_ecall debits host gas and applies the
+  // result without resuming dispatch.
   template<bool Trace> StepResult drive();
   template<bool Trace> StepResult apply_ecall(const HostResult &result);
 
 public:
-  // Public so the free-function handlers (below) can manipulate state. This is
-  // an experimental, single-translation-unit interpreter; the handlers are
-  // effectively part of the machine.
-  //
-  // regs_ is deliberately the first member (offset 0): the machine pointer is
-  // then also the register-file base, so hot-path regs_[i] is a single indexed
-  // load with no base adjustment, while every other (cold) field is still
-  // reached through the same pointer at its own offset.
-  // One extra register. EXPERIMENT(flip): regs_[0] is the x0 write-sink (trash)
-  // and regs_[kRegisterCount] is the always-zero register that x0 *reads* remap
-  // to, so register writes stay unconditional (no x0 special-case). regs_[0] is
-  // garbage during execution; architectural x0 (==0) is restored in
-  // reg()/capture()/view(). regs_[kRegisterCount] is never written.
+  // Public for the free-function handlers. Keep regs_ first so the machine
+  // pointer is also the register-file base. regs_[0] absorbs x0 writes;
+  // regs_[kRegisterCount] supplies x0 reads and is never written.
   std::array<uint32_t, kRegisterCount + 1> regs_ =
       {}; // offset 0: register base
-  // Read-only / read-mostly data grouped right after regs_
-  // (regs_[kRegisterCount] is the always-0 x0 read source). max_pc_ (read in
-  // op_jalr's valid_target) and the cold pointers go here; the read/WRITE hot
-  // scalar gas_remaining_ is pushed to its own cache line below so its
-  // per-run-head store doesn't disturb this read-mostly region.
+  // Group read-mostly fields separately from the gas balance below.
   uint32_t max_pc_ = 0; // program size in bytes; op_jalr bounds-check
                         // (PreInstantiation::create)
   MemorySlot memory_; // owns this machine's guest-memory pool slot (see above)
@@ -419,22 +336,14 @@ public:
   uint32_t gas_deficit_ = 0;
 };
 
-// Lock the cache-line layout the comments above call load-bearing. memory_ must
-// stay exactly the width of a std::vector (MemorySlot adds no fields) so the
-// hot read/write scalar gas_remaining_ keeps its own cache line at offset 192
-// and the struct stays 256 bytes (4 * 64). Wrapping memory_ in a type that grew
-// it by 8 bytes silently pushed gas_remaining_ to offset 256 and the struct to
-// 320 (one extra cache line); these guard against that regressing again.
+// MemorySlot must remain the size of a vector to preserve this layout.
 static_assert(offsetof(ThreadedMachine, gas_remaining_) == 192,
               "gas_remaining_ must stay on its own cache line (offset 3 * 64); "
               "check the memory_ member width and field order above");
 static_assert(sizeof(ThreadedMachine) == 256,
               "ThreadedMachine size changed -- check the cache-line layout");
 
-// Passed BY VALUE through the musttail chain: two pointers fit in two registers
-// (AArch64), so the machine pointer and run base stay in registers across the
-// whole run instead of being reloaded from memory on every handler. Cold state
-// (host/obs) lives on the machine, reached via m.
+// Passed by value: both pointers fit in argument registers on AArch64.
 struct Ctx {
   ThreadedMachine *m = nullptr;
   const Slot *base = nullptr; // exec_.data(); pc = (ip - base) * 4
@@ -463,14 +372,7 @@ capture(const Ctx c)
   return s;
 }
 
-// A barrier ends a gas run: it transfers control
-// (branches/jumps/ecall/ebreak/unimp), so the run can't be pre-charged past it
-// (the continuation isn't known). Its
-// gas is charged individually. Loads/stores are NOT barriers: they're
-// straight-line, so they fold into runs; a mid-run fault is terminal and has
-// already paid the run's gas (block-granular metering, like the wasm engines).
-// The conditional branches (B-type). Their taken target is PC-relative and
-// static, so PreInstantiation::create resolves it the same way as jal.
+// Conditional branch targets are static and resolved during preparation.
 inline bool
 is_conditional_branch(Op op)
 {
@@ -487,6 +389,8 @@ is_conditional_branch(Op op)
   }
 }
 
+// Barriers end a run and are included in its charge. Loads/stores stay in
+// runs; a fault refunds their unexecuted suffix.
 inline bool
 is_barrier(Op op)
 {
@@ -552,21 +456,10 @@ is_barrier(Op op)
     }                                                                          \
   } while (false)
 
-// Set a terminal trap at `ip`'s pc, observe it, return kTrap. The trap class is
-// a template parameter (compile-time literal at every call site). Its signature
-// matches a handler's, so fault sites HOGD_MUSTTAIL into it (a single
-// tail-branch, no frame). Spills the register-carried `gas` back to
-// gas_remaining_ first, so observable state at the trap is correct.
-// An unsettled gas_deficit_ means this trap was reached by a speculative
-// (deficit) run that canonical metering never finished: it stopped at the
-// run's first unpayable instruction, so the trap settles as kOutOfGas with
-// zero gas regardless of T. This one check covers every deficit-run trap exit
-// -- ebreak, unimp, bad branch target, out-of-range jal/jalr, and the
-// fall-off sentinel. (trap_bad_memory settles or clears the deficit itself
-// before tailing in, so a memory fault in the still-affordable prefix keeps
-// its kBadMemory class.)
-// cold+noinline: faults are off the hot path, and out-of-lining keeps the pc_of
-// divide and the pc_/trap_/halted_ stores out of every handler body.
+// A deficit takes precedence over the requested trap: canonical execution ran
+// out of gas first. trap_bad_memory refunds the suffix before reaching here
+// so an affordable memory fault retains kBadMemory.
+// Keep terminal state materialization out of the hot handlers.
 template<bool Trace, Trap T>
 [[gnu::noinline, gnu::cold]] StepResult
 trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
@@ -589,34 +482,17 @@ trap_at(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
   return StepResult::kTrap;
 }
 
-// A load/store faulted mid-run: enter_run pre-charged the whole run, but the
-// trapped state may keep only the instructions through the faulting one
-// charged (gas_remaining at a trap is consensus-visible, and the
-// per-instruction Machine charges exactly that prefix). Every slot's
-// gas_to_run is the run gas from that slot through its barrier -- kept
-// per-slot for branch-in run heads -- so the faulting slot's successor holds
-// exactly the unexecuted suffix: refund it, net of any deficit, then trap.
-// Loads/stores are never barriers, so ip+1 is a real slot or the fall-off
-// sentinel (gas_to_run 0). Exception: when `Brk` is true the faulting slot
-// is a break carrier -- the last instruction of its chunk -- so ip+1 heads
-// the *next*, not-yet-charged chunk; its gas_to_run must NOT be credited, and
-// the suffix is 0. In a deficit run the refund decides the class: a
-// balance that covers the deficit means the fault sits in the prefix
-// canonical metering could afford (kBadMemory with the prefix charged); one
-// that does not means canonical ran dry first (kOutOfGas, zero). Memory
-// faults only: at a barrier trap (bad branch target, ebreak, unimp), ip+1
-// heads the *next* run, whose gas was never charged, and this refund would
-// over-credit.
+// Refund the charged suffix after a memory fault. If the refund covers any
+// deficit, canonical execution could afford the faulting instruction; report
+// kBadMemory with that prefix charged. Otherwise report kOutOfGas with zero.
+// A break carrier has no charged suffix: ip+1 belongs to the next chunk.
 template<bool Trace, bool Brk = false>
 StepResult
 trap_bad_memory(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
                 uint64_t gas)
 {
-  // No overflow: the suffix is part of the charge the entered run already
-  // paid (or capped by it in a deficit run), so balance <= the entry balance.
-  // Brk (a break carrier): ip is the last instruction of its chunk, so its
-  // in-run suffix is empty -- the successor heads the *next*, not-yet-charged
-  // chunk, so refunding its gas_to_run would over-credit. Refund 0 instead.
+  // No overflow: a paid suffix refund cannot exceed the entry balance;
+  // in a deficit run, gas is zero and the suffix is bounded by kMaxRunGas.
   const uint64_t suffix = Brk ? uint64_t{0} : uint64_t{(ip + 1)->gas_to_run};
   const uint64_t balance = gas + suffix;
   const uint32_t deficit = c.m->gas_deficit_;
@@ -630,21 +506,10 @@ trap_bad_memory(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
                                                         balance - deficit);
 }
 
-// The run at `ip` does not fit the balance (enter_run's unlikely arm). If a
-// prior speculative run's deficit is still unsettled, settle it now as
-// (kOutOfGas, 0): its balance was zeroed, so it re-enters here for any
-// successor run (every instruction costs >= 1 gas). Otherwise record the
-// shortfall in gas_deficit_ and execute the run speculatively on a zero
-// balance; the deficit settles at the run's exit seam -- back here, op_ecall
-// before the host sees a syscall, or trap_at / trap_bad_memory at a trap.
-// Settling everywhere at (kOutOfGas, 0) makes the consensus-visible pair
-// (trap classification, gas_remaining) match per-instruction metering at
-// every budget: canonical stops at the run's first unpayable instruction with
-// zero gas, and no seam lets a deficit escape. The deficit is tracked
-// out-of-band (not encoded in the balance) so budgets keep the full uint64
-// domain -- callers pass UINT64_MAX -- and is bounded by one run (<=
-// kMaxRunGas, the lowering's chunk cap): at most one run ever executes in
-// deficit.
+// Only one run may execute in deficit. A second run reaches this path with
+// zero gas and settles the prior deficit as kOutOfGas. Ecall and trap exits
+// settle it separately. Tracking the shortfall outside the balance preserves
+// the full uint64 budget range; kMaxRunGas bounds the shortfall.
 template<bool Trace>
 [[gnu::noinline, gnu::cold]] StepResult
 enter_run_deficit(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
@@ -658,13 +523,9 @@ enter_run_deficit(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   HOGD_MUSTTAIL return ip->handler(c, ip, mem, memsize, /*gas=*/0);
 }
 
-// Charge the gas for the whole run starting at `ip` -- its body through and
-// including its terminating barrier -- then dispatch to it. Called at every run
-// head: program start, every jump/branch target, and the instruction after each
-// barrier. This is the only place gas is charged; no instruction self-charges.
-// An unaffordable run is not rejected: enter_run_deficit (cold) records the
-// shortfall and executes it speculatively -- see its comment for how the
-// deficit settles into canonical-exact (kOutOfGas, 0).
+// Charge through the terminating barrier or chunk break. Called at entry,
+// control-flow targets, and after barriers and chunk breaks. An unaffordable
+// run takes the speculative path above.
 template<bool Trace>
 StepResult
 enter_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
@@ -769,7 +630,7 @@ op_fence(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
-// --- Barrier handlers: self-charge gas, end the run -------------------------
+// Barrier handlers end the current run; its gas was charged at entry.
 
 // Validate a byte target against the program image. Mirrors
 // Machine::validate_control_target via ThreadedProgram::contains_pc, which
@@ -944,9 +805,6 @@ try_store(uint8_t *mem, uint32_t memsize, uint32_t base, int32_t imm,
   return true;
 }
 
-// Loads/stores are non-barriers: no self-charge (their gas is in the run total
-// pre-charged by enter_run), and they continue in-run via THREAD_NEXT. They can
-// still fault (oob), which is terminal.
 template<bool Trace, uint32_t Width, bool SignExtend, bool Brk = false>
 StepResult
 op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
@@ -971,33 +829,9 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
-// EXPERIMENT(fuse): a load (slot ip) immediately followed by a fusible R-type
-// ALU op (slot ip+1) that *consumes* the loaded value, collapsed into one
-// handler so the pair costs a single dispatch instead of two. Both are in-run
-// non-barriers (loads are not barriers, and the run's gas was pre-charged by
-// enter_run), so there is no gas work between them. The load's fault checks run
-// first and are terminal -- a faulting load never lets the rr write. In traced
-// mode the handler retires the load as its own step (mirroring op_load's
-// HOGD_THREAD_NEXT) before running the rr, so the observed trace is
-// byte-identical to the two unfused. PreInstantiation::create installs this
-// only on the load's slot; slot ip+1 keeps its standalone op_rr handler (and
-// gas_to_run), so a branch landing on the rr still executes it via enter_run,
-// and the fused handler -- which jumps straight to ip+2 -- never re-enters
-// ip+1, so its gas is not double-charged.
-//
-// Because fusion is gated on a load->use (PreInstantiation::create), the loaded
-// register feeds the rr's rs1 (LoadedIsRs1) or rs2. We feed the just-loaded `v`
-// straight into that operand instead of reading it back out of regs_ --
-// avoiding the store-to-regs_/reload-from-regs_ round trip and shortening the
-// load-use dependency chain. (rd is still written for architectural visibility
-// / the trace step.) When both sources alias the load dest, LoadedIsRs1 wins
-// and the rs2 read happens to reload the same value -- still correct.
-// Spill gas + retire op1 (a non-faulting head: alu/load-ok) as a kContinue step
-// landing at op2's pc, matching the unfused trace. Defined here so the four
-// hand-fused handlers below (op_load_rr/op_load_ri/op_lui_addi/op_auipc_jalr)
-// share it with the generic two-op handlers further down, instead of repeating
-// the three-statement retire sequence -- which must stay byte-identical to the
-// unfused trace -- by hand.
+// Fused handlers retain both architectural retirement steps when tracing.
+// The tail slot remains executable as a branch target; normal fused execution
+// skips it. Both instructions are covered by the run's charge.
 #define HOGD_RETIRE_OP1(c, ip)                                                 \
   do {                                                                         \
     (c).m->gas_remaining_ = gas;                                               \
@@ -1005,6 +839,8 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     (c).m->obs_->on_retire(capture(c), StepResult::kContinue);                 \
   } while (0)
 
+// Forward the loaded value directly to the consuming ALU operand. A load
+// fault traps before the ALU executes; the load destination remains observable.
 template<bool Trace, uint32_t Width, bool SignExtend, bool LoadedIsRs1,
          uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
@@ -1017,8 +853,6 @@ op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   }
   c.m->regs_[ip->rd] = v;
   if constexpr (Trace) {
-    // Retire the load as its own step (mirrors op_load's HOGD_THREAD_NEXT) so
-    // the rr observes the same pre-state, and pc/regs, that it would unfused.
     HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *rr = ip + 1;
@@ -1031,12 +865,7 @@ op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
-// EXPERIMENT(fuse): the I-type sibling of op_load_rr -- a load (slot ip)
-// followed by a fusible I-type ALU op (slot ip+1) that consumes the loaded
-// value. An I-type's only register source is rs1, so a load->use I-type always
-// has rs1 == the load dest; we feed the just-loaded `v` directly as the first
-// operand (no regs_ reload) and the immediate as the second. Same
-// fault/trace/gas reasoning as op_load_rr.
+// Load followed by an I-type consumer; rs1 receives the loaded value.
 template<bool Trace, uint32_t Width, bool SignExtend,
          uint32_t (*Fn)(uint32_t, uint32_t)>
 StepResult
@@ -1056,12 +885,8 @@ op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
-// EXPERIMENT(fuse): lui (slot ip) + addi (slot ip+1) writing the same register
-// -- the canonical `li rd, imm32` macro (lui rd, %hi; addi rd, rd, %lo). The
-// fused slot's imm holds the full 32-bit constant; we materialize it in one
-// write and skip to ip+2. Both are non-barriers, so gas was pre-charged at the
-// run head and is unchanged. The addi slot keeps its standalone handler as the
-// branch-in fallback; the fused handler jumps to ip+2 and never re-enters it.
+// lui/addi materializes a constant. The head slot holds the combined value;
+// the preserved tail immediate reconstructs the intermediate lui for tracing.
 template<bool Trace>
 StepResult
 op_lui_addi(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
@@ -1077,19 +902,9 @@ op_lui_addi(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
-// EXPERIMENT(fuse): auipc (slot ip) + jalr (slot ip+1) whose base register is
-// the auipc dest -- the canonical far-call/long-jump thunk (auipc t, %hi;
-// jalr ra, %lo(t)). Because jalr's base is exactly the auipc result and nothing
-// sits between them, the target is PC-relative and *static*, so create() only
-// installs this when that target is in range (no per-execution range check
-// here). The fused slot's imm holds the finished auipc result (head_pc + %hi,
-// static, precomputed by fuse_auipc_jalr); the jalr's already-sign-extended
-// 12-bit imm is read from the preserved tail slot, so the handler does no
-// hi/lo unpacking at run time. rs1 = the auipc/jalr-base register (!= 0,
-// written for architectural visibility), rd = jalr's link register. The jalr
-// slot keeps its standalone handler as the branch-in fallback. Like jalr it
-// ends the run, so it enters the target run (gas for this run was pre-charged
-// at its head).
+// auipc/jalr has a static target checked during preparation. The head slot
+// stores the auipc result in imm, its destination in rs1, and the link register
+// in rd. The tail retains jalr's immediate and standalone branch-in handler.
 template<bool Trace>
 StepResult
 op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
@@ -1290,12 +1105,6 @@ op_ecall(Ctx c, const Slot *ip, [[maybe_unused]] uint8_t *mem,
   return StepResult::kEcall;
 }
 
-// Sequential fall-off past the last instruction (the exec_[n] sentinel) and
-// out-of-range jal/jalr both trap kBadPc; the unsupported-op default traps
-// kInvalidInstruction. All three bake trap_at<...> directly into the Slot
-// rather than going through a forwarding handler (see
-// handler_for/PreInstantiation::create).
-
 template<bool Trace, bool Brk = false>
 Handler
 handler_for(Op op)
@@ -1404,8 +1213,7 @@ handler_for(Op op)
   case Op::kEcall:
     return &op_ecall<Trace>;
   default:
-    // Unreachable by construction (ThreadedProgram::create rejects unsupported
-    // ops); the defensive default traps kInvalidInstruction directly.
+    // instruction_at() rejects unsupported opcodes before handler selection.
     return &trap_at<Trace, Trap::kInvalidInstruction>;
   }
 }
@@ -1421,11 +1229,7 @@ pick_handler(Op op, bool trace, bool brk)
   return trace ? handler_for<true, false>(op) : handler_for<false, false>(op);
 }
 
-// Selects the out-of-range branch handler with the same Cmp handler_for bakes
-// for the in-range case. Build-time only (cold); PreInstantiation::create calls
-// it solely for is_conditional_branch ops, so a non-branch op is a
-// PreInstantiation::create bug -- assert and abort rather than mislabel it as a
-// guest-visible invalid instruction.
+// Called during preparation for conditional branches only.
 template<bool Trace>
 Handler
 branch_bad_target_handler_for(Op op)
@@ -1450,15 +1254,9 @@ branch_bad_target_handler_for(Op op)
   }
 }
 
-// EXPERIMENT(fuse): pick the fused load+ALU handler for an adjacent
-// (load, alu) load->use pair, or nullptr if the pair is not a fusion candidate.
-// First cut: only lw (Width 4, no sign-extend) feeding a common ALU op, either
-// register-register (op_load_rr) or register-immediate (op_load_ri) -- the
-// dominant load-use shapes. `loaded_is_rs1` says whether the loaded register is
-// the rr's rs1 (vs rs2), selecting which operand gets the just-loaded value;
-// it is ignored for the I-type tail (whose only register source is rs1).
-// mul/div-after-load and narrow/sign-extended loads stay unfused (rare, and
-// bounding the instantiations keeps the fused handler set small).
+// Fuse lw followed by a supported ALU consumer. Restricting the opcode set
+// bounds handler instantiations. loaded_is_rs1 selects the forwarded R-type
+// operand; I-type consumers always use rs1.
 template<bool Trace>
 Handler
 fused_load_handler(Op load_op, Op next_op, bool loaded_is_rs1)
@@ -1572,19 +1370,8 @@ fits_int16(int32_t v)
          v <= std::numeric_limits<int16_t>::max();
 }
 
-// ---- Fusion rules -----------------------------------------------------------
-//
-// Instead of an if-else ladder in create(), each fusible pattern is a small
-// rule. A rule inspects the head (slot i) and tail (slot i+1) instructions and,
-// if they form a fusible pair, installs a fused handler on `s` (the head slot,
-// already carrying the head's decoded fields) -- overwriting its handler and,
-// where needed, repacking its operands -- and returns true. The tail slot keeps
-// its standalone handler as the branch-in fallback; the fused handler jumps
-// straight to ip+2 (or a branch/jump target) and never re-enters the tail, so
-// gas (pre-charged per run) is unchanged. create() tries the rules in order and
-// stops at the first match. Adding a fusion = adding a handler plus a rule to
-// kFusionRules. The head ops are disjoint per rule (lui / auipc / lw / ...), or
-// the rules differ on the tail, so first-match-wins needs no priority tuning.
+// A fusion rule replaces the head handler and may repack its operands. The
+// tail remains intact for branches into the second instruction.
 struct FusionCtx {
   const Instr &head;              // slot i
   const Instr &tail;              // slot i+1
@@ -1656,10 +1443,8 @@ fuse_load_use(const FusionCtx &f, Slot &s)
   return true;
 }
 
-// <alu> ; <alu> : two adjacent straight-line ALU ops. Curated high-value pairs
-// (the shift/serialize and address-math idioms the histogram surfaced); nullptr
-// for anything else. No register condition -- op2 reads the regs op1 just
-// wrote.
+// Supported adjacent ALU pairs. The second operation reads the registers
+// written by the first; no register-alias restriction is needed.
 template<bool Trace>
 Handler
 alu_alu_handler(Op op1, Op op2)
@@ -1865,10 +1650,10 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
                                         uint32_t memory_start,
                                         uint32_t total_memory_size, bool trace,
-                                        uint32_t max_run_gas)
+                                        uint32_t max_run_gas, bool fuse)
 {
   max_run_gas = std::clamp<uint32_t>(max_run_gas,
-                                     static_cast<uint32_t>(kDivInstructionGas),
+                                     static_cast<uint32_t>(kMaxInstructionGas),
                                      kMaxRunGas);
   const auto program = ThreadedProgram::create(code);
   if (!program.has_value()) {
@@ -1878,7 +1663,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   // Check the fit with subtraction so the guard is independent of host pointer
   // width: memory_start + memory.size() can wrap when size_t is 32 bits, which
   // would let an out-of-bounds image slip through to the copy below.
-  if (total_memory_size > kMaxMemoryBytes || memory_start > total_memory_size ||
+  if (total_memory_size > kMemoryCeilingBytes ||
+      memory_start > total_memory_size ||
       memory.size() > total_memory_size - memory_start) {
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }
@@ -1895,14 +1681,9 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   exec[n] = Slot{.handler = trace ? &trap_at<true, Trap::kBadPc>
                                   : &trap_at<false, Trap::kBadPc>};
 
-  // Single backward lowering pass: decode each instruction, place its gas and
-  // any mid-run break carrier, select its handler, resolve control targets, and
-  // fuse. Backward carries, seeded at the bottom of the loop: `next_op` is the
-  // instruction one slot ahead (i+1) and `next_fused` whether that slot was
-  // consumed as a fusion tail (so it can't also head this pair -- a slot
-  // belongs to at most one pair); `next_is_break` whether i+1 is a break
-  // carrier, so the fusion guard can reject a pair whose tail is a carrier
-  // without materializing a per-slot array.
+  // Decode, price, and fuse in one backward pass. Carry the successor's
+  // decoded instruction, whether it heads a fused pair, and whether it ends
+  // a chunk. These guards prevent overlapping pairs and skipped chunk charges.
   Instr next_op = {};
   bool next_fused = false;
   bool next_is_break = false;
@@ -1915,21 +1696,10 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     const Instr &d = *instruction;
     Slot &slot = exec[i];
 
-    // Gas + break placement, folded into this one backward pass. KEEP THIS
-    // SINGLE-PASS: the break decision reads exec[i+1].gas_to_run, which this
-    // same backward pass already computed, so it needs no forward pre-pass and
-    // no per-slot is_break array -- do not reintroduce either. gas_to_run[i]
-    // is the gas of the run starting at i, through its terminating barrier or
-    // break carrier; each entry sees its successor's already-computed sum
-    // (exec[i+1].gas_to_run; the i+1<n guard excludes the fall-off sentinel,
-    // gas 0). enter_run pre-charges this at every run head, so no instruction
-    // self-charges. A non-barrier normally extends into its successor's run --
-    // unless that would push the run past kMaxRunGas, in which case slot i
-    // becomes a break carrier: its Brk=true handler ends the run at its own gas
-    // and charges the next chunk via enter_run at i+1. Greedy from the tail
-    // keeps every chunk <= kMaxRunGas; a single instruction's gas is <<
-    // kMaxRunGas, so a valid split always exists and no program is rejected for
-    // run gas.
+    // Accumulate suffix gas backward. If adding this instruction would exceed
+    // max_run_gas, make it a break carrier: its handler enters a new chunk at
+    // i+1. The successor's sum is already available, so no break array is
+    // needed.
     const auto self_gas = static_cast<uint32_t>(d.gas);
     assert(self_gas <= max_run_gas &&
            "a single instruction's gas must fit within one run chunk");
@@ -2000,18 +1770,13 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
       }
     }
 
-    // EXPERIMENT(fuse): collapse this slot and its successor into one fused
-    // handler when (head, tail) match a rule, saving a dispatch. Only when i+1
-    // is a real instruction (not the fall-off sentinel) and was not itself
-    // consumed as a fusion tail (`next_fused`) -- a slot belongs to at most one
-    // pair. The tail slot keeps its standalone handler and gas_to_run as the
-    // branch-in fallback; fusion is behavior-preserving and never changes gas.
+    // Fuse disjoint adjacent pairs. The tail retains its standalone handler
+    // and suffix gas so branches can still enter it. Calibration disables
+    // fusion when measuring individual opcode costs.
     bool fused_here = false;
-    // Do not fuse across a chunk boundary: a fused handler skips the
-    // intervening enter_run, so a pair may not straddle a break carrier
-    // (either as the pair's head or its tail). Break carriers are
-    // astronomically rare, so this costs no measurable coverage.
-    if (i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
+    // A fused handler skips the intervening dispatch, so neither member may
+    // be a break carrier: that would skip charging the next chunk.
+    if (fuse && i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
                            .head_pc =
@@ -2062,9 +1827,7 @@ ThreadedMachine::drive()
   return enter_run<Trace>(c, ip, mem, memsize, gas_remaining_);
 }
 
-// Apply-only complete half: debit host gas, commit the result, and (on the
-// traced path) emit the ecall's retirement exactly as the inline op_ecall did.
-// Does NOT run on -- the caller continues via drive<Trace>().
+// Apply the host result and retire the ecall; drive() resumes execution.
 template<bool Trace>
 StepResult
 ThreadedMachine::apply_ecall(const HostResult &result)
@@ -2072,14 +1835,9 @@ ThreadedMachine::apply_ecall(const HostResult &result)
   assert(pending_ecall_.has_value());
   pending_ecall_.reset();
 
-  // The threaded ecall seam does not handle host traps. The production driver
-  // (rv32_contract.cc) resolves host errors before resuming and asserts the
-  // machine never traps kHostTrap, and -- unlike baseline Machine -- this
-  // engine has no host_trap_payload_ to carry the deterministic-vs-fatal
-  // kind/code that runtime_context relies on. So a kTrap HostResult is a
-  // contract violation: forbid it outright rather than collapse it to a
-  // payload-less kHostTrap. Checked before the gas debit so an over-budget
-  // kTrap is not masked as OOG.
+  // The production driver handles host errors before resuming. This engine
+  // has no HostTrapPayload, so accepting kTrap would lose its classification.
+  // Check before debiting gas so an excessive charge cannot mask API misuse.
   if (result.status == HostStatus::kTrap) {
     assert(false && "ThreadedMachine::apply_ecall: HostStatus::kTrap is not "
                     "supported on the threaded ecall path");
@@ -2093,8 +1851,8 @@ ThreadedMachine::apply_ecall(const HostResult &result)
   uint8_t *mem = memory_.bytes().data();
   const auto memsize = static_cast<uint32_t>(memory_.bytes().size());
 
-  // Debit host gas before committing; over-budget host cannot mutate state.
-  // Host memory writes persist on OOG (no per-ecall rollback).
+  // Debit gas before applying the register result. Host memory writes have
+  // already occurred and persist on OOG; there is no per-ecall rollback.
   if (gas_remaining_ < result.gas_consumed) {
     gas_remaining_ = 0;
     return trap_at<Trace, Trap::kOutOfGas>(c, next, mem, memsize,

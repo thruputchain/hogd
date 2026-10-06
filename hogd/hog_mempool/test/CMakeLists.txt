@@ -48,7 +48,7 @@ target_link_libraries(mempool_test
   GTest::gtest
 )
 
-gtest_discover_tests(mempool_test)
+hogd_discover_tests(mempool_test)
 
 add_executable(
   coordinator
@@ -92,3 +92,8 @@ if(BUILD_BENCHMARKS)
     set_property(TARGET mempool_scheduler_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   endif()
 endif()
+
+# Native RPC diagnostic; opt in explicitly without adding it to normal builds.
+add_executable(schedgateway_client_bench EXCLUDE_FROM_ALL schedgateway_client_bench.cc)
+target_link_libraries(schedgateway_client_bench hog_devnode hogd protocol)
+target_include_directories(schedgateway_client_bench PRIVATE ${CMAKE_BINARY_DIR})

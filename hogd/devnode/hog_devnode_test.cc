@@ -1,4 +1,6 @@
+#include <fcntl.h>
 #include <poll.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -7,6 +9,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -38,6 +41,8 @@
 
 #include "auth_claim.hh"
 #include "built_contracts/contract_loader.h"
+#include "built_contracts/default_wallet.h"
+#include "built_contracts/default_wallet.hh"
 #include "built_contracts/dev_wallet.h"
 #include "built_contracts/itc_erc20.h"
 #include "consensus.hh"
@@ -49,29 +54,35 @@
 #include "header.hh"
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/cleanup.h"
+#include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/rv32/artifact.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
+#include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
+#include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
@@ -80,11 +91,13 @@
 #include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
 #include "view_gateway.hh"
-#include "x23/serialize.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 #ifndef HOG_DEVNODE_BINARY
 #error "HOG_DEVNODE_BINARY must be defined by CMake"
@@ -99,7 +112,10 @@ constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
-constexpr std::size_t kTestRamDbBytes = 15UL * 1024 * 1024 * 1024;
+// 2 GiB per node instead of the 15 GiB default; this suite boots ~85 nodes.
+constexpr std::size_t kTestRamDbBytes = 2UL * 1024 * 1024 * 1024;
+// Read by available_parallelism(); set only when unset so suite-wide pins win.
+constexpr char kTestDevnodeThreadpoolSize[] = "4";
 
 // Unwraps a page-query result; a backend failure (e.g. the indexer db
 // still opening) yields an empty page, so pollers simply retry and
@@ -113,17 +129,16 @@ page_or_empty(TransactionRefPageResult result)
   return std::move(result.page());
 }
 
-std::tuple<uint64_t, uint64_t>
-make_erc20_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_erc20_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
 
 std::shared_ptr<Contract>
-load_default_dev_wallet_contract()
+load_legacy_dev_wallet_fixture()
 {
-  return load_dev_wallet_contract(
-      resolve_dev_wallet_profile(kDefaultDevWalletProfile));
+  return load_rv32_contract("dev_wallet.rv32a");
 }
 
 std::chrono::seconds
@@ -169,6 +184,7 @@ struct Readiness {
   };
 
   Endpoint scheduler;
+  Endpoint scheduler_gateway;
   Endpoint indexer;
   Endpoint db_gateway;
   Endpoint view_gateway;
@@ -373,13 +389,8 @@ parse_bootstrap_accounts(const json::Value &manifest, std::string_view line)
           std::format("manifest bootstrapAccounts entry is not an object: {}",
                       line));
     }
-    const std::int64_t index = require_integer_field(account, "index", line);
-    if (index < 0 ||
-        std::cmp_greater(index, std::numeric_limits<std::uint32_t>::max())) {
-      throw std::runtime_error(
-          std::format("unexpected bootstrapAccounts index in manifest: {}",
-                      line));
-    }
+    EXPECT_EQ(account.find("index"), nullptr);
+    const auto index = out.size();
     out.push_back(Readiness::BootstrapAccount{
         .index = static_cast<std::uint32_t>(index),
         .role = std::string(require_string_field(account, "role", line)),
@@ -415,7 +426,7 @@ parse_readiness(std::string line)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", line);
-  if (schema_version != 2) {
+  if (schema_version != 3) {
     throw std::runtime_error(
         std::format("unexpected readiness schemaVersion {}: {}", schema_version,
                     line));
@@ -451,7 +462,7 @@ parse_readiness(std::string line)
 
   const std::int64_t manifest_schema_version =
       require_integer_field(*manifest, "schemaVersion", manifest_bytes);
-  if (manifest_schema_version != 2) {
+  if (manifest_schema_version != 4) {
     throw std::runtime_error(std::format("unexpected manifest schemaVersion {}",
                                          manifest_schema_version));
   }
@@ -485,6 +496,10 @@ parse_readiness(std::string line)
       .scheduler = parse_endpoint(require_string_field(*endpoints, "scheduler",
                                                        manifest_bytes),
                                   "scheduler", manifest_bytes),
+      .scheduler_gateway =
+          parse_endpoint(require_string_field(*endpoints, "schedulerGateway",
+                                              manifest_bytes),
+                         "schedulerGateway", manifest_bytes),
       .indexer = parse_endpoint(require_string_field(*endpoints, "indexer",
                                                      manifest_bytes),
                                 "indexer", manifest_bytes),
@@ -520,11 +535,14 @@ hex_string(std::array<std::uint8_t, N> const &bytes)
 }
 
 AuthClaim
-source_address_auth_claim()
+native_account_auth_claim(std::uint32_t index = 1)
 {
-  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
-  claim.source_address_claim().allowed_keys = 0x01;
-  claim.source_address_claim().required_weight = 1;
+  AuthClaim claim(AuthClaimType::kPubkeySignature);
+  auto &preimage = claim.pubkey_preimage();
+  preimage.pubkey.scheme(CryptographicScheme::Ed25519);
+  preimage.pubkey.ed25519() =
+      derive_bootstrap_account_keypair("groundhog-dev-accounts", index).first;
+  preimage.nonce = 0;
   return claim;
 }
 
@@ -580,7 +598,8 @@ propose_and_commit(sched_coord_client_t &scheduler)
   }
   const SchedulerProposedBlock &proposed = proposal.proposed_block();
   SignedTransactionBatch proposed_txs;
-  EXPECT_TRUE(parallel_batch_to_t(proposed.txs, proposed_txs)());
+  EXPECT_TRUE(
+      parallel_batch_to_t(proposed.txs, proposed_txs, kNoBatchSizeLimit)());
   TransactionHashBatch tx_hashes;
   tx_hashes.reserve(proposed_txs.size());
   for (const SignedTransaction &tx : proposed_txs) {
@@ -607,6 +626,28 @@ submit_and_commit(sched_coord_client_t &scheduler,
   return propose_and_commit(scheduler);
 }
 
+// Deterministic keys are owned by this harness. Only their public allocations
+// cross the hog-devnode process boundary.
+LocalBootstrapConfig
+fixture_config(std::uint32_t count = 0,
+               std::string_view seed = "groundhog-dev-accounts",
+               std::uint64_t tokens = kDefaultLocalUserStorageTokens)
+{
+  LocalBootstrapConfig config{
+      .faucet_public_key = derive_bootstrap_account_keypair(seed, 0).first};
+  for (std::uint32_t i = 1; i <= count; ++i) {
+    config.accounts.push_back(
+        {.public_key = derive_bootstrap_account_keypair(seed, i).first,
+         .storage_tokens = tokens});
+  }
+  return config;
+}
+
+std::string bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
+                                    std::string_view initial_storage_tokens,
+                                    bool include_protocol = false);
+std::filesystem::path write_test_bootstrap_manifest(std::string_view contents);
+
 class HogDevnodeProcess {
 public:
   static HogDevnodeProcess
@@ -614,6 +655,42 @@ public:
         const std::vector<std::pair<std::string, std::string>> &extra_env = {},
         bool include_default_args = true)
   {
+    std::optional<std::filesystem::path> fixture_manifest;
+    std::uint32_t fixture_count = 0;
+    std::string fixture_seed = "groundhog-dev-accounts";
+    std::string fixture_tokens = "1000000000";
+    for (std::size_t i = 0; i + 1 < extra_args.size();) {
+      auto const name = extra_args[i];
+      if (name != "--fixture-accounts" && name != "--fixture-seed" &&
+          name != "--fixture-tokens") {
+        ++i;
+        continue;
+      }
+      if (name == "--fixture-accounts") {
+        fixture_count =
+            static_cast<std::uint32_t>(std::stoul(extra_args[i + 1]));
+      }
+      if (name == "--fixture-seed") {
+        fixture_seed = extra_args[i + 1];
+      }
+      if (name == "--fixture-tokens") {
+        fixture_tokens = extra_args[i + 1];
+      }
+      extra_args.erase(extra_args.begin() + static_cast<std::ptrdiff_t>(i),
+                       extra_args.begin() + static_cast<std::ptrdiff_t>(i + 2));
+    }
+    if (include_default_args &&
+        std::ranges::find(extra_args, "--bootstrap-manifest") ==
+            extra_args.end()) {
+      auto intent =
+          bootstrap_manifest_json(fixture_count, fixture_seed, fixture_tokens);
+      const auto network_pos = intent.find(
+          "00000000000000000000000000000000000000000000000000000000000000aa");
+      intent.replace(network_pos, 64, std::string(64, '0'));
+      fixture_manifest = write_test_bootstrap_manifest(intent);
+      extra_args.insert(extra_args.end(),
+                        {"--bootstrap-manifest", fixture_manifest->string()});
+    }
     int stdout_pipe[2];
     int stderr_pipe[2];
     if (pipe(stdout_pipe) != 0) {
@@ -650,10 +727,17 @@ public:
       if (include_default_args) {
         args.insert(args.end(),
                     {"--listen-host", "127.0.0.1", "--scheduler-port", "0",
-                     "--readiness", "stdout"});
+                     "--readiness", "stdout", "--ramdb-bytes",
+                     std::to_string(kTestRamDbBytes)});
       }
+      // Appended after the defaults, so a test's own --ramdb-bytes wins.
       args.insert(args.end(), extra_args.begin(), extra_args.end());
 
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      if (setenv("DEFAULT_THREADPOOL_SIZE", kTestDevnodeThreadpoolSize,
+                 /*overwrite=*/0) != 0) {
+        _exit(127);
+      }
       for (auto const &[key, value] : extra_env) {
         // NOLINTNEXTLINE(misc-include-cleaner)
         if (setenv(key.c_str(), value.c_str(), /*overwrite=*/1) != 0) {
@@ -674,7 +758,8 @@ public:
 
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
-    return HogDevnodeProcess(pid, stdout_pipe[0], stderr_pipe[0]);
+    return HogDevnodeProcess(pid, stdout_pipe[0], stderr_pipe[0],
+                             std::move(fixture_manifest));
   }
 
   HogDevnodeProcess(HogDevnodeProcess const &) = delete;
@@ -685,7 +770,8 @@ public:
       stderr_fd_(other.stderr_fd_),
       stdout_buffer_(std::move(other.stdout_buffer_)),
       stderr_sink_(std::move(other.stderr_sink_)),
-      stderr_reader_(std::move(other.stderr_reader_))
+      stderr_reader_(std::move(other.stderr_reader_)),
+      fixture_manifest_(std::exchange(other.fixture_manifest_, std::nullopt))
   {
     other.pid_ = -1;
     other.stdout_fd_ = -1;
@@ -708,6 +794,9 @@ public:
     }
     close_if_open(stdout_fd_);
     close_if_open(stderr_fd_);
+    if (fixture_manifest_) {
+      std::filesystem::remove(*fixture_manifest_);
+    }
   }
 
   Readiness wait_for_readiness()
@@ -793,10 +882,12 @@ private:
     std::string data;
   };
 
-  HogDevnodeProcess(int pid, int stdout_fd, int stderr_fd)
+  HogDevnodeProcess(int pid, int stdout_fd, int stderr_fd,
+                    std::optional<std::filesystem::path> fixture_manifest)
     : pid_(pid), stdout_fd_(stdout_fd), stderr_fd_(stderr_fd),
       stderr_sink_(std::make_shared<StderrSink>())
   {
+    fixture_manifest_ = std::move(fixture_manifest);
     // Drain continuously: hog-devnode logs several KiB per block, and a full
     // pipe blocks its write(2) inside ConsoleLogger with the logger's mutex
     // held, which wedges the whole node.
@@ -899,6 +990,7 @@ private:
   std::string stdout_buffer_;
   std::shared_ptr<StderrSink> stderr_sink_;
   std::thread stderr_reader_;
+  std::optional<std::filesystem::path> fixture_manifest_;
 };
 
 void
@@ -924,40 +1016,35 @@ expect_killed_exit(HogDevnodeProcess &process)
 std::string
 bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
                         std::string_view initial_storage_tokens,
-                        std::string_view content_hash,
-                        bool include_protocol = false)
+                        bool include_protocol)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{2});
+    w.field("schemaVersion", std::int64_t{4});
     w.field("kind", "groundhog-bootstrap");
     w.field("networkHash",
             "00000000000000000000000000000000000000000000000000000000000000aa");
     w.field("profile", "local-dev");
     if (include_protocol) {
-      w.field("protocol", version::kHogdProtocol());
+      w.field("protocol", protocol_text(version::kHogdProtocol()));
     }
-    w.object_field("devWallet", [&](json::Writer &w) {
-      w.field("profile", "hog-devnode-default");
-      w.field("artifactHint", "./dev-wallet.rv32a");
-      w.field("contentHash", content_hash);
-      w.field("deployEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
-      w.field("doActionEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
-    });
     w.object_field("bootstrapFaucet", [&](json::Writer &w) {
-      w.field("index", std::int64_t{0});
+      w.field("publicKey",
+              hex_string(derive_bootstrap_account_keypair(seed, 0).first));
       w.field("initialStorageTokens",
               std::to_string(kLocalFaucetStorageTokens));
     });
-    w.object_field("bootstrapAccounts", [&](json::Writer &w) {
-      w.field("count", static_cast<std::int64_t>(count));
-      w.field("firstIndex", std::int64_t{1});
-      w.field("seed", seed);
-      w.field("initialStorageTokens", initial_storage_tokens);
+    w.array_field("bootstrapAccounts", [&](json::Writer &w) {
+      for (std::uint32_t i = 1; i <= count; ++i) {
+        w.object([&](json::Writer &w) {
+          w.field("publicKey",
+                  seed.empty()
+                      ? "invalid"
+                      : hex_string(
+                            derive_bootstrap_account_keypair(seed, i).first));
+          w.field("initialStorageTokens", initial_storage_tokens);
+        });
+      }
     });
     w.object_field("storageCostModel", [&](json::Writer &w) {
       w.field("profile", "hogd-default");
@@ -1025,11 +1112,11 @@ initialize_persistent_data_dir(std::filesystem::path const &data_dir,
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--data-dir",
       data_dir.string(),
-      "--dev-accounts",
+      "--fixture-accounts",
       std::to_string(dev_accounts),
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -1112,11 +1199,11 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--data-dir",
       data_dir.string(),
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -1158,7 +1245,7 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
 void
 write_test_data_dir_metadata(
     std::filesystem::path const &data_dir, LocalBootstrapConfig const &config,
-    std::int64_t schema_version = 2,
+    std::int64_t schema_version = 4,
     std::uint64_t faucet_tokens = kLocalFaucetStorageTokens)
 {
   std::string buffer;
@@ -1166,12 +1253,19 @@ write_test_data_dir_metadata(
     w.field("schemaVersion", schema_version);
     w.field("kind", "hog-devnode-data");
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
-      w.field("devWalletProfile", config.dev_wallet_profile);
-      w.field("faucetTokens", std::to_string(faucet_tokens));
-      w.field("devAccounts",
-              static_cast<std::int64_t>(config.user_account_count));
-      w.field("devAccountSeed", config.seed);
-      w.field("devAccountTokens", std::to_string(config.user_storage_tokens));
+      w.object_field("bootstrapFaucet", [&](json::Writer &w) {
+        w.field("publicKey", hex_string(config.faucet_public_key));
+        w.field("initialStorageTokens", std::to_string(faucet_tokens));
+      });
+      w.array_field("bootstrapAccounts", [&](json::Writer &w) {
+        for (auto const &account : config.accounts) {
+          w.object([&](json::Writer &w) {
+            w.field("publicKey", hex_string(account.public_key));
+            w.field("initialStorageTokens",
+                    std::to_string(account.storage_tokens));
+          });
+        }
+      });
     });
   });
 
@@ -1210,6 +1304,9 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
             "0000000000000000000000000000000000000000000000000000000000000000");
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
   EXPECT_GT(readiness.scheduler.port, 0);
+  EXPECT_EQ(readiness.scheduler_gateway.host, "127.0.0.1");
+  EXPECT_GT(readiness.scheduler_gateway.port, 0);
+  EXPECT_NE(readiness.scheduler_gateway.port, readiness.scheduler.port);
   EXPECT_EQ(readiness.indexer.host, "127.0.0.1");
   EXPECT_GT(readiness.indexer.port, 0);
   EXPECT_EQ(readiness.db_gateway.host, "127.0.0.1");
@@ -1232,7 +1329,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(readiness.manifest_hash,
             hex_string(hash_string(read_file(readiness.manifest_path))));
   EXPECT_EQ(require_string_field(readiness.manifest, "protocol", ""),
-            version::kHogdProtocol());
+            protocol_text(version::kHogdProtocol()));
   const json::Value *producer = readiness.manifest.find("producer");
   ASSERT_NE(producer, nullptr);
   EXPECT_EQ(require_string_field(*producer, "binary", ""), "hog-devnode");
@@ -1245,24 +1342,17 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
     EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
   }
 
+  auto scheduler_gateway =
+      create_client<SchedGateway1>(readiness.scheduler_gateway.host,
+                                   readiness.scheduler_gateway.port,
+                                   /*retry=*/true)()
+          .value();
+  EXPECT_EQ(scheduler_gateway.schedgateway_intro(version::kHogdProtocol())(),
+            SchedGatewayIntroOutcome::SchedGatewayIntroSuccess);
+
   const json::Value *bootstrap = readiness.manifest.find("bootstrap");
   ASSERT_NE(bootstrap, nullptr);
-  const json::Value *dev_wallet = bootstrap->find("devWallet");
-  ASSERT_NE(dev_wallet, nullptr);
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-  auto wallet_contract = load_default_dev_wallet_contract();
-  std::string wallet_hash = hex_string(sha256(*wallet_contract));
-  EXPECT_EQ(require_string_field(*dev_wallet, "contentHash", ""), wallet_hash);
-  EXPECT_EQ(require_string_field(*dev_wallet, "deployedCodeHash", ""),
-            wallet_hash);
-  EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
-            "contracts/dev_wallet.rv32a");
-  EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
-  EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
-  EXPECT_EQ(require_string_field(*dev_wallet, "createWalletEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
+  EXPECT_EQ(bootstrap->find("devWallet"), nullptr);
 
   const json::Value *cost_model = bootstrap->find("storageCostModel");
   ASSERT_NE(cost_model, nullptr);
@@ -1303,7 +1393,7 @@ TEST(HogDevnode, HelpPrintsBeforeInitialization)
   EXPECT_TRUE(stdout_output.contains("--listen-host <ip>"));
   EXPECT_TRUE(stdout_output.contains("--data-dir <dir>"));
   EXPECT_TRUE(stdout_output.contains("--contract-artifacts-dir <dir>"));
-  EXPECT_TRUE(stdout_output.contains("--dev-wallet-profile <name>"));
+  EXPECT_FALSE(stdout_output.contains("--dev-wallet-profile"));
   EXPECT_TRUE(stdout_output.contains("--version"));
   EXPECT_TRUE(stdout_output.contains("HOGD_LOG_FORMAT=json"));
   EXPECT_TRUE(stdout_output.contains("readiness line"));
@@ -1384,10 +1474,10 @@ TEST(HogDevnode, RamdbReservationFailureReferencesFlag)
 
 TEST(HogDevnode, ReducedRamdbBytesReachesReadiness)
 {
-  // 2 GiB instead of the 15 GiB default; mirrors the low-memory (e.g. WSL)
-  // configuration the flag exists for.
+  // 1 GiB, below the 2 GiB each test node gets; mirrors the low-memory
+  // (e.g. WSL) configuration the flag exists for.
   HogDevnodeProcess process =
-      HogDevnodeProcess::start({"--ramdb-bytes", "2147483648"});
+      HogDevnodeProcess::start({"--ramdb-bytes", "1073741824"});
   process.wait_for_readiness();
   expect_clean_exit(process);
 }
@@ -1416,7 +1506,7 @@ TEST(HogDevnode,
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
 
-TEST(HogDevnode, InvalidDevWalletProfilePrintsFriendlyUsageBeforeInitialization)
+TEST(HogDevnode, RemovedDevWalletProfileFlagIsRejectedBeforeInitialization)
 {
   HogDevnodeProcess process =
       HogDevnodeProcess::start({"--dev-wallet-profile", "not-a-profile"});
@@ -1433,8 +1523,6 @@ TEST(HogDevnode, InvalidDevWalletProfilePrintsFriendlyUsageBeforeInitialization)
   std::string stdout_output = process.read_remaining_stdout();
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_TRUE(stdout_output.empty()) << stdout_output;
-  EXPECT_TRUE(stderr_output.contains("unsupported dev wallet profile"))
-      << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
 
@@ -1445,18 +1533,38 @@ TEST(HogDevnode, ContractArtifactDirectoryPrependsAndFallsBackToDefaults)
       std::format("hog-devnode-missing-contract-artifacts-{}-{}", getpid(),
                   std::chrono::steady_clock::now().time_since_epoch().count());
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--contract-artifacts-dir", missing_dir.string(), "--dev-wallet-profile",
-       "hog-devnode-default"});
+      {"--contract-artifacts-dir", missing_dir.string()});
   Readiness readiness = process.wait_for_readiness();
 
   const json::Value *bootstrap = readiness.manifest.find("bootstrap");
   ASSERT_NE(bootstrap, nullptr);
-  const json::Value *dev_wallet = bootstrap->find("devWallet");
-  ASSERT_NE(dev_wallet, nullptr);
-  EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
-            "contracts/dev_wallet.rv32a");
+  EXPECT_EQ(bootstrap->find("devWallet"), nullptr);
 
   expect_clean_exit(process);
+}
+
+TEST(HogDevnode, UnusableTmpdirPrintsDiagnosticInsteadOfAborting)
+{
+  // A missing or unwritable $TMPDIR is an operator environment problem, not a
+  // bug: it used to trip a CHECK and abort the process with a stack trace.
+  const std::filesystem::path missing_tmpdir =
+      std::filesystem::temp_directory_path() /
+      std::format("hog-devnode-missing-tmpdir-{}-{}", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({}, {{"TMPDIR", missing_tmpdir.string() + "/"}});
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = *status;
+  std::string stderr_output = process.read_remaining_stderr();
+  ASSERT_TRUE(WIFEXITED(exit_status)) << stderr_output;
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("could not create a hog-devnode temp dir"))
+      << stderr_output;
 }
 
 TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
@@ -1527,7 +1635,8 @@ TEST(HogDevnode, DevAccountCountAboveMaximumPrintsFriendlyUsage)
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_TRUE(stdout_output.empty()) << stdout_output;
   EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
-  EXPECT_TRUE(stderr_output.contains("exceeds maximum")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("dev-account shorthand was removed"))
+      << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
 
@@ -1549,8 +1658,7 @@ TEST(HogDevnode, BootstrapManifestConflictsWithShorthandPrintsFriendlyUsage)
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_TRUE(stdout_output.empty()) << stdout_output;
   EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
-  EXPECT_TRUE(
-      stderr_output.contains("--bootstrap-manifest conflicts with dev-account"))
+  EXPECT_TRUE(stderr_output.contains("dev-account shorthand was removed"))
       << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
@@ -1661,17 +1769,13 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
       std::format("hog-devnode-test-manifest-{}.json", getpid());
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
   std::string manifest =
-      R"({"schemaVersion":2,"kind":"hogd-dev-runtime","chainState":"fresh",)"
+      R"({"schemaVersion":4,"kind":"hogd-dev-runtime","chainState":"fresh",)"
       R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
-      R"("endpoints":{"scheduler":"[::1]:12345","indexer":"[::1]:23456",)"
+      R"("endpoints":{"scheduler":"[::1]:12345",)"
+      R"("schedulerGateway":"[::1]:22345","indexer":"[::1]:23456",)"
       R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"
-      R"("bootstrapAccountDerivation":{"scheme":"groundhog-bootstrap-account-v1","seed":"test"},)"
-      R"("bootstrapAccounts":[],"bootstrap":{"devWallet":{)"
-      R"("contentHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
-      R"("deployedCodeHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
-      R"("artifactHint":"contracts/dev_wallet.rv32a",)"
-      R"("deployEntrypoint":"0x0000000000000000","doActionEntrypoint":"0x0000000000000000"},)"
+      R"("bootstrapAccounts":[],"bootstrap":{)"
       R"("storageCostModel":{"hash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("baseDataItemCost":"12000","bytestringCostPerByte":"10",)"
       R"("baseContractDeploymentCost":"12000","contractDeploymentCostPerByte":"10",)"
@@ -1682,9 +1786,11 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
     output << manifest;
   }
   Readiness readiness = parse_readiness(
-      std::format(R"({{"schemaVersion":2,"status":"ready",)"
+      std::format(R"({{"schemaVersion":3,"status":"ready",)"
                   R"("manifestPath":"{}","manifestHash":"{}"}})",
                   manifest_path.string(), hex_string(hash_string(manifest))));
+  EXPECT_EQ(readiness.scheduler_gateway.host, "::1");
+  EXPECT_EQ(readiness.scheduler_gateway.port, 22345);
 
   EXPECT_EQ(readiness.scheduler.host, "::1");
   EXPECT_EQ(readiness.scheduler.port, 12345);
@@ -1718,14 +1824,67 @@ TEST(HogDevnode, BootstrapAccountDerivationMatchesRustGoldens)
   }
 }
 
+TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
+{
+  LocalBootstrapConfig config;
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_rv32_memory_bytes=16777216");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_rv32_code_bytes=1048576");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_contract_size_bytes=1048576");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_bytestring_len=32768");
+  auto artifact = build_local_bootstrap_account_artifact(config);
+  auto const &network = artifact.genesis_configuration.network_config;
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(network.v0()));
+  const NetworkConfigParams params(network.v0());
+  EXPECT_EQ(params.max_rv32_memory_bytes, 16 * 1024 * 1024U);
+  EXPECT_EQ(params.max_rv32_code_bytes, 1024 * 1024U);
+  EXPECT_EQ(params.max_contract_size_bytes, 1024 * 1024U);
+  EXPECT_EQ(params.max_bytestring_len, 32768U);
+  EXPECT_EQ(params.max_new_contracts_per_tx, 4U);
+  EXPECT_EQ(local_network_config({}), stock_network_config());
+}
+
+// The stock config takes its values from the protocol defaults rather than
+// restating them, so a default change reaches dev and test chains.
+TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaults)
+{
+  EXPECT_EQ(stock_network_config(), NetworkConfigParams::stated_defaults());
+}
+
+TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
+{
+  LocalNetworkConfigOverrides overrides;
+  for (const auto *bad :
+       {"unknown=2", "max_bytestring_len",
+        "max_bytestring_len=", "max_bytestring_len=-1",
+        "max_bytestring_len=4294967296", "max_bytestring_len=1x"}) {
+    EXPECT_THROW(add_local_network_config_override(overrides, bad),
+                 std::runtime_error);
+    EXPECT_TRUE(overrides.empty());
+  }
+  add_local_network_config_override(overrides, "max_bytestring_len=32768");
+  EXPECT_THROW(add_local_network_config_override(overrides,
+                                                 "max_bytestring_len=65536"),
+               std::runtime_error);
+  EXPECT_EQ(overrides.at("max_bytestring_len"), 32768U);
+}
+
 TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 {
-  LocalBootstrapConfig config{.user_account_count = 3};
+  LocalBootstrapConfig config = fixture_config(3);
 
   BootstrapAccountArtifact first =
       build_local_bootstrap_account_artifact(config);
   BootstrapAccountArtifact second =
       build_local_bootstrap_account_artifact(config);
+
+  const NetworkConfigParams params(
+      first.genesis_configuration.network_config.v0());
+  EXPECT_EQ(params.max_rv32_code_bytes, 256 * 1024U);
+  EXPECT_EQ(params.max_contract_size_bytes, 512 * 1024U);
 
   ASSERT_EQ(first.accounts.size(), 4UL);
   ASSERT_EQ(first.initialization_txs.size(), 1UL);
@@ -1737,7 +1896,7 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
                                           ? BootstrapAccountRole::kFaucet
                                           : BootstrapAccountRole::kLocalUser);
     const std::uint64_t expected_tokens =
-        i == 0 ? kLocalFaucetStorageTokens : config.user_storage_tokens;
+        i == 0 ? kLocalFaucetStorageTokens : config.accounts[0].storage_tokens;
     EXPECT_EQ(first.accounts[i].initial_storage_tokens, expected_tokens);
     EXPECT_EQ(first.accounts[i].storage_tokens, expected_tokens);
     EXPECT_EQ(first.accounts[i].address, second.accounts[i].address);
@@ -1747,8 +1906,8 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 
 TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
 {
-  LocalBootstrapConfig config{.user_account_count = 1};
-  EXPECT_EQ(config.user_storage_tokens, 1'000'000'000ULL);
+  LocalBootstrapConfig config = fixture_config(1);
+  EXPECT_EQ(config.accounts[0].storage_tokens, 1'000'000'000ULL);
 
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact(config);
@@ -1762,10 +1921,8 @@ TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
 {
   constexpr std::uint64_t kTokenSupply =
       kTotalHogSupply * std::uint64_t{kHogDivisibility};
-  LocalBootstrapConfig config{
-      .user_account_count = 1,
-      .user_storage_tokens = kTokenSupply,
-  };
+  LocalBootstrapConfig config =
+      fixture_config(1, "groundhog-dev-accounts", kTokenSupply);
 
   EXPECT_THROW(build_local_bootstrap_account_artifact(config),
                std::runtime_error);
@@ -1774,11 +1931,11 @@ TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
 TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "3",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -1786,11 +1943,7 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
   ASSERT_EQ(readiness.bootstrap_accounts.size(), 4UL);
   const json::Value *derivation =
       readiness.manifest.find("bootstrapAccountDerivation");
-  ASSERT_NE(derivation, nullptr);
-  EXPECT_EQ(require_string_field(*derivation, "scheme", ""),
-            "groundhog-bootstrap-account-v1");
-  EXPECT_EQ(require_string_field(*derivation, "seed", ""),
-            "groundhog-dev-accounts");
+  EXPECT_EQ(derivation, nullptr);
   for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", i);
@@ -1799,7 +1952,8 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
               i == 0 ? "faucet" : "local_user");
     EXPECT_EQ(readiness.bootstrap_accounts[i].public_key,
               hex_string(keypair.first));
-    EXPECT_TRUE(readiness.bootstrap_accounts[i].address.starts_with("0x"));
+    EXPECT_EQ(readiness.bootstrap_accounts[i].address,
+              hex_string(derive_bootstrap_account_address(keypair.first)));
     EXPECT_EQ(readiness.bootstrap_accounts[i].address.size(), 66UL);
     EXPECT_EQ(readiness.bootstrap_accounts[i].initial_storage_tokens,
               i == 0 ? "10000000000000" : "1000000000");
@@ -1810,10 +1964,8 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
 
 TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 {
-  auto wallet_contract = load_default_dev_wallet_contract();
   const std::string manifest =
-      bootstrap_manifest_json(2, "manifest-seed", "1000000000",
-                              hex_string(sha256(*wallet_contract)));
+      bootstrap_manifest_json(2, "manifest-seed", "1000000000");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
@@ -1828,8 +1980,7 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
   ASSERT_EQ(readiness.bootstrap_accounts.size(), 3UL);
   const json::Value *derivation =
       readiness.manifest.find("bootstrapAccountDerivation");
-  ASSERT_NE(derivation, nullptr);
-  EXPECT_EQ(require_string_field(*derivation, "seed", ""), "manifest-seed");
+  EXPECT_EQ(derivation, nullptr);
   for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
     auto keypair = derive_bootstrap_account_keypair("manifest-seed", i);
     EXPECT_EQ(readiness.bootstrap_accounts[i].index, i);
@@ -1846,10 +1997,8 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 
 TEST(HogDevnode, BootstrapManifestConflictsWithDevAccountShorthands)
 {
-  auto wallet_contract = load_default_dev_wallet_contract();
   const std::string manifest =
-      bootstrap_manifest_json(1, "manifest-seed", "42",
-                              hex_string(sha256(*wallet_contract)));
+      bootstrap_manifest_json(1, "manifest-seed", "42");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
@@ -1867,7 +2016,7 @@ TEST(HogDevnode, BootstrapManifestConflictsWithDevAccountShorthands)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find(
-                "--bootstrap-manifest conflicts with dev-account"),
+                "dev-account shorthand was removed"),
             std::string::npos);
 }
 
@@ -1888,7 +2037,7 @@ TEST(HogDevnode, BootstrapManifestConflictDetectedBeforeManifestRead)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find(
-                "--bootstrap-manifest conflicts with dev-account"),
+                "dev-account shorthand was removed"),
             std::string::npos);
 }
 
@@ -1909,14 +2058,14 @@ TEST(HogDevnode, BootstrapManifestConflictDetectedBeforeShorthandParsing)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find(
-                "--bootstrap-manifest conflicts with dev-account"),
+                "dev-account shorthand was removed"),
             std::string::npos);
 }
 
 TEST(HogDevnode, BootstrapManifestRejectsOversizedFile)
 {
   std::filesystem::path manifest_path =
-      write_test_bootstrap_manifest(std::string((64 * 1024) + 1, ' '));
+      write_test_bootstrap_manifest(std::string((256 * 1024) + 1, ' '));
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
   HogDevnodeProcess process = HogDevnodeProcess::start({
@@ -1934,35 +2083,9 @@ TEST(HogDevnode, BootstrapManifestRejectsOversizedFile)
             std::string::npos);
 }
 
-TEST(HogDevnode, BootstrapManifestRejectsMismatchedDevWalletHash)
+TEST(HogDevnode, BootstrapManifestRejectsInvalidPublicKey)
 {
-  const std::string manifest = bootstrap_manifest_json(
-      1, "manifest-seed", "42",
-      "0x9999999999999999999999999999999999999999999999999999999999999999");
-  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
-  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
-
-  HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--bootstrap-manifest",
-      manifest_path.string(),
-  });
-
-  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
-  ASSERT_TRUE(status.has_value());
-  const int wait_status = status.value_or(EXIT_SUCCESS);
-  EXPECT_FALSE(WIFEXITED(wait_status) &&
-               WEXITSTATUS(wait_status) == EXIT_SUCCESS);
-  EXPECT_TRUE(process.read_remaining_stdout().empty());
-  EXPECT_NE(process.read_remaining_stderr().find("devWallet.contentHash"),
-            std::string::npos);
-}
-
-TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
-{
-  auto wallet_contract = load_default_dev_wallet_contract();
-  const std::string manifest =
-      bootstrap_manifest_json(1, "", "42",
-                              hex_string(sha256(*wallet_contract)));
+  const std::string manifest = bootstrap_manifest_json(1, "", "42");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
@@ -1978,16 +2101,14 @@ TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find(
-                "bootstrapAccounts.seed must not be empty"),
+                "bootstrapAccounts entry.publicKey"),
             std::string::npos);
 }
 
 TEST(HogDevnode, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
 {
-  auto wallet_contract = load_default_dev_wallet_contract();
   const std::string manifest =
-      bootstrap_manifest_json(1, "manifest-seed", " 1000",
-                              hex_string(sha256(*wallet_contract)));
+      bootstrap_manifest_json(1, "manifest-seed", " 1000");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
@@ -2002,15 +2123,16 @@ TEST(HogDevnode, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
   EXPECT_FALSE(WIFEXITED(wait_status) &&
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
-  EXPECT_NE(process.read_remaining_stderr().find(
-                "Invalid bootstrap manifest initialStorageTokens"),
-            std::string::npos);
+  EXPECT_NE(
+      process.read_remaining_stderr().find(
+          "initialStorageTokens must be a positive canonical decimal amount"),
+      std::string::npos);
 }
 
-TEST(HogDevnode, RejectsDevAccountCountAboveLimit)
+TEST(HogDevnode, RejectsBootstrapAccountCountAboveLimit)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1001",
   });
 
@@ -2020,7 +2142,8 @@ TEST(HogDevnode, RejectsDevAccountCountAboveLimit)
   EXPECT_FALSE(WIFEXITED(wait_status) &&
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
-  EXPECT_NE(process.read_remaining_stderr().find("Invalid dev account count"),
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "bootstrapAccounts exceeds maximum account count"),
             std::string::npos);
 }
 
@@ -2071,6 +2194,21 @@ TEST(HogDevnode, GatewayEndpointAnswersIntroAndGetItems)
     ASSERT_EQ(result.error(), RPCError::kRPCNone);
     ASSERT_EQ(result.payload().items.size(), 1U);
     EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCNotFound);
+
+    const auto faucet_key =
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", 0).first;
+    query.address = derive_bootstrap_account_address(faucet_key);
+    batch.clear();
+    for (auto key :
+         {StorageKeyType::FreeNativeTokenBalance, StorageKeyType::AuthData}) {
+      query.key.key_type(key);
+      batch.push_back(query);
+    }
+    result = client.dbgateway_get_items(batch)();
+    ASSERT_EQ(result.error(), RPCError::kRPCNone);
+    ASSERT_EQ(result.payload().items.size(), 2U);
+    EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCNone);
+    EXPECT_EQ(result.payload().items[1].error(), RPCError::kRPCNotFound);
   }
 
   expect_clean_exit(process);
@@ -2097,11 +2235,11 @@ TEST(HogDevnode, ViewGatewayEndpointAnswersIntro)
 TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -2116,9 +2254,9 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
     EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
               ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
 
-    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
+        build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[1]
             .address;
     EXPECT_EQ(hex_string(wallet_address),
@@ -2128,12 +2266,12 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
+                .entrypoint = wallet_meta::entrypoint<u8"execute">(),
                 .gas_limit = GasAmount{10'000'000},
                 .calldata = Calldata{},
             },
         .parent_address = {},
-        .auth_claim = source_address_auth_claim(),
+        .auth_claim = native_account_auth_claim(),
         .forwarded_tokens = {},
         .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
     };
@@ -2173,11 +2311,11 @@ TEST(HogDevnode, IndexerEndpointServesBlockExplorer)
 TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -2208,9 +2346,9 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
-    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
+        build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[1]
             .address;
 
@@ -2221,13 +2359,15 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
                 .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
                 .calldata = wallet_meta::make_calldata<u8"deploy">(
-                    make_nonce(11), sha256(*fibonacci_contract)),
+                    make_nonce(11), sha256(*fibonacci_contract),
+                    make_erc20_amount(100'000'000),
+                    x23::Ptr<default_wallet::WalletInitCall>{}),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 11},
         .contracts_to_deploy = {*fibonacci_contract},
-        .auth_claim = source_address_auth_claim(),
+        .auth_claim = native_account_auth_claim(),
     };
     Signature signature(CryptographicScheme::Ed25519);
     auto signed_bytes = ed25519_sign(
@@ -2276,7 +2416,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
   std::optional<ProposedTransaction> expected_indexed_tx;
   std::optional<TxEventLog> expected_event_log;
   const ContractAddress wallet_address =
-      build_local_bootstrap_account_artifact({.user_account_count = 1})
+      build_local_bootstrap_account_artifact(fixture_config(1))
           .accounts[1]
           .address;
 
@@ -2314,11 +2454,11 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         {
             "--data-dir",
             data_dir.string(),
-            "--dev-accounts",
+            "--fixture-accounts",
             "1",
-            "--dev-account-seed",
+            "--fixture-seed",
             "groundhog-dev-accounts",
-            "--dev-account-tokens",
+            "--fixture-tokens",
             "1000000000",
         },
         {{"HOG_DEVNODE_TEST_WITHHOLD_INDEXER_PULL", "1"}});
@@ -2343,7 +2483,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
-    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
 
     Transaction tx{
         .invocation =
@@ -2352,13 +2492,15 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
                 .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
                 .calldata = wallet_meta::make_calldata<u8"deploy">(
-                    make_nonce(17), sha256(*fibonacci_contract)),
+                    make_nonce(17), sha256(*fibonacci_contract),
+                    make_erc20_amount(100'000'000),
+                    x23::Ptr<default_wallet::WalletInitCall>{}),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 17},
         .contracts_to_deploy = {*fibonacci_contract},
-        .auth_claim = source_address_auth_claim(),
+        .auth_claim = native_account_auth_claim(),
     };
     Signature signature(CryptographicScheme::Ed25519);
     auto signed_bytes = ed25519_sign(
@@ -2410,11 +2552,11 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     HogDevnodeProcess process = HogDevnodeProcess::start({
         "--data-dir",
         data_dir.string(),
-        "--dev-accounts",
+        "--fixture-accounts",
         "1",
-        "--dev-account-seed",
+        "--fixture-seed",
         "groundhog-dev-accounts",
-        "--dev-account-tokens",
+        "--fixture-tokens",
         "1000000000",
     });
     Readiness readiness = process.wait_for_readiness();
@@ -2448,11 +2590,11 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     HogDevnodeProcess process = HogDevnodeProcess::start({
         "--data-dir",
         data_dir.string(),
-        "--dev-accounts",
+        "--fixture-accounts",
         "1",
-        "--dev-account-seed",
+        "--fixture-seed",
         "groundhog-dev-accounts",
-        "--dev-account-tokens",
+        "--fixture-tokens",
         "1000000000",
     });
     Readiness readiness = process.wait_for_readiness();
@@ -2482,10 +2624,8 @@ TEST(HogDevnode, DataDirRejectsLegacyNetworkHashAfterFaucetInitialization)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
 
-  auto wallet_contract = load_default_dev_wallet_contract();
   const std::string manifest =
-      bootstrap_manifest_json(0, "groundhog-dev-accounts", "1000000000",
-                              hex_string(sha256(*wallet_contract)));
+      bootstrap_manifest_json(0, "groundhog-dev-accounts", "1000000000");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
@@ -2541,12 +2681,9 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentNetworkHash)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   initialize_persistent_data_dir(data_dir);
-  ASSERT_TRUE(std::filesystem::remove(data_dir / "hog-devnode-data.json"));
 
-  auto wallet_contract = load_default_dev_wallet_contract();
   const std::string manifest =
-      bootstrap_manifest_json(1, "groundhog-dev-accounts", "1000000000",
-                              hex_string(sha256(*wallet_contract)));
+      bootstrap_manifest_json(1, "groundhog-dev-accounts", "1000000000");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
@@ -2585,9 +2722,9 @@ TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
       data_dir / "events" / "indexer-outbox" /
       IndexerOutboxStore::current_epoch_origin_filename()));
 
-  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
-                          "0", "--dev-account-seed", "groundhog-dev-accounts",
-                          "--dev-account-tokens", "1000000000"},
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
+                          "0", "--fixture-seed", "groundhog-dev-accounts",
+                          "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
                          "required");
@@ -2603,11 +2740,12 @@ TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
 
   std::filesystem::rename(
       outbox_dir / IndexerOutboxStore::current_epoch_origin_filename(),
-      outbox_dir / IndexerOutboxStore::epoch_origin_filename("hogp/archival"));
+      outbox_dir / IndexerOutboxStore::epoch_origin_filename(
+                       protocol_from_text("hogp/archival")));
 
-  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
-                          "0", "--dev-account-seed", "groundhog-dev-accounts",
-                          "--dev-account-tokens", "1000000000"},
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
+                          "0", "--fixture-seed", "groundhog-dev-accounts",
+                          "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
                          "required");
@@ -2621,9 +2759,9 @@ TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyDurableOutbox)
   ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
             0UL);
 
-  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
-                          "1", "--dev-account-seed", "groundhog-dev-accounts",
-                          "--dev-account-tokens", "1000000000"},
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
+                          "1", "--fixture-seed", "groundhog-dev-accounts",
+                          "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
                          "required");
@@ -2655,8 +2793,8 @@ TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
                         std::filesystem::copy_options::recursive);
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -2729,8 +2867,8 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
   }
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -2758,6 +2896,85 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
       (data_dir / "events").string(), finalized.proposal_header.events_hash)));
 }
 
+// Graceful shutdown is an optimization. Same-volume recovery must still reopen
+// canonical state after SIGKILL and keep producing blocks.
+TEST(HogDevnode, DataDirRecoversAfterUncleanKill)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--fixture-accounts",
+        "1",
+        "--fixture-seed",
+        "groundhog-dev-accounts",
+        "--fixture-tokens",
+        "1000000000",
+    });
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "recovered");
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    ASSERT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+    expect_killed_exit(process);
+  }
+
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--data-dir",
+      data_dir.string(),
+      "--fixture-accounts",
+      "1",
+      "--fixture-seed",
+      "groundhog-dev-accounts",
+      "--fixture-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+  sched_coord_client_t scheduler =
+      create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                     readiness.scheduler.port,
+                                     /*retry=*/true)()
+          .value();
+  SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+  TransactionRefPage page;
+  while (std::chrono::steady_clock::now() < deadline) {
+    page = page_or_empty(reader.get_transactions_by_address(query)());
+    if (page.latest_block == 2) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_EQ(page.latest_block, 2);
+
+  EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+  tip = scheduler.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 3);
+  expect_clean_exit(process);
+}
+
 TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)
 {
   std::filesystem::path data_dir = make_test_data_dir();
@@ -2766,8 +2983,8 @@ TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)
   std::ignore = append_next_test_outbox_record(data_dir);
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -2803,8 +3020,8 @@ TEST(HogDevnode, DataDirRejectsIndexerAheadOfHogDb)
                         std::filesystem::copy_options::recursive);
 
   expect_startup_failure(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"},
       "recovered hog-devnode indexer is ahead of finalized event outbox: "
       "indexed height 2, finalized height 1");
@@ -2817,8 +3034,8 @@ TEST(HogDevnode, DataDirAcceptsMatchingOutboxIndexerAndHogDb)
   initialize_persistent_data_dir(data_dir);
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   EXPECT_EQ(readiness.chain_state, "recovered");
@@ -2848,11 +3065,11 @@ TEST(HogDevnode, DataDirRejectsUnreadableDbTip)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
       "failed to read recovered DbTip: Type Mismatch");
@@ -2877,17 +3094,46 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
       "recovered database storage hash does not match DbTip");
 }
 
-TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountSeed)
+TEST(HogDevnode, NetworkOverridesSurviveRestartAndRejectChangedIntent)
+{
+  const auto data_dir = make_test_data_dir();
+  Defer cleanup([&] { std::filesystem::remove_all(data_dir); });
+  for (const auto *expected_state : {"fresh", "recovered"}) {
+    auto process = HogDevnodeProcess::start(
+        {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+         "--network-config", "max_bytestring_len=32768"});
+    const auto readiness = process.wait_for_readiness();
+    EXPECT_EQ(readiness.chain_state, expected_state);
+    auto scheduler = create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                                    readiness.scheduler.port,
+                                                    /*retry=*/true)()
+                         .value();
+    const auto tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(NetworkConfigParams(tip.db_tip().network_config.v0())
+                  .max_bytestring_len,
+              32768U);
+    expect_clean_exit(process);
+  }
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
+                          "1"},
+                         "different --network-config");
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
+                          "1", "--network-config", "max_bytestring_len=16384"},
+                         "different --network-config");
+}
+
+TEST(HogDevnode, DataDirRejectsRestartWithDifferentPublicKeys)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2897,17 +3143,17 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountSeed)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "different-seed",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
-      "different --dev-account-seed");
+      "different bootstrap accounts");
 }
 
-TEST(HogDevnode, DataDirRejectsRestartWithOmittedDevAccounts)
+TEST(HogDevnode, DataDirRejectsRestartWithOmittedAllocations)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2918,10 +3164,10 @@ TEST(HogDevnode, DataDirRejectsRestartWithOmittedDevAccounts)
           "--data-dir",
           data_dir.string(),
       },
-      "different --dev-accounts");
+      "different bootstrap accounts");
 }
 
-TEST(HogDevnode, DataDirRejectsRestartWithLargerDevAccountCount)
+TEST(HogDevnode, DataDirRejectsRestartWithAdditionalAllocations)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2931,17 +3177,17 @@ TEST(HogDevnode, DataDirRejectsRestartWithLargerDevAccountCount)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "2",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
-      "different --dev-accounts");
+      "different bootstrap accounts");
 }
 
-TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountTokens)
+TEST(HogDevnode, DataDirRejectsRestartWithDifferentAllocations)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2951,14 +3197,14 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountTokens)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "42",
       },
-      "different --dev-account-tokens");
+      "different bootstrap accounts");
 }
 
 TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
@@ -2982,6 +3228,57 @@ TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
   expect_clean_exit(first);
 }
 
+TEST(HogDevnode, DataDirRejectsInvalidInheritedLockDescriptor)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  for (const char *descriptor : {"0", "999999", "not-a-descriptor"}) {
+    HogDevnodeProcess process =
+        HogDevnodeProcess::start({"--data-dir", data_dir.string()},
+                                 {{"HOG_DEVNODE_DATA_DIR_LOCK_FD",
+                                   descriptor}});
+    auto status = process.wait_for_exit_for_test(startup_timeout());
+    if (!status.has_value()) {
+      FAIL() << "hog-devnode did not exit";
+      return;
+    }
+    const int exit_status = status.value();
+    EXPECT_TRUE(WIFEXITED(exit_status));
+    EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+    EXPECT_NE(process.read_remaining_stderr().find(
+                  "inherited data-dir lock does not identify this chain"),
+              std::string::npos);
+  }
+}
+
+TEST(HogDevnode, DataDirRetainsInheritedLockAfterParentClosesDescriptor)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::create_directories(data_dir);
+  const int opened =
+      ::open((data_dir / ".hog-devnode.lock").c_str(), O_RDWR | O_CREAT, 0600);
+  ASSERT_GE(opened, 0);
+  const int descriptor = ::fcntl(opened, F_DUPFD, 100);
+  ::close(opened);
+  ASSERT_GE(descriptor, 100);
+  std::optional<File> parent_lock(std::in_place, descriptor);
+  ASSERT_EQ(::flock(descriptor, LOCK_EX | LOCK_NB), 0);
+  HogDevnodeProcess child =
+      HogDevnodeProcess::start({"--data-dir", data_dir.string()},
+                               {{"HOG_DEVNODE_DATA_DIR_LOCK_FD",
+                                 std::to_string(descriptor)}});
+  child.wait_for_readiness();
+  parent_lock.reset();
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "already locked by another process");
+  expect_clean_exit(child);
+  const int restored = ::open((data_dir / ".hog-devnode.lock").c_str(), O_RDWR);
+  ASSERT_GE(restored, 0);
+  File released_lock(restored);
+  EXPECT_EQ(::flock(restored, LOCK_EX | LOCK_NB), 0);
+}
+
 TEST(HogDevnode, DataDirRejectsCommittedChainWhenMetadataMissing)
 {
   std::filesystem::path data_dir = make_test_data_dir();
@@ -2993,35 +3290,30 @@ TEST(HogDevnode, DataDirRejectsCommittedChainWhenMetadataMissing)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
-      "committed chain state but no bootstrap metadata; reinitialize the data "
-      "dir");
+      "persisted state but no bootstrap metadata");
 }
 
 TEST(HogDevnode, DataDirResumesMetadataWithoutCommittedChain)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {.user_account_count = 1,
-                                          .seed = "groundhog-dev-accounts",
-                                          .user_storage_tokens = 1'000'000'000,
-                                          .dev_wallet_profile = std::string(
-                                              kDefaultDevWalletProfile)});
+  write_test_data_dir_metadata(data_dir, fixture_config(1));
 
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--data-dir",
       data_dir.string(),
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -3034,10 +3326,10 @@ TEST(HogDevnode, DataDirRejectsBootstrapGenesisWithoutInitializationBlock)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   const std::vector<std::string> args{
-      "--data-dir",           data_dir.string(),
-      "--dev-accounts",       "1",
-      "--dev-account-seed",   "groundhog-dev-accounts",
-      "--dev-account-tokens", "1000000000",
+      "--data-dir",         data_dir.string(),
+      "--fixture-accounts", "1",
+      "--fixture-seed",     "groundhog-dev-accounts",
+      "--fixture-tokens",   "1000000000",
   };
 
   {
@@ -3084,19 +3376,49 @@ TEST(HogDevnode, DataDirRejectsCorruptMetadataWithoutCommittedChain)
       "hog-devnode data metadata missing root.schemaVersion");
 }
 
-TEST(HogDevnode, DataDirRejectsLegacyBootstrapMetadata)
+TEST(HogDevnode, DataDirRejectsLegacyBootstrapMetadataWithoutChangingData)
+{
+  for (std::int64_t version : {1, 2, 3}) {
+    std::filesystem::path data_dir = make_test_data_dir();
+    Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+    write_test_data_dir_metadata(data_dir, {}, version);
+    std::filesystem::create_directories(data_dir / "ramdb");
+    const auto sentinel = data_dir / "ramdb" / "legacy-state";
+    {
+      std::ofstream output(sentinel);
+      output << "preserve legacy chain bytes";
+    }
+    const auto metadata = data_dir / "hog-devnode-data.json";
+    const auto original_metadata = read_file(metadata);
+    expect_startup_failure({"--data-dir", data_dir.string()},
+                           "use the original runtime");
+    EXPECT_EQ(read_file(metadata), original_metadata);
+    EXPECT_EQ(read_file(sentinel), "preserve legacy chain bytes");
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(data_dir /
+                                                                "ramdb"),
+                            std::filesystem::directory_iterator{}),
+              1);
+  }
+}
+
+TEST(HogDevnode, DataDirRejectsUnidentifiedPersistedStateBeforeOpeningDatabase)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/1);
-
-  expect_startup_failure(
-      {
-          "--data-dir",
-          data_dir.string(),
-      },
-      "schemaVersion 1 uses the legacy bootstrap layout; reinitialize the data "
-      "dir");
+  std::filesystem::create_directories(data_dir / "ramdb");
+  const auto sentinel = data_dir / "ramdb" / "unidentified-state";
+  {
+    std::ofstream output(sentinel);
+    output << "preserve chain bytes";
+  }
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "persisted state but no bootstrap metadata");
+  EXPECT_EQ(read_file(sentinel), "preserve chain bytes");
+  EXPECT_FALSE(std::filesystem::exists(data_dir / "hog-devnode-data.json"));
+  EXPECT_EQ(std::distance(std::filesystem::directory_iterator(data_dir /
+                                                              "ramdb"),
+                          std::filesystem::directory_iterator{}),
+            1);
 }
 
 TEST(HogDevnode, DataDirRejectsCorruptMetadataOnRecovery)
@@ -3115,24 +3437,24 @@ TEST(HogDevnode, DataDirRejectsCorruptMetadataOnRecovery)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
       "hog-devnode data metadata JSON parse failed");
 }
 
-TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
+TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -3152,20 +3474,34 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
-    auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
-    ASSERT_TRUE(fibonacci_contract);
+    // Exercise the stock code cap through real devnode admission and deployment
+    // without overrides. Header + code + memory also exceeds the old blob cap.
+    std::vector<uint32_t> words(256 * 1024 / rv32::kInstructionBytes,
+                                rv32::test_program::addi(0, 0, 0));
+    // Return an empty buffer, with the rest of the code padded by valid NOPs.
+    words[0] = rv32::test_program::addi(10, 0, 6); // Return syscall
+    words[1] = rv32::test_program::addi(11, 0, 0); // buffer
+    words[2] = rv32::test_program::addi(12, 0, 0); // length
+    words[3] = 0x00000073U;                        // ecall
+    const std::vector<uint8_t> initial_memory(64 * 1024, 0);
+    const auto bytes =
+        rv32::test_artifact::build_artifact(words, initial_memory);
+    Contract large_contract(ContractType::kRv32);
+    large_contract.rv32_contract().data.append_range(bytes);
+    ASSERT_EQ(large_contract.rv32_contract().data.size(),
+              (320 * 1024U) + rv32::kArtifactHeaderBytes);
 
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
-    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
+        build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[1]
             .address;
     EXPECT_EQ(hex_string(wallet_address),
               readiness.bootstrap_accounts[1].address);
     const SHA256Hash deploy_nonce = make_nonce(7);
-    const SHA256Hash contract_hash = sha256(*fibonacci_contract);
+    const SHA256Hash contract_hash = sha256(large_contract);
 
     Transaction tx{
         .invocation =
@@ -3173,15 +3509,15 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
                 .invoked_address = wallet_address,
                 .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata =
-                    wallet_meta::make_calldata<u8"deploy">(deploy_nonce,
-                                                           contract_hash),
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
+                    deploy_nonce, contract_hash, make_erc20_amount(100'000'000),
+                    x23::Ptr<default_wallet::WalletInitCall>{}),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 7},
-        .contracts_to_deploy = {*fibonacci_contract},
-        .auth_claim = source_address_auth_claim(),
+        .contracts_to_deploy = {large_contract},
+        .auth_claim = native_account_auth_claim(),
     };
 
     Signature signature(CryptographicScheme::Ed25519);
@@ -3224,19 +3560,37 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
     EXPECT_EQ(result.info().events.tx_hash, tx_hash);
+    const ContractAddress deployed_address = sha256(
+        ContractDeploymentHashPreimage{.deployer_address = wallet_address,
+                                       .nonce = deploy_nonce,
+                                       .contract_hash = contract_hash});
+    auto view = create_client<ViewGateway1>(readiness.view_gateway.host,
+                                            readiness.view_gateway.port,
+                                            /*retry=*/true)()
+                    .value();
+    ASSERT_EQ(view.viewgateway_intro(version::kHogdProtocol())(),
+              ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+    const auto output = view.viewgateway_view(TransactionViewQuery{
+        .invocation = Invocation{.invoked_address = deployed_address,
+                                 .gas_limit = GasAmount{10'000'000}},
+        .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+    })();
+    ASSERT_EQ(output.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    EXPECT_EQ(output.payload().output.status_code(),
+              InvocationFrameStatusCode::Return);
   }
 
   expect_clean_exit(process);
 }
 
-TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
+TEST(HogDevnode, NativeBootstrapAccountDeploysExplicitLegacyWalletFixture)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -3269,16 +3623,16 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
       return result;
     };
 
-    auto wallet_contract = load_default_dev_wallet_contract();
+    auto wallet_contract = load_legacy_dev_wallet_fixture();
     ASSERT_TRUE(wallet_contract);
     auto sponsor_keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
     Ed25519PublicKey owner_public_key =
         derive_bootstrap_account_keypair("created-wallet-owner", /*index=*/0)
             .first;
-    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress sponsor_wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
+        build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[0]
             .address;
     EXPECT_EQ(hex_string(sponsor_wallet_address),
@@ -3293,24 +3647,26 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
                                               .contract_hash = wallet_hash});
 
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    Calldata transfer_calldata =
-        x23::serialize(kNativeTokenContractAddress,
-                       erc20_meta::entrypoint<u8"transfer">(),
-                       GasAmount{10'000'000},
-                       erc20_meta::make_calldata<u8"transfer">(
-                           created_wallet_address,
-                           make_erc20_amount(uint128_t{200'000'000})));
+    x23::Vec<default_wallet::WalletCall, UINT32_MAX> transfer_calls{
+        default_wallet::WalletCall{
+            .target = kNativeTokenContractAddress,
+            .entrypoint = erc20_meta::entrypoint<u8"transfer">(),
+            .gas_limit = 10'000'000,
+            .calldata = erc20_meta::make_calldata<u8"transfer">(
+                created_wallet_address,
+                make_erc20_amount(int128_t{200'000'000})),
+        }};
     Transaction prefund_wallet_tx{
         .invocation =
             Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
+                       .entrypoint = wallet_meta::entrypoint<u8"execute">(),
                        .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<u8"do_action">(
-                           transfer_calldata)},
+                       .calldata = wallet_meta::make_calldata<u8"execute">(
+                           transfer_calls)},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 30},
-        .auth_claim = source_address_auth_claim(),
+        .auth_claim = native_account_auth_claim(0),
     };
     SignedTransaction signed_prefund_wallet_tx =
         sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second,
@@ -3335,15 +3691,26 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
         .invocation =
             Invocation{
                 .invoked_address = sponsor_wallet_address,
-                .entrypoint = wallet_meta::entrypoint<u8"create_wallet">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<u8"create_wallet">(
-                    create_wallet_nonce, wallet_hash, owner_public_key)},
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
+                    create_wallet_nonce, wallet_hash,
+                    make_erc20_amount(100'000'000),
+                    x23::Ptr<default_wallet::WalletInitCall>(
+                        default_wallet::WalletInitCall{
+                            .entrypoint =
+                                ContractTraitMeta<dev_wallet::DevWallet>::
+                                    entrypoint<u8"initialize">(),
+                            .gas_limit = 10'000'000,
+                            .calldata =
+                                ContractTraitMeta<dev_wallet::DevWallet>::
+                                    make_calldata<u8"initialize">(
+                                        owner_public_key)}))},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 31},
         .contracts_to_deploy = {*wallet_contract},
-        .auth_claim = source_address_auth_claim(),
+        .auth_claim = native_account_auth_claim(0),
     };
     SignedTransaction signed_create_wallet_tx =
         sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second,
@@ -3456,9 +3823,9 @@ make_wallet_deploy_tx(Readiness const &readiness, std::uint64_t nonce)
   CHECK(fibonacci_contract != nullptr);
   auto keypair =
       derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
   const ContractAddress wallet_address =
-      build_local_bootstrap_account_artifact({.user_account_count = 1})
+      build_local_bootstrap_account_artifact(fixture_config(1))
           .accounts[1]
           .address;
 
@@ -3469,13 +3836,15 @@ make_wallet_deploy_tx(Readiness const &readiness, std::uint64_t nonce)
               .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
               .gas_limit = GasAmount{10'000'000},
               .calldata = wallet_meta::make_calldata<u8"deploy">(
-                  make_nonce(nonce), sha256(*fibonacci_contract)),
+                  make_nonce(nonce), sha256(*fibonacci_contract),
+                  make_erc20_amount(100'000'000),
+                  x23::Ptr<default_wallet::WalletInitCall>{}),
           },
       .uniquifier = Uniquifier{.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
                                .nonce = nonce},
       .contracts_to_deploy = {*fibonacci_contract},
-      .auth_claim = source_address_auth_claim(),
+      .auth_claim = native_account_auth_claim(),
   };
   return sign_transaction(std::move(tx), keypair.second,
                           readiness_network_hash(readiness));
@@ -3516,8 +3885,9 @@ submit_and_propose_without_commit(sched_coord_client_t &scheduler,
     return {};
   }
   SignedTransactionBatch proposed_txs;
-  EXPECT_TRUE(
-      parallel_batch_to_t(proposal.proposed_block().txs, proposed_txs)());
+  // This node's own proposal, not a peer message.
+  EXPECT_TRUE(parallel_batch_to_t(proposal.proposed_block().txs, proposed_txs,
+                                  kNoBatchSizeLimit)());
   TransactionHashBatch tx_hashes;
   tx_hashes.reserve(proposed_txs.size());
   for (const SignedTransaction &tx : proposed_txs) {
@@ -3557,10 +3927,10 @@ std::vector<std::string>
 persistent_data_dir_args(std::filesystem::path const &data_dir)
 {
   return {
-      "--data-dir",           data_dir.string(),
-      "--dev-accounts",       "1",
-      "--dev-account-seed",   "groundhog-dev-accounts",
-      "--dev-account-tokens", "1000000000",
+      "--data-dir",         data_dir.string(),
+      "--fixture-accounts", "1",
+      "--fixture-seed",     "groundhog-dev-accounts",
+      "--fixture-tokens",   "1000000000",
   };
 }
 
@@ -3568,7 +3938,7 @@ std::vector<ContractAddress>
 single_dev_account_addresses()
 {
   BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact({.user_account_count = 1});
+      build_local_bootstrap_account_artifact(fixture_config(1));
   return {artifact.accounts[0].address, artifact.accounts[1].address};
 }
 
@@ -3601,8 +3971,9 @@ TEST(HogDevnode, DataDirServesIdenticalCommittedStateAfterCleanRestart)
     committed_items = read_account_gateway_items(gateway, addresses);
     ASSERT_EQ(committed_items.block_height, 2);
     ASSERT_EQ(committed_items.items.size(), 2 * addresses.size());
-    for (DbGatewayItemResult const &item : committed_items.items) {
-      ASSERT_EQ(item.error(), RPCError::kRPCNone);
+    for (std::size_t i = 0; i < committed_items.items.size(); ++i) {
+      ASSERT_EQ(committed_items.items[i].error(),
+                i % 2 == 0 ? RPCError::kRPCNone : RPCError::kRPCNotFound);
     }
 
     expect_clean_exit(process);
@@ -3852,11 +4223,11 @@ TEST(HogDevnode, DataDirRejectsMetadataFromANewerSchemaVersion)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/3);
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/5);
 
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
-      "unsupported hog-devnode data metadata schemaVersion 3, expected 2");
+      "unsupported hog-devnode data metadata schemaVersion 5, expected 4");
 }
 
 TEST(HogDevnode, DataDirRejectsMetadataWithUnexpectedKind)
@@ -3864,7 +4235,7 @@ TEST(HogDevnode, DataDirRejectsMetadataWithUnexpectedKind)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   write_raw_test_data_dir_metadata(
-      data_dir, R"({"schemaVersion":2,"kind":"hog-hosted-data"})");
+      data_dir, R"({"schemaVersion":4,"kind":"hog-hosted-data"})");
 
   expect_startup_failure({"--data-dir", data_dir.string()},
                          "unsupported hog-devnode data metadata kind "
@@ -3876,7 +4247,7 @@ TEST(HogDevnode, DataDirRejectsMetadataWithoutBootstrapConfig)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   write_raw_test_data_dir_metadata(
-      data_dir, R"({"schemaVersion":2,"kind":"hog-devnode-data"})");
+      data_dir, R"({"schemaVersion":4,"kind":"hog-devnode-data"})");
 
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
@@ -3887,13 +4258,11 @@ TEST(HogDevnode, DataDirRejectsMetadataWithDevAccountsAboveMaximum)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {.user_account_count =
-                                              kMaxBootstrapAccounts + 1});
+  write_test_data_dir_metadata(data_dir,
+                               fixture_config(kMaxBootstrapAccounts + 1));
 
-  expect_startup_failure(
-      {"--data-dir", data_dir.string()},
-      std::format("hog-devnode data metadata devAccounts {} exceeds maximum {}",
-                  kMaxBootstrapAccounts + 1, kMaxBootstrapAccounts));
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "bootstrapAccounts exceeds maximum account count");
 }
 
 TEST(HogDevnode, DataDirRejectsMetadataWithForeignFaucetTokens)
@@ -3902,36 +4271,25 @@ TEST(HogDevnode, DataDirRejectsMetadataWithForeignFaucetTokens)
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   // The faucet allocation is fixed by the local bootstrap profile, so a data
   // dir claiming a different one was not written by this bootstrap.
-  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/2,
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/4,
                                /*faucet_tokens=*/1);
 
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
-      std::format("hog-devnode data metadata faucetTokens must be {}, got 1",
-                  kLocalFaucetStorageTokens));
+      "bootstrapFaucet.initialStorageTokens must be 10000000000000");
 }
 
-TEST(HogDevnode, DataDirRejectsMetadataWithEmptyDevAccountSeed)
+TEST(HogDevnode, DataDirRejectsMetadataWithDuplicatePublicKeys)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {.seed = ""});
+  write_test_data_dir_metadata(data_dir,
+                               LocalBootstrapConfig{
+                                   .accounts = {LocalAccountAllocation{},
+                                                LocalAccountAllocation{}}});
 
-  expect_startup_failure(
-      {"--data-dir", data_dir.string()},
-      "hog-devnode data metadata devAccountSeed must not be empty");
-}
-
-TEST(HogDevnode, DataDirRejectsMetadataWithUnknownDevWalletProfile)
-{
-  std::filesystem::path data_dir = make_test_data_dir();
-  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {.dev_wallet_profile =
-                                              "hog-devnode-from-the-future"});
-
-  expect_startup_failure(
-      {"--data-dir", data_dir.string()},
-      "unsupported dev wallet profile 'hog-devnode-from-the-future'");
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "duplicate bootstrap public key");
 }
 
 // Replay protection is durable state, so a restart has to preserve exactly
@@ -4164,8 +4522,8 @@ TEST(HogDevnode, DataDirRejectsPreparedOriginWithoutCanonicalTipRecord)
   }
 
   expect_startup_failure(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "0",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "0",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"},
       "recovered event outbox is missing canonical HogDB tip height 1");
 }

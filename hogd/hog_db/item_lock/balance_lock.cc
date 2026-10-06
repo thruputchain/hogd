@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <span>
 
 #include "db_conflict.hh"
 #include "db_sched.hh"
@@ -11,6 +12,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hog_db/change_set.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/status.h"
@@ -45,7 +47,7 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
     if (after != nullptr) {
       int128_t delta_after = after->delta();
       if (delta_after < get_storage_cost_of_committed_value(ctx.cost_model)) {
-        return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+        return ctx.conflict(DbConflictCode::InsufficientFunds);
       }
     }
   }
@@ -61,13 +63,19 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
   // subtraction in the same non-overflowing domain NNInt128 relies on.
   int128_t snapshot = snapshot_value.value_or(0);
   auto [committed, committed_overflow] = overflowing_add(snapshot, delta_after);
-  if (committed_overflow || committed < 0) {
-    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+  if (committed_overflow) {
+    return ctx.conflict(DbConflictCode::Overflow);
+  }
+  if (committed < 0) {
+    return ctx.conflict(DbConflictCode::InsufficientFunds);
   }
 
+  // Reservation fails when this block's debits exhaust the balance as of the
+  // block's start (add-capacity exhaustion is unreachable under the supply
+  // bound), so it is a funds shortfall rather than a generic bounds failure.
   if (!delta_bounds_.try_reserve_delta(delta_before, delta_after, add_before,
                                        add_after, sub_before, sub_after)) {
-    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+    return ctx.conflict(DbConflictCode::InsufficientFunds);
   }
 
   return 0;
@@ -77,8 +85,16 @@ void
 BalanceLock::add_committed_credit(int128_t delta)
 {
   CHECK_GT(delta, 0);
-  auto ok = delta_bounds_.try_reserve_delta(0, delta, 0, delta, 0, 0);
-  CHECK(ok);
+  // Refund of a redundant storage reservation (a duplicate same-value write
+  // whose row an earlier commit already materialized). Bump the committed delta
+  // directly rather than reserving add-capacity, which a refund is not and
+  // which can be exhausted near INT128_MAX. This cannot overflow the committed
+  // balance because total HOG supply is bounded at INT128_MAX in the native
+  // token precompile, and that bound includes storage-locked funds, so any
+  // single balance plus the storage it reclaims stays <= total supply <=
+  // INT128_MAX. The safety comes from that global bound, not from the refund
+  // reversing a specific reserved debit (it need not). (#4095)
+  delta_bounds_.apply_committed_refund(delta);
 }
 
 int128_t
@@ -138,7 +154,7 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
         //    transferred to this address.
         // 2. hog_db creates a new HogAge struct for address X and writes Y hogs
         //    to the [kHogAgeGroupToSchedule] group in the struct.
-        // 3. hog_db sends a [HogsTransferred] struct to the mempool which
+        // 3. hog_db sends a [HogsTransferredChunk] struct to the mempool which
         //    indicates that Y hogs were transferred to address X.
         // 4. In the mempool scheduler, Y hogs are added to the
         //    [kHogAgeGroupReceived] group for address X, so then address X's
@@ -148,8 +164,13 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
         .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
     };
     auto hog_age_key = make_address_key(ctx.key.get_address(), Prefix::kHogAge);
+    // Persist only the trailing fields; the key already encodes the address, so
+    // storing it in the value too is redundant (issue #3812). address is
+    // HogAge's first XDR field, and read_address_average_hog_age reconstructs
+    // it from the key.
     auto age_buf = x23::serialize(age);
-    changes.put(hog_age_key, 0, age_buf);
+    changes.put(hog_age_key, 0,
+                std::as_bytes(std::span(age_buf)).subspan(kAddressSize));
   }
 
   auto encoded = int128_to_xdr_bytes(value);

@@ -24,23 +24,22 @@
 #include <utility>
 #include <vector>
 
-#include "built_contracts/dev_wallet.h"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "network_config.hh"
 #include "storage_cost.hh"
 #include "types.hh"
@@ -53,8 +52,6 @@ namespace {
 
 constexpr std::string_view kStorageCostModelHashTag =
     "groundhog-storage-cost-model-v1";
-constexpr std::string_view kHostedFaucetNonceHashTag =
-    "groundhog-hosted-faucet-nonce-v1";
 constexpr int kHostedBootstrapTempOpenFlags =
     O_WRONLY | O_CREAT | O_EXCL; // NOLINT(misc-include-cleaner)
 
@@ -120,16 +117,6 @@ hash_field(SHA256Hasher &hasher, std::string_view value)
 }
 
 SHA256Hash
-derive_hosted_faucet_nonce(Ed25519PublicKey const &public_key)
-{
-  SHA256Hasher hasher;
-  hash_field(hasher, kHostedFaucetNonceHashTag);
-  auto const public_key_bytes = std::as_bytes(std::span(public_key));
-  hasher.update(std::span<const std::byte>(public_key_bytes));
-  return hasher.finalize();
-}
-
-SHA256Hash
 storage_cost_model_hash(StorageCostModel const &model)
 {
   SHA256Hasher hasher;
@@ -180,14 +167,6 @@ write_storage_cost_model_xdr(json::Writer &w, StorageCostModelXdr const &model)
   w.field("balance_cost", uint64_string(model.balance_cost));
 }
 
-void
-write_network_config(json::Writer &w, NetworkConfig const &config)
-{
-  w.field("max_sha256_buffers", uint64_string(config.max_sha256_buffers));
-  w.field("max_cross_invoke_depth",
-          uint64_string(config.max_cross_invoke_depth));
-}
-
 std::string
 build_genesis_json(GenesisConfiguration const &genesis)
 {
@@ -198,7 +177,26 @@ build_genesis_json(GenesisConfiguration const &genesis)
       write_storage_cost_model_xdr(w, genesis.storage_cost_model);
     });
     w.object_field("network_config", [&](json::Writer &w) {
-      write_network_config(w, genesis.network_config);
+      // Genesis needs JSON-XDR unions, not a flat effective-value summary.
+      // Preserve the stated parameter list: expanding defaults changes its
+      // hash.
+      const NetworkConfig &config = genesis.network_config;
+      w.object_field(std::format("{}", config.v()), [&](json::Writer &w) {
+        w.object_field("v0", [&](json::Writer &w) {
+          w.array_field("params", [&](json::Writer &w) {
+            for (const ConfigParam &param : config.v0().params) {
+              w.object([&](json::Writer &w) {
+                w.object_field(std::format("{}", param.param()),
+                               [&](json::Writer &w) {
+                                 w.field(config_param_name(param.param()),
+                                         std::int64_t{
+                                             config_param_value(param)});
+                               });
+              });
+            }
+          });
+        });
+      });
     });
     w.object_field("root_contract", [&](json::Writer &w) {
       w.field("contract_type",
@@ -223,23 +221,16 @@ std::string
 build_metadata_json(HostedBootstrapGeneratorConfig const &config,
                     HostedBootstrapArtifact const &artifact)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-
-  DevWalletProfile wallet_profile =
-      resolve_dev_wallet_profile(config.bootstrap_config.dev_wallet_profile);
-  auto wallet_contract = load_dev_wallet_contract(wallet_profile);
-  const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
       artifact.genesis_configuration.storage_cost_model);
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{1});
+    w.field("schemaVersion", std::int64_t{2});
     w.field("kind", "hog-hosted-bootstrap");
     w.field("networkHash", format_network_hash(config.network_hash));
-    w.field("protocol", version::kHogdProtocol());
+    w.field("protocol", protocol_text(version::kHogdProtocol()));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
-      w.field("devWalletProfile", config.bootstrap_config.dev_wallet_profile);
       w.field("devAccounts",
               static_cast<std::int64_t>(config.bootstrap_config.count));
       w.field("devAccountSeed", config.bootstrap_config.seed);
@@ -284,17 +275,6 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
       }
     });
     w.object_field("bootstrap", [&](json::Writer &w) {
-      w.object_field("devWallet", [&](json::Writer &w) {
-        w.field("contentHash", hex_string(dev_wallet_hash));
-        w.field("deployedCodeHash", hex_string(dev_wallet_hash));
-        w.field("artifactHint", wallet_profile.artifact_hint);
-        w.field("deployEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
-        w.field("doActionEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
-        w.field("createWalletEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
-      });
       w.object_field("storageCostModel", [&](json::Writer &w) {
         write_storage_cost_model(w, storage_cost_model);
       });
@@ -419,7 +399,6 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     throw std::runtime_error(
         "hosted bootstrap dev account seed must not be empty");
   }
-  resolve_dev_wallet_profile(config.bootstrap_config.dev_wallet_profile);
 
   GenesisConfigurationBuilder builder;
   std::vector<BootstrapAccountMetadata> accounts;
@@ -446,14 +425,8 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
       }
     }
 
-    DevWalletProfile wallet_profile =
-        resolve_dev_wallet_profile(config.bootstrap_config.dev_wallet_profile);
-    auto wallet_contract = load_dev_wallet_contract(wallet_profile);
-    const SHA256Hash wallet_contract_hash = sha256(*wallet_contract);
-    const SHA256Hash nonce =
-        derive_hosted_faucet_nonce(config.faucet->public_key);
     const ContractAddress wallet_address =
-        calculate_genesis_deployment_address(wallet_contract_hash, nonce);
+        derive_bootstrap_account_address(config.faucet->public_key);
 
     for (BootstrapAccountMetadata const &account : accounts) {
       if (account.address == wallet_address) {
@@ -462,11 +435,9 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
       }
     }
 
-    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-    builder.add_distribution(
-        wallet_contract, nonce, wallet_meta::entrypoint<u8"initialize">(),
-        wallet_meta::make_calldata<u8"initialize">(config.faucet->public_key),
-        static_cast<int128_t>(config.faucet->storage_tokens));
+    builder.add_account_allocation(wallet_address,
+                                   static_cast<int128_t>(
+                                       config.faucet->storage_tokens));
     faucet = HostedFaucetMetadata{
         .wallet_address = wallet_address,
         .public_key = config.faucet->public_key,
@@ -481,6 +452,13 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     throw std::runtime_error(
         "hosted bootstrap accounts, faucet, and ceremony funding exceed the "
         "native token supply");
+  }
+
+  // The hosted coordinator verifies a single-transaction ceremony commitment.
+  if (initialization_txs->size() != 1) {
+    throw std::runtime_error(
+        "hosted bootstrap allocations exceed the single-transaction ceremony "
+        "limit; reduce the dev account count");
   }
 
   HostedBootstrapArtifact artifact{

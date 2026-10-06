@@ -11,7 +11,6 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -34,6 +33,15 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
+
+namespace {
+// Any consistent context will do, but it must be the same for every open of
+// a given block: open_block rejects a reopen whose context disagrees.
+constexpr hogd::BlockExecutionContext kTestBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1,
+};
+} // namespace
 
 namespace hogd {
 
@@ -107,7 +115,8 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockBeforeInit)
   BlockID test_block_id = 123;
 
   // Call open_proposal_block before init - should fail
-  auto result = client_.executorsched_open_proposal_block(test_block_id);
+  auto result = client_.executorsched_open_proposal_block(test_block_id,
+                                                          kTestBlockExecution);
 
   // Should return system error since executor is not initialized
   EXPECT_EQ(result, ExecResult::ExecResultSystemError);
@@ -128,10 +137,11 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockAfterInit)
   };
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Call open_proposal_block after init - should succeed
-  auto result = client_.executorsched_open_proposal_block(test_block_id);
+  auto result = client_.executorsched_open_proposal_block(test_block_id,
+                                                          kTestBlockExecution);
 
   // Should return OK since executor is now initialized
   EXPECT_EQ(result, ExecResult::ExecResultOK);
@@ -151,12 +161,15 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   exec_result.event = make_event_card();
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Call open_proposal_block multiple times - should all succeed
-  auto result1 = client_.executorsched_open_proposal_block(test_block_id);
-  auto result2 = client_.executorsched_open_proposal_block(test_block_id);
-  auto result3 = client_.executorsched_open_proposal_block(test_block_id);
+  auto result1 = client_.executorsched_open_proposal_block(test_block_id,
+                                                           kTestBlockExecution);
+  auto result2 = client_.executorsched_open_proposal_block(test_block_id,
+                                                           kTestBlockExecution);
+  auto result3 = client_.executorsched_open_proposal_block(test_block_id,
+                                                           kTestBlockExecution);
 
   // open corresponding db block
   // Without this, the executor's calls to lookup deployed contracts will fail
@@ -225,9 +238,10 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
   exec_result.event = make_event_card();
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
-  EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id),
+  EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id,
+                                                      kTestBlockExecution),
             ExecResult::ExecResultOK);
 
   SignedTransactionBatch txs = {SignedTransaction{}, SignedTransaction{},

@@ -3,16 +3,24 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <optional>
 
 #include "contract.hh"
+#include "db_conflict.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "x23/async.h"
 
 namespace hogd {
 
 class SystemCallHandler;
 class Runtime;
+// Defined in prepared_contract.h. Taken by reference below, which is valid
+// over an incomplete type, so this widely-included header does not pull in
+// the per-runtime machinery that builds a preparation.
+struct PreparedContract;
 
 // Abstract class that wraps the context associated with a sandbox runtime.
 // Most sandbox implementations have some amount of shared state (i.e., a list
@@ -42,11 +50,37 @@ public:
 
   virtual ~RuntimeContext() = default;
 
-  // Perform any required validation checks on the contract.
-  // In the case of webassembly, this is the webassembly validator.
-  virtual InvokeErrorCode verify_contract(Contract const &contract) const = 0;
+  // Perform any required validation checks on the contract, handing back
+  // whatever ready-to-instantiate image the check produced.
+  //
+  // For RV32, verification *is* translation: Rv32Contract::create parses the
+  // artifact and builds the threaded pre-instantiation, and nothing cheaper
+  // proves translatability (a stored contract that does not translate fails
+  // its snapshot-cache lookup as Unrecoverable). Handing that image back lets
+  // the caller reuse it instead of lowering the same bytes again (#3536).
+  // Runtimes with nothing to prepare leave `out` untouched.
+  //
+  // `out` is built in place: the caller supplies storage at whatever scope it
+  // wants the preparation to live, and the context memoizes nothing. It is
+  // written only on success; on rejection it is left as the caller had it.
+  // An invalid contract returns Deterministic and names why in `rejection`
+  // (ContractRejectNotDeployable for a type it can't run).
+  virtual InvokeErrorCode
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const = 0;
 
-  virtual SystemStatus<std::unique_ptr<Runtime>>
+  // Convenience for callers that only want the verdict and would discard the
+  // preparation and the reason.
+  // Defined out-of-line so PreparedContract is complete where the discarded
+  // instance is constructed and destroyed.
+  //
+  // Overriders hide this overload; a class whose callers use it through the
+  // derived type needs `using RuntimeContext::verify_contract;`.
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  NetworkConfigParams const &params) const;
+
+  [[nodiscard]] virtual x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const = 0;
 };
@@ -68,13 +102,17 @@ public:
   Runtime(Runtime &&other) = delete;
   Runtime &operator=(Runtime &&other) = delete;
 
-  InvokeResult invoke(MethodID method_id, uint64_t gas_limit);
+  x23::Async<InvokeResult> invoke(MethodID method_id, uint64_t gas_limit);
 
   virtual ~Runtime() = default;
 
 protected:
-  // Invariant:  The returned GasAmount must be <= the input gas_limit
-  virtual std::pair<InvokeStatus<void>, GasAmount>
+  // Invariant:  The returned GasAmount must be <= the input gas_limit.
+  //
+  // MaybeAsync so an implementation that answers without touching the database
+  // -- and one that must stay noexcept, which a coroutine cannot (its frame
+  // allocation throws before the body runs) -- can return a value directly.
+  virtual x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) = 0;
 
   SystemCallHandler *syscall_handler_ = nullptr;

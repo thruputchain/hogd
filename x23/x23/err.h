@@ -9,6 +9,7 @@
 #include <string>
 #include <system_error>
 #include <type_traits>
+#include <variant>
 
 namespace x23 {
 
@@ -83,6 +84,23 @@ make_error_condition(const std::derived_from<ErrorBase> auto &e)
   return make_error_code(e).default_error_condition();
 }
 
+template<typename... E> requires (std::derived_from<E, ErrorBase> && ...)
+struct MultiError : ErrorBase, std::variant<E...> {
+  using variant_type = std::variant<E...>;
+  using variant_type::variant;
+
+  int raw_code(this auto &&self)
+  {
+    return std::visit([](auto &&e) { return e.raw_code(); },
+                      std::forward<decltype(self)>(self));
+  }
+  std::error_code error_code(this auto &&self)
+  {
+    return std::visit([](auto &&e) { return e.error_code(); },
+                      std::forward<decltype(self)>(self));
+  }
+};
+
 } // namespace x23
 
 // make everything that inherits ErrorBase an error_code_enum
@@ -98,6 +116,14 @@ public:
   {
     return super::format(make_error_code(e).message(), ctx);
   }
+};
+
+// When you call std::expected<T, Error>:value(), it should throw
+// something derived from Error, so specialize
+// std::bad_expected_access for this case.
+template<std::derived_from<x23::ErrorBase> E>
+struct std::bad_expected_access<E> : std::system_error {
+  bad_expected_access(const E &err) : system_error(err.error_code()) {}
 };
 
 namespace x23 {

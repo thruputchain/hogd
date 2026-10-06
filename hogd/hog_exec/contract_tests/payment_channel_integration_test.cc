@@ -143,7 +143,7 @@ protected:
 
   uint64_t nonce_ = 0;
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
@@ -251,9 +251,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -267,17 +267,15 @@ protected:
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    // Use adjust_allowance to set the allowance (i128 can be positive to
-    // increase)
-    Calldata approve_calldata =
+    Calldata allowance_calldata =
         x23::serialize(kERC20Address,
                        erc20_meta::entrypoint<u8"adjust_allowance">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"adjust_allowance">(
                            kPaymentChannelAddress,
                            make_difference(static_cast<int128_t>(amount))));
-    Ed25519Signature approve_sig =
-        ed25519_sign(secret_key, approve_calldata).value();
+    Ed25519Signature allowance_sig =
+        ed25519_sign(secret_key, allowance_calldata).value();
 
     auto &wallet_client =
         (wallet == kWalletAAddress) ? wallet_a_client_ : wallet_b_client_;
@@ -285,16 +283,16 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_client.make_invocation<u8"do_action">(
-                UINT64_MAX, approve_sig, approve_calldata),
+                UINT64_MAX, allowance_sig, allowance_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -327,9 +325,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     EXPECT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -364,11 +362,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -399,11 +397,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -434,11 +432,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -463,11 +461,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -500,9 +498,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -522,9 +520,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -541,9 +539,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -560,9 +558,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -591,7 +589,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -605,9 +603,9 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -652,7 +650,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -666,9 +664,9 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -714,7 +712,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -728,9 +726,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -766,7 +764,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -780,9 +778,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -819,7 +817,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -833,9 +831,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -875,7 +873,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -889,9 +887,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -935,7 +933,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress,
-                           make_amount(uint128_t{deposit_b * 2})));
+                           make_amount(int128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -949,9 +947,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -988,7 +986,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress,
-                           make_amount(uint128_t{deposit_b * 2})));
+                           make_amount(int128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
@@ -1002,9 +1000,9 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,

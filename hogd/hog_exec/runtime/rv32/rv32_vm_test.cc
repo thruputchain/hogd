@@ -25,6 +25,7 @@
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_support.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
 // Some legacy VM tests keep descriptive snake_case names and compact aggregate
 // tables; the checks still run through clang-tidy for the production code
@@ -85,7 +86,7 @@ store_digest_at(std::vector<uint8_t> &bytes, size_t offset,
 void
 expect_artifact_error(std::vector<uint8_t> artifact, ArtifactError expected)
 {
-  const auto parsed = parse_artifact(artifact);
+  const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_FALSE(parsed.has_value());
   EXPECT_EQ(parsed.error(), expected);
 }
@@ -298,7 +299,8 @@ TEST(Rv32ArtifactTest, computesCanonicalSha256SectionDigests)
 
 TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
 {
-  const auto parsed = parse_artifact(compiled_sha256_return::kArtifact);
+  const auto parsed =
+      parse_artifact(compiled_sha256_return::kArtifact, Rv32Limits::defaults());
 
   ASSERT_TRUE(parsed.has_value());
   ASSERT_NE(parsed->program, nullptr);
@@ -399,11 +401,223 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
   }
 }
 
+TEST(Rv32ArtifactTest, acceptsOnlyRegisteredGasSchedulePairs)
+{
+  // Gas version and digest are one identity; reject cross-paired schedules.
+  auto transitional = valid_artifact_bytes();
+  store_u32_at(transitional, kArtifactGasVersionOffset,
+               kTransitionalGasTableVersion);
+  store_u64_at(transitional, kArtifactGasDigestOffset,
+               kTransitionalGasScheduleDigest);
+  EXPECT_TRUE(parse_artifact(transitional, Rv32Limits::defaults()).has_value());
+  EXPECT_TRUE(parse_threaded_artifact(transitional, Rv32Limits::defaults())
+                  .has_value());
+
+  auto current_version_transitional_digest = valid_artifact_bytes();
+  store_u64_at(current_version_transitional_digest, kArtifactGasDigestOffset,
+               kTransitionalGasScheduleDigest);
+  expect_artifact_error(std::move(current_version_transitional_digest),
+                        ArtifactError::kGasScheduleDigestMismatch);
+
+  auto transitional_version_current_digest = valid_artifact_bytes();
+  store_u32_at(transitional_version_current_digest, kArtifactGasVersionOffset,
+               kTransitionalGasTableVersion);
+  expect_artifact_error(std::move(transitional_version_current_digest),
+                        ArtifactError::kGasScheduleDigestMismatch);
+}
+
+TEST(Rv32ArtifactTest, rejectsExtremeHeaderIntegersWithoutWrapping)
+{
+  // Reject extreme sizes before forming section ranges or allocating memory.
+  struct ExtremeFieldCase {
+    size_t offset;
+    ArtifactError error;
+  };
+  constexpr std::array<ExtremeFieldCase, 4> kCases = {{
+      {kArtifactMemoryBytesOffset, ArtifactError::kMemorySizeInvalid},
+      {kArtifactCodeSizeOffset, ArtifactError::kCodeSizeInvalid},
+      {kArtifactInitialMemorySizeOffset, ArtifactError::kInitialMemoryTooLarge},
+      {kArtifactInitialMemoryStartOffset,
+       ArtifactError::kInitialMemoryTooLarge},
+  }};
+  for (const auto &[offset, error] : kCases) {
+    SCOPED_TRACE(offset);
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, offset, std::numeric_limits<uint32_t>::max());
+    const auto canonical = parse_artifact(artifact, Rv32Limits::defaults());
+    const auto threaded =
+        parse_threaded_artifact(artifact, Rv32Limits::defaults());
+    ASSERT_FALSE(canonical.has_value());
+    ASSERT_FALSE(threaded.has_value());
+    EXPECT_EQ(canonical.error(), error);
+    EXPECT_EQ(threaded.error(), error);
+  }
+
+  // With permissive caller limits, start+size would wrap in uint32_t. The
+  // subtraction-form placement check must still reject the image as too large.
+  auto wrapping_placement = valid_artifact_bytes();
+  store_u32_at(wrapping_placement, kArtifactMemoryBytesOffset,
+               std::numeric_limits<uint32_t>::max());
+  store_u32_at(wrapping_placement, kArtifactInitialMemoryStartOffset,
+               std::numeric_limits<uint32_t>::max() - 1);
+  constexpr Rv32Limits kPermissive = {
+      .max_code_bytes = std::numeric_limits<uint32_t>::max(),
+      .max_memory_bytes = std::numeric_limits<uint32_t>::max(),
+  };
+  const auto canonical = parse_artifact(wrapping_placement, kPermissive);
+  const auto threaded =
+      parse_threaded_artifact(wrapping_placement, kPermissive);
+  ASSERT_FALSE(canonical.has_value());
+  ASSERT_FALSE(threaded.has_value());
+  EXPECT_EQ(canonical.error(), ArtifactError::kInitialMemoryTooLarge);
+  EXPECT_EQ(threaded.error(), ArtifactError::kInitialMemoryTooLarge);
+}
+
+TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
+{
+  // Check zero, one-below, and exact caller limits without rounding.
+  const auto artifact = valid_artifact_bytes();
+  const uint32_t code_size = load_u32_le(artifact, kArtifactCodeSizeOffset);
+  const uint32_t memory_size =
+      load_u32_le(artifact, kArtifactMemoryBytesOffset);
+
+  auto expect_both = [&](Rv32Limits limits, bool accepted,
+                         ArtifactError rejected_as) {
+    const auto canonical = parse_artifact(artifact, limits);
+    const auto threaded = parse_threaded_artifact(artifact, limits);
+    EXPECT_EQ(canonical.has_value(), accepted);
+    EXPECT_EQ(threaded.has_value(), accepted);
+    if (!accepted) {
+      ASSERT_FALSE(canonical.has_value());
+      ASSERT_FALSE(threaded.has_value());
+      EXPECT_EQ(canonical.error(), rejected_as);
+      EXPECT_EQ(threaded.error(), rejected_as);
+    }
+  };
+
+  expect_both({.max_code_bytes = 0, .max_memory_bytes = memory_size}, false,
+              ArtifactError::kCodeSizeInvalid);
+  expect_both({.max_code_bytes = code_size - 1,
+               .max_memory_bytes = memory_size},
+              false, ArtifactError::kCodeSizeInvalid);
+  expect_both({.max_code_bytes = code_size,
+               .max_memory_bytes = memory_size - 1},
+              false, ArtifactError::kMemorySizeInvalid);
+  expect_both({.max_code_bytes = code_size, .max_memory_bytes = memory_size},
+              true, ArtifactError::kTooSmall);
+
+  const auto zero_memory =
+      test_artifact::build_artifact({addi(0, 0, 0)},
+                                    std::span<const uint8_t>{});
+  const Rv32Limits zero_memory_limit = {
+      .max_code_bytes = kInstructionBytes,
+      .max_memory_bytes = 0,
+  };
+  EXPECT_TRUE(parse_artifact(zero_memory, zero_memory_limit).has_value());
+  EXPECT_TRUE(
+      parse_threaded_artifact(zero_memory, zero_memory_limit).has_value());
+}
+
+TEST(Rv32ArtifactTest, defersMisalignedCodeOnlyOnThreadedParsePath)
+{
+  // The threaded parser defers alignment checks to pre-instantiation.
+  for (const uint32_t malformed_code_size : {1U, 2U, 3U}) {
+    SCOPED_TRACE(malformed_code_size);
+    auto artifact = valid_artifact_bytes();
+    const uint32_t original_code_size =
+        load_u32_le(artifact, kArtifactCodeSizeOffset);
+    artifact.erase(artifact.begin() + kArtifactHeaderBytes +
+                       malformed_code_size,
+                   artifact.begin() + kArtifactHeaderBytes +
+                       original_code_size);
+    store_u32_at(artifact, kArtifactCodeSizeOffset, malformed_code_size);
+    const auto malformed_code =
+        std::span<const uint8_t>(artifact).subspan(kArtifactHeaderBytes,
+                                                   malformed_code_size);
+    store_digest_at(artifact, kArtifactCodeDigestOffset,
+                    artifact_digest(malformed_code));
+
+    const auto canonical = parse_artifact(artifact, Rv32Limits::defaults());
+    ASSERT_FALSE(canonical.has_value());
+    EXPECT_EQ(canonical.error(), ArtifactError::kInvalidProgram);
+
+    const auto threaded =
+        parse_threaded_artifact(artifact, Rv32Limits::defaults());
+    ASSERT_TRUE(threaded.has_value());
+    const auto pre =
+        ThreadedMachinePreInstantiation::create(threaded->code,
+                                                threaded->initial_memory,
+                                                threaded->initial_memory_start,
+                                                threaded->memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_FALSE(pre.has_value());
+    EXPECT_EQ(pre.error(), ProgramError::kCodeSizeNotAligned);
+  }
+}
+
+// The code and memory bounds are the caller's, not the format's: an artifact
+// past the protocol defaults is refused under them and admitted under a
+// chain's raised limits, and only the header's declaration is checked -- the
+// body still has to be what it says.
+TEST(Rv32ArtifactTest, boundsComeFromTheCallersLimits)
+{
+  constexpr Rv32Limits kRaised = {.max_code_bytes = 2 * kDefaultMaxCodeBytes,
+                                  .max_memory_bytes =
+                                      2 * kDefaultMaxMemoryBytes};
+
+  // One instruction past the default code size.
+  const std::vector<uint32_t> words((kDefaultMaxCodeBytes / kInstructionBytes) +
+                                        1,
+                                    addi(0, 0, 0));
+  auto big_code =
+      test_artifact::build_artifact(std::span<const uint32_t>(words.data(),
+                                                              words.size()),
+                                    std::span<const uint8_t>{});
+  {
+    const auto parsed = parse_artifact(big_code, Rv32Limits::defaults());
+    ASSERT_FALSE(parsed.has_value());
+    EXPECT_EQ(parsed.error(), ArtifactError::kCodeSizeInvalid);
+    EXPECT_FALSE(
+        parse_threaded_artifact(big_code, Rv32Limits::defaults()).has_value());
+  }
+  {
+    const auto parsed = parse_artifact(big_code, kRaised);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->program->instruction_count(), words.size());
+    EXPECT_TRUE(parse_threaded_artifact(big_code, kRaised).has_value());
+  }
+
+  // One byte past the default memory size, declared in the header alone: the
+  // stored image stays small and the runtime zero-extends.
+  auto big_memory = valid_artifact_bytes();
+  store_u32_at(big_memory, kArtifactMemoryBytesOffset,
+               kDefaultMaxMemoryBytes + 1);
+  {
+    const auto parsed = parse_artifact(big_memory, Rv32Limits::defaults());
+    ASSERT_FALSE(parsed.has_value());
+    EXPECT_EQ(parsed.error(), ArtifactError::kMemorySizeInvalid);
+  }
+  {
+    const auto parsed = parse_artifact(big_memory, kRaised);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->memory_bytes, kDefaultMaxMemoryBytes + 1);
+    const auto threaded = parse_threaded_artifact(big_memory, kRaised);
+    ASSERT_TRUE(threaded.has_value());
+    EXPECT_EQ(threaded->memory_bytes, kDefaultMaxMemoryBytes + 1);
+  }
+
+  // The VM's ceilings are the most any caller may pass and still be honoured.
+  auto at_ceiling = valid_artifact_bytes();
+  store_u32_at(at_ceiling, kArtifactMemoryBytesOffset, kMemoryCeilingBytes);
+  EXPECT_TRUE(parse_artifact(at_ceiling, Rv32Limits::ceiling()).has_value());
+}
+
 TEST(Rv32ArtifactTest, rejectsBoundsAndSectionLayoutErrors)
 {
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactMemoryBytesOffset, kMaxMemoryBytes + 1);
+    store_u32_at(artifact, kArtifactMemoryBytesOffset,
+                 kDefaultMaxMemoryBytes + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kMemorySizeInvalid);
   }
@@ -414,13 +628,13 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndSectionLayoutErrors)
   }
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactCodeSizeOffset, kMaxCodeBytes + 1);
+    store_u32_at(artifact, kArtifactCodeSizeOffset, kDefaultMaxCodeBytes + 1);
     expect_artifact_error(std::move(artifact), ArtifactError::kCodeSizeInvalid);
   }
   {
     auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactInitialMemorySizeOffset,
-                 kMaxMemoryBytes + 1);
+                 kDefaultMaxMemoryBytes + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kInitialMemoryTooLarge);
   }
@@ -506,7 +720,7 @@ TEST(Rv32ArtifactTest, acceptsZeroExtendedInitialMemoryPrefix)
   auto artifact =
       test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored);
   store_u32_at(artifact, kArtifactMemoryBytesOffset, 256);
-  const auto parsed = parse_artifact(artifact);
+  const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->memory_bytes, 256U);
   ASSERT_EQ(parsed->initial_memory.size(), stored.size());
@@ -520,12 +734,13 @@ TEST(Rv32ArtifactTest, acceptsZeroMemoryBytesArtifact)
   const auto artifact =
       test_artifact::build_artifact({addi(1, 0, 7), 0x00100073U},
                                     std::span<const uint8_t>{});
-  const auto parsed = parse_artifact(artifact);
+  const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->memory_bytes, 0U);
   EXPECT_TRUE(parsed->initial_memory.empty());
 
-  const auto threaded = parse_threaded_artifact(artifact);
+  const auto threaded =
+      parse_threaded_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(threaded.has_value());
   EXPECT_EQ(threaded->memory_bytes, 0U);
   EXPECT_TRUE(threaded->initial_memory.empty());
@@ -537,20 +752,23 @@ TEST(Rv32ArtifactTest, acceptsLimitBoundaryValues)
   // would reject artifacts other validators accept.
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactMemoryBytesOffset, kMaxMemoryBytes);
-    const auto parsed = parse_artifact(artifact);
+    store_u32_at(artifact, kArtifactMemoryBytesOffset, kDefaultMaxMemoryBytes);
+    const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
     ASSERT_TRUE(parsed.has_value());
-    EXPECT_EQ(parsed->memory_bytes, kMaxMemoryBytes);
-    EXPECT_TRUE(parse_threaded_artifact(artifact).has_value());
+    EXPECT_EQ(parsed->memory_bytes, kDefaultMaxMemoryBytes);
+    EXPECT_TRUE(
+        parse_threaded_artifact(artifact, Rv32Limits::defaults()).has_value());
   }
   {
-    const std::vector<uint32_t> words((kMaxCodeBytes / kInstructionBytes),
+    const std::vector<uint32_t> words((kDefaultMaxCodeBytes /
+                                       kInstructionBytes),
                                       addi(0, 0, 0));
     const std::array<uint8_t, 1> stored = {1};
     const auto artifact = test_artifact::build_artifact(words, stored);
-    const auto parsed = parse_artifact(artifact);
+    const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
     ASSERT_TRUE(parsed.has_value());
-    EXPECT_TRUE(parse_threaded_artifact(artifact).has_value());
+    EXPECT_TRUE(
+        parse_threaded_artifact(artifact, Rv32Limits::defaults()).has_value());
   }
 }
 
@@ -589,7 +807,7 @@ TEST(Rv32ArtifactTest, materializesInitialMemoryAtStartOffset)
       test_artifact::build_artifact({addi(0, 0, 0), 0x00000073U}, stored,
                                     /*initial_memory_start=*/8);
 
-  const auto parsed = parse_artifact(artifact);
+  const auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   // build_artifact stamps memory_bytes = start + size.
   EXPECT_EQ(parsed->memory_bytes, 12U);
@@ -602,11 +820,157 @@ TEST(Rv32ArtifactTest, materializesInitialMemoryAtStartOffset)
       std::span<const uint8_t>(parsed->initial_memory).subspan(8), stored));
 
   // The zero-copy path exposes the offset instead of materializing.
-  const auto threaded = parse_threaded_artifact(artifact);
+  const auto threaded =
+      parse_threaded_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(threaded.has_value());
   EXPECT_EQ(threaded->initial_memory_start, 8U);
   EXPECT_EQ(threaded->memory_bytes, 12U);
   EXPECT_TRUE(std::ranges::equal(threaded->initial_memory, stored));
+}
+
+TEST(Rv32ThreadedHostileInput, translatesCodeAtExactVmCeiling)
+{
+  // Each four-byte guest instruction expands into a 16-byte host slot.
+  std::vector<uint8_t> code;
+  code.reserve(kCodeCeilingBytes);
+  while (code.size() < kCodeCeilingBytes) {
+    append_u32(code, addi(0, 0, 0));
+  }
+  ASSERT_EQ(code.size(), kCodeCeilingBytes);
+
+  const auto pre =
+      ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                              /*memory_start=*/0,
+                                              /*total_memory_size=*/0,
+                                              /*trace=*/false);
+  EXPECT_TRUE(pre.has_value());
+}
+
+TEST(Rv32ThreadedHostileInput,
+     retainsMultipleRaisedLimitTranslationsIndependently)
+{
+  // Retain several translations to catch aliasing and lifetime bugs, using
+  // default-sized code and above-default memory to limit CI memory use
+  // compared with ceiling programs.
+  constexpr size_t kRetainedPrograms = 4;
+  constexpr uint32_t kLargeCodeBytes = 256 * 1024;
+  constexpr uint32_t kLargeMemoryBytes = 256 * 1024;
+  std::vector<ThreadedMachinePreInstantiation> retained;
+  retained.reserve(kRetainedPrograms);
+
+  for (size_t i = 0; i < kRetainedPrograms; ++i) {
+    std::vector<uint8_t> code;
+    code.reserve(kLargeCodeBytes);
+    append_u32(code, addi(1, 0, static_cast<int32_t>(i + 1)));
+    append_u32(code, 0x00100073U); // ebreak terminates the short execution.
+    while (code.size() < kLargeCodeBytes) {
+      append_u32(code, addi(0, 0, 0));
+    }
+    std::vector<uint8_t> memory(kLargeMemoryBytes, static_cast<uint8_t>(i + 1));
+    auto pre = ThreadedMachinePreInstantiation::create(code, memory,
+                                                       /*memory_start=*/0,
+                                                       kLargeMemoryBytes,
+                                                       /*trace=*/false);
+    ASSERT_TRUE(pre.has_value());
+    retained.emplace_back(std::move(*pre));
+  }
+
+  for (size_t i = 0; i < retained.size(); ++i) {
+    ThreadedMachine machine(retained[i], /*gas=*/10);
+    EXPECT_EQ(machine.memory().front(), static_cast<uint8_t>(i + 1));
+    EXPECT_EQ(machine.start(), StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
+    EXPECT_EQ(machine.reg(1), i + 1);
+  }
+}
+
+TEST(Rv32ThreadedHostileInput, boundsMemoryPoolAtIdleSlotCapacity)
+{
+  // Exceed the idle-pool capacity, then check bounded reuse of clean buffers.
+  memory_slot_pool() = MemorySlotPool{};
+  const auto code = code_from_words({addi(0, 0, 0)});
+  auto pre = ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                                     /*memory_start=*/0,
+                                                     /*total_memory_size=*/64,
+                                                     /*trace=*/false);
+  ASSERT_TRUE(pre.has_value());
+
+  {
+    std::vector<ThreadedMachine> live;
+    live.reserve(kMemorySlotPoolCap + 1);
+    std::vector<const uint8_t *> buffers;
+    buffers.reserve(kMemorySlotPoolCap + 1);
+    for (size_t i = 0; i <= kMemorySlotPoolCap; ++i) {
+      live.emplace_back(*pre, /*gas=*/10);
+      const uint8_t *buffer = live.back().memory().data();
+      EXPECT_EQ(std::ranges::count(buffers, buffer), 0U);
+      buffers.push_back(buffer);
+      live.back().memory().front() = static_cast<uint8_t>(i + 1);
+    }
+    EXPECT_EQ(memory_slot_pool().count, 0U);
+  }
+  EXPECT_EQ(memory_slot_pool().count, kMemorySlotPoolCap);
+
+  {
+    std::vector<ThreadedMachine> reused;
+    reused.reserve(kMemorySlotPoolCap);
+    for (size_t i = 0; i < kMemorySlotPoolCap; ++i) {
+      reused.emplace_back(*pre, /*gas=*/10);
+      EXPECT_TRUE(std::ranges::all_of(reused.back().memory(),
+                                      [](uint8_t byte) { return byte == 0; }));
+    }
+    EXPECT_EQ(memory_slot_pool().count, 0U);
+  }
+  EXPECT_EQ(memory_slot_pool().count, kMemorySlotPoolCap);
+  memory_slot_pool() = MemorySlotPool{};
+}
+
+TEST(Rv32ThreadedHostileInput, resetRestoresAllMutableExecutionState)
+{
+  // Reset restores the image and clears state after ECALL, trap, or halt.
+  const auto code =
+      code_from_words({addi(1, 0, 7), 0x00000073U, addi(3, 0, 9)});
+  constexpr std::array<uint8_t, 4> kStored = {1, 2, 3, 4};
+  auto pre =
+      ThreadedMachinePreInstantiation::create(code, kStored, /*memory_start=*/4,
+                                              /*total_memory_size=*/16,
+                                              /*trace=*/false);
+  ASSERT_TRUE(pre.has_value());
+  ThreadedMachine machine(*pre, /*gas=*/100);
+
+  machine.memory().front() = 0xaa;
+  ASSERT_EQ(machine.start(), StepResult::kEcall);
+  ASSERT_TRUE(machine.pending_ecall().has_value());
+  EXPECT_EQ(machine.reg(1), 7U);
+  machine.reset(/*gas=*/55);
+  EXPECT_EQ(machine.pc(), 0U);
+  EXPECT_EQ(machine.reg(1), 0U);
+  EXPECT_EQ(machine.gas_remaining(), 55U);
+  EXPECT_EQ(machine.trap(), Trap::kNone);
+  EXPECT_FALSE(machine.halted());
+  EXPECT_FALSE(machine.pending_ecall().has_value());
+  EXPECT_EQ(machine.memory().front(), 0U);
+  EXPECT_TRUE(
+      std::ranges::equal(machine.memory().subspan(4, kStored.size()), kStored));
+
+  ASSERT_EQ(machine.start(), StepResult::kEcall);
+  EXPECT_EQ(machine.resume_from_ecall(HostResult::continue_with()),
+            StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadPc);
+  machine.reset(/*gas=*/44);
+  EXPECT_EQ(machine.trap(), Trap::kNone);
+  EXPECT_FALSE(machine.halted());
+
+  ASSERT_EQ(machine.start(), StepResult::kEcall);
+  EXPECT_EQ(machine.resume_from_ecall(HostResult::halt(9)),
+            StepResult::kHalted);
+  EXPECT_TRUE(machine.halted());
+  EXPECT_EQ(machine.halt_code(), 9U);
+  machine.reset(/*gas=*/33);
+  EXPECT_FALSE(machine.halted());
+  EXPECT_EQ(machine.halt_code(), 0U);
+  EXPECT_EQ(machine.gas_remaining(), 33U);
+  EXPECT_EQ(machine.start(), StepResult::kEcall);
 }
 
 TEST(Rv32ProgramTest, smoke_builds_standalone_vm)
@@ -642,7 +1006,7 @@ TEST(Rv32ProgramTest, reset_restores_initial_machine_state)
   EXPECT_EQ(machine.gas_remaining(), 9U);
   EXPECT_EQ(machine.trap(), Trap::kNone);
 
-  Machine bad_memory(program, kMaxMemoryBytes + 1, 5);
+  Machine bad_memory(program, kMemoryCeilingBytes + 1, 5);
   EXPECT_EQ(bad_memory.trap(), Trap::kBadMemory);
   bad_memory.reset(9);
   EXPECT_EQ(bad_memory.trap(), Trap::kBadMemory);
@@ -664,7 +1028,7 @@ TEST(Rv32ProgramTest, validates_code_shape_and_profile)
     EXPECT_EQ(result.error, ProgramError::kCodeSizeNotAligned);
   }
   {
-    std::vector<uint8_t> code(kMaxCodeBytes + kInstructionBytes);
+    std::vector<uint8_t> code(kCodeCeilingBytes + kInstructionBytes);
     const auto result = Program::validate(code);
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.error, ProgramError::kCodeTooLarge);
@@ -705,8 +1069,8 @@ TEST(Rv32ProgramTest, validates_profile_boundaries)
 {
   {
     std::vector<uint8_t> code;
-    code.reserve(kMaxCodeBytes);
-    for (uint32_t i = 0; i < kMaxCodeBytes / kInstructionBytes; ++i) {
+    code.reserve(kDefaultMaxCodeBytes);
+    for (uint32_t i = 0; i < kDefaultMaxCodeBytes / kInstructionBytes; ++i) {
       append_u32(code, addi(0, 0, 0));
     }
     const auto result = Program::validate(code);
@@ -828,13 +1192,13 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
       {u_type(0x17, 6, 0xfffff000U), InstructionKind::kAuipc, Op::kAuipc, 6, -1,
        -1, -4096, kBaseInstructionGas},
       {j_type(7, -2048), InstructionKind::kJal, Op::kJal, 7, -1, -1, -2048,
-       kBaseInstructionGas},
+       kDirectJumpGas},
       {jalr(8, 9, 12), InstructionKind::kJalr, Op::kJalr, 8, 9, 12, 12,
-       kBaseInstructionGas},
+       kIndirectJumpGas},
       {b_type(0, 1, 2, -16), InstructionKind::kBranch, Op::kBeq, -1, 1, 2, -16,
-       kBaseInstructionGas},
+       kBranchInstructionGas},
       {load(3, 2, 4, 20), InstructionKind::kLoad, Op::kLw, 3, 4, 20, 20,
-       kBaseInstructionGas},
+       kWideLoadGas},
       {s_type(2, 5, 6, -12), InstructionKind::kStore, Op::kSw, -1, 5, 6, -12,
        kBaseInstructionGas},
       {addi(10, 11, -1), InstructionKind::kOpImm, Op::kAddi, 10, 11, 31, -1,
@@ -888,13 +1252,13 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
 
   const std::array<ExpectedGasEntry, kOpCount> expected = {{
       {Op::kLui, u8"LUI", 1},     {Op::kAuipc, u8"AUIPC", 1},
-      {Op::kJal, u8"JAL", 1},     {Op::kJalr, u8"JALR", 1},
-      {Op::kBeq, u8"BEQ", 1},     {Op::kBne, u8"BNE", 1},
-      {Op::kBlt, u8"BLT", 1},     {Op::kBge, u8"BGE", 1},
-      {Op::kBltu, u8"BLTU", 1},   {Op::kBgeu, u8"BGEU", 1},
-      {Op::kLb, u8"LB", 1},       {Op::kLh, u8"LH", 1},
-      {Op::kLw, u8"LW", 1},       {Op::kLbu, u8"LBU", 1},
-      {Op::kLhu, u8"LHU", 1},     {Op::kSb, u8"SB", 1},
+      {Op::kJal, u8"JAL", 3},     {Op::kJalr, u8"JALR", 3},
+      {Op::kBeq, u8"BEQ", 2},     {Op::kBne, u8"BNE", 2},
+      {Op::kBlt, u8"BLT", 2},     {Op::kBge, u8"BGE", 2},
+      {Op::kBltu, u8"BLTU", 2},   {Op::kBgeu, u8"BGEU", 2},
+      {Op::kLb, u8"LB", 1},       {Op::kLh, u8"LH", 3},
+      {Op::kLw, u8"LW", 3},       {Op::kLbu, u8"LBU", 1},
+      {Op::kLhu, u8"LHU", 3},     {Op::kSb, u8"SB", 1},
       {Op::kSh, u8"SH", 1},       {Op::kSw, u8"SW", 1},
       {Op::kAddi, u8"ADDI", 1},   {Op::kSlti, u8"SLTI", 1},
       {Op::kSltiu, u8"SLTIU", 1}, {Op::kXori, u8"XORI", 1},
@@ -905,24 +1269,32 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kSlt, u8"SLT", 1},     {Op::kSltu, u8"SLTU", 1},
       {Op::kXor, u8"XOR", 1},     {Op::kSrl, u8"SRL", 1},
       {Op::kSra, u8"SRA", 1},     {Op::kOr, u8"OR", 1},
-      {Op::kAnd, u8"AND", 1},     {Op::kMul, u8"MUL", 3},
-      {Op::kMulh, u8"MULH", 3},   {Op::kMulhsu, u8"MULHSU", 3},
-      {Op::kMulhu, u8"MULHU", 3}, {Op::kDiv, u8"DIV", 8},
-      {Op::kDivu, u8"DIVU", 8},   {Op::kRem, u8"REM", 8},
-      {Op::kRemu, u8"REMU", 8},   {Op::kFence, u8"FENCE", 1},
+      {Op::kAnd, u8"AND", 1},     {Op::kMul, u8"MUL", 1},
+      {Op::kMulh, u8"MULH", 1},   {Op::kMulhsu, u8"MULHSU", 1},
+      {Op::kMulhu, u8"MULHU", 1}, {Op::kDiv, u8"DIV", 2},
+      {Op::kDivu, u8"DIVU", 2},   {Op::kRem, u8"REM", 2},
+      {Op::kRemu, u8"REMU", 2},   {Op::kFence, u8"FENCE", 1},
       {Op::kEcall, u8"ECALL", 1}, {Op::kEbreak, u8"EBREAK", 1},
       {Op::kUnimp, u8"UNIMP", 1},
   }};
-  const std::array<ExpectedSyscallGasEntry, 4> expected_syscalls = {{
-      {u8"SHA256HashBase", hogd::kSHA256HashBaseCost},
-      {u8"SHA256HashByte", hogd::kSHA256HashByteCost},
+  const std::array<ExpectedSyscallGasEntry, 12> expected_syscalls = {{
+      {u8"SyscallBase", hogd::kSyscallBaseCost},
+      {u8"SHA256HashBlock", hogd::kSHA256HashBlockCost},
+      {u8"SHA256Stream", hogd::kSHA256StreamCost},
+      {u8"VerifySignatureBase", hogd::kVerifySignatureBaseCost},
+      {u8"VerifySignatureBlock", hogd::kVerifySignatureBlockCost},
+      {u8"StorageAccess", hogd::kStorageAccessCost},
+      {u8"DBRPC", hogd::kDBRPCCost},
+      {u8"BytestringBlockBytes", hogd::kBytestringBlockBytes},
+      {u8"BytestringWriteBlock", hogd::kBytestringWriteBlockCost},
+      {u8"BytestringReadBlock", hogd::kBytestringReadBlockCost},
       {u8"NoSyscall", hogd::kNoSyscallCost},
       {u8"GenericBadSyscall", hogd::kGenericBadSyscallCost},
   }};
 
   EXPECT_EQ(kOpCount, 49U);
-  EXPECT_EQ(kGasTableVersion, 3U);
-  EXPECT_EQ(kGasScheduleDigest, 0x918317c21c46bb60ULL);
+  EXPECT_EQ(kGasTableVersion, 4U);
+  EXPECT_EQ(kGasScheduleDigest, 0x3dd1fbedf37a5719ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
@@ -1233,7 +1605,7 @@ TEST(Rv32ExecutionTest, bad_jump_targets_trap_before_state_mutation)
     EXPECT_EQ(machine.trap(), Trap::kBadPc);
     EXPECT_EQ(machine.pc(), 0U);
     EXPECT_EQ(machine.reg(1), 0U);
-    EXPECT_EQ(machine.gas_remaining(), 99U);
+    EXPECT_EQ(machine.gas_remaining(), 100 - kDirectJumpGas);
   }
   {
     const auto program = make_program({jalr(1, 2, 0), addi(3, 0, 1)});
@@ -1266,6 +1638,30 @@ TEST(Rv32ExecutionTest, jalr_clears_low_target_bit)
   EXPECT_EQ(machine.reg(2), 4U);
   EXPECT_EQ(machine.step(), StepResult::kContinue);
   EXPECT_EQ(machine.reg(3), 2U);
+}
+
+TEST(Rv32ExecutionTest, jalrTargetArithmeticWrapsInRv32AddressSpace)
+{
+  // JALR arithmetic wraps; invalid targets must trap before writing the link.
+  {
+    const auto program = make_program({jalr(5, 1, 1)});
+    Machine machine(program, 16, 100);
+    MachineTestPeer::set_reg(machine, 1, std::numeric_limits<uint32_t>::max());
+    EXPECT_EQ(machine.step(), StepResult::kContinue);
+    EXPECT_EQ(machine.pc(), 0U);
+    EXPECT_EQ(machine.reg(5), 4U);
+    EXPECT_EQ(machine.gas_remaining(), 100U - kIndirectJumpGas);
+  }
+  {
+    const auto program = make_program({jalr(5, 1, -1)});
+    Machine machine(program, 16, 100);
+    MachineTestPeer::set_reg(machine, 1, 0);
+    EXPECT_EQ(machine.step(), StepResult::kTrap);
+    EXPECT_EQ(machine.trap(), Trap::kBadPc);
+    EXPECT_EQ(machine.pc(), 0U);
+    EXPECT_EQ(machine.reg(5), 0U);
+    EXPECT_EQ(machine.gas_remaining(), 100U - kIndirectJumpGas);
+  }
 }
 
 TEST(Rv32ExecutionTest, fetch_and_data_memory_access_semantics)
@@ -1316,10 +1712,44 @@ TEST(Rv32ExecutionTest, fetch_and_data_memory_access_semantics)
   }
   {
     const auto program = make_program({addi(1, 0, 1)});
-    Machine machine(program, kMaxMemoryBytes + 1, 10);
+    Machine machine(program, kMemoryCeilingBytes + 1, 10);
     EXPECT_EQ(machine.trap(), Trap::kBadMemory);
     EXPECT_TRUE(machine.halted());
   }
+}
+
+TEST(Rv32ExecutionTest, zeroSeededStackUnderflowTrapsWithoutMemoryMutation)
+{
+  // ABI v3 seeds sp to zero; decrementing it wraps, so the store must trap.
+  const auto words = std::array{
+      addi(1, 0, 0x7f),
+      addi(2, 2, -4),
+      s_type(2, 2, 1, 0),
+  };
+  const auto program = make_program(words);
+  Machine canonical(program, /*memory_bytes=*/16, /*gas=*/10);
+  EXPECT_EQ(canonical.step(), StepResult::kContinue);
+  EXPECT_EQ(canonical.step(), StepResult::kContinue);
+  EXPECT_EQ(canonical.reg(2), 0xfffffffcU);
+  EXPECT_EQ(canonical.step(), StepResult::kTrap);
+  EXPECT_EQ(canonical.trap(), Trap::kBadMemory);
+  EXPECT_EQ(canonical.gas_remaining(), 7U);
+  EXPECT_TRUE(std::ranges::all_of(canonical.memory(),
+                                  [](uint8_t byte) { return byte == 0; }));
+
+  const auto code = code_from_words(words);
+  auto pre = ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                                     /*memory_start=*/0,
+                                                     /*total_memory_size=*/16,
+                                                     /*trace=*/false);
+  ASSERT_TRUE(pre.has_value());
+  ThreadedMachine threaded(*pre, /*gas=*/10);
+  EXPECT_EQ(threaded.start(), StepResult::kTrap);
+  EXPECT_EQ(threaded.trap(), Trap::kBadMemory);
+  EXPECT_EQ(threaded.reg(2), 0xfffffffcU);
+  EXPECT_EQ(threaded.gas_remaining(), 7U);
+  EXPECT_TRUE(std::ranges::all_of(threaded.memory(),
+                                  [](uint8_t byte) { return byte == 0; }));
 }
 
 TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
@@ -1329,21 +1759,26 @@ TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
     uint8_t funct3;
     uint32_t address;
     Trap trap;
+    // Budget exactly this load's own gas, so gas_remaining() reaching zero
+    // means the trapping instruction was charged and nothing more. Budgeting a
+    // flat one instruction would make the wide loads trap kOutOfGas before the
+    // bounds check and stop testing what this case is named for.
+    uint64_t gas;
   };
 
   const std::array<LoadTrapCase, 5> load_cases = {{
-      {"lb_bad_memory", 0, 16, Trap::kBadMemory},
-      {"lh_bad_memory", 1, 16, Trap::kBadMemory},
-      {"lw_bad_memory", 2, 16, Trap::kBadMemory},
+      {"lb_bad_memory", 0, 16, Trap::kBadMemory, kBaseInstructionGas},
+      {"lh_bad_memory", 1, 16, Trap::kBadMemory, kWideLoadGas},
+      {"lw_bad_memory", 2, 16, Trap::kBadMemory, kWideLoadGas},
       // End-overlap: address in bounds but address+width exceeds memory size.
-      {"lh_end_overlap", 1, 15, Trap::kBadMemory}, // 15+2=17 > 16
-      {"lw_end_overlap", 2, 13, Trap::kBadMemory}, // 13+4=17 > 16
+      {"lh_end_overlap", 1, 15, Trap::kBadMemory, kWideLoadGas}, // 15+2=17 > 16
+      {"lw_end_overlap", 2, 13, Trap::kBadMemory, kWideLoadGas}, // 13+4=17 > 16
   }};
 
   for (const auto &test_case : load_cases) {
     SCOPED_TRACE(test_case.name);
     const auto program = make_program({load(1, test_case.funct3, 2, 0)});
-    Machine machine(program, 16, kBaseInstructionGas);
+    Machine machine(program, 16, test_case.gas);
     MachineTestPeer::set_reg(machine, 1, 99);
     MachineTestPeer::set_reg(machine, 2, test_case.address);
     EXPECT_EQ(machine.step(), StepResult::kTrap);
@@ -1455,8 +1890,10 @@ TEST(Rv32ExecutionTest, debits_gas_before_later_traps_and_mutation)
   }
   {
     // Unaligned OOB lw: gas debited before trap (kBadMemory, no writeback).
+    // Budget the load's own gas, so reaching zero means it was charged exactly
+    // once -- a flat one instruction would trap kOutOfGas first.
     const auto program = make_program({load(1, 2, 2, 0)});
-    Machine machine(program, 16, kBaseInstructionGas);
+    Machine machine(program, 16, kWideLoadGas);
     MachineTestPeer::set_reg(machine, 2, 13);
     EXPECT_EQ(machine.step(), StepResult::kTrap);
     EXPECT_EQ(machine.trap(), Trap::kBadMemory);
@@ -1498,6 +1935,57 @@ TEST(Rv32GasTest, out_of_gas_saturates_remaining_gas_to_zero)
   }
 }
 
+TEST(Rv32GasTest, repeatedEcallsStopBeforeAnUnfundedHostCall)
+{
+  // Fund two ECALL cycles; both engines must stop before a third host call.
+  struct CountingGasHost final : Host {
+    explicit CountingGasHost(uint64_t gas_per_call) : gas_per_call(gas_per_call)
+    {}
+
+    HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
+    {
+      (void)view;
+      (void)args;
+      ++calls;
+      return HostResult::continue_with(static_cast<uint32_t>(calls),
+                                       gas_per_call);
+    }
+
+    uint64_t gas_per_call;
+    size_t calls = 0;
+  };
+
+  constexpr uint64_t kHostGasPerCall = 2;
+  constexpr uint64_t kCompletedCalls = 2;
+  constexpr uint64_t kGasLimit =
+      kCompletedCalls *
+      (kBaseInstructionGas + kHostGasPerCall + kDirectJumpGas);
+  const auto words = std::array{0x00000073U, j_type(0, -4)};
+
+  const auto program = make_program(words);
+  Machine canonical(program, /*memory_bytes=*/16, kGasLimit);
+  CountingGasHost canonical_host(kHostGasPerCall);
+  EXPECT_EQ(canonical.run(canonical_host), StepResult::kTrap);
+  EXPECT_EQ(canonical.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(canonical.gas_remaining(), 0U);
+  EXPECT_EQ(canonical_host.calls, kCompletedCalls);
+  EXPECT_EQ(canonical.reg(10), kCompletedCalls);
+
+  const auto code = code_from_words(words);
+  auto pre = ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                                     /*memory_start=*/0,
+                                                     /*total_memory_size=*/16,
+                                                     /*trace=*/false);
+  ASSERT_TRUE(pre.has_value());
+  ThreadedMachine threaded(*pre, kGasLimit);
+  CountingGasHost threaded_host(kHostGasPerCall);
+  EXPECT_EQ(threaded.run(threaded_host), StepResult::kTrap);
+  EXPECT_EQ(threaded.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(threaded.gas_remaining(), 0U);
+  EXPECT_EQ(threaded_host.calls, kCompletedCalls);
+  EXPECT_EQ(threaded.reg(10), kCompletedCalls);
+}
+
 TEST(Rv32GasTest, charges_mul_and_div_costs_before_mutation)
 {
   struct Case {
@@ -1508,10 +1996,10 @@ TEST(Rv32GasTest, charges_mul_and_div_costs_before_mutation)
   };
 
   const std::array<Case, 8> cases = {{
-      {"mul", 0, kMulInstructionGas, 252},
-      {"mulh", 1, kMulInstructionGas, 0},
-      {"mulhsu", 2, kMulInstructionGas, 0},
-      {"mulhu", 3, kMulInstructionGas, 0},
+      {"mul", 0, kBaseInstructionGas, 252},
+      {"mulh", 1, kBaseInstructionGas, 0},
+      {"mulhsu", 2, kBaseInstructionGas, 0},
+      {"mulhu", 3, kBaseInstructionGas, 0},
       {"div", 4, kDivInstructionGas, 7},
       {"divu", 5, kDivInstructionGas, 7},
       {"rem", 6, kDivInstructionGas, 0},

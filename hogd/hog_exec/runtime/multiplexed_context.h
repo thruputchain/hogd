@@ -5,8 +5,10 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -19,11 +21,15 @@ public:
       std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>
           contexts);
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 
-  InvokeErrorCode verify_contract(Contract const &contract) const override;
+  InvokeErrorCode
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const override;
+  using RuntimeContext::verify_contract;
 
   ~MultiplexedContext() override
   {

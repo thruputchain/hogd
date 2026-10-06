@@ -35,12 +35,14 @@
 #include "hogd/hog_db/rpc_from_exec.h"
 #include "hogd/hog_db/rpc_from_gateway.h"
 #include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_db/startup_validation.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
@@ -58,10 +60,10 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
     panic("Invalid coordinator address: {}", coordinator_addr);
   }
 
-  // Use the bulk message cap: a single committed block's aggregated
-  // HogsTransferred deltas can exceed x23's 16 MiB default (the mempool
-  // server on this node already accepts the larger size). Matches the other
-  // bulk DB links (rpc_from_db, rpc_from_coord, auth subscriptions).
+  // Use the bulk message cap, matching the other bulk DB links (rpc_from_db,
+  // rpc_from_coord, auth subscriptions) and the mempool server on this link.
+  // A block's balance deltas go out as HogsTransferredChunk records that stay
+  // far below it (BackgroundCommitWorker::kMaxDeltasPerChunk).
   auto client = make_rpc_client<SchedDb1>(host_port, cp, /*retry=*/true,
                                           kBulkRpcMaxMessageSize)();
   if (!client)
@@ -125,19 +127,31 @@ hog_db_init(std::string_view path, size_t ram_bytes,
       critical("Root hash doesn't match DbTip");
       return EXIT_FAILURE;
     }
-    ctx.set_tip(*tip);
-    Health::instance().set_current_block_height(
-        tip->value.proposal_header.block_height)();
-    if (auto cost_model = ctx.get_db().read_cost_model(); cost_model) {
-      ctx.initialize_cost_model(*cost_model);
-    }
-    else {
+    HogDbStatus<StorageCostModel> cost_model = ctx.get_db().read_cost_model();
+    if (!cost_model) {
       critical("Failed to read cost model: {}", cost_model.error());
       return EXIT_FAILURE;
     }
+    // The state hash above covers no part of the chain configuration.
+    if (!StartupValidation::tip_is_servable(ctx.get_db(), *tip, *cost_model)) {
+      return EXIT_FAILURE;
+    }
+    ctx.set_tip(*tip);
+    Health::instance().set_current_block_height(
+        tip->value.proposal_header.block_height)();
+    ctx.initialize_cost_model(*cost_model);
   }
   else {
-    CHECK_EQ(db_hash, StorageLongHash{});
+    // Only an absent tip denotes a fresh database. Decode, type, and I/O
+    // failures must never turn recovered state into a new genesis.
+    if (tip.error().code() != HogDbCode::kNotFound) {
+      critical("Failed to read recovered DbTip: {}", tip.error());
+      return EXIT_FAILURE;
+    }
+    if (db_hash != StorageLongHash{}) {
+      critical("Database has committed state but no DbTip");
+      return EXIT_FAILURE;
+    }
     ConsensusValue value{};
     value.proposal_header.block_height = -1;
     ctx.set_tip(DbTip{.id = std::numeric_limits<BlockTXID>::max(),

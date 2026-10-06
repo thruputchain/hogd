@@ -6,6 +6,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "transaction.hh"
 #include "view.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -13,7 +14,10 @@ class View {
 public:
   View() = delete;
 
-  static ExpectedViewResult run_view_transaction(
+  // The syscalls the view runs read tip-derived values (executing height,
+  // network hash, configuration parameters) off `snapshot_cache`, whose tip
+  // the caller must have loaded or seeded before calling this.
+  static x23::Async<ExpectedViewResult> run_view_transaction(
       StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy proxy,
       PerTransactionEventServerProxy event_proxy,
       TransactionViewQuery const &query, RuntimeContext &context,

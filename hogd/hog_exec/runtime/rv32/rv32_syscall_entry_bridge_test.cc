@@ -19,6 +19,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -26,6 +27,7 @@
 #include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/syscall_bridge.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
@@ -153,7 +155,7 @@ protected:
             .gas_limit = kPlentyOfGas,
             .calldata = Calldata{},
         },
-        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
+        std::to_underlying(InvokeFlag::None), ValidatedAuthTokens{});
     return std::move(stashed).value();
   }
 
@@ -163,7 +165,7 @@ protected:
                InvokeStatus<void> result = {})
   {
     auto status = handler.finish_frame(std::move(result),
-                                       std::move(stashed_parent_trace));
+                                       std::move(stashed_parent_trace))();
     ASSERT_TRUE(status.has_value());
   }
 
@@ -379,8 +381,8 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  rv32::HostResult result =
-      call_bridge(memory, handler, 0, make_ecall_args(arg_words));
+  rv32::HostResult result = call_bridge(memory, handler, kSyscallBaseCost + 1,
+                                        make_ecall_args(arg_words));
   finish_frame(handler, std::move(stashed_trace),
                std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
 
@@ -388,7 +390,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
   EXPECT_EQ(memory, before);
 }
 
-TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
+TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasDoesNotComputeHash)
 {
   // Rv32Runtime::invoke_internal calls syscall_entry with ExecutionContext
   // memory backed directly by ThreadedMachine memory; unlike
@@ -397,13 +399,16 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
   std::vector<uint8_t> memory(256, 0xCC);
   constexpr std::string_view input = "out of gas";
   std::ranges::copy(input, memory.begin() + kInputAddress);
-  const std::vector<uint8_t> before = memory;
+  auto expected_memory = memory;
+  std::fill_n(expected_memory.begin() + kOutputAddress, sizeof(SHA256Hash), 0);
 
+  // Afford entry, but leave too little gas to hash the input.
+  constexpr GasAmount kBudget = kSyscallBaseCost + 1;
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
   ExecutionContext context{
       .memory = std::as_writable_bytes(std::span<uint8_t>(memory)),
-      .gas_remaining = 0,
+      .gas_remaining = kBudget,
   };
   const auto result =
       syscall_entry(&handler, context,
@@ -415,12 +420,89 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
 
   ASSERT_FALSE(result.first.has_value());
   EXPECT_EQ(result.first.error().code(), HostFnErrorCode::OutOfGas);
-  EXPECT_EQ(result.second, 0U);
-  EXPECT_NE(memory, before);
-  const SHA256Hash expected = sha256(input);
-  EXPECT_TRUE(
-      std::ranges::equal(expected, std::span<const uint8_t>(memory).subspan(
-                                       kOutputAddress, expected.size())));
+  EXPECT_EQ(result.second, kBudget);
+  // The output adapter flushes its zero-initialized staging value on a
+  // frame fault, but no hash is computed.
+  EXPECT_EQ(memory, expected_memory);
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest,
+       InterpretersAgreeOnObservableExactBudgetOutOfGas)
+{
+  // Both bridges reject exact exhaustion before hashing and agree on the
+  // trap and gas remaining.
+  constexpr std::string_view input = "out of gas";
+  // Cover the four argument loads, ecall, crossing, and SHA256 body exactly.
+  // The preflight gas check reports OutOfGas before the hash is computed.
+  constexpr uint64_t kExactBudget = (5 * rv32::kBaseInstructionGas) +
+                                    kSyscallBaseCost +
+                                    GasCost::sha256_hash(input.size());
+
+  std::vector<uint8_t> code;
+  uint8_t reg = 10; // a0
+  for (const int32_t imm :
+       {static_cast<int32_t>(SyscallNo::kSHA256),
+        static_cast<int32_t>(kInputAddress), static_cast<int32_t>(input.size()),
+        static_cast<int32_t>(kOutputAddress)}) {
+    append_u32(code, addi(reg, 0, imm));
+    ++reg;
+  }
+  append_u32(code, ecall());
+
+  std::vector<uint8_t> initial_memory(256, 0xCC);
+  std::ranges::copy(input, initial_memory.begin() + kInputAddress);
+
+  // Canonical per-instruction Machine driven through the scratch-buffer bridge.
+  auto canonical_program =
+      rv32::Program::create(std::span<const uint8_t>(code.data(), code.size()));
+  ASSERT_TRUE(canonical_program.has_value());
+  rv32::Machine canonical(std::make_shared<rv32::Program>(
+                              std::move(*canonical_program)),
+                          initial_memory.size(), kExactBudget);
+  ASSERT_TRUE(canonical.view().write_memory(0, initial_memory));
+  auto canonical_handler = make_handler();
+  rv32::SyscallBridgeHost canonical_bridge(&canonical_handler, &syscall_entry);
+  auto canonical_trace = start_frame(canonical_handler);
+  const rv32::StepResult canonical_result = canonical.run(canonical_bridge);
+  finish_frame(canonical_handler, std::move(canonical_trace),
+               std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
+
+  // Threaded interpreter driven against live guest memory, exactly as
+  // Rv32Runtime::invoke_internal does.
+  auto pre_instantiation = rv32::ThreadedMachinePreInstantiation::create(
+      std::span<const uint8_t>(code.data(), code.size()), initial_memory, 0,
+      initial_memory.size(), false);
+  ASSERT_TRUE(pre_instantiation.has_value());
+  rv32::ThreadedMachine threaded(*pre_instantiation, kExactBudget);
+  auto threaded_handler = make_handler();
+  auto threaded_trace = start_frame(threaded_handler);
+  ASSERT_EQ(threaded.start(), rv32::StepResult::kEcall);
+  ASSERT_TRUE(threaded.pending_ecall().has_value());
+  const rv32::EcallArgs ecall =
+      threaded.pending_ecall().value_or(rv32::EcallArgs{});
+  ExecutionContext threaded_context{
+      .memory = std::as_writable_bytes(threaded.memory()),
+      .gas_remaining = threaded.gas_remaining(),
+  };
+  const auto threaded_syscall =
+      syscall_entry(&threaded_handler, threaded_context, ecall.a0, ecall.a1,
+                    ecall.a2, ecall.a3, ecall.a4, ecall.a5, ecall.a6,
+                    ecall.a7)();
+  const rv32::StepResult threaded_result = threaded.resume_from_ecall(
+      rv32::HostResult::out_of_gas(threaded_syscall.second));
+  finish_frame(threaded_handler, std::move(threaded_trace),
+               std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
+
+  // The consensus-visible result is identical on both interpreters.
+  EXPECT_EQ(canonical_result, rv32::StepResult::kTrap);
+  EXPECT_EQ(canonical.trap(), rv32::Trap::kOutOfGas);
+  EXPECT_EQ(canonical.gas_remaining(), 0U);
+  EXPECT_EQ(threaded_result, rv32::StepResult::kTrap);
+  EXPECT_EQ(threaded.trap(), rv32::Trap::kOutOfGas);
+  EXPECT_EQ(threaded.gas_remaining(), 0U);
+  auto expected_memory = initial_memory;
+  std::fill_n(expected_memory.begin() + kOutputAddress, sizeof(SHA256Hash), 0);
+  EXPECT_TRUE(std::ranges::equal(threaded.memory(), expected_memory));
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)

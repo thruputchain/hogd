@@ -15,6 +15,7 @@
 #include "hogd/hog_db/status.h"
 #include "retrocausal_queue.hh"
 #include "x23/testlock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -65,7 +66,10 @@ public:
   HogDbStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
 
-  std::optional<QueueEntry> get_concurrent_entry(uint32_t index) const;
+  // A view of the entry a transaction in the current block inserted at
+  // [index], or nullopt past the end.  Valid for this lock's lifetime, so
+  // callers must keep the owning BlockTX alive.
+  std::optional<x23::BufView> get_concurrent_entry(uint32_t index) const;
 
   HogDbStatus<RetrocausalQueueMetadata *>
   get_meta(const LockContext *ctx) const;

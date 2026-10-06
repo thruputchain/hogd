@@ -28,6 +28,7 @@ add_library(hog_db_objects OBJECT
   rpc_from_exec.cc
   rpc_from_gateway.cc
   rpc_from_sched.cc
+  startup_validation.cc
   status.cc
 )
 target_link_libraries(
@@ -77,7 +78,11 @@ endif()
 # Build hog_db_test executable
 add_executable(
   hog_db_test
+  $<TARGET_OBJECTS:alloc_fault_test_support>
   auth_subscription_test.cc
+  background_commit_worker_test.cc
+  db_tip_serving_test.cc
+  genesis_config_validation_test.cc
   hog_db_test.cc
   item_change_auth_test.cc
   item_change_exclusive_test.cc
@@ -93,6 +98,7 @@ add_executable(
   rpc_context_lifetime_test.cc
   rpc_from_exec_test.cc
   rpc_from_gateway_test.cc
+  startup_validation_test.cc
 )
 target_link_libraries(
   hog_db_test
@@ -101,6 +107,6 @@ target_link_libraries(
   GTest::gtest_main
 )
 add_dependencies(hog_db_test all_riscv_contracts)
-gtest_discover_tests(
+hogd_discover_tests(
   hog_db_test
 )

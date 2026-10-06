@@ -188,7 +188,7 @@ target_link_libraries(contract_loader_test
   GTest::gtest_main
 )
 add_dependencies(contract_loader_test all_riscv_contracts all_riscvs_built)
-gtest_discover_tests(contract_loader_test)
+hogd_discover_tests(contract_loader_test)
 
 # Build the contracts for RV32 (each gets a [[bin]] wrapper + .rv32a). The
 # SPEC_CONTRACTS also produce <name>_spec.json, consumed by the header/XDR
@@ -237,6 +237,8 @@ add_riscv_builds(
     local_test_contracts/auth_weight_test
     local_test_contracts/drip_faucet
     local_test_contracts/faucet_caller
+    local_test_contracts/invoke_malformed_tokens_test
+    local_test_contracts/itc_erc20_permit
     local_test_contracts/tx_context_test
   RAW_CONTRACTS
     integration_test_contracts/hash_bug
@@ -247,6 +249,7 @@ add_types_xdr(default_wallet)
 add_types_xdr(drip_faucet)
 add_types_xdr(genesis_root)
 add_types_xdr(itc_erc20)
+add_types_xdr(itc_erc20_permit)
 add_types_xdr(manual_revert_test)
 add_types_xdr(simple_wallet)
 add_types_xdr(txs_roundtrip)
@@ -258,6 +261,7 @@ add_xdr(default_wallet_hh ./default_wallet.x)
 add_xdr(drip_faucet_hh ./drip_faucet.x)
 add_xdr(genesis_root_hh ./genesis_root.x)
 add_xdr(itc_erc20_hh ./itc_erc20.x)
+add_xdr(itc_erc20_permit_hh ./itc_erc20_permit.x)
 add_xdr(manual_revert_test_hh ./manual_revert_test.x)
 add_xdr(simple_wallet_hh ./simple_wallet.x)
 add_xdr(txs_roundtrip_hh ./txs_roundtrip.x)
@@ -269,6 +273,7 @@ add_dependencies(build_default_wallet_hh all_riscvs_built)
 add_dependencies(build_drip_faucet_hh all_riscvs_built)
 add_dependencies(build_genesis_root_hh all_riscvs_built)
 add_dependencies(build_itc_erc20_hh all_riscvs_built)
+add_dependencies(build_itc_erc20_permit_hh all_riscvs_built)
 add_dependencies(build_manual_revert_test_hh all_riscvs_built)
 add_dependencies(build_simple_wallet_hh all_riscvs_built)
 add_dependencies(build_txs_roundtrip_hh all_riscvs_built)
@@ -294,6 +299,7 @@ add_contract_header(sha256_wrapper)
 add_contract_header(simple_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/simple_wallet.hh")
 add_contract_header(simple_wallet_authclaim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
+add_contract_header(itc_erc20_permit "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20_permit.hh")
 add_contract_header(authclaim_test)
 add_contract_header(htlc)
 add_contract_header(payment_channel "${CURRENT_RELATIVE_SOURCE_DIR}/payment_channel.hh")
@@ -311,12 +317,14 @@ add_contract_header(airdrop_faucet)
 add_contract_header(auth_weight_test)
 add_contract_header(drip_faucet "${CURRENT_RELATIVE_SOURCE_DIR}/drip_faucet.hh")
 add_contract_header(faucet_caller)
+add_contract_header(invoke_malformed_tokens_test)
 add_contract_header(tx_context_test)
 
 add_dependencies(default_wallet_header default_wallet_hh)
 add_dependencies(drip_faucet_header drip_faucet_hh)
 add_dependencies(genesis_root_header genesis_root_hh)
 add_dependencies(itc_erc20_header itc_erc20_hh)
+add_dependencies(itc_erc20_permit_header itc_erc20_permit_hh)
 add_dependencies(payment_channel_header payment_channel_hh)
 add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)
 add_dependencies(txs_roundtrip_header txs_roundtrip_hh)

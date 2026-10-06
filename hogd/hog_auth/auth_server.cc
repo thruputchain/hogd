@@ -12,15 +12,18 @@
 #include "auth_rpc.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_auth/status.h"
 #include "hogd/metrics/health.h"
+#include "integration.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -38,29 +41,31 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
       co_await current_height_futex_.wait(current_height);
       continue;
     }
-    if (current_height > height) {
-      co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
-    }
     if (current_height < height) {
       co_await current_height_futex_.wait(current_height);
       continue;
     }
     break;
   }
-  CHECK_EQ(current_height, height);
+  CHECK_GE(current_height, height);
   CHECK_NE(current_height, kUninitializedHeight);
   CHECK_NE(current_height, kInitializing);
 
   auto auth_data = auth_data_cache_.get(address);
   if (auth_data != nullptr) {
-    // Auth data cache has processed all updates from some initial height up to
-    // and including current_height. That means that if the data is present
-    // there, and it's not from a block in the future, then it must be valid for
-    // current_height.
-    if (auth_data->first <= current_height) {
+    // Updates replace an account's cache entry before [current_height_futex_]
+    // advances. An entry no newer than the requested height is therefore still
+    // valid even when the auth server has since processed newer blocks.
+    if (auth_data->first <= height) {
       co_return auth_data;
     }
   }
+
+  if (current_height > height) {
+    // [height] is too old for us to look up this particular wallet's auth data.
+    co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
+  }
+  CHECK_EQ(current_height, height);
 
   auto db_auth_data = co_await dbauth_client_.lookup_auth_data(height, address);
   if (!db_auth_data.has_value()) {
@@ -77,8 +82,8 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 }
 
 x23::Async<void>
-AuthServer::register_auth_data_updates(BlockHeight height,
-                                       KeyChangeBatch key_changes)
+AuthServer::register_auth_data_updates(
+    BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes)
 {
   // TODO(geoff): this logic will break if there's a sharded db, and i.e.
   // multiple batches of updates from the same block height. Probably the
@@ -138,8 +143,13 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   co_await Health::instance().set_current_block_height(height);
 
   if (mempool_client_) {
-    co_await mempool_client_->mempoolauth_auth_data_changed(height,
-                                                            key_changes);
+    // The mempool's proc still takes the height as one batch.
+    KeyChangeBatch batch;
+    batch.reserve(key_changes.size());
+    for (const KeyChange &key_change : key_changes) {
+      batch.push_back(key_change);
+    }
+    co_await mempool_client_->mempoolauth_auth_data_changed(height, batch);
   }
 }
 
@@ -161,15 +171,6 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
       info("initializing auth server to height {}", current_height);
       current_height_futex_.broadcast(&default_threadpool());
       co_await Health::instance().set_current_block_height(current_height);
-      // No update callback is delivered for blocks that committed before this
-      // subscription was installed.  Tell the mempool which height the auth
-      // server initialized from so its downstream watermark cannot remain
-      // behind forever.  An empty batch is sufficient: a freshly initialized
-      // mempool has no cached transactions that need revalidation.
-      if (mempool_client_) {
-        co_await mempool_client_->mempoolauth_auth_data_changed(
-            current_height, KeyChangeBatch{});
-      }
     }
     else {
       info("auth server already initialized to height {} by concurrent "
@@ -200,6 +201,24 @@ AuthServer::populate_auth_data(BlockHeight height,
   co_return std::move(entry.value());
 }
 
+namespace {
+
+// Auth is the one place the whole SignedTransaction is measured; the executor
+// caps only the body (#3844).
+bool
+wrapper_over_cap(const SignedTransaction &tx)
+{
+  const size_t wrapper_size = x23::xdr_size(tx);
+  if (wrapper_size <= kMaxBytesSignedTransaction) {
+    return false;
+  }
+  trace("auth: rejecting over-cap transaction wrapper ({} bytes, cap {})",
+        wrapper_size, kMaxBytesSignedTransaction);
+  return true;
+}
+
+} // namespace
+
 x23::Async<AuthErrorCodeBatch>
 AuthServer::verify_transactions(BlockHeight height,
                                 std::span<const SignedTransaction> txs,
@@ -215,6 +234,10 @@ AuthServer::verify_transactions(BlockHeight height,
       auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
+    if (wrapper_over_cap(tx)) {
+      results[i] = AuthErrorCode::kAuthFailed;
+      continue;
+    }
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
       auto entry =
           co_await populate_auth_data(height, tx.tx.invocation.invoked_address);
@@ -278,6 +301,9 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
 {
   Ed25519SignatureVerifier signature_verifier;
   for (const auto &tx : txs) {
+    if (wrapper_over_cap(tx)) {
+      co_return AuthErrorCode::kAuthFailed;
+    }
     auto source_addr =
         co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
     if (!source_addr.has_value()) {

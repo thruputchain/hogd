@@ -1,146 +1,203 @@
-# RV32 Runtime Design Map
+# RV32 runtime
 
-## Purpose
+This directory owns the RV32IM interpreter, artifact validation, executor
+adapter, and their tests. Start with [rv32_contract.cc](rv32_contract.cc) for
+production execution and [machine.cc](machine.cc) for instruction semantics.
 
-`hogd/hog_exec/runtime/rv32` implements the RV32IM contract runtime. It plugs
-into the same executor-facing `Runtime` / `RuntimeContext` shape as the wasm
-runtime, while keeping the portable ISA core free of wider `hogd` dependencies.
+## Production path
 
-The runtime accepts lowered RV32 artifacts, validates their format and gas
-schedule, prepares a decoded production representation, and executes contract
-entrypoints against the shared host syscall layer.
+1. `Rv32Context::verify_contract` validates an attached artifact against the
+   chain's configured code and memory limits. `Rv32Contract::create` parses it
+   and builds a `ThreadedMachinePreInstantiation`: executable slots and a
+   zero-padded initial memory image.
+2. The prepared contract is retained by the transaction's `SystemCallHandler`
+   or the block's [StorageSnapshotCache](../item/storage_snapshot_cache.cc).
+   Loading an already-deployed contract uses the VM ceilings rather than the
+   current admission limits, so lowering a chain limit does not invalidate
+   existing deployments.
+3. `Rv32Context::make_new_runtime` borrows that prepared contract.
+   `Rv32Runtime` creates a machine per invocation, copies the initial memory,
+   seeds the method ID, and drives execution through `start()` and
+   `resume_from_ecall()`.
+4. The invocation coroutine owns the machine while awaiting
+   [syscall_entry](../syscall_entry.cc). It maps host errors and VM traps to
+   executor outcomes and reports `gas_limit - gas_remaining` as consumption.
 
-## Layers
+[make_hog_exec_context](../../precompiles/context.cc) selects this adapter for
+`ContractType::kRv32`. The similarly named [runtime_context.h](runtime_context.h)
+defines a **test-only** adapter: `rv32::RuntimeContext` runs the canonical
+`Machine` under `kMockTest`. It is not the production context or cache.
 
-The portable ISA core is the lowest layer:
+## Instruction and memory model
 
-- `program.h` / `program.cc`: instruction definitions, gas costs, validation,
-  and decoded immutable `Program` objects.
-- `isa_ops.h`: pure RV32 arithmetic and decode helpers shared by engine
-  implementations.
-- `machine.h` / `machine.cc`: canonical per-instruction interpreter used as a
-  reference engine and oracle adapter.
-- `host.h`, `arch_trace.h`, `oracle.h`, `spec_model.h`: model-neutral host,
-  tracing, and differential-test infrastructure.
+The profile supports RV32I and M with fixed four-byte instructions and
+little-endian data. Code is immutable and separate from guest data memory;
+loads and stores cannot read or modify instructions. Unaligned data accesses
+are allowed when the entire access is in bounds. Jump targets must be aligned
+and within the code image. Falling off the image traps.
 
-The production/runtime layer is above that:
+The decoders in [program.cc](program.cc) and
+[threaded_program.h](threaded_program.h) define the accepted encodings.
+Compressed, atomic, floating-point, vector, and general CSR/privileged
+instructions are rejected. The admitted SYSTEM words are `ECALL`, `EBREAK`,
+and canonical `UNIMP`; the latter two terminate with VM traps. `FENCE` is a
+no-op. [isa_ops.h](isa_ops.h) handles arithmetic cases that need explicit
+unsigned operations or special treatment of division overflow and zero.
 
-- `artifact.h` / `artifact.cc`: artifact header parsing, section validation,
-  ABI/profile checks, and gas-schedule digest validation.
-- `threaded_program.h` and `threaded_machine.h`: production direct-threaded
-  interpreter, run lowering, fusion, and execution.
-- `rv32_contract.h` / `rv32_contract.cc` and `runtime_context.*`: executor
-  integration and cached prepared-contract storage.
-- `syscall_bridge.*`: testable host bridge for the register-native syscall ABI.
+[program.h](program.h) owns default limits and VM ceilings. Admission limits
+come from network configuration. An artifact declares its data-memory size;
+the stored image is copied at `initial_memory_start`, with zeros on both sides.
+Zero-sized data memory is valid and every load/store against it faults.
 
-## Execution Engines
+## Artifacts and guest entry
 
-There are intentionally multiple engines:
+[artifact.h](artifact.h) defines the wire constants and header layout;
+[artifact.cc](artifact.cc) defines validation. The parser reads explicit
+little-endian fields and requires exactly `header || code || initial_memory`,
+with no gaps or trailing bytes. SHA256 commitments cover the stored code and
+memory sections. ELF parsing belongs to the author toolchain.
 
-- `Machine` is the canonical, simple interpreter. It charges gas and executes
-  one instruction at a time, which makes it easy to reason about and compare
-  against external models.
-- `ThreadedMachine` is the production engine. It lowers decoded instructions
-  into compact executable slots, uses musttail direct dispatch, and can select
-  fused handlers.
-- `spec_model.h` is an independent hand-written test oracle. It deliberately
-  does not share `isa_ops.h` with the engines.
-- `spike_oracle.h` adapts an external Spike oracle when available; those tests
-  are optional in local/CI runs.
+The runtime enters at PC 0 with registers zeroed except for the method ID:
+`a0` contains its low 32 bits and `a1` its high 32 bits. The guest initializes
+`sp` and dispatches the method. There is no runtime method table or pre-entry
+unknown-method check. SDK dispatchers handle unknown IDs in guest code, so
+that path consumes gas; the runtime itself does not enforce a method set.
+Successful completion uses the `Return` syscall; `_start` must not return or
+fall through.
 
-When changing ISA semantics, update the canonical engine and production engine
-together, then rely on the spec/corpus/oracle tests to keep them honest.
+The producer and consumer are maintained in different repositories:
 
-## Artifacts
+| Owner | Contract |
+|---|---|
+| SDK (`sdk_rs`) | Guest startup, method dispatch, and typed syscall wrappers |
+| Tooling (`groundhog-rpc`, `crates/rv32/artifact` and `crates/rv32/lower`) | ELF validation and artifact writing; shared by the CLI and standalone lowerer |
+| This directory | Artifact admission, preparation, and execution |
 
-RV32 contracts are deployed as artifacts, not raw instruction streams. The
-artifact header pins the format version, VM profile, syscall ABI version,
-memory size, section digests, gas table version, and gas schedule digest.
+Guest dispatch removes the need for the lowerer to discover method symbols or
+serialize method PCs. Contract specs remain author-tool outputs, separate from
+the execution artifact. [build_risc.sh](../../../../built_contracts/build_risc.sh)
+uses the pinned CLI to produce integration-test artifacts and metadata;
+[built_contracts/CMakeLists.txt](../../../../built_contracts/CMakeLists.txt)
+owns their build targets.
 
-`Rv32Contract::create` parses the artifact and builds a
-`ThreadedMachinePreInstantiation`. That preparation step rejects invalid code,
-invalid memory sizing, and straight-line runs whose precharged gas would not fit
-in the threaded slot representation.
+`kArtifactFormatFingerprint` records the format constants and validation
+policies with an explicit encoding. A compile-time assertion pins the C++
+value; `LoweredSdkArtifactFormatFingerprintMatchesRuntime` checks generated
+lowerer metadata against `kAcceptedFormatFingerprints`. The fingerprint is a
+compatibility check, not a substitute for parsing or instruction validation.
+Format, entry ABI, syscall ABI, and gas schedule are separate versioned
+contracts; update the relevant producer, consumer, fixtures, and checks together.
 
-## Gas And Traps
+## Execution engines
 
-Instruction gas costs live in `program.h`. The artifact gas digest in
-`artifact.h` folds those instruction costs together with the host syscall gas
-schedule, so artifacts built against a different gas table are rejected.
+| Implementation | Role |
+|---|---|
+| `Program` / `Machine` | Canonical decoder and per-instruction interpreter |
+| `ThreadedProgram` / `ThreadedMachine` | Production decoder, lowering, and direct-threaded execution |
+| `spec_model.h` | Test model written independently of `isa_ops.h` |
+| `spike_oracle.h` | Optional adapter to an external ISA implementation |
 
-`Machine` meters per instruction. `ThreadedMachine` meters straight-line runs:
-the lowering step records the total gas for a run, and `enter_run()` charges it
-once before executing the run body. Control-flow and host boundary instructions
-are barriers. Loads and stores remain in straight-line runs for performance, so
-a memory trap can fire after the run has already been charged past it;
-`trap_bad_memory` refunds the run's unexecuted suffix so the trapped state
-keeps exactly the instructions through the faulting one charged.
+The canonical and production decoders classify instructions separately so
+differential tests can catch decode disagreements. The spec model can still
+share a misunderstanding with both engines; it does not replace external
+conformance testing.
 
-An unaffordable run still executes speculatively on a zero balance with the
-shortfall recorded out-of-band; the deficit settles as `kOutOfGas` with zero
-gas at the run's exit seam, before any effect can escape the frame. The seams
-are exhaustive: `enter_run` at the next run head, `op_ecall` before the host
-sees a syscall (a speculative syscall would have effects outside the frame),
-and `trap_at` / `trap_bad_memory` at every trap. At most one run ever
-executes in deficit (every head settles first), bounding the overdraft by
-`kMaxRunGas` (the lowering's chunk cap; over-cap straight-line runs are split
-at mid-run break carriers rather than rejected).
+Production lowering builds one slot per instruction plus a fall-off sentinel.
+It resolves static branch targets, divides straight-line execution into gas
+runs, and fuses selected instruction pairs. A fused pair retains the tail's
+standalone handler so a branch can enter it directly. Traced handlers preserve
+individual instruction observations for differential tests.
 
-The invariant this buys: the consensus-visible pair (trap classification,
-`gas_remaining`) matches the canonical `Machine` at every budget and on every
-trap class -- every instruction through and including the trapping one is
-charged, nothing after it, and all `Trap::kOutOfGas` paths saturate
-`gas_remaining` to zero in the canonical engine, production threaded engine,
-and independent spec model. This pair is consensus-visible because
-`rv32_contract.cc` reports `gas_limit - gas_remaining` to the caller as the
-frame's consumption, and a TryInvoke parent continues executing with the
-remainder. NOT invariant (frame-local state a trap discards): the trap pc, a
-speculative run's register/memory writes, and traced intermediate gas past
-the OOG fence. `Rv32ThreadedTrapGas` pins engine parity for every trap class
--- including each fused handler's fault paths and every deficit seam -- and
-`Rv32Threaded.outOfGasMidRunSettlesAtNextSeam` pins the speculative
-semantics.
+Dispatch requires the `musttail` attribute. [musttail.h](musttail.h) rejects
+unsupported compilers because ordinary recursive calls would grow the host
+stack with guest execution. The `rv32_isa_core` target has no artifact, crypto,
+protocol, or executor link dependencies; `rv32_isa_core_test` checks that
+boundary. [CMakeLists.txt](CMakeLists.txt) defines these targets, while
+[the parent CMake file](../CMakeLists.txt) owns tests that link the executor.
+
+## Gas and traps
+
+Instruction costs are in [program.h](program.h); host costs are in
+[gas_cost_table.h](../gas_cost_table.h). The artifact gas digest covers both.
+`kAcceptedGasSchedules` accepts explicit `(version, digest)` pairs, including
+transitional declarations. **Every accepted artifact executes at this build's
+current prices**, regardless of the declaration it carries. Validators must
+agree on both prices and accepted declarations. Removing an accepted entry
+requires accounting for stored artifacts as well as the producing toolchain.
+The [calibration guide](gas_calibration/README.md) describes measurement and
+schedule changes.
+
+`Machine` charges each instruction before executing it. `ThreadedMachine`
+charges a run at entry, including its terminating control-flow or host-boundary
+instruction. Lowering splits long runs at `kMaxRunGas`; run length is not an
+artifact rejection condition. Loads/stores remain within runs. A memory fault
+refunds the unexecuted suffix of the charged run.
+
+An unaffordable run executes speculatively with zero balance and a recorded
+deficit. That deficit settles at the next run entry, before an `ecall` reaches
+the host, or on a trap. A memory fault in the affordable prefix keeps its
+memory-trap classification after refunding the suffix; otherwise exhaustion
+wins. At most one run executes in deficit, bounded by `kMaxRunGas`.
+
+Trap classification and remaining gas must match canonical execution, since a
+`TryInvoke` parent retains the unused gas. VM out-of-gas traps leave zero gas.
+Registers, memory, trap PC, and intermediate trace gas may differ after
+speculative execution in a frame that will be discarded. The trap-gas and
+deficit tests in [rv32_threaded_test.cc](rv32_threaded_test.cc) cover this
+distinction, including fused instructions and split runs.
 
 ## Syscalls
 
-The RV32 guest syscall ABI is register-native: the guest places the syscall
-number in `a0`, up to seven argument words in `a1..a7`, and executes `ecall`.
-The shared syscall parser interprets those words as pointers, lengths, scalars,
-enums, and optional sentinels.
+At `ecall`, `a0` holds the syscall number and `a1..a7` hold up to seven 32-bit
+argument words. Wider values pass through guest memory. The shared
+[argument parser](../syscall_entry_outer.h) owns pointer, length, scalar,
+enum, sentinel, and alias checks. Return codes go in `a0`; output buffers are
+written through guest pointers.
 
-Production drives the `ecall` loop in `rv32_contract.cc` against live guest
-memory for performance: syscall output spans point directly into the active
-`ThreadedMachine` memory. Syscall handlers that need atomic output behavior must
-stage internally before writing to those spans. `SyscallBridgeHost` is a
-canonical-test seam for the same register ABI; it intentionally runs
-`syscall_entry` against scratch memory so tests can inspect faults/OOG without
-committing partial writes to `Machine` memory. Do not infer production output
-rollback semantics from the bridge.
+Production passes live machine memory to `syscall_entry`. A handler requiring
+atomic output must stage its writes before touching those spans. The test-only
+[SyscallBridgeHost](syscall_bridge.h) uses scratch memory and conditional
+writeback. Its rollback behavior does not describe production syscall output.
+Production resolves host errors in `Rv32Runtime`; it does not pass
+`HostStatus::kTrap` back into the threaded engine.
 
-## Testing
+## Verification
 
-The test strategy is deliberately redundant:
+Run commands from the repository root, using a configured build with the
+repository's toolchain and dependencies:
 
-- `rv32_vm_test.cc` and `rv32_conformance_test.cc` cover canonical execution.
-- `rv32_borrowed_conformance_test.cc` checks borrowed RISC-V-style vectors.
-- `rv32_spec_model_crosscheck_test.cc` compares the independent spec model.
-- `rv32_oracle_test.cc` and `rv32_spike_oracle_test.cc` cover oracle adapters.
-- `rv32_threaded_test.cc` compares production lowering/execution against the
-  canonical engine and exercises traced and untraced paths.
-- `rv32_syscall_bridge_test.cc`, `rv32_syscall_entry_bridge_test.cc`,
-  `rv32_runtime_context_test.cc`, and `rv32_contract_test.cc` cover ABI and
-  executor integration.
+```sh
+ctest --test-dir BUILD_DIR --output-on-failure -R '^rv32\.'
+```
 
-For consensus-sensitive changes, prefer a narrow regression test near the
-changed layer plus at least one cross-engine check.
+The test prefix covers ISA conformance, artifact rejection, cross-engine
+execution, syscall bridges, runtime adapters, and calibration tests. Production
+executor tests also live in the [parent runtime directory](..) and
+[contract_tests](../../contract_tests); the prefix alone is not full executor
+coverage. For semantic changes, add a focused regression and a cross-engine
+check, then exercise the affected production path.
 
-Two local-only libFuzzer targets live under `fuzz/` (built with
-`-DBUILD_FUZZERS=ON`, excluded from CI). `rv32_fuzz_artifact` drives the
-attacker-facing deploy path -- raw bytes through `parse_artifact` /
-`parse_threaded_artifact` for the rejection paths, and a fixed-up well-formed
-artifact through lowering and machine construction to reach decode/fusion/image
-staging past the SHA256 digest wall. `rv32_fuzz_engine_diff` extends the
-canonical-vs-threaded differential beyond the fixed-seed corpora, asserting
-exact-`ProgramError` decoder parity and execution parity (OOG class and
-`gas_remaining==0` first; full trace parity only when neither engine runs out of
-gas). See `fuzz/README.md`.
+Coverage limits:
+
+- Borrowed conformance cases retain upstream operand/result vectors; see the
+  [license notice](riscv-tests-license.md). `rv32_upstream_artifact_test.cc`
+  runs synthetic upstream-shaped artifacts through the canonical test adapter,
+  not compiled upstream assembly through the production engine.
+- Spike tests skip unless `RV32_ORACLE_BIN` names an executable. The adapter
+  compares architectural traces without gas. Its relocated code mapping
+  excludes `AUIPC`, `JALR`, linking `JAL`, and breakpoint/illegal-instruction
+  trap cases, and requires zero initial registers and memory. The predicate
+  `spike_supported()` and corpus construction define its scope; passing it
+  does not establish conformance for arbitrary compiled contracts.
+- Generated SDK smoke tests check the format fingerprint and an
+  increment/commit/get round trip through `rv32::RuntimeContext`. Production
+  integration is covered separately by `rv32_contract_test.cc` and the
+  executor tests. The committed Rust fixture under `fixtures/` is a separate
+  regression input with its own pinned regeneration toolchain.
+- A test run on one platform does not establish cross-platform determinism.
+  Compare supported validator builds when changing platform-sensitive behavior.
+
+[Fuzzing](fuzz/README.md) exercises artifact validation/preparation and
+canonical/threaded execution. Both targets run in the scheduled RV32 fuzz
+workflow; they are optional in ordinary builds. Calibration procedures and
+retained measurement evidence live under [gas_calibration/](gas_calibration/README.md).

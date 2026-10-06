@@ -4,26 +4,50 @@
 
 #include <cstddef>
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
+#include "integration.hh"
 
 namespace hogd {
 
-// Maximum size of a deployed contract's code blob (ContractBlob.data for
-// kWasmi / kRv32) -- the same quantity contract_deployment_cost_per_byte
-// charges for. Enforced deterministically in
-// SystemCallHandler::perform_initial_validation() before any attached
-// contract is verified or executed (#2569).
-//
-// TODO(#2569): migrate into a protocol-defined config-bounds struct plumbed
-// through genesis (like StorageCostModelXdr) once that exists.
-inline constexpr size_t kMaxContractSizeBytes = 256_KiB;
+// Cap on the Transaction body, what TransactionHash commits to (#3844).
+inline constexpr size_t kMaxBytesTransaction = 1'900'000;
+static_assert(kMaxBytesTransaction < kMaxBytesSignedTransaction);
+
+// Ceiling on kConfigParamMaxSavepointDepth, checked at genesis load: each open
+// savepoint is a nested VM on one executor thread's stack, and this is the
+// depth those stacks are sized for.
+inline constexpr uint32_t kSavepointDepthCeiling =
+    static_cast<uint32_t>(kMaxSavepointDepth);
+
+// The budget the executor holds itself to on the HogDb link (pinned to
+// kBulkRpcMaxMessageSize). Raising it changes which transactions abort.
+inline constexpr size_t kExecToDbMessageCap = 0x100'0000;
+
+// Ceiling on kConfigParamMaxContractSizeBytes, checked at genesis load. A
+// transaction body carries its attachments, so nothing above
+// kMaxBytesTransaction could reach the executor; hog_db stores rows up to it,
+// and the commit-batch check below keeps one such contract in one message.
+inline constexpr size_t kContractSizeCeilingBytes = kMaxBytesTransaction;
+
+// Bytes the XDR envelope adds to a blob in a serialized Contract row: union
+// tag 4 + opaque length 4 + padding <= 3, with slack.
+inline constexpr size_t kSerializedContractEnvelopeBytes = 16;
+
+// Bound on the serialized Contract row holding a blob of `blob_bytes`.
+constexpr size_t
+serialized_contract_bound(size_t blob_bytes)
+{
+  return blob_bytes + kSerializedContractEnvelopeBytes;
+}
 
 // Bound on the serialized Contract row hog_db accepts in
-// InvokeTX::request_new_contract(): blob bytes plus the XDR envelope (union
-// tag 4 + opaque length 4 + padding <= 3), with slack. Exceeding it is
-// executor misbehavior (kInvalidExecutorBehavior), not a storage limit --
-// hog_db chunks any row up to this bound transparently.
+// InvokeTX::request_new_contract(); exceeding it is executor misbehavior.
 inline constexpr size_t kMaxSerializedContractBytes =
-    kMaxContractSizeBytes + 16;
+    serialized_contract_bound(kContractSizeCeilingBytes);
+
+// One contract at the ceiling must fit one executor->HogDb message.
+static_assert(kMaxSerializedContractBytes + 1_KiB <= kExecToDbMessageCap,
+              "a contract at the ceiling must fit one executor->HogDb message");
 
 } // namespace hogd

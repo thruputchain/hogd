@@ -24,6 +24,7 @@
 #include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -192,12 +193,24 @@ xdr_cpu_to_be(T value)
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
 
+// [max_objects] for input this node produced itself.  Grep it to find every
+// decode that trusts its source.
+inline constexpr size_t kNoBatchSizeLimit = SIZE_MAX;
+
+// #4030: parallel_batch_to_t's segment prefix sums assume a 64-bit size_t.
+static_assert(sizeof(size_t) >= sizeof(uint64_t),
+              "parallel_batch_to_t segment prefix sums assume a 64-bit size_t "
+              "(#4030)");
+
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs
 // xdr.size()) as well as per-object XDR deserialization failures.
+// [max_objects] caps what the batch may claim, rejected before anything is
+// allocated for it.  Use [kNoBatchSizeLimit] only for locally produced input.
 template<typename T>
 inline x23::Async<bool>
-parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
+parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs,
+                    size_t max_objects)
 {
   if (parallel.segment_tokens.size() != parallel.segment_bytes.size()) {
     info("failed to deserialize: segment_tokens size {} != segment_bytes size "
@@ -227,12 +240,15 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
   // divide rather than multiply so the bound cannot overflow [size_t]. The sum
   // itself cannot overflow either: [segment_tokens] holds at most 0xffffffff
   // entries each at most 0xffffffff, so the total is below SIZE_MAX.
+  // [max_objects] joins that bound rather than getting a scan of its own: the
+  // loop below already accumulates the claimed total.
   constexpr size_t kMinObjectSize = x23::detail::xdr_size_bounds<T>().min_;
   static_assert(kMinObjectSize > 0,
                 "ParallelBatch element type must have a nonzero minimum XDR "
                 "size, else token counts cannot bound the allocation");
   const size_t max_total_segment_tokens =
-      std::min<size_t>(0xffffffffUL, total_segment_bytes / kMinObjectSize);
+      std::min({max_objects, size_t{0xffffffffUL},
+                total_segment_bytes / kMinObjectSize});
 
   std::vector<size_t> obj_offsets;
   obj_offsets.reserve(parallel.segment_tokens.size());
@@ -243,8 +259,9 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
   }
   if (total_segment_tokens > max_total_segment_tokens) {
     info("failed to deserialize: claimed {} segment tokens exceeds the maximum "
-         "{} that {} payload bytes can encode",
-         total_segment_tokens, max_total_segment_tokens, total_segment_bytes);
+         "{} allowed by the caller's {} object limit and {} payload bytes",
+         total_segment_tokens, max_total_segment_tokens, max_objects,
+         total_segment_bytes);
     co_return false;
   }
   objs.resize(total_segment_tokens, {});

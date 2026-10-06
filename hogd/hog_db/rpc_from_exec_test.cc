@@ -2,8 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <set>
 #include <utility>
@@ -11,6 +13,7 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -30,6 +33,10 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/async.h"
+#include "x23/serialize.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -192,19 +199,18 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsConflicts)
   if constexpr (is_debug_build()) {
     ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticAll);
     ASSERT_EQ(r.conflict().conflicts().size(), 2U);
-    // key_a then key_b, both kDbConflictValueMismatch (order: hog_db
-    // preserves batch order).
+    // key_a then key_b, both ValueMismatch (order: hog_db preserves batch
+    // order).
     EXPECT_EQ(r.conflict().conflicts()[0].addrkey, key_a);
     EXPECT_EQ(r.conflict().conflicts()[1].addrkey, key_b);
     for (auto const &d : r.conflict().conflicts()) {
-      EXPECT_EQ(d.code, DbConflictCode::kDbConflictValueMismatch);
+      EXPECT_EQ(d.code, DbConflictCode::ValueMismatch);
     }
   }
   else {
     ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
     EXPECT_EQ(r.conflict().first().addrkey, key_a);
-    EXPECT_EQ(r.conflict().first().code,
-              DbConflictCode::kDbConflictValueMismatch);
+    EXPECT_EQ(r.conflict().first().code, DbConflictCode::ValueMismatch);
   }
 }
 
@@ -238,7 +244,7 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsAllBalanceConflicts)
     std::set<ContractAddress> expected{addr_a, addr_b};
     std::set<ContractAddress> actual;
     for (auto const &d : r.conflict().conflicts()) {
-      EXPECT_EQ(d.code, DbConflictCode::kDbConflictBoundsExceeded);
+      EXPECT_EQ(d.code, DbConflictCode::InsufficientFunds);
       EXPECT_EQ(d.addrkey.key.key_type(),
                 StorageKeyType::FreeNativeTokenBalance);
       actual.insert(d.addrkey.address);
@@ -247,8 +253,7 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsAllBalanceConflicts)
   }
   else {
     ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
-    EXPECT_EQ(r.conflict().first().code,
-              DbConflictCode::kDbConflictBoundsExceeded);
+    EXPECT_EQ(r.conflict().first().code, DbConflictCode::InsufficientFunds);
     EXPECT_EQ(r.conflict().first().addrkey.key.key_type(),
               StorageKeyType::FreeNativeTokenBalance);
     EXPECT_TRUE(r.conflict().first().addrkey.address == addr_a ||
@@ -374,14 +379,13 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractExclusiveFlagBlocksConcurrent)
     EXPECT_EQ(r2.conflict().conflicts()[0].addrkey.key.key_type(),
               StorageKeyType::Metadata);
     EXPECT_EQ(r2.conflict().conflicts()[0].code,
-              DbConflictCode::kDbConflictExclusiveLock);
+              DbConflictCode::ExclusiveLockDenied);
   }
   else {
     ASSERT_EQ(r2.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
     EXPECT_EQ(r2.conflict().first().addrkey.key.key_type(),
               StorageKeyType::Metadata);
-    EXPECT_EQ(r2.conflict().first().code,
-              DbConflictCode::kDbConflictExclusiveLock);
+    EXPECT_EQ(r2.conflict().first().code, DbConflictCode::ExclusiveLockDenied);
   }
 }
 
@@ -402,6 +406,74 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractWithoutFlagAdmitsConcurrent)
   auto r2 =
       rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, second);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
+}
+
+// A persistent contract-code row whose inline payload does not decode as a
+// Contract (e.g. tampered on-disk state) must surface as a structured
+// corruption error, not as an XDR decode exception unwinding across the
+// executor RPC boundary. See #3804.
+TEST_F(RpcFromExecDiagnosticsTest, MalformedContractRowReportsCorruption)
+{
+  SHA256Hash hash{};
+  hash.fill(0x98);
+  constexpr std::array<std::byte, 3> kTruncatedContractXdr{std::byte{0},
+                                                           std::byte{0},
+                                                           std::byte{0}};
+  ASSERT_TRUE(ctx_->get_db().write_contract_code(hash, kTruncatedContractXdr));
+
+  ExpectedContract result = rpc_->get_contract(BlockID{1}, hash);
+  EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
+}
+
+// BorrowedQueueEntryReply must put the same bytes on the wire as the
+// ExpectedQueueEntry it stands in for, on every arm and length (#2035).
+TEST(BorrowedQueueEntryReplyTest, MatchesExpectedQueueEntryOnTheWire)
+{
+  static_assert(
+      x23::serializes_like<BorrowedQueueEntryReply, ExpectedQueueEntry>);
+  static_assert(x23::satisfies_rpc_return<BorrowedQueueEntryReply,
+                                          ExpectedQueueEntry, x23::MaybeAsync>);
+
+  // 0 and kQueueEntryMaxLen are the bounds; 1 and 3 are the sub-word cases
+  // and 13 is the interior case that needs padding.
+  for (size_t len : {size_t{0}, size_t{1}, size_t{3}, size_t{13},
+                     size_t{kQueueEntryMaxLen}}) {
+    QueueEntry entry;
+    for (size_t i = 0; i < len; i++) {
+      entry.push_back(static_cast<uint8_t>((i * 7) + 1));
+    }
+
+    ExpectedQueueEntry owning;
+    owning.error(RPCError::kRPCNone);
+    owning.queue_entry() = entry;
+
+    BorrowedQueueEntryReply borrowed(RPCError::kRPCNotFound);
+    borrowed.set_entry(x23::BufView(entry.data(), entry.size()));
+
+    EXPECT_EQ(borrowed.error(), RPCError::kRPCNone);
+    EXPECT_EQ(x23::xdr_size(owning), xdr_size(borrowed)) << "length " << len;
+    auto owning_bytes = x23::serialize(owning);
+    auto borrowed_bytes = x23::serialize(borrowed);
+    ASSERT_EQ(owning_bytes.size(), borrowed_bytes.size()) << "length " << len;
+    EXPECT_EQ(0, memcmp(owning_bytes.data(), borrowed_bytes.data(),
+                        owning_bytes.size()))
+        << "length " << len;
+  }
+
+  // Every other discriminant selects the void arm, which carries no entry.
+  for (RPCError error : {RPCError::kRPCNotFound, RPCError::kRPCBadBlockID,
+                         RPCError::kRPCUnrecoverable}) {
+    ExpectedQueueEntry owning;
+    owning.error(error);
+    BorrowedQueueEntryReply borrowed(error);
+
+    EXPECT_EQ(x23::xdr_size(owning), xdr_size(borrowed));
+    auto owning_bytes = x23::serialize(owning);
+    auto borrowed_bytes = x23::serialize(borrowed);
+    ASSERT_EQ(owning_bytes.size(), borrowed_bytes.size());
+    EXPECT_EQ(0, memcmp(owning_bytes.data(), borrowed_bytes.data(),
+                        owning_bytes.size()));
+  }
 }
 
 } // namespace

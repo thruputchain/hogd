@@ -7,23 +7,23 @@
 // production frame -- inert today, since only the TryInvoke and ReadOnly bits
 // are ever read back, but a trap for whenever DelegateCall or a new flag lands.
 // Both pathways now run the same check, via
-// SystemCallHandler::validate_new_invocation(); the FFI boundary reports
-// kTestFFIErrorCodeInvalidArgument, since the point of the FFI error codes is
-// to hand an honest caller a structured failure.
+// SystemCallHandler::validate_new_invocation(); the FFI boundary hands the
+// caller production's own refusal, kSyscallErrorCodeInvalidSyscallInput, with
+// no FFI error -- asking for a frame production would not admit is not a
+// misuse of the test API.
 
 #include <array>
-#include <cstdint>
 #include <limits>
 #include <utility>
 
 #include <gtest/gtest.h>
 
 #include "ffi_enums.hh"
-#include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
 #include "invoke_flag.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -71,7 +71,7 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
 
   auto invocation = test_invocation();
 
-  constexpr std::array<int32_t, 6> kRejectedFlags = {
+  constexpr std::array<InvokeFlagSet, 6> kRejectedFlags = {
       // The bit from the issue report: not any defined InvokeFlag.
       0x40,
       // Defined in invoke_flag.x but explicitly not implemented, so production
@@ -81,15 +81,21 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
       std::to_underlying(InvokeFlag::TryInvoke) |
           std::to_underlying(InvokeFlag::DelegateCall),
       std::to_underlying(InvokeFlag::ReadOnly) | 0x40,
-      // InvokeFlagSet is a signed int over the FFI boundary.
-      -1,
-      std::numeric_limits<int32_t>::min(),
+      // Every bit, and the top bit alone: the values that read as -1 and
+      // INT32_MIN while InvokeFlagSet was signed.
+      std::numeric_limits<InvokeFlagSet>::max(),
+      InvokeFlagSet{1} << 31,
   };
 
-  for (int32_t flags : kRejectedFlags) {
-    auto res = open_frame(handler.syscall_handler, invocation, flags);
-    EXPECT_EQ(res, kTestFFIErrorCodeInvalidArgument) << "flags = " << flags;
-    if (res == kTestFFIErrorCodeNone) {
+  for (InvokeFlagSet flags : kRejectedFlags) {
+    SCOPED_TRACE(flags);
+    auto res = expect_frame_refused(
+        handler.syscall_handler, invocation,
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, flags);
+    // A refusal is reported in syscall_error_code, so that -- not the FFI
+    // code, which is None either way -- is what says a frame was admitted.
+    if (res.syscall_error_code ==
+        std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone)) {
       // A regression admitted the frame. Finish it so the rest of this test and
       // the handler teardown still run: an unfinished mock frame blocks close,
       // which would turn a clear assertion failure into a hung test binary.
@@ -135,7 +141,7 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
 // mock pathway to production's set, it does not narrow it further.
 TEST(TestBindingsTest, MockFrameOpenAcceptsProductionValidInvokeFlags)
 {
-  constexpr std::array<int32_t, 4> kAcceptedFlags = {
+  constexpr std::array<InvokeFlagSet, 4> kAcceptedFlags = {
       std::to_underlying(InvokeFlag::None),
       std::to_underlying(InvokeFlag::TryInvoke),
       std::to_underlying(InvokeFlag::ReadOnly),
@@ -143,7 +149,7 @@ TEST(TestBindingsTest, MockFrameOpenAcceptsProductionValidInvokeFlags)
           std::to_underlying(InvokeFlag::ReadOnly),
   };
 
-  for (int32_t flags : kAcceptedFlags) {
+  for (InvokeFlagSet flags : kAcceptedFlags) {
     // A fresh handler per flag value: finishing the root frame makes the
     // handler terminal, so these cannot share one.
     auto *db = make_db();

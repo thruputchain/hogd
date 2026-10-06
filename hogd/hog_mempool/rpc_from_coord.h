@@ -9,10 +9,9 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
-#include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -26,6 +25,7 @@
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -44,10 +44,12 @@
 #include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_gateway.hh"
 #include "scheduler.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -77,8 +79,6 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  static constexpr size_t kFailedAuthenticationTxsBlockExpiryDelta = 5;
-
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
                         size_t num_exec_shards = 1)
@@ -92,7 +92,7 @@ public:
 
   ~MempoolCoordinatorRpc()
   {
-    disconnect_auth_callback();
+    disconnect_auth_callback()();
     // Wait for coroutines that outlive their initiating RPC handler and still
     // touch our members -- the detached vetted-notify send and the
     // [auth_data_changed] callback (whose [auth_data_height_] broadcast tail
@@ -107,10 +107,10 @@ public:
   // RPC is destroyed. This is normally called by our destructor; the devnode's
   // failed-construction path calls it earlier because it closes the auth server
   // before member destruction reaches the coordinator.
-  void disconnect_auth_callback()
+  x23::Async<void> disconnect_auth_callback()
   {
     if (auth_rpc_ != nullptr) {
-      auth_rpc_->unregister_callback();
+      co_await auth_rpc_->unregister_callback();
       auth_rpc_ = nullptr;
     }
   }
@@ -167,10 +167,9 @@ public:
   x23::Async<CoordinatorRegistrationOutcome>
   schedulercoord_intro_coord(CoordCard card)
   {
-    info("got {}, expected {}", card.protocol.c_str(),
-         version::kHogdProtocol());
-    if (std::string_view(card.protocol) !=
-        std::string_view(version::kHogdProtocol())) {
+    info("got {}, expected {}", protocol_text(card.protocol),
+         protocol_text(version::kHogdProtocol()));
+    if (card.protocol != version::kHogdProtocol()) {
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }
@@ -200,6 +199,11 @@ public:
   // Submit an unvetted tx.
   x23::Async<void>
   schedulercoord_submit_unvetted(ParallelSignedTransactionBatch batch);
+
+  // Gateway-facing admission helper. This is deliberately not part of the
+  // coordinator RPC service; MempoolGatewayRpc exposes it as SchedGateway1.
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  submit_unvetted_with_outcomes(ParallelSignedTransactionBatch batch);
 
   // Submit a vetted tx.
   x23::Async<void>
@@ -267,6 +271,12 @@ public:
       CHECK_EQ(auth_data_height(), -1);
       CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
 
+      // Arrives over the wire, and compute_config_hash CHECKs it -- refuse a
+      // malformed one rather than abort on it.
+      if (!config_hashable(genesis_configuration.network_config)) {
+        co_return DbSchedResult::DbSchedResultError;
+      }
+
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;
       genesis_value.proposal_header.network_hash = network_hash_;
@@ -304,63 +314,63 @@ public:
     co_return ret;
   }
 
-  x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
-    x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
+    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
       ret.resize(tx_hashes.size());
       co_return ret;
     }
     ret.reserve(tx_hashes.size());
     for (const TransactionHash &tx_hash : tx_hashes) {
-      std::shared_ptr<const SignedTransaction> tx =
-          scheduler_->find_tx(tx_hash);
-      if (tx) {
-        // This is a bit awkward, but I need to copy [tx] into an [x23::Ptr]
-        // using [x23::Ptr]'s value constructor rather than just use the
-        // existing [tx] pointer. This avoids the issue where [tx] is freed from
-        // the scheduler by another thread before we can serialize and return
-        // the tx from this RPC.
-        //
-        // Even if we hold [scheduler_->global_lock_] to protect the txs rather
-        // than copy them into [tx_store], the lock is released at the end of
-        // this function, which is *before* the txs are accessed and serialized
-        // by x23. So that is still not safe.
-        ret.push_back(x23::Ptr<SignedTransaction>(*tx));
-      }
-      else {
-        ret.push_back(nullptr);
-      }
+      // [find_tx] hands back a reference into the scheduler's tx store, and
+      // the reply holds that reference until x23 has serialized the response,
+      // so the tx cannot be freed by another thread in between.  That is what
+      // the copy through [x23::Ptr]'s value constructor used to buy, and it
+      // was paying for it with a deep copy of the whole transaction --
+      // including its unbounded [Calldata] -- for every hash resolved.
+      //
+      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
+      // is an ownership change, not a wire change.
+      ret.push_back(
+          x23::XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
 
     co_return ret;
   }
 
-  // Generates a new block ID. This block ID is guaranteed to be unique for
-  // the lifetime of this process. This function is thread-safe.
-  static uint64_t generate_block_id()
+  x23::Async<SchedulerTransactionOutcomeBatch>
+  schedcoord_lookup_transaction_outcomes(const TransactionHashBatch &tx_hashes)
   {
-    static std::atomic<uint64_t> last_ns = 0;
-    while (true) {
-      auto now = std::chrono::system_clock::now();
-      uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        now.time_since_epoch())
-                        .count();
-      uint64_t last_ns_relaxed = last_ns.load(std::memory_order_relaxed);
-      if (ns == last_ns_relaxed) {
-        continue;
-      }
-      if (last_ns.compare_exchange_weak(
-              /*expected=*/last_ns_relaxed,
-              /*desired=*/ns,
-              /*order=*/std::memory_order_relaxed)) {
-        return ns;
-      }
+    SchedulerTransactionOutcomeBatch ret;
+    ret.reserve(tx_hashes.size());
+    if (!ready()) {
+      ret.resize(
+          tx_hashes.size(),
+          SchedulerTransactionOutcome{
+              .status =
+                  SchedulerTransactionStatus::SchedulerTransactionNotFound,
+              .error_source = SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorNone,
+              .error_code = 0,
+          });
+      co_return ret;
     }
+    for (const TransactionHash &tx_hash : tx_hashes) {
+      ret.push_back(co_await scheduler_->lookup_transaction_outcome(tx_hash));
+    }
+    co_return ret;
   }
 
+  // Hashes a txset this node built itself. Fatal if [hashes] repeats a
+  // transaction hash.
   static SHA256Hash get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
+
+  // Hashes a txset that came off the wire. Returns nullopt if [hashes] repeats
+  // a transaction hash, which no well-formed nomination does.
+  static std::optional<SHA256Hash>
+  try_get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
@@ -417,18 +427,47 @@ public:
     propose_batch_result_test_hook_ = std::move(hook);
   }
 
+  // Runs immediately before/after the submission auth RPC, with commit
+  // unlocked.
+  void set_submission_auth_test_hook(
+      std::function<x23::Async<void>(BlockHeight,
+                                     const SignedTransactionBatch &, bool)>
+          hook)
+  {
+    submission_auth_test_hook_ = std::move(hook);
+  }
+
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
   }
 
 private:
+  struct SubmissionAuth {
+    std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
+        accounts;
+    std::unordered_set<ContractAddress, SipHash24Hasher> dirty;
+  };
+
+  // Returns with [commit_guard] held, so results stay valid through admission.
+  x23::Async<AuthErrorCodeBatch>
+  verify_submission(const SignedTransactionBatch &txs,
+                    x23::CoroGuard &commit_guard);
+
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  submit_unvetted(ParallelSignedTransactionBatch batch,
+                  bool malformed_is_protocol_error);
+
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
   // NOLINTNEXTLINE(bugprone-exception-escape)
   struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
+    // Handed to every executor opening the block: from the coordinator's
+    // ProposalContext when proposing, from the proposal's header when
+    // validating.
+    BlockExecutionContext block_execution;
     x23::XdrVec<SignedTransaction> txs;
     x23::XdrVec<TransactionHash> tx_hashes;
 
@@ -436,10 +475,12 @@ private:
     x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
     SchedulerProposalResult proposal_result;
 
-    x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
+    x23::Vec<ExecResult> statuses =
+        x23::Vec<ExecResult>(kMaxBlockSize, ExecResult::ExecResultSystemError);
     x23::Vec<x23::XdrVec<NondeterministicProposalData>>
         transaction_nomination_chunks;
     x23::XdrVec<TransactionHash> failed_tx_hashes;
+    x23::XdrVec<ExecResult> failed_tx_results;
   };
   struct JointCommitResult {
     DbBlockResult db;
@@ -477,8 +518,22 @@ private:
     {
       DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
       if (db_res.result() == DbSchedResult::DbSchedResultOK) {
-        last_committed_block_ = db_res.db_tip();
-        CHECK_GE(last_committed_block_.value.proposal_header.block_height, 0);
+        const DbTip &recovered_tip = db_res.db_tip();
+        CHECK_GE(recovered_tip.value.proposal_header.block_height, 0);
+        // The recovered tip is the identity of the chain behind hog_db. No
+        // registration card carries a network hash, so this is the only place
+        // a shard holding another network's state can be caught before its tip
+        // is published, seeds the scheduler, and reaches every executor. The
+        // failure surfaces to the coordinator as a rejected intro.
+        if (recovered_tip.value.proposal_header.network_hash != network_hash_) {
+          throw std::runtime_error(std::format(
+              "recovered chain network hash {} does not match requested "
+              "network hash {}",
+              format_network_hash(
+                  recovered_tip.value.proposal_header.network_hash),
+              format_network_hash(network_hash_)));
+        }
+        last_committed_block_ = recovered_tip;
         auth_data_height_.store(
             last_committed_block_.value.proposal_header.block_height);
       }
@@ -522,22 +577,11 @@ private:
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
     co_await db_rpc_->register_scheduler(scheduler_);
-    const BlockHeight recovered_db_height =
-        last_committed_block_.value.proposal_header.block_height;
-    std::optional<BlockHeight> rejected_auth_height =
-        auth_rpc_->register_callback(
-            recovered_db_height,
-            [this](BlockHeight height, KeyChangeBatch key_changes) {
-              return auth_data_changed(height, std::move(key_changes));
-            },
-            [this] { initialized_.store(true, std::memory_order_release); });
-    if (rejected_auth_height) {
-      co_await db_rpc_->reset_scheduler();
-      throw std::runtime_error(std::format(
-          "auth startup watermark {} is ahead of recovered database height "
-          "{}; partial restart during an in-flight commit is unsupported",
-          *rejected_auth_height, recovered_db_height));
-    }
+    co_await auth_rpc_->register_callback(
+        [this](BlockHeight height, KeyChangeBatch key_changes) {
+          return auth_data_changed(height, std::move(key_changes));
+        },
+        [this] { initialized_.store(true, std::memory_order_release); });
     initialized_waiters_.store(true);
     initialized_waiters_.broadcast(&default_threadpool());
   }
@@ -565,20 +609,21 @@ private:
   x23::Async<void> propose_batch(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-      x23::span<bool> ret_chunk, size_t executor_idx);
+      x23::span<ExecResult> ret_chunk, size_t executor_idx);
 
   x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
-      x23::span<bool> ret);
+      x23::span<ExecResult> ret);
 
   x23::Async<void> propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-      x23::span<bool> ret);
+      x23::span<ExecResult> ret);
 
-  x23::Async<ExecResult> open_proposal_block(BlockID block_id,
-                                             size_t executor_idx);
+  x23::Async<ExecResult>
+  open_proposal_block(BlockID block_id, BlockExecutionContext block_execution,
+                      size_t executor_idx);
 
   struct InitializeBlockNodes {
     x23::DagNode<DbSchedResult> create_snapshot;
@@ -587,7 +632,7 @@ private:
     x23::DagNode<bool> initialized;
   };
   struct ScheduleNodes {
-    x23::DagNode<void> lock_scheduler;
+    x23::DagNode<void> start_nomination;
     x23::DagCleanup nomination_cleanup;
     x23::Vec<x23::DagNode<void>> schedule_chunks;
     x23::Vec<x23::DagNode<void>> propose_chunks;
@@ -647,8 +692,9 @@ private:
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs);
 
-  x23::Async<ExecResult> open_validation_block(BlockID block_id,
-                                               size_t executor_idx);
+  x23::Async<ExecResult>
+  open_validation_block(BlockID block_id, BlockExecutionContext block_execution,
+                        size_t executor_idx);
 
   static void record_submitted_vetted(size_t count);
   static void record_submitted_unvetted(size_t count);
@@ -697,11 +743,15 @@ private:
     co_return;
   }
 
-  x23::Async<void> close_validation_gate()
+  x23::Async<bool> close_validation_gate()
   {
     while (true) {
       int64_t current_validations = num_validations_in_progress_.load();
-      CHECK_GE(current_validations, 0L);
+      CHECK_GE(current_validations, -1L);
+      if (current_validations == -1) {
+        // This is a concurrent call to [close_validation_gate()].
+        co_return false;
+      }
 
       bool closed = false;
       num_validations_in_progress_.rmw([&closed](int64_t &count) {
@@ -712,7 +762,7 @@ private:
       });
       if (closed) {
         MempoolMetrics::instance().validation_in_progress_count.record(0);
-        co_return;
+        co_return true;
       }
       co_await num_validations_in_progress_.wait(current_validations);
     }
@@ -728,54 +778,6 @@ private:
     num_validations_in_progress_.broadcast(&default_threadpool());
   }
 
-  void clear_expired_failed_authentication_txs()
-  {
-    // Entries are keyed by the last committed block height at which the failed
-    // authentication should still affect validation.
-    const BlockHeight cutoff =
-        last_committed_block_.value.proposal_header.block_height;
-    for (BlockHeight height = cutoff;
-         height > cutoff - static_cast<BlockHeight>(
-                               kFailedAuthenticationTxsBlockExpiryDelta);
-         height--) {
-      failed_authentication_txs_.remove(height);
-    }
-  }
-
-  void mark_tx_failed_authentication(const TransactionHash &tx_hash)
-  {
-    const BlockHeight expiry =
-        last_committed_block_.value.proposal_header.block_height +
-        kFailedAuthenticationTxsBlockExpiryDelta;
-    auto [tx_hashes, tx_hashes_lock] = failed_authentication_txs_[expiry];
-    // We do not check whether the insert succeeds. It is possible for the same
-    // tx to be added multiple times for the same block height (two validators
-    // could each call [schedulercoord_submit_unvetted()] with the same tx).
-    tx_hashes.insert(tx_hash, 0);
-  }
-
-  bool tx_failed_authentication(const TransactionHash &tx_hash)
-  {
-    const BlockHeight min_unexpired_height =
-        last_committed_block_.value.proposal_header.block_height + 1;
-    const BlockHeight max_unexpired_height =
-        last_committed_block_.value.proposal_header.block_height +
-        kFailedAuthenticationTxsBlockExpiryDelta;
-    for (BlockHeight height = min_unexpired_height;
-         height <= max_unexpired_height; height++) {
-      auto [tx_hashes, tx_hashes_lock] =
-          failed_authentication_txs_.find(height);
-      if (tx_hashes == nullptr) {
-        continue;
-      }
-      auto [entry, tx_hash_lock] = tx_hashes->find(tx_hash);
-      if (entry != nullptr) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   MempoolDbRpc *db_rpc_;
   MempoolAuthRpc *auth_rpc_;
   const NetworkHash network_hash_;
@@ -788,6 +790,9 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
+  std::function<x23::Async<void>(BlockHeight, const SignedTransactionBatch &,
+                                 bool)>
+      submission_auth_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
@@ -798,22 +803,17 @@ private:
   // validated concurrently, [validated_block_cache_] could be accessed in
   // parallel without this lock.
   x23::CoroLock validated_block_cache_lock_;
-  // Ensures that a commit does not occur while txs are being verified. Txs
-  // are verified against a certain block height, so if they race with a block
-  // commit, we could add txs to the scheduler that are no longer verified as
-  // of the last committed block.
+  // Serializes commits, auth-data updates, and final submission admission.
   x23::CoroLock commit_lock_;
+  // Protected by [commit_lock_]. Weak pointers also handle failed or canceled
+  // authentication without requiring asynchronous cleanup.
+  std::vector<std::weak_ptr<SubmissionAuth>> submission_auth_;
   // [num_validations_in_progress_] is a gate: values > 0 are active
   // validations, 0 means validation is open, and -1 means commit has closed
   // validation admission.
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
-  using FailedAuthenticationTxSet =
-      SynchronizedMap<TransactionHash, char, SipHash24Hasher>;
-  SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
-      failed_authentication_txs_;
-
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
 

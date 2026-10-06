@@ -108,7 +108,8 @@ public:
         const SchedulerProposedBlock &proposed = res_propose.proposed_block();
         {
           SignedTransactionBatch proposed_txs;
-          CHECK(parallel_batch_to_t(proposed.txs, proposed_txs)());
+          CHECK(parallel_batch_to_t(proposed.txs, proposed_txs,
+                                    kNoBatchSizeLimit)());
           num_nominated_txs += proposed_txs.size();
         }
 
@@ -218,7 +219,8 @@ public:
       size_t num_txs = 0;
       {
         SignedTransactionBatch proposed_txs;
-        CHECK(co_await parallel_batch_to_t(proposed.txs, proposed_txs));
+        CHECK(co_await parallel_batch_to_t(proposed.txs, proposed_txs,
+                                           kNoBatchSizeLimit));
         num_txs = proposed_txs.size();
       }
 

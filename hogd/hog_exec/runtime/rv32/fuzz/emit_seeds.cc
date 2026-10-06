@@ -107,10 +107,10 @@ try {
                               /*image_start=*/8));
 
   // Break-carrier seed: knob 1 maps to the smallest run-gas cap
-  // (kFuzzMinRunGasCap = one div), so this straight line of divs lowers with a
-  // carrier at nearly every slot, putting the chunk-split refund and deficit
-  // seams in the fuzzer's starting coverage; at the production cap they are
-  // unreachable within kFuzzGasCap.
+  // (kFuzzMinRunGasCap, one instruction's worth of the priciest opcode), so
+  // this straight line of divs lowers with a carrier every couple of slots,
+  // putting the chunk-split refund and deficit seams in the fuzzer's starting
+  // coverage; at the production cap they are unreachable within kFuzzGasCap.
   std::vector<uint32_t> carrier_words(48, test_program::op(3, 1, 2, 4, 0x01));
   carrier_words.push_back(0x00000073U); // ecall
   write_file(engine_dir / "engine_carrier.bin",

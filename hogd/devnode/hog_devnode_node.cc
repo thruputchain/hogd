@@ -13,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -22,14 +23,13 @@
 #include <thread>
 #include <utility>
 
-#include "address_auth.hh"
 #include "auth_card.hh"
-#include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/cleanup.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
@@ -43,8 +43,9 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
-#include "hogd/devnode/manifest_parse.h"
+#include "hogd/devnode/bootstrap_manifest.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
+#include "hogd/devnode/manifest_hex.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_db/hog_age_reconciliation.h"
@@ -61,6 +62,7 @@
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/hog_mempool/registration.h"
+#include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/ramdb/db.h"
@@ -82,12 +84,8 @@ namespace hogd {
 
 namespace {
 constexpr char kIndexerDbSubdir[] = "indexer-db";
-constexpr char kRuntimeSubdir[] = "runtime";
-constexpr char kRamDbSubdir[] = "ramdb";
-constexpr char kEventSubdir[] = "events";
-constexpr char kIndexerSubdir[] = "indexer";
 constexpr char kDataDirMetadataFile[] = "hog-devnode-data.json";
-constexpr std::size_t kMaxDataDirMetadataBytes = 64 * 1024;
+constexpr std::size_t kMaxDataDirMetadataBytes = 256 * 1024;
 constexpr int kMetadataTempOpenFlags =
     O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC; // NOLINT(misc-include-cleaner)
 
@@ -115,30 +113,6 @@ withhold_indexer_pull_for_test()
 {
   const char *value = std::getenv("HOG_DEVNODE_TEST_WITHHOLD_INDEXER_PULL");
   return value != nullptr && std::string_view(value) == "1";
-}
-
-void
-validate_bootstrap_account_auth_data(BootstrapAccountMetadata const &account,
-                                     AddressAuthData const &auth_data)
-{
-  if (auth_data.required_weight != Weight{1}) {
-    throw std::runtime_error("bootstrap account auth data required weight "
-                             "does not match persisted metadata");
-  }
-  if (auth_data.public_keys[0] == nullptr) {
-    throw std::runtime_error(
-        "bootstrap account auth data is missing public key "
-        "from persisted metadata");
-  }
-  if (auth_data.public_keys[0]->max_weight != Weight{1}) {
-    throw std::runtime_error("bootstrap account auth data public key weight "
-                             "does not match persisted metadata");
-  }
-  if (auth_data.public_keys[0]->key.scheme() != CryptographicScheme::Ed25519 ||
-      auth_data.public_keys[0]->key.ed25519() != account.public_key) {
-    throw std::runtime_error("bootstrap account public key does not match "
-                             "persisted metadata");
-  }
 }
 
 template<typename T>
@@ -172,15 +146,30 @@ build_data_dir_metadata_json(LocalBootstrapConfig const &config)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{2});
+    w.field("schemaVersion", std::int64_t{4});
     w.field("kind", "hog-devnode-data");
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
-      w.field("devWalletProfile", config.dev_wallet_profile);
-      w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
-      w.field("devAccounts",
-              static_cast<std::int64_t>(config.user_account_count));
-      w.field("devAccountSeed", config.seed);
-      w.field("devAccountTokens", std::to_string(config.user_storage_tokens));
+      w.object_field("bootstrapFaucet", [&](json::Writer &faucet) {
+        faucet.field("publicKey", hex_string(config.faucet_public_key));
+        faucet.field("initialStorageTokens",
+                     std::to_string(kLocalFaucetStorageTokens));
+      });
+      w.array_field("bootstrapAccounts", [&](json::Writer &accounts) {
+        for (auto const &account : config.accounts) {
+          accounts.object([&](json::Writer &allocation) {
+            allocation.field("publicKey", hex_string(account.public_key));
+            allocation.field("initialStorageTokens",
+                             std::to_string(account.storage_tokens));
+          });
+        }
+      });
+      if (!config.network_config_overrides.empty()) {
+        w.object_field("networkConfigOverrides", [&](json::Writer &fields) {
+          for (auto const &[name, value] : config.network_config_overrides) {
+            fields.field(name, static_cast<std::int64_t>(value));
+          }
+        });
+      }
     });
   });
   return buffer;
@@ -310,71 +299,62 @@ parse_data_dir_metadata(std::string_view bytes)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", "root");
-  if (schema_version == 1) {
+  if (schema_version >= 1 && schema_version <= 3) {
     throw std::runtime_error(
-        "hog-devnode data metadata schemaVersion 1 uses the legacy bootstrap "
-        "layout; reinitialize the data dir");
+        "hog-devnode data metadata uses legacy bootstrap accounts; use the "
+        "original "
+        "runtime for this data directory or choose a new data directory");
   }
-  if (schema_version != 2) {
+  if (schema_version != 4) {
     throw std::runtime_error(std::format(
-        "unsupported hog-devnode data metadata schemaVersion {}, expected 2",
+        "unsupported hog-devnode data metadata schemaVersion {}, expected 4",
         schema_version));
+  }
+  std::set<std::string_view> root_fields;
+  for (auto const &[name, unused] : parsed->as_object()) {
+    if ((name != "schemaVersion" && name != "kind" &&
+         name != "bootstrapConfig") ||
+        !root_fields.insert(name).second) {
+      throw std::runtime_error(
+          std::format("unknown or duplicate data metadata field '{}'", name));
+    }
   }
   require_string_value(require_string_field(*parsed, "kind", "root"),
                        "hog-devnode-data", "kind");
 
   const json::Value &config_json =
       require_object_field(*parsed, "bootstrapConfig", "root");
-  const std::int64_t count =
-      require_integer_field(config_json, "devAccounts", "bootstrapConfig");
-  if (count < 0 || std::cmp_greater(count, kMaxBootstrapAccounts)) {
-    throw std::runtime_error(std::format(
-        "hog-devnode data metadata devAccounts {} exceeds maximum {}", count,
-        kMaxBootstrapAccounts));
+  std::set<std::string_view> config_fields;
+  for (auto const &[name, unused] : config_json.as_object()) {
+    if ((name != "bootstrapFaucet" && name != "bootstrapAccounts" &&
+         name != "networkConfigOverrides") ||
+        !config_fields.insert(name).second) {
+      throw std::runtime_error(
+          std::format("unknown bootstrapConfig field '{}'", name));
+    }
   }
-
-  const std::string_view faucet_tokens_field =
-      require_string_field(config_json, "faucetTokens", "bootstrapConfig");
-  const std::optional<std::uint64_t> faucet_tokens =
-      try_parse_u64(faucet_tokens_field);
-  if (!faucet_tokens) {
+  auto allocations = parse_local_bootstrap_accounts(config_json);
+  if (!allocations) {
     throw std::runtime_error(
-        std::format("Invalid hog-devnode data metadata faucetTokens: {}",
-                    faucet_tokens_field));
+        std::format("invalid hog-devnode data metadata: {}",
+                    allocations.error()));
   }
-  if (*faucet_tokens != kLocalFaucetStorageTokens) {
-    throw std::runtime_error(
-        std::format("hog-devnode data metadata faucetTokens must be {}, got {}",
-                    kLocalFaucetStorageTokens, *faucet_tokens));
+  LocalBootstrapConfig config = std::move(*allocations);
+  if (const auto *overrides = config_json.find("networkConfigOverrides")) {
+    if (overrides->type() != json::Value::Type::kObject) {
+      throw std::runtime_error(
+          "data metadata networkConfigOverrides must be an object");
+    }
+    for (auto const &[name, value] : overrides->as_object()) {
+      const auto number = value.as_integer();
+      if (!number || *number < 0 || std::cmp_greater(*number, UINT32_MAX)) {
+        throw std::runtime_error(
+            "data metadata network override must be a uint32 integer");
+      }
+      add_local_network_config_override(config.network_config_overrides,
+                                        std::format("{}={}", name, *number));
+    }
   }
-
-  const std::string_view dev_account_tokens =
-      require_string_field(config_json, "devAccountTokens", "bootstrapConfig");
-  const std::optional<std::uint64_t> user_storage_tokens =
-      try_parse_u64(dev_account_tokens);
-  if (!user_storage_tokens) {
-    throw std::runtime_error(
-        std::format("Invalid hog-devnode data metadata devAccountTokens: {}",
-                    dev_account_tokens));
-  }
-  LocalBootstrapConfig config{
-      .user_account_count = static_cast<std::uint32_t>(count),
-      .seed = std::string(require_string_field(config_json, "devAccountSeed",
-                                               "bootstrapConfig")),
-      .user_storage_tokens = *user_storage_tokens,
-      .dev_wallet_profile =
-          std::string(require_string_field(config_json, "devWalletProfile",
-                                           "bootstrapConfig")),
-  };
-  if (config.seed.empty()) {
-    throw std::runtime_error(
-        "hog-devnode data metadata devAccountSeed must not be empty");
-  }
-  if (config.dev_wallet_profile.empty()) {
-    throw std::runtime_error(
-        "hog-devnode data metadata devWalletProfile must not be empty");
-  }
-  resolve_dev_wallet_profile(config.dev_wallet_profile);
   return config;
 }
 
@@ -382,27 +362,19 @@ void
 require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
                                   LocalBootstrapConfig const &requested)
 {
-  auto fail = [](std::string_view flag, std::string_view expected,
-                 std::string_view actual) {
-    throw std::runtime_error(std::format(
-        "hog-devnode data dir was initialized with different {}; expected "
-        "'{}', got '{}'",
-        flag, expected, actual));
-  };
-  if (persisted.user_account_count != requested.user_account_count) {
-    fail("--dev-accounts", std::to_string(persisted.user_account_count),
-         std::to_string(requested.user_account_count));
+  if (persisted.faucet_public_key != requested.faucet_public_key ||
+      persisted.accounts != requested.accounts) {
+    throw std::runtime_error(
+        "hog-devnode data dir was initialized with different bootstrap "
+        "accounts; "
+        "reuse the original public allocations or choose a new data directory");
   }
-  if (persisted.seed != requested.seed) {
-    fail("--dev-account-seed", persisted.seed, requested.seed);
-  }
-  if (persisted.user_storage_tokens != requested.user_storage_tokens) {
-    fail("--dev-account-tokens", std::to_string(persisted.user_storage_tokens),
-         std::to_string(requested.user_storage_tokens));
-  }
-  if (persisted.dev_wallet_profile != requested.dev_wallet_profile) {
-    fail("--dev-wallet-profile", persisted.dev_wallet_profile,
-         requested.dev_wallet_profile);
+  if (persisted.network_config_overrides !=
+      requested.network_config_overrides) {
+    throw std::runtime_error(
+        "hog-devnode data dir was initialized with different --network-config "
+        "overrides; reuse the original overrides or choose a fresh data "
+        "directory");
   }
 }
 
@@ -421,6 +393,28 @@ preflight_data_dir_metadata(
       throw std::runtime_error(std::format(
           "could not inspect hog-devnode data dir metadata '{}': {}",
           path.string(), ec.message()));
+    }
+    // Directory setup runs before this preflight. Empty subsystem directories
+    // are a fresh skeleton; any persisted file requires compatible metadata.
+    for (const auto *name : {"ramdb", "events", "indexer"}) {
+      const auto subsystem = *data_dir / name;
+      if (!std::filesystem::exists(subsystem, ec)) {
+        if (ec) {
+          throw std::runtime_error(
+              std::format("could not inspect data directory: {}",
+                          ec.message()));
+        }
+        continue;
+      }
+      for (const auto &entry :
+           std::filesystem::recursive_directory_iterator(subsystem)) {
+        if (!entry.is_directory()) {
+          throw std::runtime_error(
+              "hog-devnode data directory has persisted state but no bootstrap "
+              "metadata; "
+              "use the original runtime or choose a new data directory");
+        }
+      }
     }
     return;
   }
@@ -496,20 +490,20 @@ run_ramdb_open(std::size_t ramdb_bytes, Fn &&fn)
 
 HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
+    HogDevnodeDirectories directories,
     LocalBootstrapConfig const &bootstrap_config,
     std::optional<std::filesystem::path> const &data_dir,
     NetworkHash network_hash, std::size_t ramdb_bytes)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
-    ramdb_bytes_(ramdb_bytes), runtime_dir_(data_dir, kRuntimeSubdir),
-    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
-    indexer_dir_(data_dir, kIndexerSubdir), opened_db_([this] {
+    ramdb_bytes_(ramdb_bytes), dirs_(std::move(directories)),
+    opened_db_([this] {
       // Reject incompatible bootstrap intent before opening or migrating any
       // persisted chain state.
       preflight_data_dir_metadata(data_dir_, bootstrap_config_);
       return open_db_backend();
     }()),
-    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
+    event_ctx_(dirs_.event.directory()), event_sched_server_(event_ctx_),
     event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
 {
   try {
@@ -521,6 +515,7 @@ HogDevnodeNode::HogDevnodeNode(
 
     // Genesis bootstrap payloads can be larger than the transport default.
     mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    mempool_gateway_server_->max_message_size_ = kDevRpcMaxMessageSize;
     mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
 
     // Start the mempool RPC servers. All of the subsystems register with the
@@ -532,6 +527,8 @@ HogDevnodeNode::HogDevnodeNode(
         make_bind_host_port(bind_host_, /*port=*/0));
     mempool_coord_server_.start_server(
         make_bind_host_port(bind_host_, requested_scheduler_port));
+    mempool_gateway_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
     mempool_auth_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
 
@@ -659,7 +656,7 @@ HogDevnodeNode::~HogDevnodeNode()
     // Note: unlike prepare_for_failed_construction(), we do not need to drain
     // [mempool_auth_server_] here. [ctx_.reset()] below tears down the DB's
     // auth-change subscription manager, whose destructor waits for in-flight
-    // [authdb_forward_key_changes] forwards -- and thus the downstream
+    // [authdb_forward_key_changes_chunk] forwards -- and thus the downstream
     // [auth_data_changed] callbacks -- to finish, before the member destructors
     // tear down [mempool_coord_server_]. Draining the auth server here would
     // instead close it while the subscription manager is still forwarding,
@@ -706,7 +703,11 @@ HogDevnodeNode::prepare_for_failed_construction() noexcept
     // already captured coordinator state; this also clears the coordinator's
     // borrowed auth pointer before the server is destroyed. This is also safe
     // when construction failed before a callback was registered.
-    mempool_coord_server_.impl()->disconnect_auth_callback();
+    [](RpcServer<MempoolCoordinatorRpc> &mempool_coord_server)
+        -> x23::Async<void> {
+      co_await default_threadpool().bg();
+      co_await mempool_coord_server.impl()->disconnect_auth_callback();
+    }(mempool_coord_server_)();
     mempool_auth_server_.reset();
     // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
     // the coordinator registered the scheduler (e.g. the post-genesis failure
@@ -738,7 +739,7 @@ void
 HogDevnodeNode::init_indexer_backend()
 {
   std::filesystem::path db_path =
-      std::filesystem::path(indexer_dir_.directory()) / kIndexerDbSubdir;
+      std::filesystem::path(dirs_.indexer.directory()) / kIndexerDbSubdir;
   IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(db_path);
   if (!db_status) {
     panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
@@ -894,7 +895,7 @@ HogDevnodeNode::validate_recovered_data_dir(
     }
     throw std::runtime_error(
         "hog-devnode data dir has committed chain state but no bootstrap "
-        "metadata; reinitialize the data dir");
+        "metadata; use the original runtime or choose a new data directory");
   }
 
   LocalBootstrapConfig persisted_config =
@@ -947,9 +948,16 @@ HogDevnodeNode::materialize_bootstrap_accounts(
       build_local_bootstrap_account_artifact(config, network_hash_,
                                              ctx_->get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
-  CHECK_EQ(client.schedcoord_load_genesis_configuration(
-               std::move(artifact.genesis_configuration))(),
-           DbSchedResult::DbSchedResultOK);
+  const auto genesis_result = client.schedcoord_load_genesis_configuration(
+      std::move(artifact.genesis_configuration))();
+  if (genesis_result != DbSchedResult::DbSchedResultOK) {
+    panic("devnode could not load the genesis configuration: {}. A "
+          "--network-config override is likely outside the bounds this build "
+          "accepts. If this node has a persistent --data-dir, it already "
+          "recorded the requested overrides; correct them and start from a "
+          "fresh data directory.",
+          genesis_result);
+  }
   co_await initialize_fresh_event_outbox_origin();
   register_event_with_mempool();
   register_executor_with_mempool();
@@ -1013,14 +1021,11 @@ void
 HogDevnodeNode::refresh_bootstrap_account_balances()
 {
   for (BootstrapAccountMetadata &account : bootstrap_accounts_) {
-    HogDbStatus<AddressAuthData> auth_data =
-        ctx_->get_db().read_address_auth_data(account.address);
-    if (!auth_data.has_value()) {
+    if (account.address !=
+        derive_bootstrap_account_address(account.public_key)) {
       throw std::runtime_error(
-          "bootstrap account metadata does not match recovered chain: missing "
-          "auth data");
+          "bootstrap account address does not match derived native account");
     }
-    validate_bootstrap_account_auth_data(account, *auth_data);
 
     HogDbStatus<int128_t> balance =
         ctx_->get_db().read_address_balance(account.address);
@@ -1043,20 +1048,20 @@ HogDbDAO
 HogDevnodeNode::open_db_backend() const
 {
   DBStatus<std::uint64_t> lsn = run_ramdb_open(ramdb_bytes_, [&] {
-    return Database::check(db_dir_.directory(), ramdb_bytes_);
+    return Database::check(dirs_.db.directory(), ramdb_bytes_);
   });
   if (!lsn.has_value()) {
     lsn.error().raise("ramdb integrity check failed for '{}'",
-                      db_dir_.directory());
+                      dirs_.db.directory());
   }
   info("database '{}' passed integrity check; current LSN is {}",
-       db_dir_.directory(), *lsn);
+       dirs_.db.directory(), *lsn);
 
   DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(ramdb_bytes_, [&] {
-    return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
+    return Database::open_lsn(dirs_.db.directory(), *lsn, ramdb_bytes_);
   });
   if (!ramdb.has_value()) {
-    ramdb.error().raise("ramdb open failed for '{}'", db_dir_.directory());
+    ramdb.error().raise("ramdb open failed for '{}'", dirs_.db.directory());
   }
 
   HogDbDAO db(RAMDB(std::move(*ramdb)));

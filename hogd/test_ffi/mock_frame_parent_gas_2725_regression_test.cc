@@ -3,7 +3,7 @@
 // A manually-opened mock invocation frame must be metered exactly the way
 // production kInvoke meters a child frame. Production does this in two places:
 //
-//   * syscall_Invoke_inner() calls SystemCallHandler::invoke() with
+//   * syscall_Invoke_inner()() calls SystemCallHandler::invoke() with
 //     min(requested gas_limit, remaining_gas), so a child frame is never
 //     admitted with a bigger budget than its parent still has; and
 //   * wrap_after_parse()'s gas epilogue rewrites a handleable syscall result to
@@ -72,9 +72,12 @@
 namespace hogd {
 namespace {
 
-// Gas a one-byte kSHA256 syscall costs. The tests size the parent frame around
-// this so the child's spend lands exactly on, or just under, the parent budget.
-constexpr GasAmount kShaGas = SHA256HashCost(1);
+// Gas a one-byte kSHA256 syscall costs, in total: what the body bills for the
+// hash plus the crossing every syscall pays, which wrap_after_parse_async adds
+// centrally. The tests size the parent frame around this so the child's spend
+// lands exactly on, or just under, the parent budget -- so it has to be the
+// whole charge, not just the body's share.
+constexpr GasAmount kShaGas = GasCost::sha256_hash(1) + kSyscallBaseCost;
 
 Invocation
 make_invocation(ContractAddress address, uint64_t method, GasAmount gas_limit)
@@ -252,8 +255,9 @@ TEST(TestBindingsTest, UnderBudgetChildFinishesParentInvokeAsSuccess)
   ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(handler.syscall_handler, nullptr);
 
-  // One gas unit of headroom above what the child will spend.
-  constexpr GasAmount kParentGas = kShaGas + 1;
+  // One gas unit of headroom above what the child will spend plus the crossing
+  // the parent's own Invoke pays for reaching it.
+  constexpr GasAmount kParentGas = kShaGas + kSyscallBaseCost + 1;
   ASSERT_EQ(open_frame(handler.syscall_handler,
                        make_invocation(ContractAddress{0xA0}, 0x1111,
                                        kParentGas)),
@@ -295,7 +299,8 @@ TEST(TestBindingsTest, UnderBudgetChildFinishesParentInvokeAsSuccess)
   auto const &invoke_trace = trace.system_calls[0];
   EXPECT_EQ(invoke_trace.body.syscall_number(), SyscallNo::kInvoke);
   EXPECT_EQ(invoke_trace.gas_remaining_at_start, kParentGas);
-  EXPECT_EQ(invoke_trace.gas_remaining_at_end, kParentGas - kShaGas);
+  EXPECT_EQ(invoke_trace.gas_remaining_at_end,
+            kParentGas - kShaGas - kSyscallBaseCost);
   EXPECT_EQ(invoke_trace.status.error(), HostFnErrorCode::NoneOrRecoverable);
   EXPECT_EQ(invoke_trace.status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeNone);

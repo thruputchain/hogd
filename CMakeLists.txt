@@ -6,6 +6,12 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.18)
 # Configuration parameters
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Nothing here uses C++20 modules. Without this, CMake scans every source
+# of a project that declares cmake_minimum_required(VERSION 3.28) or newer
+# (x23) for module imports: an extra preprocessing step per file, and with GCC
+# a -fmodules-ts flag that ccache refuses to cache ("unsupported compiler
+# option"), so CI recompiled all of x23 (~155 files) on every GCC build.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_COLOR_MAKEFILE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -124,6 +130,7 @@ set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
   CACHE PATH "Path to googletest" FORCE)
 enable_testing()
 include(GoogleTest)
+include(cmake/hogd_tests.cmake)
 
 # When enabled, test commands are prefixed with a wrapper that captures gdb
 # backtraces on timeout (instead of ctest's silent SIGKILL).
@@ -202,6 +209,11 @@ endif()
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)
+# x23c runs during the build to generate XDR bindings. The server CPU target
+# must not make this host tool require Zen 5 instructions on the CI runner.
+if(BUILD_ARCHITECTURE STREQUAL "znver5")
+  target_compile_options(x23c PRIVATE -march=x86-64-v2)
+endif()
 include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 
 option(RUST_TSAN

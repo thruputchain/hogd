@@ -60,6 +60,12 @@ target_link_libraries(
 add_executable(
   hog_event_test
   $<TARGET_OBJECTS:hog_event_test_objects>
+  event_process_test.cc
+)
+target_compile_definitions(
+  hog_event_test
+  PRIVATE
+  HOG_EVENT_BINARY="$<TARGET_FILE:hog-event>"
 )
 target_link_libraries(
   hog_event_test
@@ -67,7 +73,13 @@ target_link_libraries(
   hog_event
   GTest::gtest
 )
-gtest_discover_tests(hog_event_test)
+add_dependencies(hog_event_test hog-event)
+target_include_directories(
+  hog_event_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+hogd_discover_tests(hog_event_test)
 
 add_executable(
   hog_event_server_bench

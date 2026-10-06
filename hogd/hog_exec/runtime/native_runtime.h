@@ -8,11 +8,13 @@
 
 #include "contract.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/unique_function.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -49,8 +51,11 @@ class NativeSyscallContext;
 
 class NativeContract {
 public:
-  using function_t =
-      UniqueFunction<InvokeStatus<void>(NativeSyscallContext &) const noexcept>;
+  // Not noexcept: these bodies are coroutines now (they await syscalls), and
+  // a coroutine's frame allocation can throw before the body runs.
+  // NativeContract::invoke() re-establishes the noexcept boundary.
+  using function_t = UniqueFunction<x23::Async<InvokeStatus<void>>(
+      NativeSyscallContext &) const>;
   using function_entry_t = std::pair<Runtime::MethodID, function_t>;
 
   NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)
@@ -70,12 +75,20 @@ public:
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
-  std::pair<InvokeStatus<void>, GasAmount>
+  // Stays noexcept and is not itself a coroutine; it catches the frame
+  // allocation of invoke_impl() below (cf. Rv32Runtime::invoke_internal).
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke(Runtime::MethodID method, SystemCallHandler &syscall_handler,
          uint64_t gas_limit) const noexcept;
 
 private:
   const function_t *find_function(Runtime::MethodID method) const;
+
+  // Body of invoke(); owns the NativeSyscallContext across suspensions.
+  // Static: it works entirely from the resolved function and the handler.
+  static x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  invoke_impl(function_t const &fn, SystemCallHandler &syscall_handler,
+              uint64_t gas_limit);
 
   const std::vector<function_entry_t> functions_;
 };
@@ -91,19 +104,27 @@ public:
 
   ~NativeContext() override = default;
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 
-  InvokeErrorCode verify_contract(Contract const &contract) const override
+  // Native contracts are registered at genesis, not translated: there is
+  // nothing to prepare, so `out` is left alone.
+  InvokeErrorCode
+  verify_contract(Contract const &contract,
+                  NetworkConfigParams const & /*params*/,
+                  PreparedContract & /*out*/,
+                  std::optional<ContractRejectCode> &rejection) const override
   {
     CHECK(contract.contract_type() == ContractType::kNative);
     if (contracts_.contains(
             std::to_underlying(contract.native_contract_id()))) {
       return InvokeErrorCode::None;
     }
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
     return InvokeErrorCode::Deterministic;
   }
+  using RuntimeContext::verify_contract;
 
 private:
   const std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts_;
@@ -130,7 +151,7 @@ public:
   ~NativeRuntime() override = default;
 
 private:
-  std::pair<InvokeStatus<void>, GasAmount>
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
   NativeContract const &contract_;

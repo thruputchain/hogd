@@ -7,7 +7,6 @@
 #include <optional>
 #include <span>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -21,13 +20,17 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
+#include "hogd/container/flat_key_set.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/transaction_stats.h"
@@ -47,16 +50,23 @@
 namespace hogd {
 
 class StorageSnapshotCache;
-// Defined in rv32/rv32_contract.h. Held only by pointer here (stored as
-// unique_ptr in the per-transaction translation cache), so a forward
-// declaration keeps the heavy rv32 header out of this widely-included one.
-class Rv32Contract;
 
-// TODO(geoff): root_invoke() validates any incoming wasm blobs.
+// What a storage read found, and what its database load cost.
+//
+// [load_gas] is nonzero only when the read was this transaction's first touch
+// of the key, and is set whether or not [result] is an error: a read of a
+// missing key, or of one holding another type, has already gone to the
+// database by the time it can tell. Callers add it to the gas they charge.
+template<typename T> struct StorageRead {
+  SyscallStatus<T> result;
+  GasAmount load_gas;
+};
+
+// TODO(geoff): root_invoke() validates any incoming contract code blobs.
 // We may later do that validation preemptively in the coordinator.
-// We may also wish to add checks to make sure that a wasm that's created
-// is actually deployed, and/or put limits on the size of an individual wasm.
-// What's done here is only check well-formedness of the wasm.
+// We may also wish to add checks to make sure that a contract that's created
+// is actually deployed, and/or put limits on the size of an individual
+// contract. What's done here is only check well-formedness of the code.
 
 // Data structure that manages all system calls and state associated with a
 // running transaction.
@@ -68,8 +78,8 @@ class Rv32Contract;
 //   pushes its state changes into its parent frame.
 //   - Storage Snapshot Cache reference: Object in which lookups to the database
 //   are cached (reads).
-//   - Wasmi Context: Stores any relevant state internal to Wasmi.  Can be
-//   shared across runtime instances and across transactions.
+//   - Runtime Context: Stores any relevant state internal to the contract
+//   runtime.  Can be shared across runtime instances and across transactions.
 //   Not implemented to be threadsafe.
 class SystemCallHandler {
 public:
@@ -78,6 +88,15 @@ public:
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context);
+
+  // The handler borrows tx.contracts_to_deploy for its whole lifetime (see
+  // contracts_to_deploy_ below), so a temporary Transaction would dangle
+  // before first use. Deleted to make that a compile error at the call site.
+  SystemCallHandler(Transaction &&tx, StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy db_proxy,
+                    PerTransactionEventServerProxy event_server_proxy,
+                    ExecutionModeCtor execution_mode_ctor,
+                    RuntimeContext &runtime_context) = delete;
 
   // Constructor for test harness, mock infrastructure
   SystemCallHandler(StorageSnapshotCache &snapshot_cache,
@@ -93,9 +112,6 @@ public:
   SystemCallHandler(const SystemCallHandler &ll) = delete;
   SystemCallHandler &operator=(const SystemCallHandler &ll) = delete;
 
-  // Defined out-of-line so the forward-declared Rv32Contract (held by
-  // unique_ptr in local_rv32_translations_) is complete at the point of
-  // destruction.
   ~SystemCallHandler();
 
   // Debug management operations
@@ -108,7 +124,7 @@ public:
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Must only be called once per transaction.
-  InvokeResult root_invoke();
+  x23::Async<InvokeResult> root_invoke();
 
   // Lower level functions to manipulate the invocation stack.
   // These should ONLY be used within the testing framework
@@ -118,10 +134,14 @@ public:
   // restored in finish_frame. Returns an Unrecoverable SystemError if child
   // frame admission fails under memory pressure; no child frame is pushed in
   // that case, so finish_frame must not be called (#3058).
+  //
+  // The frame's limits come from config_params(), held by the frame stack, so
+  // this stays a noexcept non-coroutine boundary the FFI mock path enters.
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids) noexcept;
-  SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
+              ValidatedAuthTokens owned_auth_tokens) noexcept;
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>>
+  finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
 
@@ -140,16 +160,25 @@ public:
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
   // Admission checks a new invocation frame must pass, in the order their
-  // error codes take precedence: valid flags, no reentrance, then auth tokens
-  // owned by the caller. invoke() runs these before creating a child frame;
-  // the test FFI mock frame path enters at start_frame(), below invoke(), so
-  // it runs them itself (#3301). The Invoke syscall body runs them before it
-  // copies the caller's calldata, so a rejected invoke does no
-  // length-dependent host work (#2973). Failing is a no-op -- nothing here
-  // mutates the handler, so any of those callers may ask more than once.
+  // error codes take precedence, grouped by the question each answers:
+  //
+  //   can this frame make any such call -- valid flags, no reentrance, room
+  //   under the cross-invoke depth bound;
+  //   does this call hold up -- auth tokens owned by the caller.
+  //
+  // Reentrance and the depth bound are conditions of the calling frame, so
+  // they outrank the request's own validity: a reentrant or too-deep invoke
+  // reports that even when it also forwards a token it does not own (#2973
+  // established this for reentrance; the depth bound follows the same rule).
+  //
+  // Callers must run this before invoke(); invoke() does not repeat it.
+  //
+  // Failing is a no-op -- nothing here mutates the handler. The depth bound is
+  // a plain load off the tip the snapshot cache loaded when the block was
+  // opened.
   [[nodiscard]] SyscallStatus<void>
   validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
-                          std::span<uint32_t const> owned_auth_token_ids) const;
+                          ValidatedAuthTokens const &owned_auth_tokens) const;
 
   // Copy events from the currently active invocation frame.
   x23::Vec<TxEmittedEvent> copy_active_frame_events() const
@@ -165,18 +194,13 @@ public:
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return (*last_frame_).get_events();
   }
-  // Called after the root invocation frame finishes (by root_invoke or
-  // the mock path).  Runs final validation on cumulative_invoke_result_
-  // and sets root_invoke_succeeded_ if appropriate.
-  void finalize_after_root_frame();
-
-  // Allow the mock path to set cumulative_invoke_result_ before calling
-  // finalize_after_root_frame().  Must be called before finalization.
-  void mock_set_cumulative_invoke_result(InvokeResult result)
-  {
-    assert(!finalized_);
-    cumulative_invoke_result_ = result;
-  }
+  // Called after the root invocation completes (by root_invoke or the mock
+  // path) with the root frame's result. Stores it as root_invoke_result_
+  // (rewriting it to ValidationFailure if final validation fails), marks the
+  // root invocation finished (last_frame_finished_), and returns the
+  // finalized result -- callers must consume the return value, not the
+  // argument they passed in, or they miss the rewrite.
+  [[nodiscard]] InvokeResult finalize_after_root_frame(InvokeResult result);
 
   template<SyscallNo Syscall> auto *get_syscall_trace_data() noexcept
   {
@@ -206,7 +230,7 @@ public:
   // Requirement: root_invoke() must be called first.
   // Calls abort_transaction if either the commit fails or
   // the root_invoke earlier had an error.
-  ExecResult try_commit_transaction();
+  x23::Async<ExecResult> try_commit_transaction();
 
   // The two-phase-commit conflict diagnostic from the most recent failed commit
   // push (the root lock-acquire / 2pc push, or the commit_body_discarded RCQ /
@@ -221,7 +245,7 @@ public:
   // ExecResultTxNonDeterministicError) before interpreting this value.
   DbConflictResult const &last_commit_conflict() const;
 
-  SystemStatus<void> abort_transaction();
+  [[nodiscard]] x23::Async<SystemStatus<void>> abort_transaction();
 
   // Adds the replay-nonce consume delta for the root invoked address to the
   // current subtransaction batch (no-op when there is no uniquifier). The delta
@@ -235,16 +259,17 @@ public:
   // replay nonce to one batch, pushes it, then commits. A reservation conflict
   // (forged observation or replay) aborts the transaction and returns
   // ExecResultTxNonDeterministicError; otherwise returns success_result.
-  ExecResult commit_body_discarded(ExecResult success_result);
-  // Emit the transaction's event log to the event server.
+  x23::Async<ExecResult> commit_body_discarded(ExecResult success_result);
+  // Emit the transaction's event log, including the gas the root result
+  // consumed, to the event server.
   // Called for all deterministic outcomes (OK, DeterministicError, Reverted).
   //
   // [proposed_tx] is the full transaction body forwarded to the event server
   // alongside the event log (assembled in proposal mode, forwarded in
   // validation mode).  Tests that only exercise the event-log path pass an
   // empty ProposedTransaction{} explicitly.
-  x23::Async<SystemStatus<void>> emit_events(ExecResult exec_result,
-                                             ProposedTransaction proposed_tx);
+  [[nodiscard]] x23::Async<SystemStatus<void>>
+  emit_events(ExecResult exec_result, ProposedTransaction proposed_tx);
 
   // Get the proposal data.
   // Can only be called after root_invoke()
@@ -266,7 +291,8 @@ public:
   }
 
   // Create and run a child call frame.
-  // Should be called from within a syscall.
+  // Should be called from within a syscall, after validate_new_invocation()
+  // has admitted the call; invoke() does not repeat those checks.
   //
   // The result layers the two failure channels:
   //  - outer SystemError: a block-ending error (Unrecoverable / Abandon /
@@ -277,16 +303,17 @@ public:
   //  - value (InvocationFrameStatusCode): a child frame ran; the value is how
   //    it ended (Return / Abort / Fault).
   [[nodiscard]]
-  std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>
+  x23::Async<std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
+                       GasAmount>>
   invoke(ContractAddress const &address, Runtime::MethodID method,
          GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
-         std::span<uint32_t const> owned_auth_token_ids);
+         ValidatedAuthTokens owned_auth_tokens);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
   const ContractAddress &get_current_address() const;
 
-  SyscallStatus<ContractAddress> get_msg_sender() const;
+  [[nodiscard]] SyscallStatus<ContractAddress> get_msg_sender() const;
   SHA256Hash get_source_tx_hash() const;
 
   // return the calldata associated with the current active invocation.
@@ -303,27 +330,30 @@ public:
 
   // Get the buffer returned by a child call frame.
   // Error if most recent child did call set_return_buffer.
-  SystemStatus<SyscallStatus<const ReturnBuffer *>> get_return_buffer() const;
+  [[nodiscard]] SystemStatus<SyscallStatus<const ReturnBuffer *>>
+  get_return_buffer() const;
   std::span<const uint32_t> get_returned_auth_token_ids() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.
   void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame,
                          std::vector<uint32_t> returned_auth_token_ids = {});
 
-  SyscallStatus<void> log_event(Topic const *topic0, Topic const *topic1,
-                                Topic const *topic2,
-                                std::span<const std::byte> data);
-  SyscallStatus<void> log_event(uint32_t num_topics,
-                                std::span<const std::byte> data);
+  [[nodiscard]] SyscallStatus<void> log_event(Topic const *topic0,
+                                              Topic const *topic1,
+                                              Topic const *topic2,
+                                              std::span<const std::byte> data);
+  [[nodiscard]] SyscallStatus<void> log_event(uint32_t num_topics,
+                                              std::span<const std::byte> data);
 
   static ContractAddress
   static_get_deploy_address(ContractAddress const &sender,
                             SHA256Hash const &nonce,
                             SHA256Hash const &contract_hash);
 
-  SystemStatus<SyscallStatus<ContractAddress>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<ContractAddress>>>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
   bool is_read_only() const
@@ -332,84 +362,109 @@ public:
   }
 
   // === Crypto syscalls ===
-  SyscallStatus<void> sha256_update(uint32_t input_index,
-                                    std::span<const std::byte> input_buffer,
-                                    bool input_reset);
-  SyscallStatus<void> sha256_copy(uint32_t input_src_index,
-                                  uint32_t input_dst_index);
-  SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
+  [[nodiscard]] SyscallStatus<void>
+  sha256_update(uint32_t input_index, std::span<const std::byte> input_buffer,
+                bool input_reset);
+  [[nodiscard]] SyscallStatus<void> sha256_copy(uint32_t input_src_index,
+                                                uint32_t input_dst_index);
+  [[nodiscard]] SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
-  SystemStatus<SyscallStatus<const Bytestring *>>
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<std::span<const uint8_t>>>>
   get_bytestring(StorageKeyContractData const &storage_key);
-  SystemStatus<SyscallStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_bytestring(StorageKeyContractData const &storage_key,
-                 std::span<const std::byte> input_bytestring,
-                 StorageDeltaFlagSet input_flags);
+                 std::span<const std::byte> input_bytestring);
 
   // === Nonnegative Integer syscalls ===
   // get_nnint returns the base value and the add value.
   // Returns the base value from the snapshot if load_from_snapshot is true.
   // Otherwise, returns a tx-local written set value, if one exists,
   // or nullopt if not.
-  SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
+  x23::Async<
+      SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
   get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
 
-  SystemStatus<SyscallStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_nnint(StorageKeyContractData const &storage_key,
-            std::optional<int128_t> set_value, const int128_t &add_value,
-            StorageDeltaFlagSet input_flags);
+            std::optional<int128_t> set_value, const int128_t &add_value);
 
   // === Delete syscall ===
-  SystemStatus<SyscallStatus<void>>
-  delete_object(StorageKeyContractData const &storage_key,
-                StorageDeltaFlagSet flags);
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  delete_object(StorageKeyContractData const &storage_key);
+
+  // === Storage flags syscalls ===
+  // A key's flags belong to the transaction's pending write to it, not to any
+  // single write: writes leave them alone, and every delta pushed for the key
+  // carries them. set_storage_flags ORs flags in and fails if no write to the
+  // key is pending in the active frame's view; clear_storage_flags removes
+  // them all.
+  [[nodiscard]] SyscallStatus<void>
+  set_storage_flags(StorageKeyContractData const &storage_key,
+                    StorageDeltaFlagSet flags);
+  [[nodiscard]] StorageDeltaFlagSet
+  get_storage_flags(StorageKeyContractData const &storage_key);
+  void clear_storage_flags(StorageKeyContractData const &storage_key);
 
   // === Retrocausal Queue syscalls ===
-  SystemStatus<SyscallStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
-  SystemStatus<SyscallStatus<QueueEntry>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
-  SystemStatus<SyscallStatus<int128_t>>
+  // The load cost get_native_token_balance() would charge now, without loading.
+  // The two must agree on what counts as a cold touch.
+  [[nodiscard]] GasAmount
+  peek_native_token_balance_load_gas(ContractAddress const &contract_address);
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<int128_t>>>
   get_native_token_balance(ContractAddress const &contract_address);
-  SystemStatus<SyscallStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   modify_native_token_balance(ContractAddress const &contract_address,
                               int128_t transfer_amount);
 
   // == Authentication syscalls ==
-  SystemStatus<SyscallStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   change_public_key_registration(uint32_t key_index,
                                  PublicKeyConfigOpt new_key);
 
-  SystemStatus<SyscallStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_address_required_weight(Weight required_weight);
 
   // Auth token syscalls
-  SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
-  SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
+  [[nodiscard]] SyscallStatus<uint32_t>
+  mint_auth_token(AuthToken const &auth_token);
+  [[nodiscard]] SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
   // == Block statistics syscalls ==
-  // These are based on reading the db tip.
-  SystemStatus<BlockHeight> get_block_height() const;
+  // Served off the tip the snapshot cache loaded when the block was opened,
+  // so reading one cannot fail.
+  BlockHeight get_block_height() const;
+  NetworkHash const &get_network_hash() const;
+
+  // Served from the BlockExecutionContext the block was opened with: for an
+  // open block the tip is the parent, whose timepoint is the previous block's.
+  TimePoint get_block_timepoint() const;
 
   // == General access methods ==
   //
   // returns nullptr if the contract does not exist
-  SystemStatus<const Contract *> resolve_contract(SHA256Hash const &hash) const;
+  [[nodiscard]] x23::Async<SystemStatus<const Contract *>>
+  resolve_contract(SHA256Hash const &hash) const;
 
-  // Returns a translated rv32 contract for a transaction-local deployment,
-  // translating and caching it in this handler on first use. The returned
-  // pointer is owned by this handler (stable for the transaction's lifetime)
-  // and borrowed by the Rv32Runtime. `contract` must be the kRv32 contract for
-  // `hash`. Returns nullptr if translation fails.
-  const Rv32Contract *
-  get_or_create_local_rv32_translation(SHA256Hash const &hash,
-                                       Contract const &contract);
+  // Returns the image already built for `hash`: by perform_initial_validation
+  // for an attachment, or by the block-scoped snapshot cache when it loaded an
+  // already-committed contract. Never builds a second one. The result is
+  // borrowed -- both owners are node-stable and outlive this transaction's
+  // runtimes. Returns nullptr (wrapped) if `hash` names no contract.
+  [[nodiscard]] x23::Async<SystemStatus<const PreparedContract *>>
+  resolve_prepared_contract(SHA256Hash hash);
+
+  // The parameters this transaction's chain puts in force.
+  NetworkConfigParams const &config_params() const;
 
   // == Error conversion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
@@ -438,30 +493,36 @@ private:
   const std::optional<Uniquifier> tx_uniquifier_;
   const std::optional<ContractAddress> root_invoked_address_;
 
-  // Searchable map of contracts that are implicitly created by the current
-  // transaction.
-  const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                           SipHash24Hasher>
-      newly_created_contracts_;
-
-  // Per-transaction cache of translated rv32 contracts for transaction-local
-  // deployments (which are not in the block-scoped StorageSnapshotCache).
-  // Filled lazily, keyed by contract hash; a null mapped value memoizes a
-  // non-translatable artifact so we never retranslate. Entries are node-stable
-  // and borrowed by Rv32Runtime, so they must outlive the runtimes -- they live
-  // for the whole transaction.
-  std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, SipHash24Hasher>
-      local_rv32_translations_;
-
   ExecutionModeData execution_mode_data_;
+
+  // Borrowed, not copied (the #1538 deep copy is intentionally gone): this
+  // references the ctor tx's contracts_to_deploy (kEmptyVec for the tx-less
+  // ctor), and newly_created_contracts_ holds raw pointers into its elements.
+  // The caller must keep the element storage alive for the handler's
+  // lifetime. Moving the enclosing SignedTransaction is fine -- x23::Vec's
+  // move steals the heap buffer, so element addresses are stable, and this
+  // reference is only read in perform_initial_validation() anyway -- but
+  // destroying the elements is not. executor_context.cc relies on this: it
+  // moves signed_tx into the detached event coroutine after
+  // try_commit_transaction(), the last point the contract pointers are read.
+  NewContractBatch const &contracts_to_deploy_;
+  // Empty until perform_initial_validation() populates it; a plain value (not
+  // an optional) so pre-validation resolve_contract() calls -- e.g. a test
+  // building a runtime without running root_invoke() -- see an empty set and
+  // fall through to the snapshot cache instead of hitting UB.
+  NewContractSet newly_created_contracts_;
 
   std::unique_ptr<TransactionStats> stats_ = nullptr;
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
-  InvokeResult cumulative_invoke_result_ =
+  InvokeResult root_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
-  bool root_invoke_succeeded_{false};
+  // perform_initial_validation() rejected the transaction (expired replay
+  // uniquifier or malformed attachment set). try_commit_transaction() asserts
+  // (debug only) that every proposal-mode ValidationFailure came from here --
+  // no mid-body execution path may produce one.
+  bool initial_validation_rejected_{false};
   bool finalized_{false};
   bool last_frame_finished_{false};
   bool transaction_committed_or_aborted_{false};
@@ -469,49 +530,87 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
+  // Keys this transaction has loaded, rolled-back frames included. See
+  // note_item_load().
+  FlatKeySet<FrameItemKey> loaded_keys_;
+
   inline static bool debug_force_commit_abort_{false};
+
+  // Record that this transaction is loading [key], and return what that load
+  // costs: kDBRPCCost the first time, nothing after. Nodiscard because the
+  // only correct thing to do with a load is bill it.
+  //
+  // A load is the transaction's first touch: the view is created by the frame
+  // walk and populated once, and every later touch finds it. A frame that
+  // rolls back drops its views, so a touch after that loads again -- but the
+  // block's snapshot cache is not rolled back and serves it, so that is not a
+  // second database read and must not be charged as one.
+  [[nodiscard]] GasAmount note_item_load(FrameItemKey const &key);
 
   // True if the given replay uniquifier has already expired at the executing
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.
   static bool replay_uniquifier_expired(Uniquifier const &uniquifier,
                                         BlockHeight executing_height);
   // Whether this handler's transaction has an already-expired replay uniquifier
-  // (reads the db tip via get_block_height(); a tip-read failure is
-  // propagated). Returns false for the test-harness constructor (no
-  // uniquifier). Used by perform_initial_validation() to reject the transaction
-  // before the body runs, and by try_commit_transaction()'s debug-only check
-  // that a proposal-mode ValidationFailure is in fact a bad expiry height.
-  SystemStatus<bool> replay_uniquifier_expired();
+  // (reads the executing height off the pinned tip). Returns false for the
+  // test-harness constructor (no uniquifier). Used by
+  // perform_initial_validation() to reject the transaction before the body
+  // runs, and by try_commit_transaction()'s debug-only check that a
+  // proposal-mode ValidationFailure is in fact a bad expiry height.
+  bool replay_uniquifier_expired() const;
 
   // Validate that the transaction can be run safely.
-  // Ensures, for example, that the wasms are valid, and that the replay
+  // Ensures, for example, that the contracts are valid, and that the replay
   // uniquifier has not already expired.
-  // Sets cumulative_invoke_result_ to the appropriate error on a deterministic
-  // validation failure; returns a system error (e.g. an unreadable db tip)
-  // through the SystemStatus so the caller can surface it rather than drop it.
-  SystemStatus<void> perform_initial_validation();
+  // Returns the appropriate error on a deterministic validation failure;
+  // a system error (e.g. an unreadable db tip) comes back through the
+  // SystemStatus so the caller can surface it rather than drop it.
+  std::pair<InvokeStatus<void>, GasAmount> perform_initial_validation();
 
   // check the validation data at the end of a transaction, if in validation
   // mode
-  void check_final_validation_data();
+  [[nodiscard]] bool check_final_validation_data() const;
+
+  // The root invocation has been finalized and its (post-rewrite) result is a
+  // success. Derived from root_invoke_result_ rather than cached: with the
+  // result stored exactly once, in finalize_after_root_frame(), a parallel
+  // bool could only ever agree with this or be stale.
+  bool root_invoke_succeeded() const
+  {
+    return finalized_ && root_invoke_result_.is_root_success();
+  }
 
   // Convert the HostFnStatus returned from the root invocation frame into an
   // InvokeStatus for the top level return.
-  static InvokeStatus<void> handle_root_host_fn_status(
+  [[nodiscard]] static InvokeStatus<void> handle_root_host_fn_status(
       SystemStatus<SyscallStatus<InvocationFrameStatusCode>> status);
 
-  // Resolve the WasmiRuntime associated with the queried address.
+  // Body of finish_frame(). Not noexcept: it is the coroutine, and its frame
+  // allocation is what finish_frame() catches on its behalf.
+  [[nodiscard]] x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+  finish_frame_impl(InvokeStatus<void> result,
+                    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
+
+  // Resolve the Runtime associated with the queried address.
   // Creates a new runtime if contract is deployed at
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
-  SystemStatus<std::unique_ptr<Runtime>>
+  [[nodiscard]] x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   resolve_runtime(ContractAddress const &addr);
 
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the
   // transaction.
   void commit_last_call_frame_success(InvocationFrame &&frame);
+
+  // Shared failure epilogue for the two-phase-commit push/commit sites in
+  // try_commit_transaction() and commit_body_discarded(): records the 2pc
+  // failure, optionally reports the conflict diagnostic (only push sites that
+  // detected a conflict do), aborts the HogDb transaction, and returns
+  // failure_result -- unless the abort itself fails, whose error outranks it.
+  x23::Async<ExecResult> abort_after_commit_failure(ExecResult failure_result,
+                                                    bool report_diagnostic);
 
   // On a failed 2pc push: trace-logs db_proxy_'s last_push_conflict() and
   // fire-and-forgets a best-effort TxFailureDiagnostic (first conflict +
@@ -522,8 +621,18 @@ private:
   // validation/viewing blocks) -- hog_db selects the level from the block's
   // execution mode, so there is no seam to configure here. Called right
   // after each 2pc push failure site sets two_phase_commit_failed_. Never
-  // blocks and never fails.
+  // fails and never suspends: the attempt height is a plain read off the
+  // pinned tip, and the send runs in its own detached coroutine.
   void report_db_conflict_diagnostic() const;
+
+  // Proposal mode only: fire-and-forgets `rejection` as this transaction's
+  // TxFailureDiagnostic. In validation nobody is waiting on the hash.
+  void
+  report_contract_rejection(ContractRejectDiagnostic const &rejection) const;
+
+  // Sends `cause` for this transaction at the executing block height. Never
+  // fails and never suspends.
+  void report_tx_failure(TxFailureCause cause) const;
 
   BlockExecutionMode get_block_execution_mode() const
   {

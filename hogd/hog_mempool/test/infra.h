@@ -75,9 +75,29 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
+  struct Options {
+    bool skip_genesis_block = false;
+    size_t mempool_tx_size_limit =
+        MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit;
+    // The network this stack runs as: what --network-hash is to the binaries.
+    NetworkHash network_hash = kNetworkHash;
+    // Database directory to open, or empty for a fresh temporary one. Pass a
+    // directory that outlives the instance to restart a stack over the
+    // database an earlier instance committed to.
+    std::string db_directory;
+  };
+
+  // Brings up the whole stack and registers every subsystem with the mempool.
+  // Throws when startup fails, e.g. [x23::XdrCallFailed] when the mempool
+  // rejects the coordinator intro; the partially started stack is torn down.
+  explicit MempoolTestInfra(const Options &options);
+
   MempoolTestInfra(bool skip_genesis_block = false,
                    size_t mempool_tx_size_limit =
-                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
+                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit)
+    : MempoolTestInfra(Options{.skip_genesis_block = skip_genesis_block,
+                               .mempool_tx_size_limit = mempool_tx_size_limit})
+  {}
 
   ~MempoolTestInfra()
   {
@@ -176,9 +196,10 @@ public:
     std::shared_ptr<Contract> contract = load_rv32_contract(artifact_filename);
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
-    CHECK(get_db()
-              .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
-              .has_value());
+    CHECK(
+        get_db()
+            .write_contract_code(contract_hash, std::as_bytes(std::span(bytes)))
+            .has_value());
     CHECK(get_db()
               .write_address_metadata(
                   address,
@@ -203,6 +224,12 @@ public:
   read_address_metadata(const ContractAddress &address)
   {
     return get_db().read_address_metadata(address);
+  }
+
+  HogDbStatus<AddressAuthData>
+  read_address_auth_data(const ContractAddress &address)
+  {
+    return get_db().read_address_auth_data(address);
   }
 
   HogDbStatus<ReplayCacheMetadata>
@@ -282,16 +309,16 @@ private:
   void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
   {
     // check the database's integrity and find the highest valid LSN.
-    DBStatus<uint64_t> lsn = Database::check(db_dir_.directory(), kRamDbBytes);
+    DBStatus<uint64_t> lsn = Database::check(db_directory_, kRamDbBytes);
     CHECK(lsn.has_value());
     info("database '{}' passed integrity check; current LSN is {}",
-         db_dir_.directory(), *lsn);
+         db_directory_, *lsn);
 
     // create the database, loading up to the highest valid LSN.
     // TODO(abelay): When sharding is supported, this will become a separate
     // step.
     DBStatus<std::unique_ptr<Database>> ramdb =
-        Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
+        Database::open_lsn(db_directory_, *lsn, kRamDbBytes);
     CHECK(ramdb.has_value());
 
     auto db = HogDbDAO(RAMDB(std::move(*ramdb)));
@@ -305,8 +332,11 @@ private:
         .contract_deployment_cost_per_byte = 10,
     }));
     // Placeholder parameters for tests that never load genesis; a genesis
-    // load installs the real ones over these.
-    ctx_->set_network_config(stock_network_config());
+    // load installs the real ones over these. A recovered database already
+    // carries the parameters its genesis installed.
+    if (!ctx_->has_committed_tip()) {
+      ctx_->set_network_config(stock_network_config());
+    }
   }
 
   HogDbDAO &get_db()
@@ -323,9 +353,10 @@ private:
     // Write contract to hog_db.
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
-    CHECK(get_db()
-              .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
-              .has_value());
+    CHECK(
+        get_db()
+            .write_contract_code(contract_hash, std::as_bytes(std::span(bytes)))
+            .has_value());
 
     for (const ContractAddress &address : kAccountAddresses) {
       // Write deployment.
@@ -440,8 +471,21 @@ private:
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }
 
+  // Tears down whatever startup reached before the constructor rethrows. The
+  // destructor body never runs for a failed construction, so this covers what
+  // member destruction alone cannot: the executor blocks in its destructor
+  // until shut down, and a registered scheduler must stop before
+  // [db_scheduler_server_] goes away.
+  void prepare_for_failed_construction() noexcept;
+
+  // The constructor body: starts every server and registers the subsystems.
+  void start(const Options &options);
+
   // Various backend components required by the database.
-  TmpDir db_dir_;
+  // The temporary directory is only created when [Options::db_directory] is
+  // empty; otherwise the caller owns the directory.
+  std::unique_ptr<TmpDir> owned_db_dir_;
+  std::string db_directory_;
   std::unique_ptr<RPCContext> ctx_;
 
   // These hold references to ctx_, so they should be destroyed before ctx_.

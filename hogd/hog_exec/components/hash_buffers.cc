@@ -2,9 +2,7 @@
 
 #include <cstddef>
 #include <span>
-#include <utility>
 
-#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -14,14 +12,11 @@
 namespace hogd {
 
 SyscallStatus<SHA256Hash>
-HashBuffers::finalize(uint32_t index, size_t *output_size)
+HashBuffers::finalize(uint32_t index)
 {
   auto it = streams_.find(index);
   if (it == streams_.end()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  if (output_size) {
-    *output_size = it->second.size;
   }
   auto out = it->second.hasher.finalize();
   streams_.erase(it);
@@ -35,25 +30,27 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
     return update_existing_stream(index, data);
   }
 
-  // Validate before touching any state: a rejected reset must leave an
-  // existing stream hashing as if the call never happened.
-  if (data.size() > kSHA256BufferMaxSize) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  // Each lookup costs a keyed SipHash24 of the index, so hash it once: below
+  // the cap try_emplace both finds and inserts; at the cap only an existing
+  // slot can be reset.
+  Stream *stream = nullptr;
+  if (streams_.size() < max_buffers_) {
+    auto [it, inserted] = streams_.try_emplace(index);
+    stream = &it->second;
+    if (!inserted) {
+      *stream = Stream{};
+    }
   }
-
-  auto it = streams_.find(index);
-  if (it == streams_.end()) {
-    if (streams_.size() >= max_buffers_) {
+  else {
+    auto it = streams_.find(index);
+    if (it == streams_.end()) {
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
-    it = streams_.emplace(index, Stream{}).first;
+    stream = &it->second;
+    *stream = Stream{};
   }
-  else {
-    it->second = Stream{};
-  }
-  it->second.hasher.update(data);
-  it->second.size = data.size();
+  stream->hasher.update(data);
   return {};
 }
 
@@ -67,20 +64,22 @@ HashBuffers::copy(uint32_t src_index, uint32_t dst_index)
   if (src_index == dst_index) {
     return {};
   }
+  // Hash dst_index once, as in update(). A rehash inside try_emplace
+  // invalidates iterators but not references to elements, so the copy source
+  // stays valid while the new node is constructed from it.
+  const Stream &src_stream = src->second;
+  if (streams_.size() < max_buffers_) {
+    auto [dst, inserted] = streams_.try_emplace(dst_index, src_stream);
+    if (!inserted) {
+      dst->second = src_stream;
+    }
+    return {};
+  }
   auto dst = streams_.find(dst_index);
   if (dst == streams_.end()) {
-    if (streams_.size() >= max_buffers_) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    }
-    // Copy to a local first: emplace may rehash, which would invalidate the
-    // src iterator mid-construction.
-    Stream copied = src->second;
-    streams_.emplace(dst_index, std::move(copied));
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  else {
-    dst->second = src->second;
-  }
+  dst->second = src_stream;
   return {};
 }
 
@@ -92,13 +91,7 @@ HashBuffers::update_existing_stream(uint32_t index,
   if (it == streams_.end()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  // Reject before absorbing: a failed append must leave the stream hashing
-  // as if the call never happened.
-  if (it->second.size + data.size() > kSHA256BufferMaxSize) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
   it->second.hasher.update(data);
-  it->second.size += data.size();
   return {};
 }
 

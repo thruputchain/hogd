@@ -21,7 +21,7 @@ target_link_libraries(hog_auth_test
     hog_auth
     GTest::gtest
 )
-gtest_discover_tests(hog_auth_test)
+hogd_discover_tests(hog_auth_test)
 
 add_executable(
   hog-auth

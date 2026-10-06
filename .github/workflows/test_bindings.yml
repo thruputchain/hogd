@@ -14,11 +14,19 @@ concurrency:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  # Published crates and pinned submodules retain the legacy registry identity.
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+  # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
+  # is cached by `cache: rust`); see built_contracts/build_risc.sh.
+  HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
 
 jobs:
   build:
-    runs-on: namespace-profile-hogd-linux-2604
+    # Own cache volume, as for the build jobs in cpp-namespace-optimized.yml.
+    runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-test-bindings
     permissions:
       contents: read
       actions: read
@@ -57,9 +65,17 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
+          # Like the other Linux jobs, keep ~/.cargo (fetch.sh's groundhog-cli and
+          # groundhog-rv32-lower installs, rebuilt from source on every run
+          # without it) and the toolchains (~/.cache/rustup) on the cache volume.
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -115,6 +131,11 @@ jobs:
           echo 'NPROC=30' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+          # Zero the persisted counters so "Show ccache stats" reports this run.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
+
       - name: Configure Build
         run: |
           ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -n
@@ -143,7 +164,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          python3 scripts/ci/ninja_build_profile.py build
 
       - name: Print Log Download Instructions
         if: always()

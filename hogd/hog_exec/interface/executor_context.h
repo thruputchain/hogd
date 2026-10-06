@@ -12,7 +12,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
-#include "hogd/hog_exec/interface/dispatch_pool.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
@@ -23,17 +22,18 @@
 
 namespace hogd {
 
+class SystemCallHandler;
+
 // Context for executing transactions in a single block.
 // Maintains the block's snapshot cache and any other cached data.
 class ExecutorContext {
 public:
   ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
                   std::unique_ptr<StorageSnapshotCache> snapshot_cache,
-                  EventServerProxy &event_server_proxy,
-                  DispatchPool &worker_pool)
+                  EventServerProxy &event_server_proxy)
     : mode_(mode), block_id_(id), db_proxy_(db_proxy),
       event_server_proxy_(event_server_proxy),
-      snapshot_cache_(std::move(snapshot_cache)), worker_pool_(worker_pool)
+      snapshot_cache_(std::move(snapshot_cache))
   {}
 
   // Disable copy and move
@@ -44,11 +44,16 @@ public:
 
   ExecutionMode mode() const { return mode_; }
 
+  BlockExecutionContext const &block_execution() const
+  {
+    return snapshot_cache_->block_execution_context();
+  }
+
   x23::Async<ExecProposeBatchResult>
-  propose_transaction_batch(SignedTransactionBatch const &signed_txs,
+  propose_transaction_batch(SignedTransactionBatch signed_txs,
                             TransactionID first_tx_id);
   x23::Async<ExecValidateBatchResult>
-  validate_transaction_batch(ProposedTransactionBatch const &proposed_txs,
+  validate_transaction_batch(ProposedTransactionBatch proposed_txs,
                              TransactionID first_tx_id);
 
   x23::Async<ExecProposeResult> propose_transaction(SignedTransaction signed_tx,
@@ -74,12 +79,24 @@ private:
   PerTransactionEventServerProxy
   make_per_tx_event_server_proxy(TransactionID tx_id);
 
-  ExecProposeResult run_propose_transaction(SignedTransaction signed_tx,
-                                            TransactionID tx_id);
-  ExecResult run_validate_transaction(ProposedTransaction tx,
-                                      TransactionID tx_id);
+  x23::Async<ExecProposeResult>
+  run_propose_transaction(SignedTransaction signed_tx, TransactionID tx_id);
+  x23::Async<ExecResult> run_validate_transaction(ProposedTransaction tx,
+                                                  TransactionID tx_id);
 
-  ExpectedViewResult run_view_transaction(TransactionViewQuery const &query);
+  x23::Async<ExpectedViewResult>
+  run_view_transaction(TransactionViewQuery const &query);
+
+  // Bump pending_event_calls_ and spawn emit_and_release; on spawn-allocation
+  // failure, record a block-level event error and release the counter.
+  void spawn_event_emission(SystemCallHandler &handler, ExecResult exec_res,
+                            ProposedTransaction proposed_tx);
+
+  // Detached coroutine: emit the committed transaction's events, then release
+  // the pending-event ledger via log_event_return once they return.
+  x23::Detached emit_and_release(SystemCallHandler &handler,
+                                 ExecResult exec_res,
+                                 ProposedTransaction proposed_tx);
 
   void log_event_return(SystemStatus<void> error);
 
@@ -88,7 +105,6 @@ private:
   DatabaseProxy &db_proxy_;
   EventServerProxy &event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-  DispatchPool &worker_pool_;
 
   std::mutex event_accumulate_mutex_;
   std::optional<SystemErrorCode> event_error_ = std::nullopt;

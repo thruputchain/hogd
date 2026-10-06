@@ -1,29 +1,44 @@
 #include "hogd/devnode/bootstrap_accounts.h"
 
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <memory>
+#include <set>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
-#include "built_contracts/dev_wallet.h"
-#include "contract.hh"
+#include "auth_claim.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/devnode/dev_wallet_profile.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "types.hh"
 
 namespace hogd {
 
 namespace {
+
+ConfigParamID
+local_parameter_id(std::string_view name)
+{
+  if (const auto id = config_param_id(name)) {
+    return *id;
+  }
+  throw std::runtime_error(
+      std::format("unknown network configuration parameter '{}'", name));
+}
 
 SHA256Hash
 derive_labeled_hash(std::string_view seed, std::string_view label)
@@ -42,30 +57,16 @@ derive_account_secret_seed(std::string_view seed, std::uint32_t index)
   return derive_labeled_hash(seed, std::format("account-{}", index));
 }
 
-SHA256Hash
-derive_wallet_nonce(std::string_view seed, std::uint32_t index)
-{
-  return derive_labeled_hash(seed, std::format("wallet-{}", index));
-}
-
 BootstrapAccountMetadata
 append_bootstrap_account(GenesisConfigurationBuilder &builder,
-                         std::shared_ptr<const Contract> const &wallet_contract,
                          std::string_view seed, std::uint32_t index,
                          std::uint64_t storage_tokens,
                          BootstrapAccountRole role)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
   auto keypair = derive_bootstrap_account_keypair(seed, index);
-  SHA256Hash nonce = derive_wallet_nonce(seed, index);
-  ContractAddress address =
-      calculate_genesis_deployment_address(sha256(*wallet_contract), nonce);
-
-  builder.add_distribution(wallet_contract, nonce,
-                           wallet_meta::entrypoint<u8"initialize">(),
-                           wallet_meta::make_calldata<u8"initialize">(
-                               keypair.first),
-                           static_cast<int128_t>(storage_tokens));
+  ContractAddress address = derive_bootstrap_account_address(keypair.first);
+  builder.add_account_allocation(address,
+                                 static_cast<int128_t>(storage_tokens));
   return BootstrapAccountMetadata{
       .index = index,
       .role = role,
@@ -80,7 +81,8 @@ BootstrapAccountArtifact
 finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
                           std::vector<BootstrapAccountMetadata> accounts,
                           NetworkHash const &network_hash,
-                          StorageCostModel const &cost_model)
+                          StorageCostModel const &cost_model,
+                          NetworkConfig const &network_config)
 {
   auto initialization_txs =
       builder.try_make_genesis_ceremony_transactions(cost_model);
@@ -92,8 +94,7 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
   return BootstrapAccountArtifact{
       .genesis_configuration =
           builder.build(network_hash, cost_model,
-                        *load_stock_genesis_root_contract(),
-                        stock_network_config()),
+                        *load_stock_genesis_root_contract(), network_config),
       .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
   };
@@ -101,11 +102,59 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
 
 } // namespace
 
+void
+add_local_network_config_override(LocalNetworkConfigOverrides &overrides,
+                                  std::string_view assignment)
+{
+  const auto separator = assignment.find('=');
+  if (separator == std::string_view::npos) {
+    throw std::runtime_error("--network-config expects NAME=VALUE");
+  }
+  const auto name = assignment.substr(0, separator);
+  const auto raw = assignment.substr(separator + 1);
+  static_cast<void>(local_parameter_id(name));
+  std::uint32_t value = 0;
+  const auto [end, error] =
+      std::from_chars(raw.data(), raw.data() + raw.size(), value);
+  if (error != std::errc{} || end != raw.data() + raw.size()) {
+    throw std::runtime_error(
+        std::format("network parameter '{}' requires a decimal uint32 value",
+                    name));
+  }
+  if (!overrides.emplace(std::string(name), value).second) {
+    throw std::runtime_error(
+        std::format("network parameter '{}' specified more than once", name));
+  }
+}
+
+NetworkConfig
+local_network_config(LocalNetworkConfigOverrides const &overrides)
+{
+  auto config = stock_network_config();
+  for (auto const &[name, value] : overrides) {
+    NetworkConfigParams::set_param(config, local_parameter_id(name), value);
+  }
+  return config;
+}
+
 std::pair<Ed25519PublicKey, Ed25519SecretKey>
 derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index)
 {
   SHA256Hash secret_seed = derive_account_secret_seed(seed, index);
   return ed25519_keygen_from_seed(std::as_bytes(std::span(secret_seed)));
+}
+
+ContractAddress
+derive_bootstrap_account_address(Ed25519PublicKey const &public_key)
+{
+  PublicKey key(CryptographicScheme::Ed25519);
+  key.ed25519() = public_key;
+  auto address =
+      pubkey_auth_address(PubkeyAccountPreimage{.pubkey = key, .nonce = 0});
+  if (!address.has_value()) {
+    throw std::logic_error("native bootstrap address derivation failed");
+  }
+  return *address;
 }
 
 BootstrapAccountArtifact
@@ -118,7 +167,7 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config,
       append_bootstrap_accounts(builder, config);
 
   return finish_bootstrap_artifact(builder, std::move(accounts), network_hash,
-                                   cost_model);
+                                   cost_model, stock_network_config());
 }
 
 std::vector<BootstrapAccountMetadata>
@@ -128,17 +177,11 @@ append_bootstrap_accounts(GenesisConfigurationBuilder &builder,
 {
   CHECK_LE(config.count, kMaxBootstrapAccounts);
 
-  DevWalletProfile wallet_profile =
-      resolve_dev_wallet_profile(config.dev_wallet_profile);
-
-  auto wallet_contract = load_dev_wallet_contract(wallet_profile);
-
   std::vector<BootstrapAccountMetadata> accounts;
   accounts.reserve(config.count);
 
   for (std::uint32_t i = 0; i < config.count; ++i) {
-    accounts.push_back(append_bootstrap_account(builder, wallet_contract,
-                                                config.seed, i,
+    accounts.push_back(append_bootstrap_account(builder, config.seed, i,
                                                 config.storage_tokens, role));
   }
 
@@ -150,24 +193,43 @@ build_local_bootstrap_account_artifact(LocalBootstrapConfig const &config,
                                        NetworkHash const &network_hash,
                                        StorageCostModel const &cost_model)
 {
-  CHECK_LE(config.user_account_count, kMaxBootstrapAccounts);
-  auto wallet_contract = load_dev_wallet_contract(
-      resolve_dev_wallet_profile(config.dev_wallet_profile));
+  if (config.accounts.size() > kMaxBootstrapAccounts) {
+    throw std::runtime_error("too many local bootstrap accounts");
+  }
   GenesisConfigurationBuilder builder;
   std::vector<BootstrapAccountMetadata> accounts;
-  accounts.reserve(static_cast<std::size_t>(config.user_account_count) + 1);
-  accounts.push_back(append_bootstrap_account(builder, wallet_contract,
-                                              config.seed, 0,
-                                              kLocalFaucetStorageTokens,
-                                              BootstrapAccountRole::kFaucet));
-  for (std::uint32_t index = 1; index <= config.user_account_count; ++index) {
-    accounts.push_back(
-        append_bootstrap_account(builder, wallet_contract, config.seed, index,
-                                 config.user_storage_tokens,
-                                 BootstrapAccountRole::kLocalUser));
+  std::set<Ed25519PublicKey> public_keys;
+  auto append = [&](Ed25519PublicKey const &key, std::uint64_t tokens,
+                    BootstrapAccountRole role) {
+    if (tokens == 0 || tokens > static_cast<std::uint64_t>(
+                                    std::numeric_limits<std::int64_t>::max())) {
+      throw std::runtime_error(
+          "local bootstrap allocation must be positive and fit int64");
+    }
+    if (!public_keys.insert(key).second) {
+      throw std::runtime_error("duplicate local bootstrap public key");
+    }
+    auto address = derive_bootstrap_account_address(key);
+    builder.add_account_allocation(address, static_cast<int128_t>(tokens));
+    accounts.push_back(BootstrapAccountMetadata{
+        .index = static_cast<std::uint32_t>(accounts.size()),
+        .role = role,
+        .address = address,
+        .public_key = key,
+        .initial_storage_tokens = tokens,
+        .storage_tokens = tokens,
+    });
+  };
+  append(config.faucet_public_key, kLocalFaucetStorageTokens,
+         BootstrapAccountRole::kFaucet);
+  for (auto const &account : config.accounts) {
+    append(account.public_key, account.storage_tokens,
+           BootstrapAccountRole::kLocalUser);
   }
   return finish_bootstrap_artifact(builder, std::move(accounts), network_hash,
-                                   cost_model);
+                                   cost_model,
+                                   local_network_config(
+                                       config.network_config_overrides));
 }
 
 } // namespace hogd

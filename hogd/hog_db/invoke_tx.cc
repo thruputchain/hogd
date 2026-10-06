@@ -16,7 +16,6 @@
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -490,7 +489,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
     return HogDbError(HogDbCode::kOverflow);
   }
   if (sum < std::min<int128_t>(base, 0)) {
-    last_conflict_reason_ = DbConflictCode::kDbConflictBoundsExceeded;
+    last_conflict_reason_ = DbConflictCode::BoundsExceeded;
     return HogDbError(HogDbCode::kConflict);
   }
 
@@ -508,7 +507,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 {
   if (key.is_address_balance()) {
     if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
-      last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
+      last_conflict_reason_ = DbConflictCode::ExclusiveLockDenied;
       return HogDbError(HogDbCode::kConflict);
     }
     request_balance_change(key.get_address(), delta);
@@ -531,17 +530,16 @@ InvokeTX::request_auth_data(Address const &addr,
                             StorageDeltaFlagSet flags)
 {
   auto base_auth_data = block_.get().get_db().read_address_auth_data(addr);
-  if (!base_auth_data) {
-    if (base_auth_data.error() != HogDbCode::kNotFound) {
-      return base_auth_data.error();
-    }
-    base_auth_data = AddressAuthData{};
+  if (!base_auth_data && base_auth_data.error() != HogDbCode::kNotFound) {
+    return base_auth_data.error();
   }
 
-  AuthDataItem auth_data_item(std::move(base_auth_data.value()));
+  AuthDataItem auth_data_item = base_auth_data
+                                    ? AuthDataItem(std::move(*base_auth_data))
+                                    : AuthDataItem::for_missing_row();
   for (const auto &signer : auth_data_change.auth_data_change_signers) {
     if (signer.public_key_id >= kMaxSigners) {
-      last_conflict_reason_ = DbConflictCode::kDbConflictCapacityExceeded;
+      last_conflict_reason_ = DbConflictCode::CapacityExceeded;
       return HogDbError(HogDbCode::kConflict);
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
@@ -598,7 +596,7 @@ DbConflictCode
 InvokeTX::conflict_reason_for(HogDbCode code) const
 {
   if (code == HogDbCode::kOverflow) {
-    return DbConflictCode::kDbConflictOverflow;
+    return DbConflictCode::Overflow;
   }
   CHECK(code == HogDbCode::kConflict);
   // CHECK below guarantees last_conflict_reason_ has a value.
@@ -688,7 +686,7 @@ InvokeTX::assert_is_valid() const noexcept
     return;
   }
   assert(tx_depth_ >= 0);
-  assert(tx_depth_ <= kMaxSavepointDepth);
+  assert(tx_depth_ <= max_savepoint_depth());
   if constexpr (is_debug_build()) {
     try {
       std::unordered_map<Address, int128_t> balance_deltas;
@@ -784,20 +782,22 @@ InvokeTX::assert_is_valid() const noexcept
 HogDbStatus<void>
 InvokeTX::request_new_contract(Contract contract)
 {
-  // hog_exec rejects attached contract blobs above kMaxContractSizeBytes in
-  // perform_initial_validation(), before execution, and storage stores any
-  // legal row (chunked across RAMDB items if necessary; see
-  // for_each_wasm_code_item). A serialized row above the bound here
-  // therefore means the executor is misbehaving, not that the contract is
-  // merely large. xdr_size computes the serialized length without
+  // hog_exec rejects attached contract blobs above the chain's
+  // max_contract_size_bytes in perform_initial_validation(), before
+  // execution; genesis load caps that parameter at kContractSizeCeilingBytes,
+  // and storage stores any row up to it (chunked across RAMDB items if
+  // necessary; see for_each_contract_code_item). A serialized row above the
+  // bound here therefore means the executor is misbehaving, not that the
+  // contract is merely large. xdr_size computes the serialized length without
   // allocating; it equals the byte count NewContractLock stages.
   if (x23::xdr_size(contract) > kMaxSerializedContractBytes)
     return HogDbError(HogDbCode::kInvalidExecutorBehavior);
 
   // One-byte chunk indexes must cover the largest row hog_db accepts.
-  static_assert((kMaxSerializedContractBytes + kWasmCodeChunkPayloadSize - 1) /
-                    kWasmCodeChunkPayloadSize <=
-                255);
+  static_assert(
+      (kMaxSerializedContractBytes + kContractCodeChunkPayloadSize - 1) /
+          kContractCodeChunkPayloadSize <=
+      255);
 
   // hash is computed outside make_contract_code_item_key to dodge an
   // observed gcc-CI miscompile.

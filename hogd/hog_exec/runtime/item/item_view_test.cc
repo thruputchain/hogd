@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -119,8 +120,7 @@ TEST_F(ItemViewTest, Exists)
   const auto *get_res = proxy.template get<BytestringItem>();
   ASSERT_FALSE(get_res);
 
-  BytestringItem write1;
-  write1.bytestring_ = bytes;
+  BytestringItem write1(bytes);
 
   EXPECT_TRUE(proxy.set(write1));
 
@@ -136,11 +136,11 @@ TEST_F(ItemViewTest, SetBytestring)
 
   const auto *get_res = proxy.template get<BytestringItem>();
   ASSERT_TRUE(get_res);
-  EXPECT_EQ(get_res->bytestring_, bytes);
+  EXPECT_TRUE(std::ranges::equal(get_res->bytes(), bytes));
 
   EXPECT_TRUE(proxy.set(BytestringItem(bytes2)));
   ASSERT_TRUE(get_res = proxy.template get<BytestringItem>());
-  EXPECT_EQ(get_res->bytestring_, bytes2);
+  EXPECT_TRUE(std::ranges::equal(get_res->bytes(), bytes2));
 }
 
 TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
@@ -204,7 +204,7 @@ TEST_F(ItemViewTest, RCQRead)
 
   auto check_item = [&](std::optional<uint8_t> const &expected_entry,
                         bool advance_cursor) {
-    auto r = rcq_item.get_next_item(execution_mode_data, advance_cursor);
+    auto r = rcq_item.get_next_item(execution_mode_data, advance_cursor)();
     ASSERT_TRUE(r.has_value());
     if (expected_entry) {
       ASSERT_NE(r.value(), nullptr);
@@ -275,7 +275,7 @@ TEST_F(ItemViewTest, RCQRead)
   auto check_item_validation = [&](std::optional<uint8_t> const &expected_entry,
                                    bool advance_cursor) {
     auto r =
-        validate_rcq_item.get_next_item(validation_mode_data, advance_cursor);
+        validate_rcq_item.get_next_item(validation_mode_data, advance_cursor)();
     ASSERT_TRUE(r.has_value());
     if (expected_entry) {
       ASSERT_NE(r.value(), nullptr);
@@ -354,13 +354,139 @@ TEST_F(ItemViewTest, CrossTypeOverwriteNNIntToBytestring)
   // BytestringItem should be present with the new value
   const auto *bs = proxy.template get<BytestringItem>();
   ASSERT_TRUE(bs);
-  EXPECT_EQ(bs->bytestring_, bytes);
+  EXPECT_TRUE(std::ranges::equal(bs->bytes(), bytes));
 
   // get_delta should produce a bytestring delta (not NNInt)
   auto [delta, flags] = proxy.get_delta();
   ASSERT_TRUE(delta.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeBytestringSet);
+}
+
+constexpr StorageDeltaFlagSet kNoFlags =
+    std::to_underlying(StorageDeltaFlags::None);
+constexpr StorageDeltaFlagSet kExclusive =
+    std::to_underlying(StorageDeltaFlags::ExclusiveLock);
+
+TEST_F(ItemViewTest, FlagsNeedAPendingWrite)
+{
+  ItemView proxy;
+  EXPECT_FALSE(proxy.has_pending_write());
+  EXPECT_FALSE(proxy.set_flags(kExclusive));
+  EXPECT_EQ(proxy.flags(), kNoFlags);
+
+  // A deletion is a write, so flags attach to it.
+  EXPECT_TRUE(proxy.set(DeletedItem{}));
+  EXPECT_TRUE(proxy.has_pending_write());
+  EXPECT_TRUE(proxy.set_flags(kExclusive));
+  EXPECT_EQ(proxy.flags(), kExclusive);
+}
+
+TEST_F(ItemViewTest, WritesKeepFlags)
+{
+  ItemView proxy;
+  ASSERT_TRUE(proxy.set(BytestringItem(Bytestring{1, 2})));
+  ASSERT_TRUE(proxy.set_flags(kExclusive));
+
+  // A write of another type and a rejected write both leave the flags alone.
+  EXPECT_TRUE(proxy.set(NNIntItem(to_xdr(int128_t(5)), to_xdr(int128_t(1)))));
+  EXPECT_FALSE(proxy.set(NNIntItem(to_xdr(int128_t(5)), to_xdr(int128_t(-6)))));
+  EXPECT_EQ(proxy.flags(), kExclusive);
+
+  auto [delta, flags] = proxy.get_delta();
+  ASSERT_TRUE(delta.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+  EXPECT_EQ(flags, kExclusive);
+}
+
+TEST_F(ItemViewTest, SetFlagsAddsAndClearFlagsRemoves)
+{
+  ItemView proxy;
+  ASSERT_TRUE(proxy.set(BytestringItem(Bytestring{1})));
+
+  ASSERT_TRUE(proxy.set_flags(kExclusive));
+  EXPECT_TRUE(proxy.set_flags(kNoFlags));
+  EXPECT_TRUE(proxy.set_flags(kExclusive));
+  EXPECT_EQ(proxy.flags(), kExclusive);
+
+  proxy.clear_flags();
+  EXPECT_EQ(proxy.flags(), kNoFlags);
+  EXPECT_EQ(proxy.get_delta().second, kNoFlags);
+  // Clearing drops the flags, not the write.
+  EXPECT_TRUE(proxy.template get<BytestringItem>());
+}
+
+TEST_F(ItemViewTest, FrameCopiesCarryFlags)
+{
+  // A frame works on a copy of its parent's view and copies it back only on
+  // success, so a flag change must travel with the copy and nowhere else.
+  ItemView parent;
+  ASSERT_TRUE(parent.set(BytestringItem(Bytestring{1})));
+
+  ItemView child = parent;
+  ASSERT_TRUE(child.set_flags(kExclusive));
+  EXPECT_EQ(parent.flags(), kNoFlags);
+
+  parent = child;
+  EXPECT_EQ(parent.flags(), kExclusive);
+}
+
+TEST_F(ItemViewTest, FrameCopiesShareBytestring)
+{
+  // #4303: a frame's copy of its parent's view shares the bytestring.
+  Bytestring const payload(4096, 0x5a);
+  ItemView parent;
+  ASSERT_TRUE(parent.set(BytestringItem(payload)));
+  auto const *parent_data =
+      parent.template get<BytestringItem>()->bytes().data();
+
+  ItemView child = parent;
+  child.clear_flags();
+  EXPECT_EQ(child.template get<BytestringItem>()->bytes().data(), parent_data);
+
+  // Overwriting the child replaces its item and leaves the parent's alone.
+  ASSERT_TRUE(child.set(BytestringItem(Bytestring{1})));
+  EXPECT_TRUE(std::ranges::equal(child.template get<BytestringItem>()->bytes(),
+                                 Bytestring{1}));
+  auto const parent_bytes = parent.template get<BytestringItem>()->bytes();
+  EXPECT_EQ(parent_bytes.data(), parent_data);
+  EXPECT_TRUE(std::ranges::equal(parent_bytes, payload));
+}
+
+TEST_F(ItemViewTest, FrameCopiesOfAuthDataChangeIndependently)
+{
+  // Auth-data changes go through a mutable pointer, so copies must not share
+  // state (unlike BytestringItem).
+  ItemView parent;
+  AddressAuthDataItem item;
+  item.change_public_key(0, PublicKeyConfigOpt{});
+  ASSERT_TRUE(parent.set(item));
+
+  ItemView child = parent;
+  auto *child_item = child.template get<AddressAuthDataItem>();
+  ASSERT_TRUE(child_item);
+  child_item->change_public_key(1, PublicKeyConfigOpt{});
+  child_item->set_required_weight(Weight{2});
+
+  auto parent_delta = parent.get_delta().first;
+  ASSERT_TRUE(parent_delta.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  EXPECT_EQ(parent_delta->auth_data_change().auth_data_change_signers.size(),
+            1U);
+  EXPECT_FALSE(parent_delta->auth_data_change().new_required_weight);
+
+  auto child_delta = child.get_delta().first;
+  ASSERT_TRUE(child_delta.has_value());
+  EXPECT_EQ(child_delta->auth_data_change().auth_data_change_signers.size(),
+            2U);
+  ASSERT_TRUE(child_delta->auth_data_change().new_required_weight);
+  EXPECT_EQ(*child_delta->auth_data_change().new_required_weight, Weight{2});
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  // The item that was set is a copy too, and is just as unaffected.
+  auto item_delta = item.get_delta();
+  EXPECT_EQ(item_delta.auth_data_change().auth_data_change_signers.size(), 1U);
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -377,12 +503,12 @@ TEST_F(ItemViewTest, RCQInsertOverflow)
   ExecutionModeData mode = ProposalModeData();
 
   for (int i = 0; i < kRetrocausalQueueBlockEntriesMaxLen; i++) {
-    auto res = rcq_item.get_next_item(mode, true);
+    auto res = rcq_item.get_next_item(mode, true)();
     ASSERT_TRUE(res.has_value() && res.value() != nullptr);
     auto const &val = *res.value();
     check_eq(val, i);
   }
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() == nullptr);
 }
 
@@ -398,7 +524,7 @@ TEST_F(ItemViewTest, CurrentBlockConsumeOrder)
   ExecutionModeData mode = ProposalModeData();
 
   auto check_read = [&](uint8_t expect, bool advance_cursor) {
-    auto res = rcq_item.get_next_item(mode, advance_cursor);
+    auto res = rcq_item.get_next_item(mode, advance_cursor)();
     ASSERT_TRUE(res.has_value() && res.value() != nullptr);
     auto const &val = *res.value();
     check_eq(val, expect);
@@ -429,7 +555,7 @@ TEST_F(ItemViewTest, CurrentBlockInsertConsumeSelfDelta)
   ExecutionModeData mode = ProposalModeData();
 
   auto check_read = [&](uint8_t expect, bool advance_cursor) {
-    auto res = rcq_item.get_next_item(mode, advance_cursor);
+    auto res = rcq_item.get_next_item(mode, advance_cursor)();
     ASSERT_TRUE(res.has_value() && res.value() != nullptr);
     auto const &val = *res.value();
     check_eq(val, expect);
@@ -490,7 +616,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
 
   ExecutionModeData mode = ProposalModeData();
 
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 1);
 
@@ -506,7 +632,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
       delta.retrocausal_queue().consume->current_block_consumed.empty());
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 2);
 
@@ -519,7 +645,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
                 .consume->past_block_consume.partial_consumed_number,
             0);
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 3);
 
@@ -547,7 +673,7 @@ TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
 
   ExecutionModeData mode = ProposalModeData();
 
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 7);
 
@@ -564,7 +690,7 @@ TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
             (std::vector<uint32_t>{7}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 8);
 
@@ -587,14 +713,14 @@ TEST_F(ItemViewTest,
 
   ExecutionModeData mode = ProposalModeData();
 
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 20);
 
   ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(1)).has_value());
   ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(2)).has_value());
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 1);
 
@@ -619,17 +745,17 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
 
   ExecutionModeData mode = ProposalModeData();
 
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 42);
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 99);
 
   auto fully_consumed = RetrocausalQueueItem::make_fully_consumed_item(
       *item, item->get_retrocausally_consumed_entries(
-                 rcq_item.get_retrocausally_consumed_count()));
+                 rcq_item.get_retrocausally_consumed_count())());
   auto delta = fully_consumed.get_delta();
 
   ASSERT_TRUE(delta.retrocausal_queue().consume);

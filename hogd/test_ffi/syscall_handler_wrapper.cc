@@ -3,10 +3,12 @@
 #include "auth_claim.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
@@ -39,8 +41,9 @@ SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
     DBContext &db)
   : db_(db), open_handler_guard_(db), identifier_(db.allocate_identifier()),
-    runtime_context_owner_(std::move(context)),
-    handler_(*this, stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
+    runtime_context_owner_(std::move(context)), signed_tx_(stx),
+    handler_(*this, signed_tx_.tx, db.get_snapshot(),
+             db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
              *runtime_context_owner_),
     is_mocked_handler_(false)
@@ -114,7 +117,7 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
   // consumed early in SystemCallHandler::root_invoke(), so even a pre-frame
   // throw must block a later retry (issue #2643).
   root_invoke_attempted_ = true;
-  auto res = to_handler().root_invoke();
+  auto res = to_handler().root_invoke()();
 
   if (res.result_.has_value() ||
       res.result_.error().code() == InvokeErrorCode::Deterministic ||
@@ -134,12 +137,13 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
     // guard rather than only at the structured-error return sites so it also
     // fires when a by-value copy throws -- get_most_recent_frame_output() (the
     // root output) or copy_last_frame_events() (the root event vector, #2699)
-    // -- not just on serialize_to_ffi_data_buffer() errors. It is gated on
-    // last_frame_finished() because a proposal-mode ValidationFailure rejects
-    // before any frame runs, so there is no finalized result to hide then.
+    // -- not just on serialize_to_ffi_data_buffer() errors. root_invoke()
+    // always finalizes before returning (finalize_after_root_frame owns
+    // last_frame_finished_), so a completed root_invoke() always leaves a
+    // finalized result to hide -- no gate on last_frame_finished() is needed.
     bool result_handed_off = false;
     x23::Defer poison_handler_on_handoff_failure([&]() {
-      if (!result_handed_off && to_handler().last_frame_finished()) {
+      if (!result_handed_off) {
         mark_finish_result_handoff_failed();
       }
     });
@@ -229,14 +233,14 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
   return kMakeFFIError(kTestFFIErrorCodeUnrecoverableError);
 }
 
-TestFFIErrorCode
+OpenMockInvocationFrameResult
 SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
                                                    InvokeFlagSet invoke_flags)
 {
   if (!is_mocked_handler_) {
     error("unrecoverable: start_mock_invocation_frame called on non-mocked "
           "handler");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   // Reject opening a mock frame after the transaction was committed or aborted.
@@ -248,13 +252,13 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   if (is_committed_or_aborted()) {
     error("unrecoverable: start_mock_invocation_frame called on an already "
           "committed/aborted transaction");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   if (to_handler().last_frame_finished()) {
     error("unrecoverable: start_mock_invocation_frame called after last frame "
           "finished");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
@@ -272,7 +276,22 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   auto finish_pending_trace = [&](HostFnStatus<SyscallErrorCode> status) {
     if (syscall_trace_pending) {
       syscall_trace_pending = false;
-      to_handler().finish_syscall_trace(status, current_gas);
+      // No child frame ran, but production still charges the crossing: a
+      // refused Invoke reached the handler through syscall_entry() like any
+      // other. A caller left short by that charge goes out of gas, which
+      // outranks the refusal it was about to be told about -- the same
+      // rewrite wrap_after_parse()'s gas epilogue makes, and with the same
+      // exclusion for a SystemError, which ends the transaction outright.
+      GasAmount gas_remaining = current_gas;
+      if (auto *runtime = get_mock_runtime()) {
+        auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+        CHECK(gas_runtime != nullptr);
+        if (!gas_runtime->consume_gas(kSyscallBaseCost) && status.has_value()) {
+          status = HostFnError{HostFnErrorCode::OutOfGas};
+        }
+        gas_remaining = gas_runtime->gas_remaining();
+      }
+      to_handler().finish_syscall_trace(status, gas_remaining);
     }
   };
   // try/catch: this runs during unwinding, where an escaping throw terminates.
@@ -305,7 +324,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   // Clamp the child's budget to what the parent still has, mirroring
-  // production kInvoke: syscall_Invoke_inner() hands
+  // production kInvoke: syscall_Invoke_inner()() hands
   // SystemCallHandler::invoke() min(requested gas_limit, remaining_gas), so a
   // child frame can never be admitted with a larger budget than its caller can
   // pay for. Without the clamp a mock child could spend past the parent's
@@ -344,16 +363,19 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // flag bits (#3302) and reentrance (#3301). Auth-token ownership is vacuous
   // until the API below can pass tokens. Only locals have been computed by this
   // point, so a refusal pushes no frame and the caller owes no finish; the
-  // caller's synthetic kInvoke is traced with production's syscall error and no
-  // gas charged, matching a refused kInvoke. Closed before the error() log,
-  // which can throw.
-  if (auto admitted = to_handler().validate_new_invocation(
-          invocation.invoked_address, frame_flags, std::span<uint32_t const>{});
-      !admitted.has_value()) {
+  // caller's synthetic kInvoke is traced with production's syscall error and
+  // charged only the crossing, matching a refused kInvoke. Closed before the
+  // error() log, which can throw.
+  auto admitted =
+      to_handler().validate_new_invocation(invocation.invoked_address,
+                                           frame_flags, ValidatedAuthTokens{});
+  if (!admitted.has_value()) {
     finish_pending_trace(admitted.error().code());
-    error("invalid argument: mock invocation frame not admitted: {}",
-          admitted.error().code());
-    return kTestFFIErrorCodeInvalidArgument;
+    error("mock invocation frame refused: {}", admitted.error().code());
+    // Not a test-API misuse: the caller asked for something production
+    // refuses, and gets production's answer with no FFI error.
+    return {.syscall_error_code = std::to_underlying(admitted.error().code()),
+            .ffi_error_code = kTestFFIErrorCodeNone};
   }
 
   // TODO(geoff): current API does not support passing auth tokens via the mock
@@ -376,7 +398,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // closed above.
   auto stashed_parent_trace =
       to_handler().start_frame(std::move(frame_invocation), frame_flags,
-                               std::span<uint32_t const>{});
+                               ValidatedAuthTokens{});
   if (!stashed_parent_trace.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back, so the handler has no new frame; skip publishing the mock-runtime
@@ -389,7 +411,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     finish_pending_trace(stashed_parent_trace.error().to_host_fn_error());
     error("unrecoverable: frame admission allocation failed in "
           "start_mock_invocation_frame");
-    return kTestFFIErrorCodeUnrecoverableError;
+    return kMakeFrameOpenError(kTestFFIErrorCodeUnrecoverableError);
   }
 
   // finish_mock_invocation_frame() owns the record now. Must disarm: the
@@ -414,7 +436,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
 
   // Capacity was reserved above, so this push_back cannot reallocate or throw.
   push_mock_runtime(mock_runtime.release());
-  return kTestFFIErrorCodeNone;
+  return kMakeFrameOpenError(kTestFFIErrorCodeNone);
 }
 
 ForeignTracedInvokeResult
@@ -519,7 +541,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // finish the frame
   auto res = to_handler().finish_frame(result.result_,
-                                       std::move(stashed_parent_trace));
+                                       std::move(stashed_parent_trace))();
   if (!res.has_value()) {
     error("unrecoverable: finish_mock_invocation_frame failed: {}",
           res.error());
@@ -528,6 +550,17 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   auto [frame_result, manually_reverted] = res.value();
   result += frame_result;
   GasAmount total_gas_consumed = result.gas_consumed_;
+
+  // What the parent pays: everything the child spent, plus the crossing its own
+  // Invoke made to get there. Reported separately from total_gas_consumed,
+  // which is the child frame's own spend and is what the caller is handed back.
+  // Saturating, so a child that already spent the maximum cannot wrap the
+  // parent's charge down to something it can afford.
+  const GasAmount parent_charge =
+      total_gas_consumed >
+              std::numeric_limits<GasAmount>::max() - kSyscallBaseCost
+          ? std::numeric_limits<GasAmount>::max()
+          : total_gas_consumed + kSyscallBaseCost;
 
   // Debit the parent for the child frame. MockGasRuntime::consume_gas() reports
   // false exactly when the charge meets or exceeds what the parent had left,
@@ -545,7 +578,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     // guest execution would (see the override at the top of this function).
     // parent_out_of_gas is the local copy used for the synthetic kInvoke status
     // just below.
-    parent_out_of_gas = !gas_runtime->consume_gas(total_gas_consumed);
+    parent_out_of_gas = !gas_runtime->consume_gas(parent_charge);
     gas_remaining = gas_runtime->gas_remaining();
   }
 
@@ -574,14 +607,14 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // When the root (last) mock frame finishes, run the same finalization
   // that root_invoke() does so that try_commit_transaction() can proceed.
-  // NOTE: mock path starts with gas_consumed_ == 0, so assignment == +=.
   if (to_handler().last_frame_finished()) {
-    to_handler().mock_set_cumulative_invoke_result(result);
-    to_handler().finalize_after_root_frame();
+    // Consume the finalized result, not the local passed in: finalization may
+    // rewrite it (a failed final validation check becomes ValidationFailure).
+    result = to_handler().finalize_after_root_frame(result);
 
     // Mirror root_invoke(): a root-level system error (Unrecoverable,
     // ValidationFailure, Abandon) must surface as an FFI error, not a
-    // serialized Fault that silently hides the cumulative root system result
+    // serialized Fault that silently hides the root system result
     // from the caller until a later try_commit_transaction(). Deterministic
     // and OutOfGas classify as Fault, so they keep flowing through as ordinary
     // serialized Fault outputs.
@@ -595,7 +628,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // The frame has been committed: finish_frame() merged a successful child into
   // its parent, and (for the root frame) finalize_after_root_frame() above made
-  // the cumulative result committable. From here until the result buffers are
+  // the root result committable. From here until the result buffers are
   // handed back to the caller, ANY failure -- a structured serialization error
   // OR a thrown copy/allocation failure -- means the caller never received the
   // result it was told to expect, so the handler must be poisoned and

@@ -1,8 +1,8 @@
 add_library(
   hog_devnode
+  block_driver.cc
   bootstrap_accounts.cc
   bootstrap_manifest.cc
-  dev_wallet_profile.cc
   hog_devnode_node.cc
   hog_devnode_tmp_dir.cc
   hosted_bootstrap_generator.cc
@@ -84,10 +84,27 @@ add_dependencies(
   all_riscv_contracts
   hog-devnode
 )
-gtest_discover_tests(
+# Every test that boots a devnode holds RESOURCE_LOCK hog_devnode (#1697), so
+# the ~90 of them run strictly one after another: 75-110s of serial work in CI.
+# CTest starts the highest-COST tests first, and a fresh build tree has no cost
+# history, so without a COST this chain starts last and runs alone on an idle
+# runner after every other test has finished. A high COST starts it first, so
+# it overlaps the parallel tests instead. The lock still allows only one devnode
+# at a time.
+#
+# A devnode runs a multithreaded node (a 4-thread pool, see
+# kTestDevnodeThreadpoolSize), but CTest counts every test as one slot, so
+# alongside a full set of parallel tests each devnode ran ~2.5x slower than
+# alone and the chain still ended up last. PROCESSORS reserves the slots it
+# actually uses.
+set(HOG_DEVNODE_TEST_COST 1000)
+set(HOG_DEVNODE_TEST_PROCESSORS 4)
+hogd_discover_tests(
   hog_devnode_test
   PROPERTIES
     RESOURCE_LOCK hog_devnode
+    COST ${HOG_DEVNODE_TEST_COST}
+    PROCESSORS ${HOG_DEVNODE_TEST_PROCESSORS}
 )
 
 add_executable(
@@ -111,7 +128,28 @@ add_dependencies(
   all_riscv_contracts
   all_contract_headers
 )
-gtest_discover_tests(bootstrap_manifest_test)
+hogd_discover_tests(bootstrap_manifest_test)
+
+add_executable(
+  hog_devnode_tmp_dir_test
+  hog_devnode_tmp_dir_test.cc
+)
+target_include_directories(
+  hog_devnode_tmp_dir_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(
+  hog_devnode_tmp_dir_test
+  hog_devnode
+  GTest::gtest
+)
+add_dependencies(
+  hog_devnode_tmp_dir_test
+  all_riscv_contracts
+  all_contract_headers
+)
+hogd_discover_tests(hog_devnode_tmp_dir_test)
 
 add_executable(
   hosted_bootstrap_generator_test
@@ -140,7 +178,7 @@ add_dependencies(
   all_contract_headers
   hog-hosted-bootstrap
 )
-gtest_discover_tests(hosted_bootstrap_generator_test)
+hogd_discover_tests(hosted_bootstrap_generator_test)
 
 add_executable(
   hog_devnode_fresh_launch_test
@@ -163,4 +201,6 @@ set_tests_properties(
   HogDevnode.FreshNonInteractiveLaunchEmitsReadiness
   PROPERTIES
     RESOURCE_LOCK hog_devnode
+    COST ${HOG_DEVNODE_TEST_COST}
+    PROCESSORS ${HOG_DEVNODE_TEST_PROCESSORS}
 )

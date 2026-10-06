@@ -19,24 +19,17 @@
 #include "hogd/hog_exec/runtime/rv32/spec_model.h"
 #include "hogd/hog_exec/runtime/rv32/test_support.h"
 
-// External-oracle differential-testing harness for the portable RV32IM core.
-// An Oracle is any independent model that, given a model-neutral program +
-// initial architectural state, produces the per-step ArchState trace
-// (arch_trace.h). MachineOracle wraps our production Machine; SpecModelOracle
-// wraps the in-tree hand spec model (spec_model.h); a future SpikeOracle /
-// SailOracle adapter slots in behind the same interface. The boundary-contract
-// comparison below is what every external-oracle run uses: it compares only the
-// architectural subset (pc/regs/memory), excludes hogd-only bookkeeping (gas,
-// trap taxonomy), and stops at the first trap/halt. On mutual traps it compares
-// register/memory side effects only and allows pc to diverge because a real
-// RISC-V model vectors while this profile halts. There is no production code
-// here; it is harness infrastructure.
+// Differential harness for the RV32IM core. MachineOracle wraps the canonical
+// test interpreter; SpecModelOracle wraps the in-tree spec model; SpikeOracle
+// runs an external simulator with its own decoder. Each produces an ArchState
+// trace from a DifferentialProgram. Comparison uses pc/registers/memory,
+// excludes gas and hogd trap taxonomy, and stops at the first trap or halt.
+// On mutual traps it allows pc to differ: RISC-V vectors while this profile
+// halts. SpecModelOracle shares the canonical decoder; see spec_model.h.
 
 namespace hogd::rv32 {
 
-// Model-neutral description of one differential test program: the shared input
-// every oracle consumes so two independent implementations execute the SAME
-// program from the SAME initial architectural state.
+// Shared program and initial architectural state for oracle comparisons.
 //
 // `code` is raw little-endian instruction words -- the lowest common
 // denominator across models, since an external oracle decodes bytes
@@ -83,8 +76,8 @@ code_bytes_from_words(std::span<const uint32_t> words)
 inline bool
 valid_differential_program(const DifferentialProgram &program)
 {
-  return program.code.size() <= (kMaxCodeBytes / kInstructionBytes) &&
-         program.memory_bytes <= kMaxMemoryBytes &&
+  return program.code.size() <= (kCodeCeilingBytes / kInstructionBytes) &&
+         program.memory_bytes <= kMemoryCeilingBytes &&
          program.initial_memory.size() <= program.memory_bytes;
 }
 
@@ -94,11 +87,8 @@ invalid_differential_program_trace()
   return ExecTrace{.steps = {}, .final_result = StepResult::kTrap};
 }
 
-// Our production Machine behind the Oracle interface: build an immutable
-// Program from the raw words, apply the initial register/memory state, and
-// trace execution. The ecall-free corpus never expects the host to fire; if it
-// does, RecordingHost's default halts so the trace terminates
-// deterministically.
+// Canonical Machine adapter: decode the raw words, apply initial state, and
+// trace execution. RecordingHost halts at ECALL.
 class MachineOracle final : public Oracle {
 public:
   [[nodiscard]] ExecTrace run(const DifferentialProgram &program) override
@@ -132,9 +122,7 @@ public:
   }
 };
 
-// The in-tree hand spec model behind the Oracle interface: the first
-// independent producer, standing in for an external oracle so the harness shape
-// is exercised with zero external dependency.
+// In-tree spec semantics with instructions from the canonical decoder.
 class SpecModelOracle final : public Oracle {
 public:
   [[nodiscard]] ExecTrace run(const DifferentialProgram &program) override

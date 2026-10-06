@@ -11,11 +11,52 @@ namespace hogd::rv32 {
 
 constexpr uint32_t kInstructionBytes = 4;
 constexpr uint32_t kRegisterCount = 32;
-constexpr uint32_t kMaxMemoryBytes = 64 * 1024;
-constexpr uint32_t kMaxCodeBytes = 64 * 1024;
+
+// The bounds in force when a chain's configuration states none: the protocol
+// defaults, restated so the VM does not depend on the XDR headers
+// (rv32_contract.cc pins them equal).
+constexpr uint32_t kDefaultMaxMemoryBytes = 64 * 1024;
+constexpr uint32_t kDefaultMaxCodeBytes = 256 * 1024;
+
+// The most this VM provisions and translates: the ceilings on the configured
+// bounds, checked at genesis load. Memory is copied in per invocation and a
+// translation holds a Slot per instruction, neither charged to gas.
+constexpr uint32_t kMemoryCeilingBytes = 16 * 1024 * 1024;
+constexpr uint32_t kCodeCeilingBytes = 4 * 1024 * 1024;
+static_assert(kDefaultMaxMemoryBytes <= kMemoryCeilingBytes);
+static_assert(kDefaultMaxCodeBytes <= kCodeCeilingBytes);
+
+// The bounds an artifact is admitted under: the chain's configuration at
+// attachment, the ceilings when a deployed contract is instantiated.
+struct Rv32Limits {
+  uint32_t max_code_bytes;
+  uint32_t max_memory_bytes;
+
+  static constexpr Rv32Limits defaults()
+  {
+    return Rv32Limits{.max_code_bytes = kDefaultMaxCodeBytes,
+                      .max_memory_bytes = kDefaultMaxMemoryBytes};
+  }
+  static constexpr Rv32Limits ceiling()
+  {
+    return Rv32Limits{.max_code_bytes = kCodeCeilingBytes,
+                      .max_memory_bytes = kMemoryCeilingBytes};
+  }
+};
+// Gas tiers measured on hog10, normalized to baseline dispatch cost. Pricing
+// uses the worst reachable measured context; see gas_calibration/README.md.
 constexpr uint64_t kBaseInstructionGas = 1;
-constexpr uint64_t kMulInstructionGas = 3;
-constexpr uint64_t kDivInstructionGas = 8;
+// Taken branches (1.38-1.42x) and integer divide (1.65-1.98x).
+constexpr uint64_t kBranchInstructionGas = 2;
+constexpr uint64_t kDivInstructionGas = 2;
+// Direct jump: 4.8832 ns / 1.6213 ns = 3.012 units on hog10's largest
+// shuffled layout. Use 3 gas; the 0.4% excess is measurement-scale variation.
+constexpr uint64_t kDirectJumpGas = 3;
+// Indirect jump (2.72x) and the loads that can carry a pointer (2.49-2.65x).
+// LH/LHU/LW carry pointers: a dependent chain of them pays
+// full cache latency the interpreter's dispatch cannot hide.
+constexpr uint64_t kIndirectJumpGas = 3;
+constexpr uint64_t kWideLoadGas = 3;
 
 enum class ProgramError {
   kNone,
@@ -111,19 +152,19 @@ struct InstructionGasEntry {
 constexpr std::array<InstructionGasEntry, kOpCount> kInstructionGasSchedule = {{
     {.op = Op::kLui, .name = u8"LUI", .cost = kBaseInstructionGas},
     {.op = Op::kAuipc, .name = u8"AUIPC", .cost = kBaseInstructionGas},
-    {.op = Op::kJal, .name = u8"JAL", .cost = kBaseInstructionGas},
-    {.op = Op::kJalr, .name = u8"JALR", .cost = kBaseInstructionGas},
-    {.op = Op::kBeq, .name = u8"BEQ", .cost = kBaseInstructionGas},
-    {.op = Op::kBne, .name = u8"BNE", .cost = kBaseInstructionGas},
-    {.op = Op::kBlt, .name = u8"BLT", .cost = kBaseInstructionGas},
-    {.op = Op::kBge, .name = u8"BGE", .cost = kBaseInstructionGas},
-    {.op = Op::kBltu, .name = u8"BLTU", .cost = kBaseInstructionGas},
-    {.op = Op::kBgeu, .name = u8"BGEU", .cost = kBaseInstructionGas},
+    {.op = Op::kJal, .name = u8"JAL", .cost = kDirectJumpGas},
+    {.op = Op::kJalr, .name = u8"JALR", .cost = kIndirectJumpGas},
+    {.op = Op::kBeq, .name = u8"BEQ", .cost = kBranchInstructionGas},
+    {.op = Op::kBne, .name = u8"BNE", .cost = kBranchInstructionGas},
+    {.op = Op::kBlt, .name = u8"BLT", .cost = kBranchInstructionGas},
+    {.op = Op::kBge, .name = u8"BGE", .cost = kBranchInstructionGas},
+    {.op = Op::kBltu, .name = u8"BLTU", .cost = kBranchInstructionGas},
+    {.op = Op::kBgeu, .name = u8"BGEU", .cost = kBranchInstructionGas},
     {.op = Op::kLb, .name = u8"LB", .cost = kBaseInstructionGas},
-    {.op = Op::kLh, .name = u8"LH", .cost = kBaseInstructionGas},
-    {.op = Op::kLw, .name = u8"LW", .cost = kBaseInstructionGas},
+    {.op = Op::kLh, .name = u8"LH", .cost = kWideLoadGas},
+    {.op = Op::kLw, .name = u8"LW", .cost = kWideLoadGas},
     {.op = Op::kLbu, .name = u8"LBU", .cost = kBaseInstructionGas},
-    {.op = Op::kLhu, .name = u8"LHU", .cost = kBaseInstructionGas},
+    {.op = Op::kLhu, .name = u8"LHU", .cost = kWideLoadGas},
     {.op = Op::kSb, .name = u8"SB", .cost = kBaseInstructionGas},
     {.op = Op::kSh, .name = u8"SH", .cost = kBaseInstructionGas},
     {.op = Op::kSw, .name = u8"SW", .cost = kBaseInstructionGas},
@@ -146,10 +187,10 @@ constexpr std::array<InstructionGasEntry, kOpCount> kInstructionGasSchedule = {{
     {.op = Op::kSra, .name = u8"SRA", .cost = kBaseInstructionGas},
     {.op = Op::kOr, .name = u8"OR", .cost = kBaseInstructionGas},
     {.op = Op::kAnd, .name = u8"AND", .cost = kBaseInstructionGas},
-    {.op = Op::kMul, .name = u8"MUL", .cost = kMulInstructionGas},
-    {.op = Op::kMulh, .name = u8"MULH", .cost = kMulInstructionGas},
-    {.op = Op::kMulhsu, .name = u8"MULHSU", .cost = kMulInstructionGas},
-    {.op = Op::kMulhu, .name = u8"MULHU", .cost = kMulInstructionGas},
+    {.op = Op::kMul, .name = u8"MUL", .cost = kBaseInstructionGas},
+    {.op = Op::kMulh, .name = u8"MULH", .cost = kBaseInstructionGas},
+    {.op = Op::kMulhsu, .name = u8"MULHSU", .cost = kBaseInstructionGas},
+    {.op = Op::kMulhu, .name = u8"MULHU", .cost = kBaseInstructionGas},
     {.op = Op::kDiv, .name = u8"DIV", .cost = kDivInstructionGas},
     {.op = Op::kDivu, .name = u8"DIVU", .cost = kDivInstructionGas},
     {.op = Op::kRem, .name = u8"REM", .cost = kDivInstructionGas},
@@ -188,6 +229,22 @@ constexpr std::array<uint64_t, kOpCount> kInstructionGasCosts =
     make_instruction_gas_costs();
 
 constexpr uint64_t
+max_instruction_gas()
+{
+  uint64_t worst = 0;
+  for (const auto &entry : kInstructionGasSchedule) {
+    worst = entry.cost > worst ? entry.cost : worst;
+  }
+  return worst;
+}
+
+// The most any single instruction can cost. Derived rather than named after
+// whichever opcode currently holds the title, so a repricing that moves the
+// peak elsewhere does not leave a stale bound behind. The lowering's run-gas
+// cap must not fall below it, or some instruction would not fit in any run.
+constexpr uint64_t kMaxInstructionGas = max_instruction_gas();
+
+constexpr uint64_t
 gas_cost_for_op(Op op)
 {
   return kInstructionGasCosts[static_cast<size_t>(op)];
@@ -219,8 +276,8 @@ struct ProgramResult {
   ProgramError error = ProgramError::kNone;
 };
 
-// Immutable, already-decoded RV32IM code. Program is the validation boundary:
-// Machine never executes raw bytes and never lets guest memory alias code.
+// Immutable, decoded RV32IM code for the canonical Machine. Guest memory cannot
+// alias code. Production preparation uses ThreadedProgram.
 class Program {
 public:
   static ProgramResult validate(std::span<const uint8_t> code);

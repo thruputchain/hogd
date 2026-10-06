@@ -1,7 +1,7 @@
 use sdk::*;
 
 #[contract_exception]
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 pub enum DripError {
     /// The requested amount exceeds what is left of the current window's
     /// budget (as visible within this transaction).
@@ -20,5 +20,5 @@ pub enum DripError {
 #[contract(client = Client, throws = DripError)]
 pub trait DripFaucet {
     /// Mint `amount` native tokens to the caller, consuming window budget.
-    fn claim(amount: u128);
+    fn claim(amount: i128);
 }

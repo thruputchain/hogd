@@ -1,34 +1,36 @@
 #pragma once
 
-#include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
-#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
-// A cached contract: the bytecode plus, for translatable engines (rv32), its
-// eagerly-built ready-to-instantiate image. `translated` is nullopt for
-// non-rv32 contracts (and if translation failed -- treated as Unrecoverable by
-// the engine, matching prior behavior).
+// A cached contract: the bytecode plus, for engines that prepare one, its
+// eagerly-built ready-to-instantiate image. `prepared` is empty for engines
+// with nothing to prepare (and if preparation failed -- treated as
+// Unrecoverable by the engine, matching prior behavior).
 struct ContractCacheEntry {
   Contract contract;
-  std::optional<Rv32Contract> translated;
+  PreparedContract prepared;
 };
 
 class DatabaseProxy;
@@ -53,27 +55,82 @@ class DatabaseProxy;
 // (and still probably involves extra copies).
 class StorageSnapshotCache {
 public:
-  StorageSnapshotCache(BlockID block_id, DatabaseProxy &db_proxy);
+  StorageSnapshotCache(BlockID block_id,
+                       BlockExecutionContext const &block_execution,
+                       DatabaseProxy &db_proxy);
   // delete move and copy
   StorageSnapshotCache(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache(StorageSnapshotCache &&) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
-  SystemStatus<const Contract *>
-  try_get_contract_by_hash(SHA256Hash const &hash);
-  SystemStatus<const DeployedContract *>
+  // Each lookup answers from cache without allocating a coroutine frame --
+  // MaybeAsync's value arm -- and falls back to an Async that suspends on the
+  // database read only on a miss.  The lock guarding each cache is always
+  // released before that read, so no cache lock is ever held across a
+  // suspension.
+  //
+  // The cached contract for `hash`: its code and the image this cache built
+  // when it loaded it, so callers reuse that image rather than preparing the
+  // same bytes again. Borrowed -- node-stable and valid for the block, so it
+  // outlives any transaction's runtimes. Returns nullptr (wrapped) for a
+  // negative lookup.
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
+  try_get_contract_entry(SHA256Hash const &hash);
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const DeployedContract *>>
   try_get_deployed_contract(ContractAddress const &addr);
-  SystemStatus<const SnapshotStorageItem *>
-  try_get_snapshot_item(AddressAndKey const &addrkey);
+  // The snapshot item under `key`, probed with the hash the key already
+  // carries. The syscall path hands over the FrameItemKey it built for its
+  // frame probe, so a first touch lays out and hashes the key once for the
+  // frames and this cache together.
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
+  try_get_snapshot_item(FrameItemKey const &key);
+  // The XDR-keyed form, for a caller holding no frame key. Lays out and
+  // hashes the key here; nothing on the syscall path should take this.
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
+  try_get_snapshot_item(AddressAndKey const &addrkey)
+  {
+    return try_get_snapshot_item(FrameItemKey::from(addrkey));
+  }
 
-  SystemStatus<const DbTip *> try_get_db_tip();
+  // Fetches and pins the block's db tip. Must be performed by one thread,
+  // before any other thread starts accessing this object. Fails with
+  // Unrecoverable if the tip disagrees with the height the block was opened
+  // with; every later height read is then a plain load.
+  [[nodiscard]] x23::Async<SystemStatus<void>> load_db_tip();
 
-  // Consensus-critical execution parameters the chain runs under. Served off
-  // the same lock-free tip cache as the block height: the first read of the
-  // block fetches the tip, every later one is an atomic load.
-  SystemStatus<uint32_t> try_get_max_sha256_buffers();
-  SystemStatus<uint32_t> try_get_max_cross_invoke_depth();
+  // Pins a tip the caller already holds (the view gateway fetches one when it
+  // opens its snapshot), under load_db_tip()'s threading contract. The
+  // opened-height agreement is a CHECK here: the caller derived the execution
+  // context from this very tip, so a mismatch is its bug, not a db race.
+  void set_db_tip(DbTip tip);
+
+  bool has_db_tip() const { return db_tip_ != nullptr; }
+
+  const DbTip &get_db_tip() const
+  {
+    CHECK(db_tip_ != nullptr);
+    return *db_tip_;
+  }
+  const NetworkConfigParams &get_network_config_params() const
+  {
+    CHECK(network_config_params_ != nullptr);
+    return *network_config_params_;
+  }
+
+  // The executing block's own facts. Unlike everything above these do not
+  // come from the db tip, which for an open block is the *parent*: the height
+  // is the tip's plus one, and the timepoint is not derivable from it at all.
+  BlockExecutionContext const &block_execution_context() const
+  {
+    return block_execution_context_;
+  }
+
+  // Re-arms a recycled cache for its next block.
+  void set_block_execution_context(BlockExecutionContext const &block_execution)
+  {
+    block_execution_context_ = block_execution;
+  }
 
   ~StorageSnapshotCache();
 
@@ -83,6 +140,13 @@ public:
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
+    // Poison rather than leave the last block's context behind:
+    // get_snapshot_cache() re-arms it, and anything that reads it before then
+    // gets an obviously-wrong height rather than a plausible stale one.
+    block_execution_context_ = BlockExecutionContext{
+        .block_height = std::numeric_limits<BlockHeight>::min(),
+        .block_timepoint = 0,
+    };
     release_db_tip();
   }
 
@@ -94,10 +158,16 @@ public:
 
 private:
   void release_db_tip();
-  // Lookup/insert/eager-translate the contract entry for `hash`. Returns
-  // nullptr (wrapped) for a negative lookup.
-  SystemStatus<const ContractCacheEntry *>
-  get_contract_entry(SHA256Hash const &hash);
+
+  // Miss paths for the lookups above.  Each takes its key BY VALUE so the key
+  // is copied into the coroutine frame and stays valid across the database
+  // read.
+  [[nodiscard]] x23::Async<SystemStatus<const ContractCacheEntry *>>
+  load_contract_entry(SHA256Hash hash);
+  [[nodiscard]] x23::Async<SystemStatus<const DeployedContract *>>
+  load_deployed_contract(ContractAddress addr);
+  [[nodiscard]] x23::Async<SystemStatus<const SnapshotStorageItem *>>
+  load_snapshot_item(FrameItemKey key);
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
@@ -115,17 +185,28 @@ private:
                   std::shared_mutex>
       deployment_cache_;
 
+  // Keyed by the frame key rather than the XDR AddressAndKey: the hasher
+  // returns the hash cached in the key, so a probe costs one shard index and
+  // one bucket index off a value already in hand, and a rehash as the cache
+  // grows moves keys instead of re-serializing and re-hashing every one.
+  // Same process-keyed SipHash24 as before; the key is contract-chosen and
+  // the map has to stay flood-resistant. The XDR form is rebuilt once, on a
+  // miss, for the database read and the item.
   SynchronizedMap<
-      AddressAndKey, SnapshotStorageItem, std::hash<AddressAndKey>,
-      std::equal_to<>,
-      std::allocator<std::pair<const AddressAndKey, SnapshotStorageItem>>,
+      FrameItemKey, SnapshotStorageItem, FrameItemKeyHash, std::equal_to<>,
+      std::allocator<std::pair<const FrameItemKey, SnapshotStorageItem>>,
       std::shared_mutex>
       snapshot_item_cache_;
 
   BlockID block_id_;
+
+  // Read-only for the life of the block, so unlike the tip it needs no
+  // synchronization.
+  BlockExecutionContext block_execution_context_;
   DatabaseProxy &db_proxy_;
 
-  std::atomic<DbTip *> db_tip_ = nullptr;
+  std::unique_ptr<DbTip> db_tip_ = nullptr;
+  std::unique_ptr<NetworkConfigParams> network_config_params_ = nullptr;
 };
 
 } // namespace hogd

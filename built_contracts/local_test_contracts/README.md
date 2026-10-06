@@ -53,3 +53,14 @@ directories.
   scenario: deployed through the default wallet by an airdrop-funded pubkey
   account, then claims from the faucet for itself. Driven by
   `hogd/hog_exec/runtime/faucet_scenario_test.cc`.
+- `invoke_malformed_tokens_test` — the Invoke syscall's handling of a
+  malformed owned-auth-token byte span (not a whole number of 4-byte ids)
+  alongside large calldata (#2327): rejected ahead of admission, so ahead
+  of the host's calldata copy, with a control showing the same calldata does
+  reach a child frame once the span is well-formed. Driven by
+  `hogd/hog_exec/runtime/invoke_malformed_tokens_rv32_test.cc`.
+- `itc_erc20_permit`: `itc_erc20` with the `ERC20Permit` interface
+  (`groundhog-erc20-permit-if`) implemented on top: the same storage keys,
+  strict updates and events, so it is the RV32 reference the native token's
+  `permit` and `transfer_from_signed` are held byte-identical to. Driven by
+  `hogd/hog_exec/runtime/erc20_permit_parity_test.cc`.

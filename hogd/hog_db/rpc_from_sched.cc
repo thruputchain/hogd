@@ -2,8 +2,10 @@
 
 #include "hogd/hog_db/rpc_from_sched.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <sys/socket.h>
@@ -15,10 +17,14 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "storage_item.hh"
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
+#include "hogd/hog_exec/common/limits.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -31,6 +37,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/block_tx.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
@@ -82,16 +89,25 @@ HogDbSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   co_return ret;
 }
 
-x23::Async<DbSchedResult>
-HogDbSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
+DbSchedResult
+HogDbSchedRpc::write_hog_ages_locked(const HogAgeBatch &ages)
 {
+  // A ramdb write pass: must not overlap commit_block()'s sync (#3397).
+  std::scoped_lock write_pass(ctx_.ramdb_write_pass_lock());
+
   HogDbDAO &db = ctx_.get_db();
   for (const HogAge &age : ages) {
     if (!db.write_address_average_hog_age(age)) {
-      co_return DbSchedResult::DbSchedResultError;
+      return DbSchedResult::DbSchedResultError;
     }
   }
-  co_return DbSchedResult::DbSchedResultOK;
+  return DbSchedResult::DbSchedResultOK;
+}
+
+x23::Async<DbSchedResult>
+HogDbSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
+{
+  co_return write_hog_ages_locked(ages);
 }
 
 x23::Async<DbAddressAuthDataBatchResult>
@@ -136,6 +152,13 @@ HogDbSchedRpc::commit_block(BlockID id, ConsensusValue value,
                             PerThreadARC<BlockTX> *btx,
                             const StorageLongHash &db_hash)
 {
+  // This whole function is one ramdb write pass ending in sync(): the
+  // changeset apply, the dbtip update, and the commit/snapshot. Holding
+  // the pass lock throughout keeps other write passes (the hog-age batch)
+  // from overlapping the sync (#3397). No co_await may run inside this
+  // scope: commit_block must stay synchronous.
+  std::scoped_lock write_pass(ctx_.ramdb_write_pass_lock());
+
   // check if already committed.
   if (ctx_.get_tip().id == id) {
     error("tried to commit the same block '{}' more than once", id);
@@ -184,8 +207,14 @@ HogDbSchedRpc::commit_block(BlockID id, ConsensusValue value,
       return ret.error();
   }
 
-  // persist everything to the ramdb.
-  HogDbStatus<uint64_t> lsn = ctx_.get_db().commit();
+  // persist everything to the ramdb. Writes have quiesced here (sync()'s
+  // precondition), so this is also the safe point to snapshot when enough
+  // WAL lies beyond snapshot coverage that disk cleanup could reclaim it
+  // (#3704). The snapshot copies items on its own thread; only the sync is
+  // paid inline.
+  HogDbStatus<uint64_t> lsn = ctx_.get_db().snapshot_recommended()
+                                  ? ctx_.get_db().commit_and_snapshot()
+                                  : ctx_.get_db().commit();
   if (!lsn)
     return lsn.error();
 
@@ -211,7 +240,7 @@ HogDbSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
-  auto res = ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
+  auto res = co_await ctx_.open_block_tx_at_parent(parent_id, new_id, mode);
   if (!res && res.error() == HogDbCode::kStaleBlock) {
     error("parent_id {} is not the last committed block", parent_id);
     co_return DbSchedResult::DbSchedResultInvalidParentId;
@@ -251,7 +280,8 @@ HogDbSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
   result.block().storage_long_hash = tip.storage_long_hash;
   result.block().config_hash_preimage =
       make_config_hash_preimage(ctx_.get_cost_model(),
-                                ctx_.get_tip().network_config);
+                                ctx_.get_tip().network_config,
+                                ctx_.get_tip().default_wallet);
   co_return result;
 }
 
@@ -301,7 +331,8 @@ HogDbSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   ret.block().storage_long_hash = *db_hash_result;
   ret.block().config_hash_preimage =
       make_config_hash_preimage(ctx_.get_cost_model(),
-                                ctx_.get_tip().network_config);
+                                ctx_.get_tip().network_config,
+                                ctx_.get_tip().default_wallet);
   co_return ret;
 }
 
@@ -328,12 +359,81 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbSchedResult::DbSchedResultError;
   }
+  // Before compute_config_hash, which CHECKs this: the genesis is untrusted,
+  // so a non-canonical list has to be a rejection rather than an abort.
+  if (!config_hashable(genesis_configuration.network_config)) {
+    error("genesis network config parameters are not the gapless prefix 0, 1, "
+          "2, ... of the parameter ids");
+    co_return DbSchedResult::DbSchedResultError;
+  }
   if (value.proposal_header.block_height != kGenesisBlockHeight ||
       value.proposal_header.network_hash !=
           genesis_configuration.network_hash ||
       value.proposal_header.config_hash !=
           compute_config_hash(genesis_configuration)) {
     error("invalid genesis height, network hash, or config hash");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  const NetworkConfigParams config_params(
+      genesis_configuration.network_config.v0());
+  if (const uint32_t stated = config_params.max_contract_size_bytes;
+      stated > kContractSizeCeilingBytes) {
+    error("genesis max_contract_size_bytes {} exceeds the {} this build can "
+          "store and a transaction can carry",
+          stated, kContractSizeCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // The commit batch a transaction can realize is the smaller of the stated
+  // count at the stated size and what one transaction body carries plus
+  // per-row slack; refuse the pair only if that cannot fit one message (#2190).
+  constexpr size_t kBatchOverhead = 1_KiB;
+  const size_t count = config_params.max_new_contracts_per_tx;
+  const size_t stated_batch =
+      count * serialized_contract_bound(config_params.max_contract_size_bytes);
+  const size_t carried_batch =
+      kContractSizeCeilingBytes + (count * kSerializedContractEnvelopeBytes);
+  const size_t batch_bytes =
+      std::min(stated_batch, carried_batch) + kBatchOverhead;
+  if (batch_bytes > kExecToDbMessageCap) {
+    error("genesis max_new_contracts_per_tx {} of max_contract_size_bytes {} "
+          "needs a {}-byte commit batch; this build sends at most {} in one "
+          "message",
+          count, config_params.max_contract_size_bytes, batch_bytes,
+          kExecToDbMessageCap);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (const uint32_t stated = config_params.max_rv32_code_bytes;
+      stated > rv32::kCodeCeilingBytes) {
+    error("genesis max_rv32_code_bytes {} exceeds the {} this build's VM "
+          "translates",
+          stated, rv32::kCodeCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (const uint32_t stated = config_params.max_rv32_memory_bytes;
+      stated > rv32::kMemoryCeilingBytes) {
+    error("genesis max_rv32_memory_bytes {} exceeds the {} this build's VM "
+          "provisions",
+          stated, rv32::kMemoryCeilingBytes);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // Every root commit pushes a savepoint, even without child TryInvokes.
+  if (config_params.max_savepoint_depth == 0) {
+    error("genesis max_savepoint_depth must be at least 1 for root commits");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (const uint32_t stated = config_params.max_savepoint_depth;
+      stated > kSavepointDepthCeiling) {
+    error("genesis max_savepoint_depth {} exceeds the {} this build's "
+          "executor stacks sustain",
+          stated, kSavepointDepthCeiling);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // The ceiling bounds the wire type, so a genesis naming more would let a
+  // contract write a bytestring no peer could carry.
+  if (const uint32_t stated = config_params.max_bytestring_len;
+      stated > static_cast<uint32_t>(kBytestringCeilingLen)) {
+    error("genesis max_bytestring_len {} exceeds the protocol ceiling of {}",
+          stated, kBytestringCeilingLen);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);
@@ -354,15 +454,21 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
       genesis_configuration,
       [&](auto const &contract) {
         const auto bytes = x23::serialize(*contract);
-        if (auto r =
-                ctx_.get_db().write_wasm_code(sha256(*contract),
-                                              std::as_bytes(std::span(bytes)));
+        if (auto r = ctx_.get_db().write_contract_code(
+                sha256(*contract), std::as_bytes(std::span(bytes)));
             !r) {
           error("failed to write genesis contract: {}", r.error());
           failure = true;
         }
       },
       [&](ContractAddress const &address, DeployedContractHash const &hash) {
+        // Reject genesis deploys at the null address; it must stay the
+        // "nothing lives here" sentinel.
+        if (address == kNullContractAddress) {
+          error("genesis deploys a contract at the reserved null address");
+          failure = true;
+          return;
+        }
         if (auto r = ctx_.get_db().write_address_metadata(address, hash); !r) {
           error("failed to write genesis deployment: {}", r.error());
           failure = true;

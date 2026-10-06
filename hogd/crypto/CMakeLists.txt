@@ -69,7 +69,7 @@ target_link_libraries(
   hogd
   GTest::gtest
 )
-gtest_discover_tests(crypto_test)
+hogd_discover_tests(crypto_test)
 
 if(BUILD_BENCHMARKS)
   # create crypto module benchmark binary

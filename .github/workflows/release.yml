@@ -9,10 +9,14 @@ on:
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  # Published crates and pinned submodules retain the legacy registry identity.
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.25-rc.4"
+  HOGD_DISTRIBUTION_VERSION: "0.1.30-rc.3"
 
 permissions:
   contents: write
@@ -197,9 +201,22 @@ jobs:
 
           for archive in artifacts/*.tar.gz; do
             contents=$(tar -tzf "$archive")
-            grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
             grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
           done
+
+      # Keep server code generation separate from portable developer artifacts.
+      # These binaries must be runtime-qualified on a Zen 5 host before deployment.
+      - name: Build and package Zen 5 server binaries
+        if: matrix.architecture == 'x86_64'
+        run: |
+          ./scripts/build.sh \
+            -d build/znver5 -t Release -c gcc \
+            -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DBUILD_ARCHITECTURE=znver5" \
+            -x "-DRUST_BUILD_CPU=znver5" \
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
+          ./scripts/package_hogd_validator_release.sh \
+            build/znver5 artifacts release x86_64 znver5
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -257,6 +274,13 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+
+      - name: Configure ccache
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume. Point it at the cached path, as the Linux jobs do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -317,7 +341,6 @@ jobs:
           cp build/release/hogd/devnode/hog-devnode package/hog-devnode-macos-arm64/hog-devnode
           chmod +x package/hog-devnode-macos-arm64/hog-devnode
           mkdir -p package/hog-devnode-macos-arm64/contracts
-          cp build/release/built_contracts/dev_wallet.rv32a package/hog-devnode-macos-arm64/contracts/dev_wallet.rv32a
           cp build/release/built_contracts/genesis_root.rv32a package/hog-devnode-macos-arm64/contracts/genesis_root.rv32a
 
           pushd package/hog-devnode-macos-arm64 >/dev/null
@@ -407,13 +430,29 @@ jobs:
 
           readiness_file="$(mktemp)"
           log_file="$(mktemp)"
+          bootstrap_file="$(mktemp)"
+          cat >"$bootstrap_file" <<'JSON'
+          {
+            "schemaVersion": 4,
+            "kind": "groundhog-bootstrap",
+            "networkHash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "profile": "local-dev",
+            "bootstrapFaucet": {
+              "publicKey": "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+              "initialStorageTokens": "10000000000000"
+            },
+            "bootstrapAccounts": [{
+              "publicKey": "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+              "initialStorageTokens": "1000000000"
+            }],
+            "storageCostModel": {"profile": "hogd-default"}
+          }
+          JSON
           ./hog-devnode \
             --listen-host 127.0.0.1 \
             --scheduler-port 0 \
             --readiness stdout \
-            --dev-accounts 1 \
-            --dev-account-seed groundhog-dev-accounts \
-            --dev-account-tokens 1000000000 \
+            --bootstrap-manifest "$bootstrap_file" \
             >"$readiness_file" 2>"$log_file" &
           devnode_pid=$!
           cleanup_devnode() {
@@ -428,7 +467,7 @@ jobs:
               fi
             fi
             wait "$devnode_pid" 2>/dev/null || true
-            rm -f "$readiness_file" "$log_file"
+            rm -f "$readiness_file" "$log_file" "$bootstrap_file"
           }
           trap cleanup_devnode EXIT
 
@@ -460,10 +499,22 @@ jobs:
               raise SystemExit(f"unexpected readiness payload: {readiness}")
           with open(readiness["manifestPath"], encoding="utf-8") as handle:
               manifest = json.load(handle)
+          if readiness.get("schemaVersion") != 3 or manifest.get("schemaVersion") != 4:
+              raise SystemExit("packaged hog-devnode must emit public bootstrap schema 4")
+          if "bootstrapAccountDerivation" in manifest:
+              raise SystemExit("packaged hog-devnode still advertises signer derivation")
+          if "devWallet" in manifest.get("bootstrap", {}):
+              raise SystemExit("packaged hog-devnode still advertises devWallet")
           accounts = manifest.get("bootstrapAccounts")
           expected = [
-              {"index": 0, "role": "faucet", "initialStorageTokens": "10000000000000"},
-              {"index": 1, "role": "local_user", "initialStorageTokens": "1000000000"},
+              {
+                  "role": "faucet", "initialStorageTokens": "10000000000000",
+                  "publicKey": "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+              },
+              {
+                  "role": "local_user", "initialStorageTokens": "1000000000",
+                  "publicKey": "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+              },
           ]
           if not isinstance(accounts, list) or len(accounts) != len(expected):
               raise SystemExit(f"unexpected bootstrap accounts: {accounts}")
@@ -480,11 +531,9 @@ jobs:
           tar -czf artifacts/hog-devnode-macos-arm64.tar.gz \
             -C package/hog-devnode-macos-arm64 \
             hog-devnode \
-            contracts/dev_wallet.rv32a \
             contracts/genesis_root.rv32a \
             lib
           contents=$(tar -tzf artifacts/hog-devnode-macos-arm64.tar.gz)
-          grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
           grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
 
       - name: Upload Artifact
@@ -540,7 +589,7 @@ jobs:
           set -euo pipefail
           cd artifacts
           archives=(*.tar.gz)
-          test "${#archives[@]}" -eq 9
+          test "${#archives[@]}" -eq 10
           for archive in "${archives[@]}"; do
             test -s "$archive"
           done

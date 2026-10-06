@@ -1,10 +1,13 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <exception>
 #include <format>
 #include <optional>
+#include <random>
+#include <set>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -16,17 +19,21 @@
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
+#include "hogd/hog_exec/runtime/item/db_connection_map.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/rpc_msg.hh"
 #include "x23/serialize.h"
@@ -37,6 +44,38 @@
 namespace hogd {
 
 namespace {
+
+// Report a transport failure escaping an RPC body and leave the caller with a
+// structured Unrecoverable.
+//
+// Nothing thrown by the client may leave a DatabaseProxy body.  Callers hold
+// x23::CoroLocks across these calls -- SnapshotStorageItem::rcq_mtx_ and the
+// view gateway's view_state_lock_ -- and every one of them is written to leave
+// through co_await g.reset_and_return(...).  An exception unwinding past them
+// would instead run ~CoroGuard, which resumes the next waiter as a nested call
+// on the unwinding stack; under contention that builds the unbounded
+// unlock->resume chain those locks document, and overruns the worker stack.
+// Several of these also run on detached executor workers, where an escaping
+// exception terminates hog_exec outright.
+//
+// What is contained: x23::XdrBadInput (client-side, an oversized request),
+// x23::XdrCallFailed (server-side SYSTEM_ERR), x23::XdrException (a connection
+// closed before the reply, or a reply that would not decode), and
+// std::bad_alloc (local OOM while serializing).  The diagnostic itself
+// allocates while formatting and can throw again under the same memory
+// pressure, so it falls back to the no-allocation reporter (cf.
+// syscall_invoke.cc, #2719).
+void
+report_rpc_failure(const char *method, std::exception const &e) noexcept
+{
+  try {
+    error("Unrecoverable: {} failed (transport/serialization/allocation "
+          "failure): {}",
+          method, e.what());
+  } catch (...) {
+    report_dropped_log("DatabaseProxy RPC failure diagnostic");
+  }
+}
 
 struct VoidMarker {};
 struct NotFoundIsUnrecoverableError {};
@@ -146,14 +185,15 @@ to_system_error_code(auto err, auto &&f)
 
 } // namespace
 
-DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
+DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier,
+                             size_t max_message_size)
   : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
-        return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(
+        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
             x23::HostPort{"localhost",
                           x23::uformat("{}", mock_db.read_port_number_)},
-            false, *x23::single_bucket_map);
+            false, *x23::single_bucket_map, max_message_size);
         // Uses just one client for local mock testing.
         // This avoids fd ulimit issues in sdk tests
       }
@@ -167,71 +207,115 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
           panic("Failed to parse database shard address");
         }
-        return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
-                                                                    false);
+        // See db_connection_map.h for why the count is derived from the
+        // machine rather than fixed, and what it was measured against.
+        const x23::CpuMap &conn_map = db_connection_map();
+        info("DatabaseProxy: {} connections (llc_map would give {}, core_map "
+             "{})",
+             conn_map.nbuckets(), x23::llc_map->nbuckets(),
+             x23::core_map->nbuckets());
+        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
+            hostport, false, conn_map, max_message_size);
       }
       panic("unimplemented");
     }())
 {}
 
-SystemStatus<std::optional<WireStorageItem>>
-DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
+x23::Async<SystemStatus<std::optional<WireStorageItem>>>
+DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey addrkey)
 {
-  auto res = client_.get_snapshot_item(block_id, addrkey);
-  return to_system_error_code<std::nullopt>(
-      res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
-        return std::make_optional<WireStorageItem>(std::move(x));
-      });
+  try {
+    auto res = co_await client_.get_snapshot_item(block_id, addrkey);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<std::nullopt>(
+        res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
+          return std::make_optional<WireStorageItem>(std::move(x));
+        });
+  } catch (std::exception const &e) {
+    report_rpc_failure("get_snapshot_item", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
-SystemStatus<std::optional<Contract>>
+x23::Async<SystemStatus<std::optional<Contract>>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
-  auto res = client_.get_contract(block_id, contract_hash);
-  return to_system_error_code<std::nullopt>(res, [](Contract &&x) {
-    return std::make_optional<Contract>(std::move(x));
-  });
+  try {
+    auto res = co_await client_.get_contract(block_id, contract_hash);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<std::nullopt>(res, [](Contract &&x) {
+      return std::make_optional<Contract>(std::move(x));
+    });
+  } catch (std::exception const &e) {
+    report_rpc_failure("get_contract", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
-SystemStatus<std::optional<DeployedContractHash>>
+x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
-  auto res = client_.get_deployment(block_id, addr);
-  return to_system_error_code<std::nullopt>(res, [](DeployedContractHash &&x) {
-    return std::make_optional<DeployedContractHash>(std::move(x));
-  });
+  try {
+    auto res = co_await client_.get_deployment(block_id, addr);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<std::nullopt>(
+        res, [](DeployedContractHash &&x) {
+          return std::make_optional<DeployedContractHash>(std::move(x));
+        });
+  } catch (std::exception const &e) {
+    report_rpc_failure("get_deployment", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
-SystemStatus<std::optional<RetrocausalQueueBlock>>
+x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
 DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
-                                                AddressAndKey const &addrkey,
+                                                AddressAndKey addrkey,
                                                 uint64_t search_start_number)
 {
-  auto res = client_.get_next_retrocausal_queue_block(block_id, addrkey,
-                                                      search_start_number);
-  return to_system_error_code<std::nullopt>(res, [](RetrocausalQueueBlock &&x) {
-    return std::make_optional<RetrocausalQueueBlock>(std::move(x));
-  });
+  try {
+    auto res =
+        co_await client_.get_next_retrocausal_queue_block(block_id, addrkey,
+                                                          search_start_number);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<std::nullopt>(
+        res, [](RetrocausalQueueBlock &&x) {
+          return std::make_optional<RetrocausalQueueBlock>(std::move(x));
+        });
+  } catch (std::exception const &e) {
+    report_rpc_failure("get_next_retrocausal_queue_block", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
-SystemStatus<std::optional<QueueEntry>>
-DatabaseProxy::get_concurrent_retrocausal_queue_entry(
-    BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
+x23::Async<SystemStatus<std::optional<QueueEntry>>>
+DatabaseProxy::get_concurrent_retrocausal_queue_entry(BlockID block_id,
+                                                      AddressAndKey addrkey,
+                                                      uint32_t index)
 {
-  auto res =
-      client_.get_concurrent_retrocausal_queue_entry(block_id, addrkey, index);
-  return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
-    return std::make_optional<QueueEntry>(std::move(x));
-  });
+  try {
+    auto res =
+        co_await client_.get_concurrent_retrocausal_queue_entry(block_id,
+                                                                addrkey, index);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
+      return std::make_optional<QueueEntry>(std::move(x));
+    });
+  } catch (std::exception const &e) {
+    report_rpc_failure("get_concurrent_retrocausal_queue_entry", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
   try {
-    auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
-    return to_system_error_code<VoidMarker{}>(res, [] {});
+    auto res =
+        co_await client_.commit_transaction(block_id, tx_id, new_contracts);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     // commit_transaction runs on a detached executor worker; any escaping
     // exception terminates hog_exec. Contain every failure here and return a
@@ -251,15 +335,21 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
     } catch (...) {
       report_dropped_log("commit_transaction failure diagnostic");
     }
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
 }
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
-  auto res = client_.abort_transaction(block_id, tx_id);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  try {
+    auto res = co_await client_.abort_transaction(block_id, tx_id);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  } catch (std::exception const &e) {
+    report_rpc_failure("abort_transaction", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
 // A transaction's r/w footprint must never encode to a StorageDeltaBatch push
@@ -370,14 +460,6 @@ footprint_bound(FlaggedStorageDelta const &fd)
   return kPerDeltaFraming + footprint_bound(fd.delta);
 }
 
-// The executor->HogDb RPC message cap a push must fit. x23 bounds
-// (record.size() - 4) -- the rpc_msg header plus the call args -- against
-// max_message_size (see send_call in x23/rpc.h). exec_server runs at x23's
-// default_max_message_size, which is a runtime-mutable extern (tests lower it)
-// with no constexpr to bind to; this mirrors its compile-time default.
-// TODO(rstutsman): bind to an x23 constexpr default once x23 exposes one.
-constexpr size_t kExecToDbMessageCap = 0x100'0000;
-
 // Bytes of the try_push_new_subtransaction request that count against the cap
 // but are NOT per-delta: the rpc_msg header, the BlockID and TransactionID
 // args, and the StorageDeltaBatch Vec length prefix. footprint_bound accounts
@@ -400,7 +482,7 @@ static_assert(kXdrMax<FlaggedStorageDelta> <= kMaxSubtransactionPushFootprint,
 
 } // namespace
 
-SystemStatus<bool>
+x23::Async<SystemStatus<bool>>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch,
@@ -429,7 +511,7 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
         "{} + message overhead {} exceeds the {}-byte executor->HogDb message "
         "cap",
         footprint, kMessageOverhead, kExecToDbMessageCap);
-    return false;
+    co_return false;
   }
 
   if constexpr (is_debug_build()) {
@@ -438,22 +520,23 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
-    auto res =
-        client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
+    auto res = co_await client_.try_push_new_subtransaction(block_id, tx_id,
+                                                            delta_batch);
+    co_await default_threadpool().bg();
     switch (res.error()) {
     case RPCError::kRPCNone:
-      return true;
+      co_return true;
     case RPCError::kRPCStorageWriteFailed:
       if (conflict_out != nullptr) {
         *conflict_out = std::move(res.conflict());
       }
-      return false;
+      co_return false;
     case RPCError::kRPCBadBlockID:
-      return SystemError{SystemErrorCode::Abandon};
+      co_return SystemError{SystemErrorCode::Abandon};
     default:
       error("Unrecoverable: Received unhandled error type from RPC: {}",
             res.error());
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
   } catch (std::exception const &e) {
     // Same containment as commit_transaction: this runs on a detached executor
@@ -469,48 +552,100 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     } catch (...) {
       report_dropped_log("try_push_new_subtransaction failure diagnostic");
     }
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
 }
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
-  auto res = client_.pop_subtransactions(block_id, tx_id, count);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  try {
+    auto res = co_await client_.pop_subtransactions(block_id, tx_id, count);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  } catch (std::exception const &e) {
+    report_rpc_failure("pop_subtransactions", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
-SystemStatus<DbTip>
-DatabaseProxy::get_db_tip(BlockID block_id)
+x23::Async<SystemStatus<DbTip>>
+DatabaseProxy::get_db_tip(BlockID block_id, BlockHeight block_height)
 {
-  auto res = client_.get_db_tip(block_id);
-  return to_system_error_code<NotFoundIsUnrecoverableError{}>(
-      res, [block_id](DbTip &&x) -> SystemStatus<DbTip> {
-        if (x.id == block_id) {
-          error("Unrecoverable: Received DbTip with block id equal to current "
+  try {
+    auto res = co_await client_.get_db_tip(block_id, block_height);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(
+        res, [block_id](DbTip &&x) -> SystemStatus<DbTip> {
+          if (x.id == block_id) {
+            error(
+                "Unrecoverable: Received DbTip with block id equal to current "
                 "block id: {} (should be parent ID)",
                 x.id);
-          return SystemError{SystemErrorCode::Unrecoverable};
-        }
-        return x;
-      });
+            return SystemError{SystemErrorCode::Unrecoverable};
+          }
+          return x;
+        });
+  } catch (std::exception const &e) {
+    report_rpc_failure("get_db_tip", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
-SystemStatus<ViewingSnapshot>
+x23::Async<SystemStatus<ViewingSnapshot>>
 DatabaseProxy::open_viewing_snapshot()
 {
-  auto res = client_.open_viewing_snapshot();
-  return to_system_error_code<NotFoundIsUnrecoverableError{}>(
-      res,
-      [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> { return x; });
+  try {
+    auto res = co_await client_.open_viewing_snapshot();
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(
+        res,
+        [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> { return x; });
+  } catch (std::exception const &e) {
+    report_rpc_failure("open_viewing_snapshot", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
 }
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 {
-  auto res = client_.close_viewing_snapshot(block_id);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  try {
+    auto res = co_await client_.close_viewing_snapshot(block_id);
+    co_await default_threadpool().bg();
+    co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  } catch (std::exception const &e) {
+    report_rpc_failure("close_viewing_snapshot", e);
+    co_return SystemError{SystemErrorCode::Unrecoverable};
+  }
+}
+
+x23::Async<SystemStatus<bool>>
+PerTransactionDatabaseProxy::try_push_current_subtransaction()
+{
+  if constexpr (is_debug_build()) {
+    // Invariant: hog_exec sends at most one delta per key per subtransaction.
+    std::set<AddressAndKey> seen_keys;
+    for (auto const &d : current_subtransaction_batch_) {
+      auto [_, inserted] = seen_keys.insert(d.addrkey);
+      CHECK(inserted);
+    }
+
+    // Shuffle the batch of deltas before sending to the database because the
+    // order of deltas in a batch is supposed to not affect the result of the
+    // call.  Shuffling in tests helps catch bugs in the database delta
+    // handling logic.
+    std::shuffle(current_subtransaction_batch_.begin(),
+                 current_subtransaction_batch_.end(),
+                 std::mt19937{std::random_device{}()});
+  }
+
+  last_push_conflict_ = DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
+  auto r = co_await db_proxy_.try_push_new_subtransaction(
+      block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
+  current_subtransaction_batch_.clear();
+  co_return r;
 }
 
 } // namespace hogd

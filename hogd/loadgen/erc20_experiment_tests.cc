@@ -43,11 +43,11 @@ protected:
     for (auto const &tx : block) {
       check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
+      auto invoke_res = handler.root_invoke()();
       ASSERT_TRUE(invoke_res.is_root_success())
           << "invoke error: " << invoke_res.result_.error().raw_code()
           << ", gas consumed: " << invoke_res.gas_consumed_;
-      auto res = handler.try_commit_transaction();
+      auto res = handler.try_commit_transaction()();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
       ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
                                       ProposedTransaction{.signed_tx = tx})());
@@ -87,14 +87,15 @@ protected:
     ASSERT_TRUE(work_txs_raw.has_value());
 
     SignedTransactionBatch work_txs;
-    parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+    parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs,
+                        kNoBatchSizeLimit)();
     ASSERT_EQ(work_txs.size(), 100);
     for (auto &tx : work_txs) {
       check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
+      auto invoke_res = handler.root_invoke()();
       ASSERT_TRUE(invoke_res.is_root_success());
-      auto res = handler.try_commit_transaction();
+      auto res = handler.try_commit_transaction()();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
       if (!gas_used) {
         gas_used = invoke_res.gas_consumed_;
@@ -134,14 +135,15 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
   ASSERT_TRUE(work_txs_raw.has_value());
 
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs,
+                      kNoBatchSizeLimit)();
   ASSERT_EQ(work_txs.size(), 100);
   for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
-    auto invoke_res = handler.root_invoke();
+    auto invoke_res = handler.root_invoke()();
     ASSERT_TRUE(invoke_res.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_TRUE(res == ExecResult::ExecResultOK);
     if (!gas_used) {
       gas_used = invoke_res.gas_consumed_;
@@ -189,13 +191,14 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
   ASSERT_TRUE(work_txs_raw.has_value());
 
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+  parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs,
+                      kNoBatchSizeLimit)();
   for (auto &tx : work_txs) {
     check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, *runtime_context_);
-    auto invoke_res = handler.root_invoke();
+    auto invoke_res = handler.root_invoke()();
     ASSERT_TRUE(invoke_res.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_TRUE(res == ExecResult::ExecResultOK);
     if (!gas_used) {
       gas_used = invoke_res.gas_consumed_;

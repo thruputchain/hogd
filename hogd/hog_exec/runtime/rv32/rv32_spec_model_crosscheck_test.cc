@@ -20,9 +20,8 @@
 #include "hogd/hog_exec/runtime/rv32/test_support.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
-// This is an in-tree spec-model cross-check, not an external differential
-// oracle. It is designed to catch local VM regressions quickly while
-// Spike/sail-riscv or another independent oracle remains an open M5 gate.
+// Cross-check both interpreters against the in-tree spec model. External
+// decoder coverage is in rv32_spike_oracle_test.cc.
 
 // NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name)
 
@@ -372,7 +371,10 @@ make_random_case(uint64_t seed, size_t instruction_count)
         random_instruction(rng, i, instruction_count));
   }
   test_case.instructions.push_back(spec(0x00000073U, Op::kEcall));
-  test_case.gas_limit = (instruction_count * kDivInstructionGas) + 10;
+  // Enough for every instruction to execute whatever it turned out to be:
+  // kMaxInstructionGas is the priciest one, which kDivInstructionGas only
+  // happened to be under an older schedule.
+  test_case.gas_limit = (instruction_count * kMaxInstructionGas) + 10;
   return test_case;
 }
 

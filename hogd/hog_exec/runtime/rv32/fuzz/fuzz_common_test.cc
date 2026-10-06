@@ -42,7 +42,7 @@ TEST(Rv32FuzzCommon, ByteReaderRestReturnsUnconsumedTail)
 TEST(Rv32FuzzCommon, ConstantsHoldTheTraceBoundInvariant)
 {
   EXPECT_LT(kFuzzGasCap, kFuzzTraceMaxSteps);
-  EXPECT_LE(kFuzzMemCap, kMaxMemoryBytes);
+  EXPECT_LE(kFuzzMemCap, kDefaultMaxMemoryBytes);
 }
 
 TEST(Rv32FuzzDecoderParity, AgreeOnValidStream)
@@ -347,13 +347,13 @@ TEST(Rv32FuzzCarveArtifact, ForcesNonEmptyCodeAndClampsMemoryToRemaining)
   EXPECT_LE(fixup.initial_memory.size(), 3U);
   EXPECT_LE(std::size_t{fixup.initial_memory_start} +
                 fixup.initial_memory.size(),
-            std::size_t{kMaxMemoryBytes});
+            std::size_t{kDefaultMaxMemoryBytes});
   EXPECT_FALSE(fixup.code_words.empty()); // forced non-empty
   EXPECT_GE(fixup.memory_bytes,
             std::max<uint32_t>(1, fixup.initial_memory_start +
                                       static_cast<uint32_t>(
                                           fixup.initial_memory.size())));
-  EXPECT_LE(fixup.memory_bytes, kMaxMemoryBytes);
+  EXPECT_LE(fixup.memory_bytes, kDefaultMaxMemoryBytes);
 }
 
 TEST(Rv32FuzzCarveArtifact, ReservesFullWordForFuzzerCodeWhenAvailable)

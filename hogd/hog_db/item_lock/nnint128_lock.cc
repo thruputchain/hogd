@@ -92,7 +92,7 @@ NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
   assert(before == nullptr || before->base() == base_);
 
   if (after != nullptr && after->base() != base_) {
-    return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
+    return ctx.conflict(DbConflictCode::ValueMismatch);
   }
 
   int128_t add_before = before == nullptr ? 0 : before->plus();
@@ -107,7 +107,7 @@ NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
 
   if (!delta_bounds_.try_reserve_delta(delta_before, delta_after, add_before,
                                        add_after, sub_before, sub_after)) {
-    return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+    return ctx.conflict(DbConflictCode::BoundsExceeded);
   }
 
   return get_storage_cost_of_committed_value(ctx.cost_model);

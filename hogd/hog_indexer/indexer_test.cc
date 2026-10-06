@@ -86,7 +86,7 @@ create_event_logs()
   std::ranges::fill(contract_addr0, 0xAA);
   std::ranges::fill(contract_addr1, 0xBB);
 
-  TxEventLog event_log0;
+  TxEventLog event_log0{};
   event_log0.tx_hash = tx_hash0;
   TxEmittedEvent event0;
   event0.contract_address = contract_addr0;
@@ -95,7 +95,7 @@ create_event_logs()
   std::ranges::fill(event0.serialized_event, 0x11);
   event_log0.events.push_back(event0);
 
-  TxEventLog event_log1;
+  TxEventLog event_log1{};
   event_log1.tx_hash = tx_hash1;
   TxEmittedEvent event1;
   event1.contract_address = contract_addr1;
@@ -115,7 +115,7 @@ create_tx_bodies(std::size_t n)
 {
   ProposedTransactionBatch bodies;
   for (std::size_t i = 0; i < n; i++) {
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     bodies.emplace_back(std::move(body));
   }
@@ -127,7 +127,7 @@ make_failure_diag(BlockHeight attempt_height)
 {
   TxFailureDiagnostic diag;
   diag.attempt_height = attempt_height;
-  diag.conflict.code = DbConflictCode::kDbConflictValueMismatch;
+  diag.cause.conflict().code = DbConflictCode::ValueMismatch;
   return diag;
 }
 
@@ -252,14 +252,14 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   ContractAddress root_addr;
   std::ranges::fill(root_addr, 0xCC);
 
-  ProposedTransaction body;
+  ProposedTransaction body{};
   body.signed_tx.tx.uniquifier.nonce = 42;
   body.signed_tx.tx.invocation.invoked_address = root_addr;
 
   SHA256Hash tx_hash;
   std::ranges::fill(tx_hash, 0x33);
 
-  TxEventLog event_log; // no events emitted
+  TxEventLog event_log{}; // no events emitted
   event_log.tx_hash = tx_hash;
   ASSERT_TRUE(event_log.events.empty());
 
@@ -293,12 +293,12 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   std::ranges::fill(root_a, 0xA1);
   std::ranges::fill(emitter_b, 0xB2);
 
-  ProposedTransaction body;
+  ProposedTransaction body{};
   body.signed_tx.tx.invocation.invoked_address = root_a;
   SHA256Hash tx_hash;
   std::ranges::fill(tx_hash, 0x44);
 
-  TxEventLog event_log;
+  TxEventLog event_log{};
   event_log.tx_hash = tx_hash;
   TxEmittedEvent ev;
   ev.contract_address = emitter_b; // event emitted by B, not the root A
@@ -346,13 +346,13 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
 
   std::vector<SHA256Hash> hashes;
   for (uint8_t i = 0; i < 3; i++) {
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     body.signed_tx.tx.invocation.invoked_address = addr;
     SHA256Hash h;
     std::ranges::fill(h, static_cast<char>(0x50 + i));
     hashes.push_back(h);
-    TxEventLog log;
+    TxEventLog log{};
     log.tx_hash = h;
     ingest_legacy_events(static_cast<BlockHeight>(300 + i),
                          TxEventLogBatch{log},
@@ -390,12 +390,12 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
   std::ranges::fill(addr, 0xD5);
 
   auto ingest = [&](BlockHeight height, uint8_t fill) {
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = fill;
     body.signed_tx.tx.invocation.invoked_address = addr;
-    TxEventLog log;
+    TxEventLog log{};
     std::ranges::fill(log.tx_hash, fill);
-    TxEmittedEvent event;
+    TxEmittedEvent event{};
     event.contract_address = addr;
     log.events.push_back(event);
     ingest_legacy_events(height, TxEventLogBatch{log},
@@ -480,11 +480,11 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     SHA256Hash h;
     std::ranges::fill(h, static_cast<char>(0x90 + i));
 
-    TxEventLog log;
+    TxEventLog log{};
     log.tx_hash = h;
     logs.push_back(log); // present, but emits no events
 
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     body.signed_tx.tx.invocation.invoked_address = addr;
     bodies.push_back(body);
@@ -521,8 +521,8 @@ TEST_F(IndexerTest, RecentFailureVisibleThenCommittedRecordWins)
   TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
   ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoRecentFailure);
   EXPECT_EQ(result.recent_failure().attempt_height, 100);
-  EXPECT_EQ(result.recent_failure().conflict.code,
-            DbConflictCode::kDbConflictValueMismatch);
+  EXPECT_EQ(result.recent_failure().cause.conflict().code,
+            DbConflictCode::ValueMismatch);
 
   // The retried tx commits at height 101: the committed record wins.
   ingest_legacy_events(101, events, bodies)();
@@ -541,9 +541,9 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
   // Ingest committed blocks 100..105; each ingest prunes against the new
   // watermark. Give each block one distinct committed tx.
   for (BlockHeight h = 100; h <= 105; h++) {
-    TxEventLog log;
+    TxEventLog log{};
     std::ranges::fill(log.tx_hash, static_cast<uint8_t>(h));
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = h;
     ingest_legacy_events(h, TxEventLogBatch{log},
                          ProposedTransactionBatch{body})();
@@ -582,7 +582,7 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   std::ranges::fill(tx12, 0x12);
 
   auto ingest_at = [&](BlockHeight height, SHA256Hash const &tx) {
-    TxEventLog log;
+    TxEventLog log{};
     log.tx_hash = tx;
     TxEmittedEvent ev;
     ev.contract_address = addr;
@@ -590,7 +590,7 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
     ev.serialized_event.resize(4);
     log.events.push_back(std::move(ev));
 
-    ProposedTransaction body;
+    ProposedTransaction body{};
     body.signed_tx.tx.invocation.invoked_address = addr;
 
     ingest_legacy_events(height, TxEventLogBatch{log},

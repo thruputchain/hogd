@@ -7,6 +7,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -21,6 +22,7 @@
 #include "auth_rpc.hh"
 #include "consensus.hh"
 #include "db_sched.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
@@ -46,6 +48,8 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -206,7 +210,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -286,6 +291,36 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   }
 }
 
+TEST_F(AuthSubscriptionTest, AuthChangesOverTheChunkBoundArriveWhole)
+{
+  // Two changes per chunk; five changes make a run of three chunks, and the
+  // subscriber sees all five once the run is complete.
+  constexpr BlockHeight kHeight = 3;
+  constexpr uint64_t kNumChanges = 5;
+  AuthChangeSubscriptionManager manager(/*max_key_changes_per_chunk=*/2);
+  ASSERT_TRUE(
+      manager.add_full_auth_change_subscriber(auth_card_)().has_value());
+
+  std::set<ContractAddress> published;
+  PerThread<KeyChangeBatch> key_changes;
+  for (uint64_t i = 0; i < kNumChanges; ++i) {
+    const ContractAddress address = make_address(0x5000 + i).get_raw();
+    published.insert(address);
+    key_changes->push_back(KeyChange{.address = address, .auth_data = {}});
+  }
+  manager.publish_auth_changes(kHeight, std::move(key_changes))();
+
+  mock_auth_server_->impl()->wait_for_changes(kHeight);
+  auto received = mock_auth_server_->impl()->get_changes_at_height(kHeight);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(received->size(), kNumChanges);
+  std::set<ContractAddress> arrived;
+  for (const KeyChange &change : *received) {
+    arrived.insert(change.address);
+  }
+  EXPECT_EQ(arrived, published);
+}
+
 TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
 {
   // Subscribe to auth changes
@@ -312,7 +347,8 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -388,7 +424,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -464,7 +501,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -503,17 +541,18 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
 namespace {
 
-// Mirrors AuthServer's strict ordered-height gate: refuses to complete
-// authdb_forward_key_changes(H) until H-1 has been processed. Used to
-// demonstrate that concurrent publishes must not be serialized on the
-// client side while one is parked on the server-side gate.
+// Mirrors AuthServer's strict ordered-height gate: refuses to complete a
+// chunk of height H until H-1 has been processed. Used to demonstrate that
+// concurrent publishes must not be serialized on the client side while one is
+// parked on the server-side gate. The publishes here are empty, so each
+// height is a run of one chunk and one call.
 class HeightOrderedMockAuthDBRpc {
 public:
   using rpc_service = AuthDB1;
 
-  x23::Async<void> authdb_forward_key_changes(BlockHeight height,
-                                              KeyChangeBatch /*key_changes*/)
+  x23::Async<void> authdb_forward_key_changes_chunk(KeyChangeChunk chunk)
   {
+    const BlockHeight height = chunk.height;
     active_calls_.fetch_add(1, std::memory_order_release);
     arrivals_.fetch_add(1, std::memory_order_release);
     last_arrived_height_.store(height, std::memory_order_release);
@@ -635,17 +674,24 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
                .address_for_mempool = ""};
 
   AuthCard wrong_protocol_card =
-      AuthCard{.protocol = "wrong/000000000000",
+      AuthCard{.protocol = protocol_from_text("wrong/000000000000"),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
 
-  std::string nul_suffixed(version::kHogdProtocol());
-  nul_suffixed.push_back('\0');
-  nul_suffixed += "suffix";
-  AuthCard nul_protocol_card =
-      AuthCard{.protocol =
-                   ProtocolCommit(nul_suffixed.data(), nul_suffixed.size()),
+  // A fixed-width token has no room past its 20 bytes, so this case used to be
+  // "the real token, a NUL, then junk" and is now simply the real token. What
+  // takes its place is the confusion the fixed width does allow: a short token
+  // padded out to the array, sharing a prefix with the real one. Rejecting it
+  // is what makes the padding part of the token's identity rather than filler.
+  // protocol_text borrows its argument, so the token has to be named here:
+  // taking the view straight off kHogdProtocol() would leave it pointing at a
+  // temporary that dies at the end of that statement (ASan: stack-use-after-
+  // scope, hogd issue #3718).
+  const ProtocolCommit current_token = version::kHogdProtocol();
+  const std::string_view current_protocol = protocol_text(current_token);
+  AuthCard padded_prefix_card =
+      AuthCard{.protocol = protocol_from_text(current_protocol.substr(0, 12)),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
@@ -659,8 +705,8 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   DBAuthIntroResult wrong_result = rpc.dbauth_intro(wrong_protocol_card)();
   EXPECT_EQ(wrong_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
 
-  DBAuthIntroResult nul_result = rpc.dbauth_intro(nul_protocol_card)();
-  EXPECT_EQ(nul_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+  DBAuthIntroResult padded_result = rpc.dbauth_intro(padded_prefix_card)();
+  EXPECT_EQ(padded_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
 
   DBAuthIntroResult valid_result = rpc.dbauth_intro(auth_card_)();
   EXPECT_EQ(valid_result.outcome(), DBAuthIntroOutcome::kIntroSuccess);

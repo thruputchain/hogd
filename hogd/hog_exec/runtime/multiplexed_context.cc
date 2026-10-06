@@ -1,15 +1,19 @@
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -19,7 +23,7 @@ MultiplexedContext::MultiplexedContext(
   : contexts_(std::move(contexts))
 {}
 
-SystemStatus<std::unique_ptr<Runtime>>
+x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
 MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
                                      SystemCallHandler *syscall_handler) const
 {
@@ -30,18 +34,22 @@ MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
     // contract fault.
     error("Unrecoverable: no runtime context registered for contract type {}",
           deployed_contract.hash.contract_type);
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
-  return it->second.first->make_new_runtime(deployed_contract, syscall_handler);
+  co_return co_await it->second.first->make_new_runtime(deployed_contract,
+                                                        syscall_handler);
 }
 
 InvokeErrorCode
-MultiplexedContext::verify_contract(Contract const &contract) const
+MultiplexedContext::verify_contract(
+    Contract const &contract, NetworkConfigParams const &params,
+    PreparedContract &out, std::optional<ContractRejectCode> &rejection) const
 {
   auto it = contexts_.find(contract.contract_type());
   if (it == contexts_.end()) {
+    rejection = ContractRejectCode::ContractRejectNotDeployable;
     return InvokeErrorCode::Deterministic;
   }
-  return it->second.first->verify_contract(contract);
+  return it->second.first->verify_contract(contract, params, out, rejection);
 }
 } // namespace hogd

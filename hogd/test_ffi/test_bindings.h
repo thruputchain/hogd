@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 26
+#define TEST_FFI_VERSION_MINOR 36
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -22,33 +22,39 @@ extern "C" {
 // DB lifecycle operations are mutually exclusive with open handlers, and with
 // each other. advance_new_block() and free_db() are rejected
 // (kTestFFIErrorCodeUnrecoverableError) while any syscall handler derived from
-// that DB is open -- for the handler's whole lifetime, from the moment
-// open_syscall_handler() / open_mocked_syscall_handler() begins constructing it
-// (so a concurrent advance cannot replace state a half-built handler is
-// borrowing) through close_syscall_handler(). For advance_new_block() the
-// exclusion runs both ways: while an advance is in flight, opening a handler
-// on that DB is itself rejected with kTestFFIErrorCodeUnrecoverableError, so a
-// caller racing those two from different threads sees one of them fail rather
-// than a handler bound to a snapshot the advance is replacing. A rejected open
-// borrows nothing and returns a null handler; retry it once the advance
-// returns.
+// that DB is open, for the handler's whole lifetime: from the moment
+// open_syscall_handler() / open_mocked_syscall_handler() registers its borrow,
+// which it does before deserializing its argument (so a concurrent advance
+// cannot replace state a half-built handler is borrowing), through
+// close_syscall_handler(). For advance_new_block() the exclusion runs both
+// ways: while an advance is in flight, opening a handler on that DB is itself
+// rejected with kTestFFIErrorCodeUnrecoverableError, so a caller racing those
+// two from different threads sees one of them fail rather than a handler bound
+// to a snapshot the advance is replacing. A rejected open borrows nothing and
+// returns a null handler; retry it once the advance returns.
+//
+// get_snapshot_storage_item() and the setup_* mutators (setup_create_contract,
+// setup_deploy_contract, setup_grant_contract_storage_tokens) take that same
+// exclusion for the length of their DB access: the read queries the snapshot
+// an advance replaces, and the writes go to the store the advance's commit
+// syncs, which that store forbids overlapping. Whichever of the two arrives
+// second is rejected with kTestFFIErrorCodeUnrecoverableError, and either is
+// fine to retry; a rejected mutator has written nothing.
 //
 // free_db() is weaker, and no in-library guard can make it otherwise: it
-// destroys the `db` handle itself, so a call that is already inside the
-// library -- an open_syscall_handler() still deserializing its argument, say --
-// has no object left to be rejected against. Every other call on that handle
-// must have returned before free_db() is called, and none may start after it;
-// the open-handler rejection above only catches a handler that has already
-// registered its borrow, and is not a substitute for sequencing the free
-// yourself.
+// destroys the `db` handle itself, so a call that has been entered but has not
+// yet registered its borrow (the first few instructions of any entry point)
+// has no object left to be rejected against. Every other call on that
+// handle must have returned before free_db() is called, and none may start
+// after it; the rejection above catches a call that has registered, and is not
+// a substitute for sequencing the free yourself.
 //
 // If a close fails to abort its transaction, the DB is poisoned:
 // advance_new_block is refused thereafter and the DB can only be freed. Beyond
-// that guarding the harness does not order your operations:
-// running transactions or the setup_* mutators (setup_create_contract,
-// setup_deploy_contract, ...) concurrently against the same DB leaves the
-// *result* unspecified -- sequence them yourself if you need a deterministic
-// outcome.
+// that guarding the harness does not order your operations: running
+// transactions or the setup_* mutators concurrently against the same DB is
+// memory-safe but leaves the *result* unspecified. Sequence them yourself if
+// you need a deterministic outcome.
 //
 // A single runtime context or syscall handler is stateful and is itself NOT
 // internally synchronized -- drive each individual handle from one thread at a
@@ -70,10 +76,11 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeDeserializeError = 4,
   // Unrecoverable error of unknown type
   kTestFFIErrorCodeUnrecoverableError = 5,
-  // Contract failed wasm verification (e.g., memory exceeds limits)
+  // Contract failed runtime verification (e.g., an RV32 artifact that cannot
+  // be translated)
   kTestFFIErrorCodeContractVerificationFailed = 6,
   // An argument violated a documented precondition (e.g. a negative
-  // storage-token grant, or a mock invocation frame production would not admit)
+  // storage-token grant)
   kTestFFIErrorCodeInvalidArgument = 7,
 };
 
@@ -137,13 +144,16 @@ struct ForeignHostFnResult {
 
 // Translation of try_commit_transaction result into an FFI-safe type.
 struct ForeignTryCommitResult {
-  int32_t result_code; // ExecResult
+  // ExecResult: the commit decision. A post-commit failure to publish the
+  // transaction's events surfaces as ffi_error_code instead; the write is
+  // durable and the handler must still be closed.
+  int32_t result_code;
 
   // XDR-serialized DbConflictResult two-phase-commit conflict diagnostic.
   // Always populated with the whole union (the kDbDiagnosticNone arm when there
   // was no conflict) so the caller always deserializes a well-formed,
-  // self-describing value. Null only if serialization itself failed. Must be
-  // freed with free_ffi_data_buffer().
+  // self-describing value. Null when ffi_error_code is set, or if
+  // serialization itself failed. Must be freed with free_ffi_data_buffer().
   struct FFIDataBuffer serialized_conflict;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
@@ -205,7 +215,17 @@ struct GetNetworkConfigResult get_network_config(void *db);
 struct GetSnapshotStorageItemResult
 get_snapshot_storage_item(void *db, struct FFISerializedAddressAndKey addrkey);
 
-enum TestFFIErrorCode advance_new_block(void *db);
+// Opens the next block. `block_timepoint` is that block's timepoint in Unix
+// nanoseconds, as a real chain's header carries; NULL takes the current wall
+// clock. Pass a value to pin it, which is how a test drives contract logic
+// keyed on time.
+//
+// A block may not be older than the one it follows. A timepoint earlier than
+// the open block's is rejected with kTestFFIErrorCodeInvalidArgument and
+// advances nothing, so the DB is left exactly as it was and the caller can
+// retry. Equal is allowed.
+enum TestFFIErrorCode advance_new_block(void *db,
+                                        const uint64_t *block_timepoint);
 
 struct OpenRuntimeContextResult {
   void *context;
@@ -290,16 +310,25 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     void *db, void *rc, struct FFISerializedAuthClaimData auth_claim_data,
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
-// Frames are admitted on production's terms, so two rules bind the caller:
+struct OpenMockInvocationFrameResult {
+  // SyscallErrorCode: why production refused the frame, none if it opened.
+  // Never set together with ffi_error_code.
+  int32_t syscall_error_code;
+  // FFI-level error code
+  enum TestFFIErrorCode ffi_error_code;
+};
+
+// Frames are admitted on production's terms, so three rules bind the caller:
 // invoke_flags may contain only defined, implemented bits (TryInvoke |
-// ReadOnly), and an address that already has a frame on the stack cannot be
-// invoked again -- nested frames need distinct invoked_addresses. Either
-// violation returns kTestFFIErrorCodeInvalidArgument and opens no frame, so the
-// handler stays usable and no finish_mock_invocation_frame() is owed.
-enum TestFFIErrorCode
+// ReadOnly); an address that already has a frame on the stack cannot be invoked
+// again -- nested frames need distinct invoked_addresses; and
+// max_cross_invoke_depth caps how many frames a transaction may hold open.
+// Breaking one is a refusal, not misuse: syscall_error_code names the rule, no
+// frame opens, and no finish_mock_invocation_frame() is owed.
+struct OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           int32_t invoke_flags);
+                           uint32_t invoke_flags);
 
 struct ForeignTracedInvokeResult
 finish_mock_invocation_frame(void *syscall_handler, int32_t invoke_error_code);
@@ -364,7 +393,7 @@ struct VerifyAuthResultFromDBResult {
 struct VerifyAuthResultFromDBResult verify_signed_transaction_auth_from_db(
     void *db, struct FFISerializedSignedTransaction signed_tx);
 
-// Result of contract wasm verification.
+// Result of contract verification.
 struct VerifyContractResult {
   // 1 if contract is valid, 0 if invalid
   uint8_t success;

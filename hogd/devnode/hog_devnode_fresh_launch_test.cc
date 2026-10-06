@@ -29,6 +29,9 @@ namespace {
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
+// Same caps as hog_devnode_test.cc; this is a launch test, not a capacity test.
+constexpr char kRamDbBytes[] = "2147483648";
+constexpr char kThreadpoolSize[] = "4";
 
 std::string
 json_string_field(std::string_view json, std::string_view field)
@@ -155,6 +158,23 @@ cleanup_child(pid_t pid)
 int
 main() // NOLINT(bugprone-exception-escape)
 {
+  // The launcher owns this fixture. The runtime receives only public intent.
+  char bootstrap_path[] = "/tmp/hog-devnode-fresh-bootstrap-XXXXXX";
+  const int bootstrap_fd = mkstemp(bootstrap_path);
+  if (bootstrap_fd < 0) {
+    fail_with_errno("mkstemp bootstrap");
+  }
+  struct BootstrapCleanup {
+    char const *path;
+    ~BootstrapCleanup() { unlink(path); }
+  } bootstrap_cleanup{bootstrap_path};
+  constexpr std::string_view kBootstrap =
+      R"({"schemaVersion":4,"kind":"groundhog-bootstrap","networkHash":"0000000000000000000000000000000000000000000000000000000000000000","profile":"local-dev","bootstrapFaucet":{"publicKey":"0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","initialStorageTokens":"10000000000000"},"bootstrapAccounts":[],"storageCostModel":{"profile":"hogd-default"}})";
+  if (write(bootstrap_fd, kBootstrap.data(), kBootstrap.size()) !=
+      static_cast<ssize_t>(kBootstrap.size())) {
+    fail_with_errno("write bootstrap");
+  }
+  close(bootstrap_fd);
   int stdout_pipe[2];
   int stderr_pipe[2];
   if (pipe(stdout_pipe) != 0) {
@@ -179,15 +199,21 @@ main() // NOLINT(bugprone-exception-escape)
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
     setenv("HOGD_LOG_FORMAT", "json", /*overwrite=*/1);
+    // Leave an existing pin alone, as hog_devnode_test.cc does.
+    setenv("DEFAULT_THREADPOOL_SIZE", kThreadpoolSize, /*overwrite=*/0);
 
     char *argv[] = {
         const_cast<char *>(HOG_DEVNODE_BINARY),
+        const_cast<char *>("--bootstrap-manifest"),
+        bootstrap_path,
         const_cast<char *>("--listen-host"),
         const_cast<char *>("127.0.0.1"),
         const_cast<char *>("--scheduler-port"),
         const_cast<char *>("0"),
         const_cast<char *>("--readiness"),
         const_cast<char *>("stdout"),
+        const_cast<char *>("--ramdb-bytes"),
+        const_cast<char *>(kRamDbBytes),
         nullptr,
     };
     execv(HOG_DEVNODE_BINARY, argv);

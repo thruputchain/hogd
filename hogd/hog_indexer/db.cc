@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <future>
@@ -43,6 +44,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/key_format.h"
 #include "hogd/hog_indexer/status.h"
@@ -61,6 +63,48 @@
 namespace hogd {
 
 namespace {
+
+// What ingest checks about a pulled block before applying it. The event
+// server established both consensus roots over the block's bodies when it
+// published the record, so ingest does not recompute them: it verifies that
+// the block is the one its identity names and that its two batches pair up.
+IndexerPayloadStatus<void>
+check_committed_block_shape(const IndexerCommittedBlock &block)
+{
+  if (block.payload.format_version != kIndexerOutboxFormatVersion) {
+    return std::unexpected(
+        std::format("unknown committed outbox format version {}",
+                    block.payload.format_version));
+  }
+  if (block.payload.consensus_value.proposal_header.block_height < 0) {
+    return std::unexpected("committed outbox height is negative");
+  }
+  if (block.payload.event_logs.size() != block.payload.tx_bodies.size()) {
+    return std::unexpected("event/body batch cardinalities differ");
+  }
+  if (block.identity.consensus_hash != sha256(block.payload.consensus_value)) {
+    return std::unexpected(
+        "committed block identity differs from canonical payload");
+  }
+  return {};
+}
+
+// True when there is nothing at [path] to open: no such path, or an empty
+// directory. A filesystem error reads as false, so an unreadable path is
+// left to [IndexDB::open] to refuse rather than treated as absent.
+bool
+path_holds_nothing(const std::filesystem::path &path)
+{
+  std::error_code ec;
+  if (!std::filesystem::exists(path, ec)) {
+    return !ec;
+  }
+  if (!std::filesystem::is_directory(path, ec) || ec) {
+    return false;
+  }
+  const bool empty = std::filesystem::is_empty(path, ec);
+  return empty && !ec;
+}
 
 // Helper function to create a tx_index SST file chunk
 IndexerStatus<bool>
@@ -385,6 +429,29 @@ RocksDBDeleter::operator()(rocksdb::DB *db) const
 }
 
 IndexerStatus<IndexDB>
+IndexDB::open_or_make_new(const std::filesystem::path &path,
+                          rocksdb::CompressionType compression_algorithm)
+{
+  // Only a path with nothing at it is created. Dispatching on whether the
+  // path exists sent an existing but empty data directory down [open],
+  // which does not create and so fails with kDBNotFound -- fatal, since
+  // every caller panics on it. Launchers make a daemon's data directory
+  // before the daemon runs often enough (a deployment script, the CI
+  // control server clearing its work directory, a plain [mkdir -p]) that
+  // an empty directory says nothing about whether a database is there
+  // (#3890).
+  //
+  // Anything else is [open]'s to make sense of, including a directory
+  // holding files this cannot identify: a database whose CURRENT file is
+  // gone still fails closed rather than having a fresh manifest written
+  // over the top of its data.
+  if (path_holds_nothing(path)) {
+    return make_new(path, compression_algorithm);
+  }
+  return open(path, compression_algorithm);
+}
+
+IndexerStatus<IndexDB>
 IndexDB::make_new(const std::filesystem::path &path,
                   rocksdb::CompressionType compression_algorithm)
 {
@@ -696,7 +763,7 @@ IndexDB::consume_events(BlockHeight block_height,
     legacy_ingest_test_hook_();
   }
 
-  auto start_ts = x23::fastclock::get_ns();
+  auto start_ts = x23::fastclock::now();
 
   // Parallelism configuration
   static constexpr size_t kNumTxIndexChunks = 8;
@@ -946,9 +1013,10 @@ IndexDB::consume_events(BlockHeight block_height,
   record_height(static_cast<int64_t>(block_height), ingest_guard);
   legacy_mode_ = true;
 
-  auto end_ts = x23::fastclock::get_ns();
-  info("consume_events time: {} ns ({:.3f} s)", end_ts - start_ts,
-       (end_ts - start_ts) / 1'000'000'000.0);
+  auto end_ts = x23::fastclock::now();
+  auto elapsed_ns = (end_ts - start_ts).count();
+  info("consume_events time: {} ns ({:.3f} s)", elapsed_ns,
+       elapsed_ns / 1'000'000'000.0);
 
   return {};
 }
@@ -1030,7 +1098,7 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
     return epoch_failure(IndexerEpochOutcome::IndexerEpochInternalFailure,
                          "indexer database is not open");
   }
-  if (origin.protocol.empty() || origin.first_height < 0) {
+  if (origin.protocol == ProtocolCommit{} || origin.first_height < 0) {
     return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
                          "invalid outbox epoch origin");
   }
@@ -1184,7 +1252,7 @@ IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
     apply_validation_test_hook_();
   }
   try {
-    if (auto valid = co_await validate_indexer_committed_block(block); !valid) {
+    if (auto valid = check_committed_block_shape(block); !valid) {
       co_return apply_failure(
           IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
     }
@@ -1569,7 +1637,8 @@ IndexDB::initialize_progress_from_db()
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  if (progress.origin.protocol.empty() || progress.origin.first_height < 0 ||
+  if (progress.origin.protocol == ProtocolCommit{} ||
+      progress.origin.first_height < 0 ||
       progress.contiguous_height < progress.origin.first_height - 1) {
     error("invalid durable indexer progress bounds");
     return IndexerError(IndexerErrorCode::kInternal);
@@ -1866,6 +1935,44 @@ private:
   bool has_current_ = false;
 };
 
+// Resolves a query's anchor to the block height a scan starts from, or
+// nullopt when the anchor/order combination selects nothing and the
+// caller returns an empty page.  A height below the retained range
+// starts an ascending scan at oldest_block() and leaves a descending one
+// nothing to visit, per protocol/indexer.x's oldest_block contract;
+// rejecting it here also keeps the signed height from wrapping to
+// all-0xFF in the seek key.
+std::optional<BlockHeight>
+resolve_anchor_block(BlockAnchor const &anchor, IterationOrder order,
+                     BlockHeight max_serve_block)
+{
+  switch (anchor.kind()) {
+  case BlockAnchorKind::AnchorAtBeginning:
+    // Nothing to iterate toward below the oldest retained block.
+    if (order == IterationOrder::IterationOrderDescending) {
+      return std::nullopt;
+    }
+    return IndexDB::oldest_block();
+  case BlockAnchorKind::AnchorAtEnd:
+    // Nothing to iterate toward above the highest indexed block.
+    if (order == IterationOrder::IterationOrderAscending) {
+      return std::nullopt;
+    }
+    return max_serve_block;
+  case BlockAnchorKind::AnchorAtHeight:
+    if (anchor.height() < IndexDB::oldest_block()) {
+      if (order == IterationOrder::IterationOrderDescending) {
+        return std::nullopt;
+      }
+      return IndexDB::oldest_block();
+    }
+    return anchor.height();
+  }
+  // Discriminant outside the enum.  No `default:` label, so -Wswitch
+  // still flags a BlockAnchorKind added without a case above.
+  return std::nullopt;
+}
+
 } // namespace
 
 IndexerStatus<EventPage>
@@ -1933,37 +2040,12 @@ IndexDB::get_events(EventQuery const &query) const
     if (!is_valid_iteration_order(order)) {
       return page;
     }
-    switch (query.anchor.kind()) {
-    case BlockAnchorKind::AnchorAtBeginning:
-      if (order == IterationOrder::IterationOrderDescending) {
-        // Nonsense combination — nothing to iterate toward below
-        // the oldest retained block.
-        return page;
-      }
-      anchor_block = oldest_block();
-      break;
-    case BlockAnchorKind::AnchorAtEnd:
-      if (order == IterationOrder::IterationOrderAscending) {
-        // Nonsense combination — nothing to iterate toward above
-        // the highest indexed block.
-        return page;
-      }
-      anchor_block = max_serve_block;
-      break;
-    case BlockAnchorKind::AnchorAtHeight:
-      anchor_block = query.anchor.height();
-      if (anchor_block < oldest_block()) {
-        if (order == IterationOrder::IterationOrderDescending) {
-          // Everything at or below the anchor is outside the
-          // retained range — empty page, per protocol/indexer.x's
-          // oldest_block contract.  Validating here also keeps the
-          // signed height from wrapping to all-0xFF in the seek key.
-          return page;
-        }
-        anchor_block = oldest_block();
-      }
-      break;
+    auto const resolved =
+        resolve_anchor_block(query.anchor, order, max_serve_block);
+    if (!resolved) {
+      return page;
     }
+    anchor_block = *resolved;
   }
   // Descending scans seek from the anchor downward; clamp the start
   // to the watermark so pending rows are never visited.  Ascending
@@ -2174,29 +2256,12 @@ IndexDB::get_transactions(TransactionQuery const &query) const
     if (!is_valid_iteration_order(order)) {
       return page;
     }
-    switch (query.anchor.kind()) {
-    case BlockAnchorKind::AnchorAtBeginning:
-      if (order == IterationOrder::IterationOrderDescending) {
-        return page;
-      }
-      anchor_block = oldest_block();
-      break;
-    case BlockAnchorKind::AnchorAtEnd:
-      if (order == IterationOrder::IterationOrderAscending) {
-        return page;
-      }
-      anchor_block = max_serve_block;
-      break;
-    case BlockAnchorKind::AnchorAtHeight:
-      anchor_block = query.anchor.height();
-      if (anchor_block < oldest_block()) {
-        if (order == IterationOrder::IterationOrderDescending) {
-          return page;
-        }
-        anchor_block = oldest_block();
-      }
-      break;
+    auto const resolved =
+        resolve_anchor_block(query.anchor, order, max_serve_block);
+    if (!resolved) {
+      return page;
     }
+    anchor_block = *resolved;
   }
   if (order == IterationOrder::IterationOrderDescending &&
       anchor_block > max_serve_block) {
@@ -2353,29 +2418,12 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     if (!is_valid_iteration_order(order)) {
       return page;
     }
-    switch (query.anchor.kind()) {
-    case BlockAnchorKind::AnchorAtBeginning:
-      if (order == IterationOrder::IterationOrderDescending) {
-        return page;
-      }
-      anchor_block = oldest_block();
-      break;
-    case BlockAnchorKind::AnchorAtEnd:
-      if (order == IterationOrder::IterationOrderAscending) {
-        return page;
-      }
-      anchor_block = max_serve_block;
-      break;
-    case BlockAnchorKind::AnchorAtHeight:
-      anchor_block = query.anchor.height();
-      if (anchor_block < oldest_block()) {
-        if (order == IterationOrder::IterationOrderDescending) {
-          return page;
-        }
-        anchor_block = oldest_block();
-      }
-      break;
+    auto const resolved =
+        resolve_anchor_block(query.anchor, order, max_serve_block);
+    if (!resolved) {
+      return page;
     }
+    anchor_block = *resolved;
   }
   if (order == IterationOrder::IterationOrderDescending &&
       anchor_block > max_serve_block) {

@@ -20,7 +20,7 @@ BytestringLock::try_atomic_change_lock(const Bytes *before, const Bytes *after,
 {
   assert(before == nullptr || before->value_view() == bytestring_);
   if (after != nullptr && after->value_view() != bytestring_) {
-    return ctx.conflict(DbConflictCode::kDbConflictValueMismatch);
+    return ctx.conflict(DbConflictCode::ValueMismatch);
   }
   return get_storage_cost_of_committed_value(ctx.cost_model);
 }

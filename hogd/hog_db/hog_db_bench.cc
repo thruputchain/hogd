@@ -22,6 +22,7 @@
 
 #include "consensus.hh"
 #include "header.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -323,7 +324,8 @@ Benchmark::run()
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
   PerThreadARC<BlockTX> block(db_, cost_model_, background_commit_worker, 1,
-                              BlockExecutionMode::kBlockExecutionModeProposal);
+                              BlockExecutionMode::kBlockExecutionModeProposal,
+                              static_cast<uint32_t>(kMaxSavepointDepth));
 
   ConsensusValue tip_value{};
   tip_value.proposal_header.block_height = 0;
@@ -371,12 +373,12 @@ Benchmark::run()
 
   // Close the block: stage changes and optionally compute the hash.
   if (compute_db_hash_) {
-    auto hash_result = block.get().close(StorageLongHash{});
+    auto hash_result = block.get().close(StorageLongHash{}, workers_);
     CHECK(hash_result.has_value());
     asm volatile("" : : "m"(*hash_result) : "memory");
   }
   else {
-    CHECK(block.get().close_skip_hash_for_testing().has_value());
+    CHECK(block.get().close_skip_hash_for_testing(workers_).has_value());
   }
 
   // commit changes to the ramdb.
@@ -437,13 +439,15 @@ private:
   void run_sequential();
   void run_concurrent();
 
-  void close_block(BlockTX &btx) const
+  // Not const: close() stages the lock maps on workers_, the same pool the
+  // block was executed and is committed on, so -w N sizes the whole block.
+  void close_block(BlockTX &btx)
   {
     if (compute_db_hash_) {
-      CHECK(btx.close(StorageLongHash{}).has_value());
+      CHECK(btx.close(StorageLongHash{}, workers_).has_value());
     }
     else {
-      CHECK(btx.close_skip_hash_for_testing().has_value());
+      CHECK(btx.close_skip_hash_for_testing(workers_).has_value());
     }
   }
 
@@ -529,7 +533,8 @@ RCQBenchmark::run_sequential()
       PerThreadARC<BlockTX> block_tx(
           db_, cost_model_, background_commit_worker_,
           static_cast<BlockHeight>(block + 1),
-          BlockExecutionMode::kBlockExecutionModeProposal);
+          BlockExecutionMode::kBlockExecutionModeProposal,
+          static_cast<uint32_t>(kMaxSavepointDepth));
 
       size_t block_end =
           std::min(num_entries_,
@@ -591,7 +596,8 @@ RCQBenchmark::run_sequential()
       PerThreadARC<BlockTX> block_tx(
           db_, cost_model_, background_commit_worker_,
           static_cast<BlockHeight>(num_blocks + 1),
-          BlockExecutionMode::kBlockExecutionModeProposal);
+          BlockExecutionMode::kBlockExecutionModeProposal,
+          static_cast<uint32_t>(kMaxSavepointDepth));
 
       std::vector<size_t> queue_indices;
       queue_indices.reserve(num_queues_);
@@ -771,7 +777,7 @@ RCQBenchmark::run_concurrent()
               if (!r)
                 fail(r.error());
               if (*r) {
-                collected.push_back(std::move(**r));
+                collected.emplace_back((*r)->begin(), (*r)->end());
                 next_index++;
               }
             }
@@ -816,7 +822,8 @@ RCQBenchmark::run_concurrent()
       PerThreadARC<BlockTX> block_tx(
           db_, cost_model_, background_commit_worker_,
           static_cast<BlockHeight>(block + 1),
-          BlockExecutionMode::kBlockExecutionModeProposal);
+          BlockExecutionMode::kBlockExecutionModeProposal,
+          static_cast<uint32_t>(kMaxSavepointDepth));
 
       size_t cur_block_end =
           std::min(num_entries_,

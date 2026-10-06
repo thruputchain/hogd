@@ -5,6 +5,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -14,12 +15,17 @@
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
+#include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
@@ -36,8 +42,8 @@ namespace hogd {
 
 // End-to-end tests for the threaded RV32 runtime: load a real compiled contract
 // artifact (.rv32a) as a kRv32 contract, resolve + translate it through
-// Rv32Context, and invoke it through Rv32Runtime. Mirrors the wasm-side
-// fibonacci tests (fibonacci_test.cc), but exercises the RV32 path.
+// Rv32Context, and invoke it through Rv32Runtime. Mirrors the fibonacci
+// tests (fibonacci_test.cc), but drives the runtime directly.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class Rv32FibonacciTest : public ::testing::TestWithParam<TestDB>,
                           public NativeContractTestFramework {
@@ -85,9 +91,9 @@ TEST_P(Rv32FibonacciTest, FibonacciCalls)
                                 kSufficientGas, 5U),
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -98,16 +104,16 @@ TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
 
   auto cache = get_storage_snapshot_cache();
-  auto deployed = cache->try_get_deployed_contract(contract_addr);
+  auto deployed = cache->try_get_deployed_contract(contract_addr)();
   ASSERT_TRUE(deployed.has_value());
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);
   EXPECT_EQ(deployed.value()->hash.contract_type, ContractType::kRv32);
-  EXPECT_TRUE(deployed.value()->entry->translated.has_value());
+  EXPECT_TRUE(deployed.value()->entry->prepared.rv32.has_value());
   // Back-pointer aliases the contract-cache entry the hash lookup returns.
-  auto by_hash = cache->try_get_contract_by_hash(deployed.value()->hash.hash);
+  auto by_hash = cache->try_get_contract_entry(deployed.value()->hash.hash)();
   ASSERT_TRUE(by_hash.has_value());
-  EXPECT_EQ(&deployed.value()->entry->contract, by_hash.value());
+  EXPECT_EQ(deployed.value()->entry, by_hash.value());
 }
 
 // Verifies the actual returned value: fibonacci(10) == 55, decoded from the
@@ -123,7 +129,7 @@ TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
                                 kSufficientGas, 10U),
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   auto output = handler.get_most_recent_frame_output();
   auto decoded = Serializer<SerializationFormat::kCxs>::deserialize<uint32_t>(
@@ -131,7 +137,7 @@ TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(*decoded, 55U);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // slow_fibonacci is exponential recursion; with a small gas limit it traps
@@ -149,7 +155,7 @@ TEST_P(Rv32FibonacciTest, SlowFibonacciOutOfGas)
                                     kGasLimit, 20U),
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
   ASSERT_EQ(res.gas_consumed_, kGasLimit);
 }
@@ -171,8 +177,8 @@ TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
                                       UINT64_MAX, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     advance_block();
   }
 
@@ -184,7 +190,7 @@ TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
                                       UINT64_MAX, uint32_t{20}, uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_FALSE(handler.root_invoke().is_root_success());
+    ASSERT_FALSE(handler.root_invoke()().is_root_success());
   }
 }
 
@@ -204,8 +210,8 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
                                       UINT64_MAX, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     advance_block();
   }
 
@@ -217,9 +223,9 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
                                   UINT64_MAX, uint32_t{20}, uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_GE(res.gas_consumed_, 1000U);
   }
 }
@@ -244,8 +250,8 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
                                       UINT64_MAX, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     advance_block();
   }
 
@@ -258,8 +264,8 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
                                       UINT64_MAX, uint32_t{5}, UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
@@ -286,6 +292,7 @@ protected:
   constexpr static int32_t kSha256SyscallNo = 0;
   constexpr static int32_t kReturnSyscallNo = 6;
   constexpr static int32_t kExitSyscallNo = 8;
+  constexpr static int32_t kBytestringGetLenSyscallNo = 13;
   constexpr static int32_t kBytestringSetSyscallNo = 15;
 
   ContractAddress
@@ -328,7 +335,7 @@ protected:
                                 },
                             .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    return handler.root_invoke();
+    return handler.root_invoke()();
   }
 };
 
@@ -377,7 +384,8 @@ TEST_F(Rv32ProductionMappingTest, ZeroMemoryContractVerifiesAndExecutes)
   blob.data.append_range(artifact);
   Contract verify_contract_xdr(ContractType::kRv32);
   verify_contract_xdr.rv32_contract() = blob;
-  EXPECT_EQ(runtime_context_.verify_contract(verify_contract_xdr),
+  EXPECT_EQ(runtime_context_.verify_contract(verify_contract_xdr,
+                                             NetworkConfigParams{}),
             InvokeErrorCode::None);
 
   auto contract = std::make_shared<Contract>(ContractType::kRv32);
@@ -404,7 +412,7 @@ TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
 
 TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)
 {
-  // SHA256HashCost(64) far exceeds the limit, so the syscall host charge
+  // GasCost::sha256_hash(64) far exceeds the limit, so the syscall host charge
   // exhausts the budget after the setup instructions execute. Out-of-gas is
   // consensus-distinguishable from other faults only by the gas signature:
   // the whole limit is consumed.
@@ -421,13 +429,19 @@ TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)
 
 TEST_F(Rv32ProductionMappingTest, SyscallAfterBlockCancelMapsToAbandon)
 {
-  // A storage write against a no-longer-current block returns Abandon from
-  // the syscall; the production runtime must surface it as Abandon, not fold
-  // it into a deterministic fault.
+  // A storage read against a canceled block returns Abandon from the
+  // syscall; the production runtime must surface it as Abandon, not fold it
+  // into a deterministic fault.
+  //
+  // A read, not a write: BytestringSet buffers its delta client-side and
+  // touches no db at syscall time, so it succeeds even on a dead block --
+  // the db round trip this test needs happens on the first-touch snapshot
+  // load a BytestringGetLen performs. And the block is discarded, not
+  // advanced: a committed block becomes the tip, whose snapshot reads still
+  // serve; only an abandoned block refuses them with Abandon.
   std::vector<uint32_t> program;
-  append_syscall(program,
-                 {kBytestringSetSyscallNo, /*key_ptr=*/0, /*value_ptr=*/32,
-                  /*value_len=*/4, /*flags=*/0});
+  append_syscall(program, {kBytestringGetLenSyscallNo, /*key_ptr=*/0,
+                           /*out_len_ptr=*/32});
   auto addr = deploy_words(program, 0);
 
   auto handler = make_new_system_call_handler(
@@ -443,8 +457,8 @@ TEST_F(Rv32ProductionMappingTest, SyscallAfterBlockCancelMapsToAbandon)
       runtime_context_);
 
   auto storage_snapshot_cache = get_storage_snapshot_cache();
-  advance_block();
-  auto result = handler.root_invoke();
+  discard_block();
+  auto result = handler.root_invoke()();
 
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Abandon);
@@ -494,10 +508,10 @@ TEST_F(Rv32ProductionMappingTest,
       make_new_system_call_handler_validation(tx, runtime_context_,
                                               NondeterministicProposalData{});
 
-  auto result = handler.root_invoke();
+  auto result = handler.root_invoke()();
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::ValidationFailure);
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure);
 }
 
@@ -550,7 +564,7 @@ TEST_F(Rv32ProductionMappingTest, SelfInvokeIsRejectedAsReentrance)
                                 },
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
   const auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.return_buffer().size(), 4U);
   const std::vector<uint8_t> expected = {
@@ -561,8 +575,8 @@ TEST_F(Rv32ProductionMappingTest, SelfInvokeIsRejectedAsReentrance)
 
 TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
 {
-  // The rv32 twin of wasm's FollowBadWithGood: two try-invokes of a child
-  // that faults deterministically, then a clean Return from the caller. Both
+  // Two try-invokes of a child that faults deterministically, then a clean
+  // Return from the caller. Both
   // child outputs report Fault and the transaction still succeeds.
   auto trap_addr = deploy_words({kEbreak}, 1);
 
@@ -598,7 +612,7 @@ TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
                                 },
                             .uniquifier = make_new_uniquifier()}},
       runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.return_buffer().size(), 24U);
@@ -636,24 +650,72 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   write_contract(contract);
   write_deployment(addr, contract);
 
-  auto deployed = get_storage_snapshot_cache()->try_get_deployed_contract(addr);
-  ASSERT_TRUE(deployed.has_value());
-  ASSERT_NE(deployed.value(), nullptr);
-  ASSERT_NE(deployed.value()->entry, nullptr);
-  EXPECT_FALSE(deployed.value()->entry->translated.has_value());
+  // Every stored contract passed attachment verification, so one that no
+  // longer translates is a node fault: the lookup itself fails rather than
+  // reading as a present deployment.
+  auto deployed =
+      get_storage_snapshot_cache()->try_get_deployed_contract(addr)();
+  ASSERT_FALSE(deployed.has_value());
+  EXPECT_EQ(deployed.error().code(), SystemErrorCode::Unrecoverable);
 
   auto result = invoke_deployed(addr, 10'000);
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
 }
 
-TEST(Rv32ContractTest, VerifyAcceptsRunExceedingLegacyGasBound)
+// Regression test for #4038: a missing-key BytestringGetLen must still pay the
+// host cold-load charge, so distinct keys cost one extra kDBRPCCost each.
+TEST_F(Rv32ProductionMappingTest,
+       DistinctMissingBytestringReadsAreChargedHostGas)
 {
-  // A single straight-line run whose total gas exceeds the legacy uint16 run
-  // bound (65535) was formerly rejected; the lowering now splits it into
-  // <= kMaxRunGas chunks, so the contract loads and verifies.
+  constexpr size_t kReadCount = 4;
+  constexpr uint32_t kKeyBytes = StorageKeyContractData{}.size();
+  constexpr uint32_t kOutputAddress = 192;
+
+  auto make_program = [&](bool distinct) {
+    std::vector<uint32_t> program;
+    std::vector<uint8_t> memory(256);
+    for (size_t i = 0; i < kReadCount; ++i) {
+      const uint32_t key_address = distinct ? i * kKeyBytes : 0;
+      if (distinct || i == 0) {
+        std::fill_n(memory.begin() + key_address, kKeyBytes,
+                    static_cast<uint8_t>(i + 1));
+      }
+      append_syscall(program, {kBytestringGetLenSyscallNo,
+                               static_cast<int32_t>(key_address),
+                               static_cast<int32_t>(kOutputAddress)});
+    }
+    append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+    return std::pair{std::move(program), std::move(memory)};
+  };
+
+  auto [same_program, same_memory] = make_program(false);
+  auto [distinct_program, distinct_memory] = make_program(true);
+  const auto same_addr = deploy_words(same_program, 0, same_memory);
+  const auto distinct_addr = deploy_words(distinct_program, 1, distinct_memory);
+
+  const auto same_result = invoke_deployed(same_addr, 1'000'000);
+  const auto distinct_result = invoke_deployed(distinct_addr, 1'000'000);
+  ASSERT_TRUE(same_result.is_root_success());
+  ASSERT_TRUE(distinct_result.is_root_success());
+
+  EXPECT_GT(distinct_result.gas_consumed_, same_result.gas_consumed_);
+  EXPECT_EQ(distinct_result.gas_consumed_ - same_result.gas_consumed_,
+            (kReadCount - 1) * kDBRPCCost);
+}
+
+TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
+{
+  // A single straight-line run whose total gas exceeds the chunk cap is split
+  // by the lowering into <= kMaxRunGas chunks, so the contract loads and
+  // verifies.
+  //
+  // The 256 KiB code default also admits runs exceeding the legacy uint16
+  // bound (65535). Verify that this formerly rejected case is split too.
   constexpr size_t kOverBoundDivCount =
-      (0xFFFFU / rv32::kDivInstructionGas) + 1; // 8193 divs -> 65544 gas
+      (0xFFFFU / rv32::kDivInstructionGas) + 1;
+  static_assert(kOverBoundDivCount * rv32::kInstructionBytes <=
+                rv32::kDefaultMaxCodeBytes);
   const std::vector<uint32_t> words(
       kOverBoundDivCount,
       rv32::test_program::op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
@@ -663,25 +725,41 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingLegacyGasBound)
 
   ContractBlob blob;
   blob.data.append_range(artifact);
-  EXPECT_TRUE(Rv32Contract::create(blob).has_value());
+  EXPECT_TRUE(
+      Rv32Contract::create(blob, rv32::Rv32Limits::defaults()).has_value());
 
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
   Rv32Context context;
-  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::None);
+  EXPECT_EQ(context.verify_contract(contract, NetworkConfigParams{}),
+            InvokeErrorCode::None);
 }
 
 namespace {
 
-InvokeErrorCode
+// Verifies `contract` under the protocol defaults: nullopt when it verifies,
+// otherwise the reason it was refused (always with Deterministic).
+std::optional<ContractRejectCode>
+verify_rejection(Contract const &contract)
+{
+  PreparedContract prepared;
+  std::optional<ContractRejectCode> rejection;
+  const InvokeErrorCode res =
+      Rv32Context{}.verify_contract(contract, NetworkConfigParams{}, prepared,
+                                    rejection);
+  EXPECT_EQ(res, rejection.has_value() ? InvokeErrorCode::Deterministic
+                                       : InvokeErrorCode::None);
+  return rejection;
+}
+
+std::optional<ContractRejectCode>
 verify_rv32_blob(std::vector<uint8_t> const &artifact)
 {
   ContractBlob blob;
   blob.data.append_range(artifact);
   Contract contract(ContractType::kRv32);
   contract.rv32_contract() = std::move(blob);
-  Rv32Context context;
-  return context.verify_contract(contract);
+  return verify_rejection(contract);
 }
 
 } // namespace
@@ -689,8 +767,9 @@ verify_rv32_blob(std::vector<uint8_t> const &artifact)
 TEST(Rv32ContractTest, VerifyRejectsGarbageBlob)
 {
   EXPECT_EQ(verify_rv32_blob({0xde, 0xad, 0xbe, 0xef}),
-            InvokeErrorCode::Deterministic);
-  EXPECT_EQ(verify_rv32_blob({}), InvokeErrorCode::Deterministic);
+            ContractRejectCode::ContractRejectMalformedArtifact);
+  EXPECT_EQ(verify_rv32_blob({}),
+            ContractRejectCode::ContractRejectMalformedArtifact);
 }
 
 TEST(Rv32ContractTest, VerifyRejectsTruncatedArtifact)
@@ -698,10 +777,27 @@ TEST(Rv32ContractTest, VerifyRejectsTruncatedArtifact)
   std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
                                           std::vector<uint8_t>{0});
-  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::None);
+  EXPECT_EQ(verify_rv32_blob(artifact), std::nullopt);
 
   artifact.resize(artifact.size() / 2);
-  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(verify_rv32_blob(artifact),
+            ContractRejectCode::ContractRejectMalformedArtifact);
+}
+
+TEST(Rv32ContractTest, VerifyRejectsOtherGasSchedule)
+{
+  // An artifact stamped by a toolchain on a gas schedule the node doesn't
+  // accept.
+  std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
+                                          std::vector<uint8_t>{0});
+  const uint32_t other_version = rv32::kGasTableVersion + 1;
+  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+    artifact[rv32::kArtifactGasVersionOffset + i] =
+        static_cast<uint8_t>(other_version >> (i * 8));
+  }
+  EXPECT_EQ(verify_rv32_blob(artifact),
+            ContractRejectCode::ContractRejectGasScheduleMismatch);
 }
 
 TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
@@ -711,18 +807,19 @@ TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
   const std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact({0x00000053U},
                                           std::vector<uint8_t>{0});
-  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(verify_rv32_blob(artifact),
+            ContractRejectCode::ContractRejectInvalidProgram);
 
   ContractBlob blob;
   blob.data.append_range(artifact);
-  EXPECT_FALSE(Rv32Contract::create(blob).has_value());
+  EXPECT_FALSE(
+      Rv32Contract::create(blob, rv32::Rv32Limits::defaults()).has_value());
 }
 
 TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
 {
-  Contract contract(ContractType::kWasmi);
-  Rv32Context context;
-  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::Deterministic);
+  EXPECT_EQ(verify_rejection(Contract(ContractType::kNative)),
+            ContractRejectCode::ContractRejectNotDeployable);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

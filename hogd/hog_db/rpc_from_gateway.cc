@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <span>
-#include <string_view>
 #include <utility>
 
 // generated x23 headers
@@ -23,6 +22,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -54,6 +54,7 @@ to_rpc_error(HogDbError err)
   case HogDbCode::kIO:
   case HogDbCode::kInvalidExecutorBehavior:
   case HogDbCode::kStaleBlock:
+  case HogDbCode::kBusy:
     return RPCError::kRPCUnrecoverable;
   }
   return RPCError::kRPCUnrecoverable;
@@ -145,17 +146,23 @@ read_one_item(HogDbDAO &db, AddressAndKey const &addrkey)
 DbGatewayIntroOutcome
 HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 {
-  if (std::string_view(protocol) !=
-      std::string_view(version::kHogdProtocol())) {
+  if (protocol != version::kHogdProtocol()) {
     return DbGatewayIntroOutcome::DbGatewayIntroMismatchedProtocol;
   }
   return DbGatewayIntroOutcome::DbGatewayIntroSuccess;
 }
 
-DbGatewayResult
-HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
+x23::Async<DbGatewayResult>
+HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch batch)
 {
   HogDbDAO &db = ctx_.get_db();
+
+  // Reject oversized batches before touching the db (see kMaxBatchItems).
+  if (batch.size() > kMaxBatchItems) {
+    error("dbgateway_get_items: batch of {} items exceeds cap of {}; rejecting",
+          batch.size(), kMaxBatchItems);
+    co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+  }
 
   // Snapshot the committed tip once up-front so every item in the response
   // is labeled with the same height.  This is a TOCTOU: a block that
@@ -176,15 +183,26 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
   for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
     // If a commit is mid-publication, wait it out so the tip and ramdb data
     // are consistent before reading (rather than burning a retry attempt).
-    ctx_.wait_for_no_commit_publishing();
+    // Suspends rather than parks: this handler runs on a ThreadPool worker.
+    co_await ctx_.co_wait_for_no_commit_publishing();
 
     DbTip tip = ctx_.get_tip();
 
     DbGatewayPayload payload;
     payload.block_height = tip.value.proposal_header.block_height;
     payload.items.reserve(batch.size());
-    for (AddressAndKey const &k : batch)
-      payload.items.push_back(read_one_item(db, k));
+    std::size_t response_bytes = 0;
+    for (AddressAndKey const &k : batch) {
+      DbGatewayItemResult item = read_one_item(db, k);
+      // Items are variable-sized, so bound the cumulative response size too.
+      response_bytes += x23::xdr_size(item);
+      if (response_bytes > kMaxResponseBytes) [[unlikely]] {
+        error("dbgateway_get_items: response exceeds {} bytes; rejecting",
+              kMaxResponseBytes);
+        co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+      }
+      payload.items.push_back(std::move(item));
+    }
 
     if (ctx_.is_committed_read_stale(tip)) [[unlikely]] {
       continue;
@@ -193,13 +211,13 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
     DbGatewayResult ret;
     ret.error(RPCError::kRPCNone);
     ret.payload() = std::move(payload);
-    return ret;
+    co_return ret;
   }
 
   error("dbgateway_get_items: committed snapshot kept moving across {} "
         "attempts; giving up",
         kMaxAttempts);
-  return DbGatewayResult(RPCError::kRPCUnrecoverable);
+  co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
 }
 
 } // namespace hogd

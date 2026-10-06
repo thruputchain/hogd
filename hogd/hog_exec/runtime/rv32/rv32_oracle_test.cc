@@ -12,11 +12,8 @@
 #include "hogd/hog_exec/runtime/rv32/test_corpus.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 
-// Exercises the external-oracle differential harness (oracle.h) against the
-// portable core. Linked against rv32_isa_core ONLY (see CMakeLists.txt): the
-// harness must stay hogd-free so the same interface can later back an external
-// reference model (Spike/sail-riscv). MachineOracle is the model under test;
-// SpecModelOracle stands in for the external oracle here.
+// Exercise the differential harness with MachineOracle and SpecModelOracle.
+// The external Spike adapter is tested in rv32_spike_oracle_test.cc.
 
 namespace hogd::rv32 {
 namespace {
@@ -202,7 +199,7 @@ TEST(Rv32Oracle, invalidDifferentialInputsRejectedConsistently)
             "");
 
   DifferentialProgram excessive_memory_bytes = diff_program({kEcall});
-  excessive_memory_bytes.memory_bytes = kMaxMemoryBytes + 1;
+  excessive_memory_bytes.memory_bytes = kMemoryCeilingBytes + 1;
   ASSERT_FALSE(valid_differential_program(excessive_memory_bytes));
   EXPECT_TRUE(machine_oracle.run(excessive_memory_bytes).steps.empty());
   EXPECT_TRUE(spec_oracle.run(excessive_memory_bytes).steps.empty());

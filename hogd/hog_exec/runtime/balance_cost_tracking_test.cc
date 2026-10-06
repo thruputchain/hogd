@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -20,6 +21,7 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -33,6 +35,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -57,7 +60,7 @@ protected:
     write_deployment(kNativeTokenContractAddress, token_contract);
   }
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
@@ -95,22 +98,23 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
 
   // Create a contract that will transfer tokens
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client =
-        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
-        ctx, kReceiverAddr,
-        make_amount(static_cast<uint128_t>(kTransferAmount)));
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr,
+            make_amount(static_cast<int128_t>(kTransferAmount)));
 
-    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-        !r_transfer.value().value().has_value() ||
-        !r_transfer.value().value().value().is_ok()) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+            !r_transfer.value().value().has_value() ||
+            !r_transfer.value().value().value().is_ok()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -139,10 +143,10 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
   auto handler =
       make_new_system_call_handler(handler_tx, *test_runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -186,36 +190,38 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
   // Create a contract that will transfer tokens
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client =
-        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
-        ctx, kReceiverAddr,
-        make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr,
+            make_amount(static_cast<int128_t>(kFirstTransferAmount)));
 
-    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-        !r_transfer.value().value().value().is_ok()) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+            !r_transfer.value().value().value().is_ok()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
-  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client =
-        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+        co_return InvokeStatus<void>{};
+      });
+  fns.emplace(
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
-        ctx, kReceiverAddr,
-        make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr,
+            make_amount(static_cast<int128_t>(kSecondTransferAmount)));
 
-    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-        !r_transfer.value().value().value().is_ok()) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+            !r_transfer.value().value().value().is_ok()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -244,10 +250,10 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   auto handler1 =
       make_new_system_call_handler(handler1_tx, *test_runtime_context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
 
-  auto commit_res1 = handler1.try_commit_transaction();
+  auto commit_res1 = handler1.try_commit_transaction()();
   ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler1.emit_events(ExecResult::ExecResultOK,
@@ -265,10 +271,10 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   auto handler2 =
       make_new_system_call_handler(handler2_tx, *test_runtime_context);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
 
-  auto commit_res2 = handler2.try_commit_transaction();
+  auto commit_res2 = handler2.try_commit_transaction()();
   ASSERT_TRUE(commit_res2 == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler2.emit_events(ExecResult::ExecResultOK,
@@ -326,7 +332,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   fns.emplace(
       0,
       [kFirstTransferAmount, kSecondTransferAmount](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto native_token_addr = kNativeTokenContractAddress;
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
@@ -334,35 +340,35 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
         // should fail because insufficient to cover balance cost
         auto calldata1 = erc20_meta::make_calldata<u8"transfer">(
             kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
+            make_amount(static_cast<int128_t>(kFirstTransferAmount)));
         CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
               native_token_addr,
               std::as_bytes(std::span(calldata1.data(), calldata1.size())),
               std::span<const std::byte>{}, inputs, r1_outputs);
         }();
 
         if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Should fail in try_invoke (insufficient funds for balance cost): the
-        // child frame runs (code None) but does not return normally — it
+        // child frame runs (code None) but does not co_return normally — it
         // reverts or faults, so frame_status is not Return.
         if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // 2. Call transfer with same arguments, NOT in try_invoke frame
         // - should succeed (creates the balance)
-        auto r2 = [&]() {
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
@@ -370,45 +376,45 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
               .flags = std::to_underlying(InvokeFlag::None),
           };
           CopyableInvokeOutputs outputs{};
-          return ctx.syscall<SyscallNo::kInvoke>(
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
               native_token_addr,
               std::as_bytes(std::span(calldata1.data(), calldata1.size())),
               std::span<const std::byte>{}, inputs, outputs);
         }();
 
         if (!r2.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // 3. Call transfer again with remainder (1), in try_invoke
         // frame - should succeed
         auto calldata2 = erc20_meta::make_calldata<u8"transfer">(
             kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
-        auto r3 = [&]() {
+            make_amount(static_cast<int128_t>(kSecondTransferAmount)));
+        auto r3 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
               native_token_addr,
               std::as_bytes(std::span(calldata2.data(), calldata2.size())),
               std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
         }();
 
         if (!r3.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
@@ -438,10 +444,10 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   auto handler =
       make_new_system_call_handler(handler_tx, *test_runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -483,53 +489,56 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_addr = kNativeTokenContractAddress;
-    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_addr = kNativeTokenContractAddress;
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    // The public transfer path is strict now; stage the deferred negative
-    // delta directly at the handler layer (the surface #1503 guards) to
-    // keep the read-side fault and commit-time rejection covered.
-    auto r_debit = ctx.handler().modify_native_token_balance(
-        ctx.handler().get_current_address(), -kTransferAmount);
-    if (!r_debit.has_value() || !r_debit.value().has_value()) {
-      ADD_FAILURE() << "staging the direct overspend debit failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    auto r_credit = ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                              kTransferAmount);
-    if (!r_credit.has_value() || !r_credit.value().has_value()) {
-      ADD_FAILURE() << "staging the direct overspend credit failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        // The public transfer path is strict now; stage the deferred negative
+        // delta directly at the handler layer (the surface #1503 guards) to
+        // keep the read-side fault and commit-time rejection covered.
+        auto r_debit = co_await ctx.handler().modify_native_token_balance(
+            ctx.handler().get_current_address(), -kTransferAmount);
+        if (!r_debit.has_value() || !r_debit.value().has_value()) {
+          ADD_FAILURE() << "staging the direct overspend debit failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        auto r_credit =
+            co_await ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                               kTransferAmount);
+        if (!r_credit.has_value() || !r_credit.value().has_value()) {
+          ADD_FAILURE() << "staging the direct overspend credit failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    // Reading sender's balance must now surface as a deterministic
-    // fault: the child frame runs but traps, so the invoke syscall returns
-    // kSyscallErrorCodeNone with frame_status == Fault.
-    auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
-    CopyableInvokeOutputs r_get_outputs{};
-    auto r_get = [&]() {
-      CopyableInvokeInputs inputs{
-          .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
-          .gas_limit = UINT64_MAX,
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      return ctx.syscall<SyscallNo::kInvoke>(native_token_addr, calldata_get,
-                                             std::span<const std::byte>{},
-                                             inputs, r_get_outputs);
-    }();
+        // Reading sender's balance must now surface as a deterministic
+        // fault: the child frame runs but traps, so the invoke syscall returns
+        // kSyscallErrorCodeNone with frame_status == Fault.
+        auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
+        CopyableInvokeOutputs r_get_outputs{};
+        auto r_get =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              native_token_addr, calldata_get, std::span<const std::byte>{},
+              inputs, r_get_outputs);
+        }();
 
-    if (!r_get.has_value() ||
-        r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-        r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
-      ADD_FAILURE() << "get_balance after overspend did not return a "
-                       "deterministic fault";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_get.has_value() ||
+            r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "get_balance after overspend did not co_return a "
+                           "deterministic fault";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -556,13 +565,13 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // HogDb's commit-time balance-lock must still reject the transaction because
   // the sender's persisted balance would go negative; try_commit_transaction
   // internally aborts on failure.
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_NE(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -584,51 +593,54 @@ TEST_F(BalanceCostTrackingTest,
   setup_grant_storage_token(kSenderAddr, kInitialBalance);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_addr = kNativeTokenContractAddress;
-    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_addr = kNativeTokenContractAddress;
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    // The public transfer path is strict now; stage the deferred negative
-    // delta directly at the handler layer (the surface #1503 guards) to
-    // keep the read-side fault and commit-time rejection covered.
-    auto r_debit = ctx.handler().modify_native_token_balance(
-        ctx.handler().get_current_address(), -kTransferAmount);
-    if (!r_debit.has_value() || !r_debit.value().has_value()) {
-      ADD_FAILURE() << "staging the direct overspend debit failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    auto r_credit = ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                              kTransferAmount);
-    if (!r_credit.has_value() || !r_credit.value().has_value()) {
-      ADD_FAILURE() << "staging the direct overspend credit failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        // The public transfer path is strict now; stage the deferred negative
+        // delta directly at the handler layer (the surface #1503 guards) to
+        // keep the read-side fault and commit-time rejection covered.
+        auto r_debit = co_await ctx.handler().modify_native_token_balance(
+            ctx.handler().get_current_address(), -kTransferAmount);
+        if (!r_debit.has_value() || !r_debit.value().has_value()) {
+          ADD_FAILURE() << "staging the direct overspend debit failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        auto r_credit =
+            co_await ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                               kTransferAmount);
+        if (!r_credit.has_value() || !r_credit.value().has_value()) {
+          ADD_FAILURE() << "staging the direct overspend credit failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    auto calldata_get =
-        erc20_meta::make_calldata<u8"get_balance_of">(kSenderAddr);
-    CopyableInvokeOutputs r_get_outputs{};
-    auto r_get = [&]() {
-      CopyableInvokeInputs inputs{
-          .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
-          .gas_limit = UINT64_MAX,
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      return ctx.syscall<SyscallNo::kInvoke>(native_token_addr, calldata_get,
-                                             std::span<const std::byte>{},
-                                             inputs, r_get_outputs);
-    }();
+        auto calldata_get =
+            erc20_meta::make_calldata<u8"get_balance_of">(kSenderAddr);
+        CopyableInvokeOutputs r_get_outputs{};
+        auto r_get =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              native_token_addr, calldata_get, std::span<const std::byte>{},
+              inputs, r_get_outputs);
+        }();
 
-    if (!r_get.has_value() ||
-        r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-        r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
-      ADD_FAILURE() << "get_balance_of after overspend did not return a "
-                       "deterministic fault";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_get.has_value() ||
+            r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "get_balance_of after overspend did not co_return a "
+                           "deterministic fault";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -655,10 +667,10 @@ TEST_F(BalanceCostTrackingTest,
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_NE(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -681,55 +693,58 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
   setup_grant_storage_token(kSenderAddr, kGrantAmount);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_addr = kNativeTokenContractAddress;
-    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_addr = kNativeTokenContractAddress;
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
-        kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
-    CopyableInvokeOutputs transfer_outputs{};
-    auto r_transfer = [&]() {
-      CopyableInvokeInputs inputs{
-          .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
-          .gas_limit = UINT64_MAX,
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
-                                             calldata_transfer,
-                                             std::span<const std::byte>{},
-                                             inputs, transfer_outputs);
-    }();
-    if (!r_transfer.has_value() ||
-        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-        transfer_outputs.frame_status != InvocationFrameStatusCode::Abort) {
-      ADD_FAILURE() << "overspending transfer did not abort at invoke";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
+            kReceiverAddr, make_amount(kTransferAmount));
+        CopyableInvokeOutputs transfer_outputs{};
+        auto r_transfer =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              native_token_addr, calldata_transfer,
+              std::span<const std::byte>{}, inputs, transfer_outputs);
+        }();
+        if (!r_transfer.has_value() ||
+            r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            transfer_outputs.frame_status != InvocationFrameStatusCode::Abort) {
+          ADD_FAILURE() << "overspending transfer did not abort at invoke";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    // The aborted child staged nothing: reading the balance in the same
-    // transaction succeeds (Return, not the #1503 Fault).
-    auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
-    CopyableInvokeOutputs get_outputs{};
-    auto r_get = [&]() {
-      CopyableInvokeInputs inputs{
-          .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
-          .gas_limit = UINT64_MAX,
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      return ctx.syscall<SyscallNo::kInvoke>(native_token_addr, calldata_get,
-                                             std::span<const std::byte>{},
-                                             inputs, get_outputs);
-    }();
-    if (!r_get.has_value() ||
-        r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-        get_outputs.frame_status != InvocationFrameStatusCode::Return) {
-      ADD_FAILURE() << "get_balance after aborted overspend did not succeed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    return {};
-  });
+        // The aborted child staged nothing: reading the balance in the same
+        // transaction succeeds (Return, not the #1503 Fault).
+        auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
+        CopyableInvokeOutputs get_outputs{};
+        auto r_get =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              native_token_addr, calldata_get, std::span<const std::byte>{},
+              inputs, get_outputs);
+        }();
+        if (!r_get.has_value() ||
+            r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            get_outputs.frame_status != InvocationFrameStatusCode::Return) {
+          ADD_FAILURE()
+              << "get_balance after aborted overspend did not succeed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -756,11 +771,11 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Nothing bad was staged: the transaction commits.
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -797,50 +812,48 @@ TEST_F(BalanceCostTrackingTest,
   setup_grant_storage_token(kSenderAddr, kGrantAmount);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client =
-        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-    auto first =
-        client.invoke_opt<u8"transfer">(ctx, kReceiverAddr,
-                                        make_amount(static_cast<uint128_t>(
-                                            kFirstTransfer)));
-    if (!first.has_value() || !first.value().has_value() ||
-        !first.value().value().has_value() ||
-        !first.value().value().value().is_ok()) {
-      ADD_FAILURE() << "first in-tx transfer did not succeed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        auto first = co_await client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr, make_amount(kFirstTransfer));
+        if (!first.has_value() || !first.value().has_value() ||
+            !first.value().value().has_value() ||
+            !first.value().value().value().is_ok()) {
+          ADD_FAILURE() << "first in-tx transfer did not succeed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    auto second =
-        client.invoke_opt<u8"transfer">(ctx, kReceiverAddr,
-                                        make_amount(static_cast<uint128_t>(
-                                            kSecondTransfer)));
-    if (!second.has_value() || !second.value().has_value() ||
-        !second.value().value().has_value() ||
-        second.value().value().value().is_ok()) {
-      ADD_FAILURE() << "second in-tx transfer did not abort on the reduced "
-                       "balance";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        auto second = co_await client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr, make_amount(kSecondTransfer));
+        if (!second.has_value() || !second.value().has_value() ||
+            !second.value().value().has_value() ||
+            second.value().value().value().is_ok()) {
+          ADD_FAILURE() << "second in-tx transfer did not abort on the reduced "
+                           "balance";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    auto balance = client.invoke_opt<u8"get_balance">(ctx);
-    if (!balance.has_value() || !balance.value().has_value() ||
-        !balance.value().value().has_value() ||
-        !balance.value().value().value().is_ok()) {
-      ADD_FAILURE() << "get_balance after contained second transfer failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    auto amount = balance.value().value().value().ok();
-    uint128_t observed =
-        (uint128_t{std::get<0>(amount)} << 64) | std::get<1>(amount);
-    auto const expected = static_cast<uint128_t>(kInTxRemainder);
-    if (observed != expected) {
-      ADD_FAILURE() << "failed second transfer changed the in-tx balance";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    return {};
-  });
+        auto balance = co_await client.invoke_opt<u8"get_balance">(ctx);
+        if (!balance.has_value() || !balance.value().has_value() ||
+            !balance.value().value().has_value() ||
+            !balance.value().value().value().is_ok()) {
+          ADD_FAILURE() << "get_balance after contained second transfer failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        auto amount = balance.value().value().value().ok();
+        uint128_t observed =
+            (static_cast<uint128_t>(std::get<0>(amount)) << 64) |
+            std::get<1>(amount);
+        auto const expected = static_cast<uint128_t>(kInTxRemainder);
+        if (observed != expected) {
+          ADD_FAILURE() << "failed second transfer changed the in-tx balance";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -869,8 +882,8 @@ TEST_F(BalanceCostTrackingTest,
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -894,7 +907,7 @@ TEST_F(BalanceCostTrackingTest,
 
 // Pins the native-side sequential in-tx semantics: tokens received earlier in
 // the same transaction are spendable by the receiver in that same transaction
-// (available = base + net in-tx delta). The WASM-side counterpart is the
+// (available = base + net in-tx delta). The guest-side counterpart is the
 // SDK's try_get_values_force behaviour.
 TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
 {
@@ -916,33 +929,33 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       receiver_fns;
   receiver_fns.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto native_token_addr = kNativeTokenContractAddress;
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         auto calldata_back =
             erc20_meta::make_calldata<u8"transfer">(kSenderAddr,
-                                                    make_amount(uint128_t{50}));
+                                                    make_amount(int128_t{50}));
         CopyableInvokeOutputs back_outputs{};
-        auto r_back = [&]() {
+        auto r_back =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
-                                                 calldata_back,
-                                                 std::span<const std::byte>{},
-                                                 inputs, back_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              native_token_addr, calldata_back, std::span<const std::byte>{},
+              inputs, back_outputs);
         }();
         if (!r_back.has_value() ||
             r_back.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             back_outputs.frame_status != InvocationFrameStatusCode::Return) {
           ADD_FAILURE() << "receiver back-transfer did not return";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto receiver_contract =
       std::make_unique<NativeContract>(std::move(receiver_fns));
@@ -951,54 +964,53 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
   // invoke receiver's method 0 so it spends the just-received tokens.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> sender_fns;
   sender_fns.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto native_token_addr = kNativeTokenContractAddress;
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         // (a) Transfer to fresh receiver; the amount covers its balance-cost.
         auto calldata_fwd = erc20_meta::make_calldata<u8"transfer">(
-            kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferToReceiver)));
+            kReceiverAddr, make_amount(kTransferToReceiver));
         CopyableInvokeOutputs fwd_outputs{};
-        auto r_fwd = [&]() {
+        auto r_fwd =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
-                                                 calldata_fwd,
-                                                 std::span<const std::byte>{},
-                                                 inputs, fwd_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              native_token_addr, calldata_fwd, std::span<const std::byte>{},
+              inputs, fwd_outputs);
         }();
         if (!r_fwd.has_value() ||
             r_fwd.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             fwd_outputs.frame_status != InvocationFrameStatusCode::Return) {
           ADD_FAILURE() << "sender->receiver transfer did not return";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // (b) Invoke receiver's method 0; it spends tokens received above.
         CopyableInvokeOutputs invoke_outputs{};
-        auto r_invoke = [&]() {
+        auto r_invoke =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kReceiverAddr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<const std::byte>{},
-                                                 inputs, invoke_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kReceiverAddr, std::span<const std::byte>{},
+              std::span<const std::byte>{}, inputs, invoke_outputs);
         }();
         if (!r_invoke.has_value() ||
             r_invoke.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             invoke_outputs.frame_status != InvocationFrameStatusCode::Return) {
           ADD_FAILURE() << "receiver method 0 did not return";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto sender_contract =
       std::make_unique<NativeContract>(std::move(sender_fns));
@@ -1033,10 +1045,10 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1066,53 +1078,55 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
                             kInitialBalance + replay_cache_cost_charged(1));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_addr = kNativeTokenContractAddress;
-    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_addr = kNativeTokenContractAddress;
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
-        kReceiverAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
-    auto r_transfer = [&]() {
-      CopyableInvokeInputs inputs{
-          .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
-          .gas_limit = UINT64_MAX,
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
-                                             calldata_transfer,
-                                             std::span<const std::byte>{},
-                                             inputs, CopyableInvokeOutputs{});
-    }();
+        auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
+            kReceiverAddr, make_amount(kTransferAmount));
+        auto r_transfer =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              native_token_addr, calldata_transfer,
+              std::span<const std::byte>{}, inputs, CopyableInvokeOutputs{});
+        }();
 
-    if (!r_transfer.has_value() ||
-        r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      ADD_FAILURE() << "transfer did not return success";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_transfer.has_value() ||
+            r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "transfer did not co_return success";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
-    auto r_get = [&]() {
-      CopyableInvokeInputs inputs{
-          .entrypoint_id =
-              sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
-          .gas_limit = UINT64_MAX,
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      return ctx.syscall<SyscallNo::kInvoke>(native_token_addr, calldata_get,
-                                             std::span<const std::byte>{},
-                                             inputs, CopyableInvokeOutputs{});
-    }();
+        auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
+        auto r_get =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              native_token_addr, calldata_get, std::span<const std::byte>{},
+              inputs, CopyableInvokeOutputs{});
+        }();
 
-    if (!r_get.has_value() ||
-        r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      ADD_FAILURE() << "get_balance after non-overspend did not "
-                       "return success";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_get.has_value() ||
+            r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "get_balance after non-overspend did not "
+                           "co_return success";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1139,10 +1153,10 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1173,36 +1187,38 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
   static uint128_t observed_receiver_balance = 0;
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client =
-        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
-        ctx, kReceiverAddr,
-        make_amount(static_cast<uint128_t>(kTransferAmount)));
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr, make_amount(kTransferAmount));
 
-    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-        !r_transfer.value().value().has_value() ||
-        !r_transfer.value().value().value().is_ok()) {
-      ADD_FAILURE() << "transfer to fresh receiver failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+            !r_transfer.value().value().has_value() ||
+            !r_transfer.value().value().value().is_ok()) {
+          ADD_FAILURE() << "transfer to fresh receiver failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    auto r_balance =
-        native_token_client.invoke_opt<u8"get_balance_of">(ctx, kReceiverAddr);
+        auto r_balance =
+            co_await native_token_client.invoke_opt<u8"get_balance_of">(
+                ctx, kReceiverAddr);
 
-    if (!r_balance.has_value() || !r_balance.value().has_value() ||
-        !r_balance.value().value().has_value() ||
-        !r_balance.value().value().value().is_ok()) {
-      ADD_FAILURE() << "get_balance_of fresh receiver failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_balance.has_value() || !r_balance.value().has_value() ||
+            !r_balance.value().value().has_value() ||
+            !r_balance.value().value().value().is_ok()) {
+          ADD_FAILURE() << "get_balance_of fresh receiver failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    auto ok = r_balance.value().value().value().ok();
-    observed_receiver_balance =
-        (uint128_t{std::get<0>(ok)} << 64) | uint128_t{std::get<1>(ok)};
-    return {};
-  });
+        auto ok = r_balance.value().value().value().ok();
+        observed_receiver_balance =
+            (static_cast<uint128_t>(std::get<0>(ok)) << 64) |
+            uint128_t{std::get<1>(ok)};
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1229,12 +1245,12 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   EXPECT_EQ(observed_receiver_balance, static_cast<uint128_t>(kTransferAmount));
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1275,36 +1291,38 @@ TEST_F(BalanceCostTrackingTest,
   static uint128_t observed_receiver_balance = 0;
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client =
-        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
-        ctx, kReceiverAddr,
-        make_amount(static_cast<uint128_t>(kTransferAmount)));
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr, make_amount(kTransferAmount));
 
-    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-        !r_transfer.value().value().has_value() ||
-        !r_transfer.value().value().value().is_ok()) {
-      ADD_FAILURE() << "transfer to fresh receiver failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+            !r_transfer.value().value().has_value() ||
+            !r_transfer.value().value().value().is_ok()) {
+          ADD_FAILURE() << "transfer to fresh receiver failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    auto r_balance =
-        native_token_client.invoke_opt<u8"get_balance_of">(ctx, kReceiverAddr);
+        auto r_balance =
+            co_await native_token_client.invoke_opt<u8"get_balance_of">(
+                ctx, kReceiverAddr);
 
-    if (!r_balance.has_value() || !r_balance.value().has_value() ||
-        !r_balance.value().value().has_value() ||
-        !r_balance.value().value().value().is_ok()) {
-      ADD_FAILURE() << "get_balance_of fresh receiver failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_balance.has_value() || !r_balance.value().has_value() ||
+            !r_balance.value().value().has_value() ||
+            !r_balance.value().value().value().is_ok()) {
+          ADD_FAILURE() << "get_balance_of fresh receiver failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    auto ok = r_balance.value().value().value().ok();
-    observed_receiver_balance =
-        (uint128_t{std::get<0>(ok)} << 64) | uint128_t{std::get<1>(ok)};
-    return {};
-  });
+        auto ok = r_balance.value().value().value().ok();
+        observed_receiver_balance =
+            (static_cast<uint128_t>(std::get<0>(ok)) << 64) |
+            uint128_t{std::get<1>(ok)};
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1331,12 +1349,12 @@ TEST_F(BalanceCostTrackingTest,
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   EXPECT_EQ(observed_receiver_balance, static_cast<uint128_t>(balance_cost));
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1376,22 +1394,23 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
                             kInitialBalance + replay_cache_cost_charged(1));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client =
-        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto native_token_client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-    auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
-        ctx, kReceiverAddr,
-        make_amount(static_cast<uint128_t>(kTransferAmount)));
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr,
+            make_amount(static_cast<int128_t>(kTransferAmount)));
 
-    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-        !r_transfer.value().value().has_value() ||
-        !r_transfer.value().value().value().is_ok()) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+            !r_transfer.value().value().has_value() ||
+            !r_transfer.value().value().value().is_ok()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1419,10 +1438,10 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
   auto handler =
       make_new_system_call_handler(handler_tx, *test_runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1454,7 +1473,8 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
 // all-zero address as an ordinary balance key, so transfer(ContractAddress{},
 // amount) credits the zero address rather than burning. The zero-recipient
 // transfer leaves total_supply() unchanged and emits a standard
-// Transfer(sender, zero, amount) event. This is working
+// Transfer(sender, zero, amount) event --- a real burn goes through burn() and
+// emits its own Burn event. This is working
 // as intended: it locks in that the native HOG token does NOT special-case the
 // zero address as a supply-reducing burn.
 TEST_F(BalanceCostTrackingTest,
@@ -1471,44 +1491,45 @@ TEST_F(BalanceCostTrackingTest,
   setup_grant_storage_token(kSenderAddr, kTransferAmount + 1'000'000);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client =
-        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-    auto const expected_total_supply = make_amount(uint128_t{0});
+        auto const expected_total_supply = make_amount(int128_t{0});
 
-    // No supply record exists in this direct-storage test setup.
-    auto ts_before = client.invoke_opt<u8"total_supply">(ctx);
-    if (!ts_before.has_value() || !ts_before.value().has_value() ||
-        !ts_before.value().value().has_value() ||
-        !ts_before.value().value().value().is_ok() ||
-        ts_before.value().value().value().ok() != expected_total_supply) {
-      ADD_FAILURE() << "total_supply before transfer was not zero";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        // No supply record exists in this direct-storage test setup.
+        auto ts_before = co_await client.invoke_opt<u8"total_supply">(ctx);
+        if (!ts_before.has_value() || !ts_before.value().has_value() ||
+            !ts_before.value().value().has_value() ||
+            !ts_before.value().value().value().is_ok() ||
+            ts_before.value().value().value().ok() != expected_total_supply) {
+          ADD_FAILURE() << "total_supply before transfer was not zero";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    // Transfer to the all-zero address. This is accepted, not rejected.
-    auto r_transfer = client.invoke_opt<u8"transfer">(
-        ctx, kZeroAddr, make_amount(static_cast<uint128_t>(kTransferAmount)));
-    if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
-        !r_transfer.value().value().has_value() ||
-        !r_transfer.value().value().value().is_ok()) {
-      ADD_FAILURE() << "transfer(zero, amount) did not return Ok";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        // Transfer to the all-zero address. This is accepted, not rejected.
+        auto r_transfer = co_await client.invoke_opt<u8"transfer">(
+            ctx, kZeroAddr, make_amount(kTransferAmount));
+        if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+            !r_transfer.value().value().has_value() ||
+            !r_transfer.value().value().value().is_ok()) {
+          ADD_FAILURE() << "transfer(zero, amount) did not co_return Ok";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    // total_supply() is unchanged: the native token does not burn.
-    auto ts_after = client.invoke_opt<u8"total_supply">(ctx);
-    if (!ts_after.has_value() || !ts_after.value().has_value() ||
-        !ts_after.value().value().has_value() ||
-        !ts_after.value().value().value().is_ok() ||
-        ts_after.value().value().value().ok() != expected_total_supply) {
-      ADD_FAILURE() << "total_supply changed after zero-recipient transfer";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+        // total_supply() is unchanged: the native token does not burn.
+        auto ts_after = co_await client.invoke_opt<u8"total_supply">(ctx);
+        if (!ts_after.has_value() || !ts_after.value().has_value() ||
+            !ts_after.value().value().has_value() ||
+            !ts_after.value().value().value().is_ok() ||
+            ts_after.value().value().value().ok() != expected_total_supply) {
+          ADD_FAILURE() << "total_supply changed after zero-recipient transfer";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
+        co_return InvokeStatus<void>{};
+      });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1537,10 +1558,10 @@ TEST_F(BalanceCostTrackingTest,
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1579,6 +1600,271 @@ TEST_F(BalanceCostTrackingTest,
   EXPECT_TRUE(std::equal(event.serialized_event.begin(),
                          event.serialized_event.end(),
                          expected_event->begin()));
+}
+
+// Regression for #3056: handler-side balance mutations bypassed the syscall
+// gas channel. Measured on warm repeat transfers, since the cold-key
+// kDBRPCCost would swamp the charge under test.
+TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
+{
+  constexpr static ContractAddress kSenderAddr = make_contract_address(181);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(182);
+  static constexpr int128_t kTransferAmount = 10'000;
+  static constexpr uint32_t kTransferCount = 3;
+  // The debit and the credit, each priced as an NNInt add.
+  static constexpr GasAmount kMutationFloor = 2 * kStorageAccessCost;
+
+  setup_grant_storage_token(kSenderAddr, (kTransferAmount * kTransferCount) +
+                                             replay_cache_cost_charged(1));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata = erc20_meta::make_calldata<u8"transfer">(
+            kReceiverAddr, make_amount(static_cast<int128_t>(kTransferAmount)));
+
+        std::array<GasAmount, kTransferCount> gas_per_transfer{};
+        for (uint32_t i = 0; i < kTransferCount; ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto before = ctx.total_gas_consumed();
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          gas_per_transfer[i] = ctx.total_gas_consumed() - before;
+
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "transfer " << i << " did not return successfully";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        // Both keys are loaded from the first transfer onward, so the later
+        // transfers do identical work and must cost the same.
+        EXPECT_EQ(gas_per_transfer[1], gas_per_transfer[2])
+            << "warm transfer cost is not stable; the floor below is not "
+               "measuring what it claims to";
+        // The charge under test: without it a warm transfer pays only its
+        // entry debit and its event crossing.
+        EXPECT_GE(gas_per_transfer[1], kMutationFloor)
+            << "transfer did not charge for both balance mutations";
+        co_return InvokeStatus<void>{};
+      });
+  auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 17;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_xdr);
+  write_deployment(kSenderAddr, sender_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  // The transfers emit events; the handler must not be destroyed holding them.
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+}
+
+// Regression for #4210: an underfunded read must fault before loading; a later
+// funded read of the same address still pays the cold price (it would run warm
+// if the starved read had loaded it for free).
+TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
+{
+  constexpr static ContractAddress kCallerAddr = make_contract_address(214);
+  constexpr static ContractAddress kFreshAddr = make_contract_address(215);
+  constexpr static GasAmount kTwoGas = 2;
+  constexpr static GasAmount kCappedCharge = kSyscallBaseCost + kTwoGas;
+  // The two reads of kFreshAddr, in order: starved then funded.
+  constexpr static std::array<GasAmount, 2> kGasLimits{kTwoGas, UINT64_MAX};
+
+  std::array<GasAmount, kGasLimits.size()> charges{};
+  std::array<InvocationFrameStatusCode, kGasLimits.size()> statuses{};
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kFreshAddr);
+        for (size_t i = 0; i < kGasLimits.size(); ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+              .gas_limit = kGasLimits[i],
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto const before = ctx.total_gas_consumed();
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          charges[i] = ctx.total_gas_consumed() - before;
+
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "get_balance_of invoke " << i
+                          << " was rejected before its child frame ran";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          statuses[i] = outputs.frame_status;
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kCallerNativeId = 19;
+  contract_map.emplace(kCallerNativeId,
+                       std::make_unique<NativeContract>(std::move(fns)));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddr, caller_xdr);
+
+  auto tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, *runtime_context);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  // The starved read faulted, paying only the capped child allowance.
+  EXPECT_EQ(statuses[0], InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(charges[0], kCappedCharge);
+  EXPECT_LT(charges[0], kDBRPCCost);
+
+  // The funded read of the same address still pays the cold-load price, proving
+  // the starved read did not load the key for free.
+  EXPECT_EQ(statuses[1], InvocationFrameStatusCode::Return);
+  EXPECT_GE(charges[1], kDBRPCCost);
+}
+
+// Regression for #4270: warm native-token balance reads skipped the flat
+// kStorageAccessCost once the view was loaded and load_gas dropped to zero.
+TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
+{
+  constexpr static ContractAddress kCallerAddr = make_contract_address(183);
+
+  setup_grant_storage_token(kCallerAddr,
+                            1'000'000 + replay_cache_cost_charged(1));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kCallerAddr);
+
+        // The first read loads the view; reads 2 and 3 are warm (no load_gas)
+        // but still owe the flat access cost.
+        std::array<GasAmount, 3> read_costs{};
+        for (size_t i = 0; i < read_costs.size(); ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto before = ctx.total_gas_consumed();
+          auto status = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          read_costs[i] = ctx.total_gas_consumed() - before;
+
+          if (!status.has_value() ||
+              status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "balance read " << i
+                          << " did not return successfully";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        // A warm read pays exactly the Invoke crossing, the method's one gas
+        // unit, and a single flat access charge (no load_gas once warm).
+        static constexpr GasAmount kWarmReadCost =
+            kSyscallBaseCost + 1 + kStorageAccessCost;
+        EXPECT_EQ(read_costs[1], kWarmReadCost)
+            << "warm balance read is not priced at crossing + method + access";
+        EXPECT_EQ(read_costs[2], kWarmReadCost);
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kCallerNativeId = 18;
+  contract_map.emplace(kCallerNativeId, std::move(caller_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddr, caller_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

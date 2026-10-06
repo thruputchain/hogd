@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <tuple>
@@ -20,8 +21,11 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -40,9 +44,11 @@ struct TupleSerializesLike<std::tuple<Es...>, std::tuple<As...>>
 
 template<typename T> struct NativeContractArgs;
 
+// Contract bodies are coroutines (they await syscalls), so they return
+// x23::Async<InvokeStatus<R>> rather than InvokeStatus<R>.
 template<typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (*)(NativeSyscallContext &,
-                                              Args...)> {
+struct NativeContractArgs<
+    x23::Async<InvokeStatus<R>> (*)(NativeSyscallContext &, Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
@@ -53,7 +59,7 @@ struct NativeContractArgs<InvokeStatus<R> (*)(NativeSyscallContext &,
 };
 
 template<typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (*)(Args...)> {
+struct NativeContractArgs<x23::Async<InvokeStatus<R>> (*)(Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
@@ -62,6 +68,49 @@ struct NativeContractArgs<InvokeStatus<R> (*)(Args...)> {
     return std::tuple{};
   }
 };
+
+// SignedToken arguments are supported at the top level of a method's argument
+// list only: the SDK assigns handles to `Signed` fields in declaration order
+// through every nested type, and nothing here walks nested types.
+template<typename Arg>
+constexpr bool kArgNestsSignedToken = [] {
+  if constexpr (std::is_same_v<Arg, SignedToken>) {
+    return false;
+  }
+  else {
+    return x23::detail::xdr_contains<Arg, SignedToken>();
+  }
+}();
+
+// Assign the parent-supplied auth-token handles to `args`' SignedToken
+// arguments in declaration order; false when the counts differ.
+template<typename... Args>
+bool
+assign_auth_handles(std::tuple<Args...> &args,
+                    std::span<const uint32_t> handles)
+{
+  static_assert(!(kArgNestsSignedToken<Args> || ...),
+                "SignedToken nested inside an argument type is unsupported");
+  constexpr size_t kSignedCount =
+      (size_t{std::is_same_v<Args, SignedToken>} + ... + 0);
+  if (handles.size() != kSignedCount) {
+    return false;
+  }
+  size_t next = 0;
+  std::apply(
+      [&](auto &...arg) {
+        (
+            [&](auto &a) {
+              if constexpr (std::is_same_v<std::remove_cvref_t<decltype(a)>,
+                                           SignedToken>) {
+                a.handle = handles[next++];
+              }
+            }(arg),
+            ...);
+      },
+      args);
+  return true;
+}
 
 template<is_contract_trait ContractTrait, StringLiteral Name, GasAmount Gas>
 struct AlwaysErrorMethod {
@@ -74,9 +123,9 @@ struct AlwaysErrorMethod {
     return []<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
       return [](NativeSyscallContext &ctx,
                 std::tuple_element_t<Is, args_t>... /*unused*/)
-                 -> InvokeStatus<return_t> {
+                 -> x23::Async<InvokeStatus<return_t>> {
         ctx.consume_gas(Gas);
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       };
     }(std::make_index_sequence<std::tuple_size_v<args_t>>());
   }
@@ -152,14 +201,16 @@ public:
     // TODO(geoff): figure out gas costs for native contracts like this
     constexpr static GasAmount kErrorGas = 0;
 
+    // A coroutine, so not noexcept: NativeContract::invoke() re-establishes
+    // that boundary around its frame allocation.
     auto wrapped_f =
         [f = std::forward<decltype(lambda)>(lambda)](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       try {
         // Mirror the sdk entrypoint glue: an args-decode failure (parse
-        // error, trailing bytes) or unconsumed forwarded auth handles
-        // (builder contracts take no Signer args) aborts the frame with
-        // LibraryExn::Handling(DecodingArgs), byte-identical to a wasm
+        // error, trailing bytes) or a forwarded auth-handle count that does
+        // not match the method's SignedToken arguments aborts the frame with
+        // LibraryExn::Handling(DecodingArgs), byte-identical to an RV32
         // contract's wrapper — not a plain frame fault. See
         // default_wallet_parity_test.cc's malformed-calldata cases.
         auto decoding_args_abort = [&ctx]() -> InvokeStatus<void> {
@@ -180,24 +231,28 @@ public:
         auto args = Serializer<Format>::template deserialize<args_t>(
             std::as_bytes(std::span(calldata)));
         if (!args.has_value()) {
-          return decoding_args_abort();
+          co_return decoding_args_abort();
         }
-        if (!ctx.handler().get_parent_supplied_auth_tokens().empty()) {
-          return decoding_args_abort();
+        if (!detail::assign_auth_handles(
+                *args, ctx.handler().get_parent_supplied_auth_tokens())) {
+          co_return decoding_args_abort();
         }
 
-        // invoke the lambda, and return the error if there is one
+        // Invoke the body and await it. extra_args is hoisted into this
+        // frame because the body holds references into it across suspensions;
+        // the inner lambda only forwards the call, so it is not itself a
+        // coroutine.
+        auto extra_args = detail::NativeContractArgs<fn_t>::extra_args(ctx);
         auto return_value =
-            [&]<size_t... Is>(
-                std::index_sequence<Is...>) -> InvokeStatus<return_t> {
-          auto extra_args = detail::NativeContractArgs<fn_t>::extra_args(ctx);
+            co_await [&]<size_t... Is>(std::index_sequence<Is...>)
+            -> x23::Async<InvokeStatus<return_t>> {
           return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
             return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
           }(std::make_index_sequence<
                      std::tuple_size_v<decltype(extra_args)>>());
         }(std::make_index_sequence<std::tuple_size_v<args_t>>());
         if (!return_value.has_value()) {
-          return return_value.error();
+          co_return return_value.error();
         }
 
         // Now we check whether the return value is a plain value,
@@ -227,26 +282,26 @@ public:
           if (r.is_ok()) {
             // void is so annoying
             if constexpr (std::is_same_v<decltype(r.ok()), void>) {
-              return do_return(std::tuple<>{});
+              co_return do_return(std::tuple<>{});
             }
             else {
-              return do_return(r.ok());
+              co_return do_return(r.ok());
             }
           }
-          return do_revert(r.err());
+          co_return do_revert(r.err());
         }
         else {
           // otherwise, return the received value
           if constexpr (std::is_same_v<decltype(*return_value), void>) {
-            return do_return(std::tuple<>{});
+            co_return do_return(std::tuple<>{});
           }
           else {
-            return do_return(*return_value);
+            co_return do_return(*return_value);
           }
         }
       } catch (...) {
         error("unrecoverable: unexpected exception in native contract");
-        return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeError{InvokeErrorCode::Unrecoverable};
       }
     };
 
@@ -312,6 +367,20 @@ public:
         "unrecoverable: host_fn_error_conversion: unknown HostFnErrorCode: {}",
         err.code());
     return InvokeError{InvokeErrorCode::Unrecoverable};
+  }
+
+  // The LibraryExn::Syscall abort the SDK throws when `call` reports `error`
+  // (`or_syscall_throw`), so a native contract rejects a failed syscall
+  // byte-identically to an RV32 one.
+  static LibraryException syscall_exception(SyscallNo call,
+                                            SyscallErrorCode error)
+  {
+    LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
+    exn.syscall_exn() = SyscallExn{
+        .call_number = static_cast<uint32_t>(std::to_underlying(call)),
+        .err_number = static_cast<SysErr>(error),
+    };
+    return LibraryException{std::move(exn)};
   }
 
 private:

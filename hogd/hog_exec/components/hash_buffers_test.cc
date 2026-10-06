@@ -14,8 +14,7 @@ namespace hogd {
 
 namespace {
 
-// The limit these tests run under. A chain sets max_sha256_buffers itself, so
-// this is the test's own choice, not a default.
+// The active-stream limit is configured by the chain.
 constexpr uint32_t kMaxBuffers = 8;
 
 } // namespace
@@ -88,68 +87,8 @@ TEST(HashBuffersTest, InvalidIndexUsage)
   ASSERT_EQ(r.error(), SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 }
 
-TEST(HashBuffersTest, InvalidBufferSizeUsage)
-{
-  HashBuffers buffers(kMaxBuffers);
-
-  ASSERT_TRUE(buffers.update(
-      0, std::as_bytes(std::span<const uint8_t>(std::vector<uint8_t>{})),
-      true));
-  for (unsigned int i = 0; i < kSHA256BufferMaxSize; i++) {
-    uint8_t data = i & 0xFF;
-    ASSERT_TRUE(buffers.update(
-        0, std::as_bytes(std::span<const uint8_t>(std::vector<uint8_t>{data})),
-        false));
-  }
-  auto r = buffers.update(
-      0, std::as_bytes(std::span<const uint8_t>(std::vector<uint8_t>{0})),
-      false);
-  ASSERT_FALSE(r.has_value());
-  ASSERT_EQ(r.error(), SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-}
-
-TEST(HashBuffersTest, InvalidSize)
-{
-  HashBuffers buffers(kMaxBuffers);
-  std::vector<uint8_t> too_big_buffer =
-      std::vector<uint8_t>(kSHA256BufferMaxSize + 1, 0);
-  ASSERT_FALSE(
-      buffers.update(0, std::as_bytes(std::span<const uint8_t>(too_big_buffer)),
-                     false));
-  std::vector<uint8_t> not_too_big_buffer =
-      std::vector<uint8_t>(kSHA256BufferMaxSize, 0);
-  ASSERT_TRUE(buffers.update(
-      0, std::as_bytes(std::span<const uint8_t>(std::vector<uint8_t>{0})),
-      true));
-  ASSERT_FALSE(buffers.update(
-      0, std::as_bytes(std::span<const uint8_t>(not_too_big_buffer)), false));
-}
-
-TEST(HashBuffersTest, FailedResetPreservesExistingBuffer)
-{
-  HashBuffers buffers(kMaxBuffers);
-
-  std::vector<uint8_t> prefix = {0x41, 0x42, 0x43, 0x44};
-  ASSERT_TRUE(
-      buffers.update(0, std::as_bytes(std::span<const uint8_t>(prefix)), true));
-
-  std::vector<uint8_t> oversized(kSHA256BufferMaxSize + 1, 0xFF);
-  auto result =
-      buffers.update(0, std::as_bytes(std::span<const uint8_t>(oversized)),
-                     true);
-  ASSERT_FALSE(result.has_value());
-  ASSERT_EQ(result.error(),
-            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-
-  auto hash = buffers.finalize(0);
-  ASSERT_TRUE(hash.has_value());
-  EXPECT_EQ(hash.value(), sha256(prefix));
-}
-
 // The tests below pin behavior the contract can observe, independent of how
-// the buffer is represented internally (accumulated bytes today, a streaming
-// hash state tomorrow): digests, the size caps and their error paths, the
-// finalize-consumes lifecycle, and the byte count finalize reports.
+// the buffer is represented internally.
 
 TEST(HashBuffersTest, BlockBoundaryChunkingMatchesOneShot)
 {
@@ -173,28 +112,6 @@ TEST(HashBuffersTest, BlockBoundaryChunkingMatchesOneShot)
     ASSERT_TRUE(hash.has_value());
     EXPECT_EQ(hash.value(), expected) << "split at " << split;
   }
-}
-
-TEST(HashBuffersTest, FailedAppendPreservesExistingBuffer)
-{
-  // The size check must reject an overflowing append before absorbing any of
-  // its bytes: the buffer keeps hashing as if the failed call never happened.
-  HashBuffers buffers(kMaxBuffers);
-  std::vector<uint8_t> prefix = {0x10, 0x20, 0x30};
-  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(prefix)), true));
-
-  std::vector<uint8_t> oversized(kSHA256BufferMaxSize, 0xEE);
-  auto result = buffers.update(0, std::as_bytes(std::span(oversized)), false);
-  ASSERT_FALSE(result.has_value());
-  ASSERT_EQ(result.error(),
-            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-
-  std::vector<uint8_t> suffix = {0x40};
-  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(suffix)), false));
-
-  auto hash = buffers.finalize(0);
-  ASSERT_TRUE(hash.has_value());
-  EXPECT_EQ(hash.value(), sha256(std::vector<uint8_t>{0x10, 0x20, 0x30, 0x40}));
 }
 
 TEST(HashBuffersTest, FinalizeConsumesBuffer)
@@ -226,36 +143,6 @@ TEST(HashBuffersTest, FinalizeMissingIndexFails)
   ASSERT_EQ(r.error(), SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 }
 
-TEST(HashBuffersTest, FinalizeReportsAccumulatedSize)
-{
-  // finalize's size output feeds sha256_total_bytes_processed in transaction
-  // stats, so the byte count is observable and must survive representation
-  // changes: it counts bytes since the last reset, not since creation.
-  HashBuffers buffers(kMaxBuffers);
-  const std::vector<uint8_t> chunk1(10, 1);
-  const std::vector<uint8_t> chunk2(20, 2);
-  const std::vector<uint8_t> chunk3(30, 3);
-  const std::vector<uint8_t> chunk4(40, 4);
-  const std::vector<uint8_t> chunk5(5, 5);
-
-  size_t size = 12345;
-  ASSERT_TRUE(
-      buffers.update(0, std::as_bytes(std::span<const uint8_t>()), true));
-  ASSERT_TRUE(buffers.finalize(0, &size).has_value());
-  EXPECT_EQ(size, 0U);
-
-  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk1)), true));
-  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk2)), false));
-  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk3)), false));
-  ASSERT_TRUE(buffers.finalize(0, &size).has_value());
-  EXPECT_EQ(size, 60U);
-
-  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk4)), true));
-  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk5)), true));
-  ASSERT_TRUE(buffers.finalize(0, &size).has_value());
-  EXPECT_EQ(size, 5U);
-}
-
 TEST(HashBuffersTest, EmptyUpdatesDoNotChangeDigest)
 {
   HashBuffers buffers(kMaxBuffers);
@@ -266,18 +153,14 @@ TEST(HashBuffersTest, EmptyUpdatesDoNotChangeDigest)
   ASSERT_TRUE(
       buffers.update(0, std::as_bytes(std::span<const uint8_t>()), false));
 
-  size_t size = 0;
-  auto hash = buffers.finalize(0, &size);
+  auto hash = buffers.finalize(0);
   ASSERT_TRUE(hash.has_value());
   EXPECT_EQ(hash.value(), sha256(data));
-  EXPECT_EQ(size, data.size());
 }
 
-TEST(HashBuffersTest, MaxSizeBufferDigestMatchesOneShot)
+TEST(HashBuffersTest, BeyondLegacySizeLimitMatchesOneShot)
 {
-  // Exactly kSHA256BufferMaxSize bytes is accepted, hashes correctly, and
-  // reports the full size.
-  std::vector<uint8_t> whole(kSHA256BufferMaxSize);
+  std::vector<uint8_t> whole((2 * kSHA256BufferMaxSize) + 1);
   for (size_t i = 0; i < whole.size(); i++) {
     whole[i] = static_cast<uint8_t>((i * 31) + 5);
   }
@@ -289,19 +172,13 @@ TEST(HashBuffersTest, MaxSizeBufferDigestMatchesOneShot)
   ASSERT_TRUE(buffers.update(
       0, std::as_bytes(std::span(whole.begin() + half, whole.end())), false));
 
-  size_t size = 0;
-  auto hash = buffers.finalize(0, &size);
+  auto hash = buffers.finalize(0);
   ASSERT_TRUE(hash.has_value());
   EXPECT_EQ(hash.value(), sha256(whole));
-  EXPECT_EQ(size, kSHA256BufferMaxSize);
 }
 
 TEST(HashBuffersTest, CopyThenDivergeMatchesOneShot)
 {
-  // The fork property: a copied stream continues from the source's exact
-  // state, and the two streams are independent afterwards. The 100-byte
-  // shared prefix spans a SHA-256 block boundary so a midstate copy is
-  // actually exercised.
   std::vector<uint8_t> prefix(100);
   for (size_t i = 0; i < prefix.size(); i++) {
     prefix[i] = static_cast<uint8_t>((i * 13) + 3);
@@ -320,16 +197,13 @@ TEST(HashBuffersTest, CopyThenDivergeMatchesOneShot)
   ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(suffix_a)), false));
   ASSERT_TRUE(buffers.update(1, std::as_bytes(std::span(suffix_b)), false));
 
-  size_t size = 0;
-  auto hash_a = buffers.finalize(0, &size);
+  auto hash_a = buffers.finalize(0);
   ASSERT_TRUE(hash_a.has_value());
   EXPECT_EQ(hash_a.value(), sha256(whole_a));
-  EXPECT_EQ(size, whole_a.size());
 
-  auto hash_b = buffers.finalize(1, &size);
+  auto hash_b = buffers.finalize(1);
   ASSERT_TRUE(hash_b.has_value());
   EXPECT_EQ(hash_b.value(), sha256(whole_b));
-  EXPECT_EQ(size, whole_b.size());
 }
 
 TEST(HashBuffersTest, CopyReplacesDestination)
@@ -342,11 +216,9 @@ TEST(HashBuffersTest, CopyReplacesDestination)
 
   ASSERT_TRUE(buffers.copy(0, 1));
 
-  size_t size = 0;
-  auto hash = buffers.finalize(1, &size);
+  auto hash = buffers.finalize(1);
   ASSERT_TRUE(hash.has_value());
   EXPECT_EQ(hash.value(), sha256(src_data));
-  EXPECT_EQ(size, src_data.size());
 }
 
 TEST(HashBuffersTest, CopyMissingSourceFails)

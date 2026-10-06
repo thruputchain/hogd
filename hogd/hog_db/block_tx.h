@@ -21,6 +21,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 // BlockTX manages a set of pending changes made in a block relative to the
@@ -30,10 +31,12 @@ class BlockTX {
 public:
   BlockTX(HogDbDAO &db, const StorageCostModel &cost_model,
           BackgroundCommitWorker &background_commit_worker,
-          BlockHeight block_height, BlockExecutionMode mode)
+          BlockHeight block_height, BlockExecutionMode mode,
+          uint32_t max_savepoint_depth)
     : db_(db), cost_model_(cost_model),
       background_commit_worker_(background_commit_worker),
-      block_height_(block_height), mode_(mode)
+      block_height_(block_height), mode_(mode),
+      max_savepoint_depth_(max_savepoint_depth)
   {}
   ~BlockTX() = default;
 
@@ -41,6 +44,7 @@ public:
   HogDbDAO &get_db() const { return db_; }
   BlockHeight get_height() const { return block_height_; }
   BlockExecutionMode mode() const { return mode_; }
+  uint32_t max_savepoint_depth() const { return max_savepoint_depth_; }
 
   void invalidate() { invalidated_.store(true, std::memory_order_release); }
   bool is_invalidated() const
@@ -82,18 +86,24 @@ public:
   HogDbStatus<int128_t> read_nnint128_base(const ItemKey &key);
   HogDbStatus<int128_t> read_balance_base(const Address &addr);
 
-  // return entry from an RCQ that was created by a transaction in the current
-  // block if it exists.
-  HogDbStatus<std::optional<QueueEntry>>
+  // Borrowed view of a current-block RCQ entry; valid while the caller holds
+  // this BlockTX.
+  HogDbStatus<std::optional<x23::BufView>>
   get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
 
   // Stage all finalized lock changes into a ChangeSet and compute the hash
   // delta. Returns the final db hash. Must be called before commit().
-  HogDbStatus<StorageLongHash> close(const StorageLongHash &base_hash);
+  // |pool| runs the lock-map scans, mirroring commit()'s pool parameter so a
+  // caller that owns a pool can drive the whole close/commit path on it
+  // instead of silently splitting the block across two pools.
+  HogDbStatus<StorageLongHash>
+  close(const StorageLongHash &base_hash,
+        WorkerPool &pool = WorkerPool::get_default_pool());
 
   // Test/benchmark only: stage changes without computing the hash.
   // Do not use in production code — the db hash is required for consensus.
-  HogDbStatus<void> close_skip_hash_for_testing();
+  HogDbStatus<void> close_skip_hash_for_testing(
+      WorkerPool &pool = WorkerPool::get_default_pool());
 
 private:
   HogDbStatus<std::pair<int128_t, ItemLockCacheData>>
@@ -129,8 +139,9 @@ private:
   std::atomic<bool> invalidated_{false};
   std::atomic<bool> poisoned_{false};
   const BlockExecutionMode mode_;
+  uint32_t max_savepoint_depth_;
 
-  HogDbStatus<void> stage_locks(ChangeSet &changes);
+  HogDbStatus<void> stage_locks(ChangeSet &changes, WorkerPool &pool);
 
   static inline HogDbStatus<int128_t>
   do_lock(ItemLock &lock, const ItemChange &change, const LockContext &ctx);

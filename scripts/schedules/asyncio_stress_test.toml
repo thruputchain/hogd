@@ -34,10 +34,15 @@ echo 'build gcc debug'
 # covered by the gcc-debug/llvm-debug/gcc-release CI (cpp-namespace-optimized).
 RCQ_DBHASH_SLOW='ConsumeCapErrorAgreesProposalAndValidationDbHash'
 
+# Excluded from this pass only: a ~6 MB upload stalls past the 100s timeout
+# under X23_RCVBUF=1 (#4072). X23_SNDBUF=1 throttles replies, not the upload,
+# and the normal CI builds still cover this test.
+SIZE_CAP_BULK_SLOW='SizeCapIgnoresSignedTransactionWrapper'
+
 export X23_RCVBUF=1
 
 echo 'run gcc tests RCVBUF=1'
-ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "rpcstress_writebuf|${RCQ_DBHASH_SLOW}"
+ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "rpcstress_writebuf|${RCQ_DBHASH_SLOW}|${SIZE_CAP_BULK_SLOW}"
 
 unset X23_RCVBUF
 
@@ -63,8 +68,12 @@ GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
+# Published crates and pinned submodules retain the legacy registry identity.
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 [jobs.host]
 bindings_1 = "?"
