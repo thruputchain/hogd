@@ -430,13 +430,29 @@ jobs:
 
           readiness_file="$(mktemp)"
           log_file="$(mktemp)"
+          bootstrap_file="$(mktemp)"
+          cat >"$bootstrap_file" <<'JSON'
+          {
+            "schemaVersion": 4,
+            "kind": "groundhog-bootstrap",
+            "networkHash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "profile": "local-dev",
+            "bootstrapFaucet": {
+              "publicKey": "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+              "initialStorageTokens": "10000000000000"
+            },
+            "bootstrapAccounts": [{
+              "publicKey": "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+              "initialStorageTokens": "1000000000"
+            }],
+            "storageCostModel": {"profile": "hogd-default"}
+          }
+          JSON
           ./hog-devnode \
             --listen-host 127.0.0.1 \
             --scheduler-port 0 \
             --readiness stdout \
-            --dev-accounts 1 \
-            --dev-account-seed groundhog-dev-accounts \
-            --dev-account-tokens 1000000000 \
+            --bootstrap-manifest "$bootstrap_file" \
             >"$readiness_file" 2>"$log_file" &
           devnode_pid=$!
           cleanup_devnode() {
@@ -451,7 +467,7 @@ jobs:
               fi
             fi
             wait "$devnode_pid" 2>/dev/null || true
-            rm -f "$readiness_file" "$log_file"
+            rm -f "$readiness_file" "$log_file" "$bootstrap_file"
           }
           trap cleanup_devnode EXIT
 
@@ -483,14 +499,22 @@ jobs:
               raise SystemExit(f"unexpected readiness payload: {readiness}")
           with open(readiness["manifestPath"], encoding="utf-8") as handle:
               manifest = json.load(handle)
-          if readiness.get("schemaVersion") != 3 or manifest.get("schemaVersion") != 3:
-              raise SystemExit("packaged hog-devnode must emit native bootstrap schema 3")
+          if readiness.get("schemaVersion") != 3 or manifest.get("schemaVersion") != 4:
+              raise SystemExit("packaged hog-devnode must emit public bootstrap schema 4")
+          if "bootstrapAccountDerivation" in manifest:
+              raise SystemExit("packaged hog-devnode still advertises signer derivation")
           if "devWallet" in manifest.get("bootstrap", {}):
               raise SystemExit("packaged hog-devnode still advertises devWallet")
           accounts = manifest.get("bootstrapAccounts")
           expected = [
-              {"index": 0, "role": "faucet", "initialStorageTokens": "10000000000000"},
-              {"index": 1, "role": "local_user", "initialStorageTokens": "1000000000"},
+              {
+                  "role": "faucet", "initialStorageTokens": "10000000000000",
+                  "publicKey": "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+              },
+              {
+                  "role": "local_user", "initialStorageTokens": "1000000000",
+                  "publicKey": "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+              },
           ]
           if not isinstance(accounts, list) or len(accounts) != len(expected):
               raise SystemExit(f"unexpected bootstrap accounts: {accounts}")

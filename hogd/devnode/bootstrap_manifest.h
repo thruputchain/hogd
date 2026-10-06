@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include "hogd/base/json.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "types.hh"
 
@@ -20,6 +21,10 @@ struct BootstrapManifestConfig {
   NetworkHash network_hash;
   LocalBootstrapConfig bootstrap_config;
 };
+
+// Validate explicit public allocations, shared by launch intent and recovery.
+std::expected<LocalBootstrapConfig, std::string>
+parse_local_bootstrap_accounts(json::Value const &value);
 
 // Reads, parses, and validates a bootstrap manifest file. On any failure --
 // I/O, JSON syntax, or schema validation -- returns the human-readable

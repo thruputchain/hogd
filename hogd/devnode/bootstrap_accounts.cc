@@ -4,7 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <memory>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -191,18 +193,38 @@ build_local_bootstrap_account_artifact(LocalBootstrapConfig const &config,
                                        NetworkHash const &network_hash,
                                        StorageCostModel const &cost_model)
 {
-  CHECK_LE(config.user_account_count, kMaxBootstrapAccounts);
+  if (config.accounts.size() > kMaxBootstrapAccounts) {
+    throw std::runtime_error("too many local bootstrap accounts");
+  }
   GenesisConfigurationBuilder builder;
   std::vector<BootstrapAccountMetadata> accounts;
-  accounts.reserve(static_cast<std::size_t>(config.user_account_count) + 1);
-  accounts.push_back(append_bootstrap_account(builder, config.seed, 0,
-                                              kLocalFaucetStorageTokens,
-                                              BootstrapAccountRole::kFaucet));
-  for (std::uint32_t index = 1; index <= config.user_account_count; ++index) {
-    accounts.push_back(
-        append_bootstrap_account(builder, config.seed, index,
-                                 config.user_storage_tokens,
-                                 BootstrapAccountRole::kLocalUser));
+  std::set<Ed25519PublicKey> public_keys;
+  auto append = [&](Ed25519PublicKey const &key, std::uint64_t tokens,
+                    BootstrapAccountRole role) {
+    if (tokens == 0 || tokens > static_cast<std::uint64_t>(
+                                    std::numeric_limits<std::int64_t>::max())) {
+      throw std::runtime_error(
+          "local bootstrap allocation must be positive and fit int64");
+    }
+    if (!public_keys.insert(key).second) {
+      throw std::runtime_error("duplicate local bootstrap public key");
+    }
+    auto address = derive_bootstrap_account_address(key);
+    builder.add_account_allocation(address, static_cast<int128_t>(tokens));
+    accounts.push_back(BootstrapAccountMetadata{
+        .index = static_cast<std::uint32_t>(accounts.size()),
+        .role = role,
+        .address = address,
+        .public_key = key,
+        .initial_storage_tokens = tokens,
+        .storage_tokens = tokens,
+    });
+  };
+  append(config.faucet_public_key, kLocalFaucetStorageTokens,
+         BootstrapAccountRole::kFaucet);
+  for (auto const &account : config.accounts) {
+    append(account.public_key, account.storage_tokens,
+           BootstrapAccountRole::kLocalUser);
   }
   return finish_bootstrap_artifact(builder, std::move(accounts), network_hash,
                                    cost_model,

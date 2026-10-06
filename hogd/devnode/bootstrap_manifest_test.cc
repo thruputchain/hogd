@@ -26,6 +26,7 @@
 #include "hogd/base/network_hash.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
+#include "hogd/devnode/manifest_hex.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
@@ -38,7 +39,7 @@ namespace {
 // manifest. Tests tweak only the field(s) under test.
 struct ManifestBuilder {
   bool include_schema_version = true;
-  std::int64_t schema_version = 3;
+  std::int64_t schema_version = 4;
 
   std::string kind = "groundhog-bootstrap";
 
@@ -54,15 +55,16 @@ struct ManifestBuilder {
   bool include_dev_wallet = false;
 
   bool include_bootstrap_faucet = true;
-  std::int64_t faucet_index = 0;
+  std::string faucet_public_key =
+      hex_string(derive_bootstrap_account_keypair("parser-fixture", 0).first);
   std::string faucet_storage_tokens = "10000000000000";
-
   bool include_bootstrap_accounts = true;
-  std::int64_t bootstrap_count = 2;
-  bool include_first_index = true;
-  std::int64_t first_index = 1;
-  bool include_bootstrap_seed = true;
-  std::string bootstrap_seed = "manifest-seed";
+  std::uint32_t bootstrap_count = 2;
+  bool duplicate_user = false;
+  bool duplicate_faucet = false;
+  bool legacy_index = false;
+  bool include_public_key = true;
+  std::string user_public_key;
   std::string initial_storage_tokens = "1000000000";
 
   bool include_storage_cost_model = true;
@@ -88,20 +90,30 @@ struct ManifestBuilder {
       }
       if (include_bootstrap_faucet) {
         w.object_field("bootstrapFaucet", [&](json::Writer &w) {
-          w.field("index", faucet_index);
+          w.field("publicKey", faucet_public_key);
           w.field("initialStorageTokens", faucet_storage_tokens);
         });
       }
       if (include_bootstrap_accounts) {
-        w.object_field("bootstrapAccounts", [&](json::Writer &w) {
-          w.field("count", bootstrap_count);
-          if (include_first_index) {
-            w.field("firstIndex", first_index);
+        w.array_field("bootstrapAccounts", [&](json::Writer &w) {
+          for (std::uint32_t i = 0; i < bootstrap_count; ++i) {
+            w.object([&](json::Writer &w) {
+              if (include_public_key) {
+                auto key = !user_public_key.empty()
+                               ? user_public_key
+                               : hex_string(derive_bootstrap_account_keypair(
+                                                "parser-fixture",
+                                                duplicate_user ? 1 : i + 1)
+                                                .first);
+                w.field("publicKey",
+                        duplicate_faucet ? faucet_public_key : key);
+              }
+              if (legacy_index) {
+                w.field("index", std::int64_t{1});
+              }
+              w.field("initialStorageTokens", initial_storage_tokens);
+            });
           }
-          if (include_bootstrap_seed) {
-            w.field("seed", bootstrap_seed);
-          }
-          w.field("initialStorageTokens", initial_storage_tokens);
         });
       }
       if (include_storage_cost_model) {
@@ -181,7 +193,6 @@ TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
   builder.network_hash =
       "00000000000000000000000000000000000000000000000000000000000000aa";
   builder.bootstrap_count = 2;
-  builder.bootstrap_seed = "manifest-seed";
   builder.initial_storage_tokens = "1000000000";
   CleanupDefer cleanup;
   std::filesystem::path path =
@@ -193,9 +204,13 @@ TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
   const BootstrapManifestConfig &config = *result;
   EXPECT_EQ(format_network_hash(config.network_hash),
             "00000000000000000000000000000000000000000000000000000000000000aa");
-  EXPECT_EQ(config.bootstrap_config.user_account_count, 2U);
-  EXPECT_EQ(config.bootstrap_config.seed, "manifest-seed");
-  EXPECT_EQ(config.bootstrap_config.user_storage_tokens, 1'000'000'000ULL);
+  ASSERT_EQ(config.bootstrap_config.accounts.size(), 2U);
+  EXPECT_EQ(config.bootstrap_config.faucet_public_key,
+            derive_bootstrap_account_keypair("parser-fixture", 0).first);
+  EXPECT_EQ(config.bootstrap_config.accounts[1].public_key,
+            derive_bootstrap_account_keypair("parser-fixture", 2).first);
+  EXPECT_EQ(config.bootstrap_config.accounts[1].storage_tokens,
+            1'000'000'000ULL);
 }
 
 TEST(BootstrapManifest, RejectsNonObjectRoot)
@@ -221,7 +236,7 @@ TEST(BootstrapManifest, RejectsWrongSchemaVersion)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "expected 3");
+  expect_error_with(path, "expected 4");
 }
 
 TEST(BootstrapManifest, RejectsMissingSchemaVersion)
@@ -281,8 +296,8 @@ TEST(BootstrapManifest, RejectsEmptyNetworkHash)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path,
-                    "networkHash must be exactly 64 hexadecimal characters");
+  expect_error_with(
+      path, "networkHash must be exactly 64 lowercase hexadecimal characters");
 }
 
 TEST(BootstrapManifest, RejectsMissingNetworkHash)
@@ -301,7 +316,7 @@ TEST(BootstrapManifest, RejectsLegacyWalletMetadata)
   builder.include_dev_wallet = true;
   CleanupDefer cleanup;
   auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "must not contain devWallet");
+  expect_error_with(path, "unknown root field 'devWallet'");
 }
 
 TEST(BootstrapManifest, RejectsLegacySchemaTwo)
@@ -310,7 +325,7 @@ TEST(BootstrapManifest, RejectsLegacySchemaTwo)
   builder.schema_version = 2;
   CleanupDefer cleanup;
   auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "expected 3");
+  expect_error_with(path, "expected 4");
 }
 
 TEST(BootstrapManifest, RejectsMissingBootstrapAccounts)
@@ -320,7 +335,7 @@ TEST(BootstrapManifest, RejectsMissingBootstrapAccounts)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "missing root.bootstrapAccounts");
+  expect_error_with(path, "bootstrapAccounts must be an array");
 }
 
 TEST(BootstrapManifest, RejectsMissingBootstrapFaucet)
@@ -333,14 +348,13 @@ TEST(BootstrapManifest, RejectsMissingBootstrapFaucet)
   expect_error_with(path, "missing root.bootstrapFaucet");
 }
 
-TEST(BootstrapManifest, RejectsWrongFaucetIndex)
+TEST(BootstrapManifest, RejectsMalformedFaucetKey)
 {
   ManifestBuilder builder;
-  builder.faucet_index = 1;
+  builder.faucet_public_key = "0x1234";
   CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "bootstrapFaucet.index must be 0");
+  auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "bootstrapFaucet.publicKey");
 }
 
 TEST(BootstrapManifest, RejectsWrongFaucetAllocation)
@@ -364,24 +378,22 @@ TEST(BootstrapManifest, RejectsMalformedFaucetAllocation)
   expect_error_with(path, "bootstrapFaucet.initialStorageTokens");
 }
 
-TEST(BootstrapManifest, RejectsWrongFirstUserIndex)
+TEST(BootstrapManifest, RejectsLegacyIndex)
 {
   ManifestBuilder builder;
-  builder.first_index = 0;
+  builder.legacy_index = true;
   CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "bootstrapAccounts.firstIndex must be 1");
+  auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "unknown bootstrapAccounts entry field 'index'");
 }
 
-TEST(BootstrapManifest, RejectsMissingFirstUserIndex)
+TEST(BootstrapManifest, RejectsMissingUserKey)
 {
   ManifestBuilder builder;
-  builder.include_first_index = false;
+  builder.include_public_key = false;
   CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "missing bootstrapAccounts.firstIndex");
+  auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "publicKey");
 }
 
 TEST(BootstrapManifest, AcceptsZeroUserAccounts)
@@ -394,44 +406,67 @@ TEST(BootstrapManifest, AcceptsZeroUserAccounts)
   expect_ok(path);
 }
 
-TEST(BootstrapManifest, RejectsNegativeCount)
+TEST(BootstrapManifest, RejectsDuplicateUsers)
 {
   ManifestBuilder builder;
-  builder.bootstrap_count = -1;
+  builder.duplicate_user = true;
   CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "bootstrapAccounts.count");
+  auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "duplicate bootstrap public key");
+}
+
+TEST(BootstrapManifest, RejectsFaucetInUserAllocations)
+{
+  ManifestBuilder builder;
+  builder.duplicate_faucet = true;
+  CleanupDefer cleanup;
+  auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "duplicate bootstrap public key");
+}
+
+TEST(BootstrapManifest, RejectsNoncanonicalKeys)
+{
+  for (const auto &key : {std::string(64, '1'), "0x" + std::string(64, 'A'),
+                          "0x" + std::string(64, 'g')}) {
+    ManifestBuilder builder;
+    builder.user_public_key = key;
+    CleanupDefer cleanup;
+    auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+    expect_error_with(path, "publicKey");
+  }
+}
+
+TEST(BootstrapManifest, RejectsNoncanonicalAndOutOfRangeAmounts)
+{
+  for (const auto *amount : {"0", "01", "-1", "9223372036854775808"}) {
+    ManifestBuilder builder;
+    builder.initial_storage_tokens = amount;
+    CleanupDefer cleanup;
+    auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
+    expect_error_with(path, "initialStorageTokens");
+  }
 }
 
 TEST(BootstrapManifest, RejectsCountAboveLimit)
 {
-  ManifestBuilder builder;
-  builder.bootstrap_count = 100000;
-  CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "maximum");
-}
-
-TEST(BootstrapManifest, RejectsEmptySeed)
-{
-  ManifestBuilder builder;
-  builder.bootstrap_seed = "";
-  CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "bootstrapAccounts.seed must not be empty");
-}
-
-TEST(BootstrapManifest, RejectsMissingSeed)
-{
-  ManifestBuilder builder;
-  builder.include_bootstrap_seed = false;
-  CleanupDefer cleanup;
-  std::filesystem::path path =
-      write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "missing bootstrapAccounts.seed");
+  // Use a compact JSON representation to exercise the count limit separately
+  // from the manifest file size bound.
+  auto value = json::parse(ManifestBuilder{}.build());
+  ASSERT_TRUE(value);
+  std::string entries;
+  for (std::uint32_t i = 0; i <= kMaxBootstrapAccounts; ++i) {
+    if (i != 0) {
+      entries += ',';
+    }
+    entries += "{}";
+  }
+  auto allocations = json::parse(std::format(
+      R"({{"bootstrapFaucet":{{"publicKey":"{}","initialStorageTokens":"10000000000000"}},"bootstrapAccounts":[{}]}})",
+      ManifestBuilder{}.faucet_public_key, entries));
+  ASSERT_TRUE(allocations);
+  auto result = parse_local_bootstrap_accounts(*allocations);
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("maximum account count"), std::string::npos);
 }
 
 TEST(BootstrapManifest, RejectsMissingStorageCostModel)
@@ -509,10 +544,10 @@ TEST(BootstrapManifest, RejectsDirectoryAsManifest)
 TEST(BootstrapManifest, RejectsOversizedManifest)
 {
   CleanupDefer cleanup;
-  // 64 KiB + 1 byte, all whitespace -- read_bootstrap_manifest_file rejects
+  // 256 KiB + 1 byte, all whitespace -- read_bootstrap_manifest_file rejects
   // before JSON parsing.
   std::filesystem::path path =
-      write_temp_manifest_with_cleanup(std::string((64 * 1024) + 1, ' '),
+      write_temp_manifest_with_cleanup(std::string((256 * 1024) + 1, ' '),
                                        cleanup);
   expect_error_with(path, "exceeds");
 }
@@ -521,8 +556,8 @@ TEST(BootstrapManifest, AcceptsManifestAtExactSizeLimit)
 {
   ManifestBuilder builder;
   std::string manifest = builder.build();
-  ASSERT_LT(manifest.size(), 64UL * 1024UL);
-  manifest.resize(64UL * 1024UL, ' ');
+  ASSERT_LT(manifest.size(), 256UL * 1024UL);
+  manifest.resize(256UL * 1024UL, ' ');
 
   CleanupDefer cleanup;
   std::filesystem::path path =
