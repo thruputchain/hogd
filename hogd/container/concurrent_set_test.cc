@@ -339,6 +339,36 @@ TEST(ConcurrentSet, IterationToleratesGrowth)
     EXPECT_EQ(visited.count(i), 1U) << "missed value present at begin()";
 }
 
+// Growth after the walk reaches end() does not revive the iterator.
+TEST(ConcurrentSet, FinishedIteratorStaysAtEndAcrossGrowth)
+{
+  ConcurrentSet<uint128_t> s;
+  constexpr size_t kInitial = ConcurrentSetHelper::kInitialCapacity *
+                              ConcurrentSetHelper::kResizeLoadFactor;
+  for (uint128_t i = 1; i <= kInitial; ++i)
+    ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+  const size_t levels_at_begin = ConcurrentSetHelper::levels(s);
+
+  std::multiset<uint128_t> visited;
+  bool grown = false;
+  for (auto it = s.begin(); it != s.end();) {
+    visited.insert(*it);
+    ++it;
+    // Every value has been returned, so that ++ reached the end; grow before
+    // the loop's next comparison.
+    if (visited.size() == kInitial && !grown) {
+      for (uint128_t i = kInitial + 1; i <= kInitial * 4; ++i)
+        ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+      grown = true;
+    }
+  }
+  ASSERT_GT(ConcurrentSetHelper::levels(s), levels_at_begin);
+
+  EXPECT_EQ(visited.size(), kInitial);
+  for (uint128_t i = 1; i <= kInitial; ++i)
+    EXPECT_EQ(visited.count(i), 1U);
+}
+
 TEST(ConcurrentSet, Contains)
 {
   ConcurrentSet<uint128_t> s;
