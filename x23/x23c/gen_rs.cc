@@ -525,25 +525,24 @@ impl {0}_{1}_Client {{
     }}
 )",
         prog_name, vers.id, prog_id, vers.val);
-  auto is_ref_type = [](const string &type) -> string {
-    const static std::set<string_view> nonref_types = {"hyper",
+  // Scalars go by value; anything else is borrowed as any type that encodes
+  // like it.  ?Sized admits slices, e.g. of Arcs where the wire type is a Vec.
+  auto arg_type = [](const string &type) -> string {
+    const static std::set<string_view> scalar_types = {"hyper",
                                                        "unsigned hyper", "bool",
                                                        "int", "unsigned int"};
-    if (nonref_types.contains(type)) {
-      return "";
+    if (scalar_types.contains(type)) {
+      return map_type(type);
     }
-    return "&";
+    return std::format("&(impl xdrs::EncodesAs<{}> + ?Sized)", map_type(type));
   };
 
   for (auto const &proc : vers.procs) {
     std::vector<string> args = {"&self"};
     std::vector<string> call_args;
     for (size_t i = 0; i < proc.arg_types.size(); i++) {
-      args.push_back(std::format("arg{} : {}{}", i,
-                                 is_ref_type(proc.arg_types[i]),
-                                 map_type(proc.arg_types[i])));
-      call_args.push_back(
-          std::format("{}arg{}", is_ref_type(proc.arg_types[i]), i));
+      args.push_back(std::format("arg{} : {}", i, arg_type(proc.arg_types[i])));
+      call_args.push_back(std::format("arg{}", i));
     }
     prtop("    pub async fn {}({}) -> Result<{}, ::rpc_api::RpcError> {{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
