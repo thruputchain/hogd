@@ -12,6 +12,11 @@ import tempfile
 import time
 
 
+# hog-devnode bootstraps explicit public allocations, so the benchmark client
+# writes the manifest for the accounts it signs with and the node reads it.
+ACCOUNTS = 100
+
+
 def interrupt(signum, frame):
     # Unwind subprocess.run and the node's finally block on CI cancellation.
     raise KeyboardInterrupt
@@ -57,15 +62,19 @@ def main():
     env["DEFAULT_THREADPOOL_SIZE_schedgateway_client_bench"] = "8"
     metadata = {"host": platform.node(), "platform": platform.platform(),
                 "cpuCount": os.cpu_count(), "backendWorkers": args.workers,
-                "accounts": 100, "ramdbBytes": 2147483648}
+                "accounts": ACCOUNTS, "ramdbBytes": 2147483648}
     (output / "host.json").write_text(json.dumps(metadata, indent=2) + "\n")
     with tempfile.TemporaryDirectory(prefix="schedgateway-bench-") as data, \
             (output / "node.log").open("w") as node_log, \
             (output / "readiness.json").open("w") as readiness, \
             (output / "client.log").open("w") as client_log:
+        bootstrap = output / "bootstrap.json"
+        subprocess.run([str(bench_bin), "--emit-bootstrap-manifest",
+                        str(bootstrap), str(ACCOUNTS)], env=env,
+                       stdout=client_log, stderr=client_log, check=True)
         node = subprocess.Popen([
             str(node_bin), "--data-dir", data, "--listen-host", "127.0.0.1",
-            "--scheduler-port", "0", "--dev-accounts", "100",
+            "--scheduler-port", "0", "--bootstrap-manifest", str(bootstrap),
             "--ramdb-bytes", "2147483648", "--log-level", "error",
         ], env=env, stdout=readiness, stderr=node_log)
         try:
