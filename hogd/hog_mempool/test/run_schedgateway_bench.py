@@ -12,6 +12,11 @@ import tempfile
 import time
 
 
+# Senders for the transfer workload: every transaction moves between two of
+# them, so the set only has to be wide enough that no sender is the hot spot.
+ACCOUNTS = 100
+
+
 def interrupt(signum, frame):
     # Unwind subprocess.run and the node's finally block on CI cancellation.
     raise KeyboardInterrupt
@@ -57,15 +62,21 @@ def main():
     env["DEFAULT_THREADPOOL_SIZE_schedgateway_client_bench"] = "8"
     metadata = {"host": platform.node(), "platform": platform.platform(),
                 "cpuCount": os.cpu_count(), "backendWorkers": args.workers,
-                "accounts": 100, "ramdbBytes": 2147483648}
+                "accounts": ACCOUNTS, "ramdbBytes": 2147483648}
     (output / "host.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    # The node is bootstrapped from public allocations alone, so the client
+    # derives the keypairs and publishes their public halves here; it keeps
+    # the secrets it signs the corpus with.
+    bootstrap = output / "bootstrap.json"
+    subprocess.run([str(bench_bin), "--write-bootstrap-manifest",
+                    str(bootstrap), str(ACCOUNTS)], env=env, check=True)
     with tempfile.TemporaryDirectory(prefix="schedgateway-bench-") as data, \
             (output / "node.log").open("w") as node_log, \
             (output / "readiness.json").open("w") as readiness, \
             (output / "client.log").open("w") as client_log:
         node = subprocess.Popen([
             str(node_bin), "--data-dir", data, "--listen-host", "127.0.0.1",
-            "--scheduler-port", "0", "--dev-accounts", "100",
+            "--scheduler-port", "0", "--bootstrap-manifest", str(bootstrap),
             "--ramdb-bytes", "2147483648", "--log-level", "error",
         ], env=env, stdout=readiness, stderr=node_log)
         try:

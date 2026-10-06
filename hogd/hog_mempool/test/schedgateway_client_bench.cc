@@ -40,6 +40,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/block_driver.h"
 #include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/init.h"
@@ -59,6 +60,15 @@ namespace hogd {
 namespace {
 using Clock = std::chrono::steady_clock;
 constexpr size_t kWorkers = 8;
+// The node is handed public allocations only, so the bench owns the signers:
+// it derives every bootstrap keypair from this seed, writes the public halves
+// into the node's bootstrap manifest, and keeps the secrets to sign with.
+constexpr std::string_view kAccountSeed = "schedgateway-bench-accounts";
+// Index 0 is the faucet every bootstrap manifest must fund; the senders the
+// bench signs with follow it.
+constexpr std::uint32_t kFaucetIndex = 0;
+constexpr std::uint32_t kFirstAccountIndex = kFaucetIndex + 1;
+constexpr std::string_view kWriteManifestFlag = "--write-bootstrap-manifest";
 
 void
 require(bool condition, const char *message)
@@ -150,19 +160,15 @@ struct Account {
 std::vector<Account>
 accounts_from_manifest(const json::Value &manifest)
 {
-  const auto &derivation = field(manifest, "bootstrapAccountDerivation");
-  require(str(field(derivation, "scheme")) == "groundhog-bootstrap-account-v1",
-          "unsupported bootstrap account derivation");
-  const auto seed = str(field(derivation, "seed"));
   std::vector<Account> accounts;
   for (const auto &account : field(manifest, "bootstrapAccounts").as_array()) {
     if (str(field(account, "role")) != "local_user")
       continue;
-    const auto index = field(account, "index").as_integer();
-    if (!index || *index < 1 ||
-        !std::cmp_less_equal(*index, kMaxBootstrapAccounts))
-      throw std::runtime_error("invalid bootstrap account index");
-    auto [public_key, secret] = derive_bootstrap_account_keypair(seed, *index);
+    // The node allocates in manifest order, so its nth local user is the
+    // account [write_bootstrap_manifest] derived at index n.
+    auto [public_key, secret] = derive_bootstrap_account_keypair(
+        kAccountSeed,
+        static_cast<std::uint32_t>(kFirstAccountIndex + accounts.size()));
     require(public_key ==
                 hex_value<Ed25519PublicKey>(field(account, "publicKey")),
             "bootstrap public key mismatch");
@@ -172,8 +178,50 @@ accounts_from_manifest(const json::Value &manifest)
          .secret = secret});
   }
   require(accounts.size() >= 2,
-          "start a fresh devnode with --dev-accounts >= 2");
+          "start a fresh devnode from this bench's bootstrap manifest");
   return accounts;
+}
+
+// Writes the node's launch intent: the public half of every keypair this
+// bench will sign with, which [accounts_from_manifest] matches back up
+// against the runtime manifest the node then publishes.
+void
+write_bootstrap_manifest(const char *path, std::uint32_t accounts)
+{
+  auto public_key = [](std::uint32_t index) {
+    return hex_string(
+        derive_bootstrap_account_keypair(kAccountSeed, index).first);
+  };
+  std::string output;
+  json::Writer(output).object([&](json::Writer &w) {
+    w.field("schemaVersion", std::int64_t{4});
+    w.field("kind", "groundhog-bootstrap");
+    w.field("networkHash", format_network_hash(NetworkHash{}));
+    w.field("profile", "local-dev");
+    // [protocol] is optional, and the node this manifest launches is the same
+    // build as this binary, so there is no version skew for it to catch.
+    w.object_field("bootstrapFaucet", [&](json::Writer &w) {
+      w.field("publicKey", public_key(kFaucetIndex));
+      w.field("initialStorageTokens",
+              std::to_string(kLocalFaucetStorageTokens));
+    });
+    w.array_field("bootstrapAccounts", [&](json::Writer &w) {
+      for (std::uint32_t i = 0; i < accounts; ++i) {
+        w.object([&](json::Writer &w) {
+          w.field("publicKey", public_key(kFirstAccountIndex + i));
+          w.field("initialStorageTokens",
+                  std::to_string(kDefaultLocalUserStorageTokens));
+        });
+      }
+    });
+    w.object_field("storageCostModel",
+                   [](json::Writer &w) { w.field("profile", "hogd-default"); });
+  });
+  std::ofstream out(path, std::ios::out | std::ios::noreplace);
+  require(out.good(), "cannot create bootstrap manifest");
+  out << output << '\n';
+  out.close();
+  require(out.good(), "cannot write bootstrap manifest");
 }
 
 SignedTransaction
@@ -404,14 +452,28 @@ write_result(const char *path, const Config &config,
 int
 run_benchmark(int argc, char **argv)
 {
+  if (argc == 4 && argv[1] == kWriteManifestFlag) {
+    try {
+      write_bootstrap_manifest(
+          argv[2],
+          static_cast<std::uint32_t>(
+              number(argv[3], static_cast<int>(kMaxBootstrapAccounts))));
+      return 0;
+    } catch (const std::exception &e) {
+      std::println(stderr, "{}", e.what());
+      return 2;
+    }
+  }
   if (argc < 3 || argc > 8) {
     std::println(
         stderr,
-        "Usage: {} MANIFEST OUTPUT [CONNECTIONS=4 [SECONDS=5 [WARMUP=1 "
+        "Usage: {0} MANIFEST OUTPUT [CONNECTIONS=4 [SECONDS=5 [WARMUP=1 "
         "[TRANSACTIONS=60000 [BLOCK_MS=500]]]]]\n"
+        "       {0} {1} PATH ACCOUNTS\n"
         "Uses a fresh hog-devnode and submits native-token transfers. "
-        "Run under a process timeout.",
-        argv[0]);
+        "Run under a process timeout. The second form writes the bootstrap "
+        "manifest to launch that node with.",
+        argv[0], kWriteManifestFlag);
     return 2;
   }
   try {
@@ -426,7 +488,7 @@ run_benchmark(int argc, char **argv)
     if (hogd_init(argc, argv, false, LogLevel::kError))
       return 2;
     auto manifest = read_manifest(argv[1]);
-    require(field(manifest, "schemaVersion").as_integer() == 3 &&
+    require(field(manifest, "schemaVersion").as_integer() == 4 &&
                 str(field(manifest, "kind")) == "hogd-dev-runtime" &&
                 str(field(manifest, "chainState")) == "fresh",
             "requires a fresh hog-devnode runtime manifest");
