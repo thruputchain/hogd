@@ -208,20 +208,28 @@ public:
   bool contains(T value) { return do_contains(value, false); }
   bool erase(T value) { return do_contains(value, true); }
 
-  // iterator over all of the non-erased values
+  // Iterates the live values. Safe alongside inserts, erases and growth: each
+  // slot is visited at most once, levels added before the walk reaches them
+  // are visited, and a dereference returns the value the slot held when the
+  // iterator reached it, so a concurrent erase never yields a reserved value.
   class Iterator {
     ConcurrentSet *set_;
     size_t index_;
     size_t level_;
+    T value_{};
+
+    T load() const
+    {
+      return set_->get_level(level_)[index_].load(std::memory_order_acquire);
+    }
+
+    friend class ConcurrentSet;
 
   public:
     Iterator(ConcurrentSet *set, size_t index, size_t level)
       : set_(set), index_(index), level_(level)
     {}
-    T operator*() const
-    {
-      return set_->get_level(level_)[index_].load(std::memory_order_acquire);
-    }
+    T operator*() const { return value_; }
 
     Iterator &operator++()
     {
@@ -231,7 +239,7 @@ public:
           level_++;
           index_ = 0;
         }
-      } while (*this != set_->end() && is_reserved(**this));
+      } while (*this != set_->end() && is_reserved(value_ = load()));
       return *this;
     }
 
@@ -245,7 +253,8 @@ public:
   Iterator begin()
   {
     auto it = Iterator(this, 0, 0);
-    if (is_reserved(*it)) {
+    it.value_ = it.load();
+    if (is_reserved(it.value_)) {
       ++it;
     }
     return it;
