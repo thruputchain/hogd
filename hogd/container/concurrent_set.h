@@ -208,10 +208,16 @@ public:
   bool contains(T value) { return do_contains(value, false); }
   bool erase(T value) { return do_contains(value, true); }
 
-  // Iterates the live values. Safe alongside inserts, erases and growth: each
-  // slot is visited at most once, levels added before the walk reaches them
-  // are visited, and a dereference returns the value the slot held when the
-  // iterator reached it, so a concurrent erase never yields a reserved value.
+  // Iterates the live values. Inserts, erases and growth may run concurrently:
+  // - An iterator stays valid across them. It refers to one slot, and *it
+  //   returns the value that slot held when the iterator reached it, even if
+  //   that value has since been erased.
+  // - Every value returned was in the set at some point between begin() and
+  //   the dereference that returned it.
+  // - A value in the set from begin() until the walk ends is returned exactly
+  //   once.
+  // - A value inserted or erased during the walk may or may not be returned. A
+  //   value erased and re-inserted during the walk may be returned twice.
   class Iterator {
     ConcurrentSet *set_;
     size_t index_;
