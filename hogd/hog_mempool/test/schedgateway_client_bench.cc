@@ -158,6 +158,9 @@ constexpr std::string_view kBootstrapSeed = "schedgateway-bench-accounts";
 void
 emit_manifest(const char *path, std::uint32_t accounts)
 {
+  // [make_transfer] needs a distinct sender and recipient, so refuse to write
+  // a manifest the run would only reject after bootstrapping the node.
+  require(accounts >= 2, "a run needs at least two accounts");
   std::string output;
   json::Writer(output).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{4});

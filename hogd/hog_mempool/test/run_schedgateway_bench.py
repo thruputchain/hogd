@@ -38,11 +38,13 @@ def main():
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--accounts", type=int, default=100)
     args = parser.parse_args()
-    for key, limit in (("connections", 64), ("seconds", 60), ("warmup", 10),
-                       ("transactions", 1000000), ("block_ms", 10000),
-                       ("workers", 256), ("accounts", 1000)):
-        if not 1 <= getattr(args, key) <= limit:
-            parser.error(f"{key} must be between 1 and {limit}")
+    for key, low, limit in (("connections", 1, 64), ("seconds", 1, 60),
+                           ("warmup", 1, 10), ("transactions", 1, 1000000),
+                           ("block_ms", 1, 10000), ("workers", 1, 256),
+                           # A transfer needs a distinct sender and recipient.
+                           ("accounts", 2, 1000)):
+        if not low <= getattr(args, key) <= limit:
+            parser.error(f"{key} must be between {low} and {limit}")
     build = args.build.resolve()
     node_bin = build / "hogd/devnode/hog-devnode"
     bench_bin = build / "hogd/hog_mempool/test/schedgateway_client_bench"
