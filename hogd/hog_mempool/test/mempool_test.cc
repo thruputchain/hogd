@@ -816,8 +816,9 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
 
   constexpr size_t kNumBlocks = 5;
   for (size_t i = 0; i < kNumBlocks; i++) {
-    // Change the hash while reusing the uniquifier, so hog_db rejects the
-    // replay and a retained commitment cannot mask its failure outcome.
+    // Change the hash while reusing the uniquifier so that hog_db rejects the
+    // replay and the previous successful commit does not override the failure
+    // outcome of this new (duplicate) tx.
     txs[0].tx.invocation.gas_limit--;
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
