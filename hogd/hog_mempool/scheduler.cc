@@ -542,6 +542,8 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
       .error_source =
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
       .error_code = 0,
+      // [height] has an undefined value when the tx is not found, so we just
+      // set it to 0.
       .height = 0,
   };
 }
