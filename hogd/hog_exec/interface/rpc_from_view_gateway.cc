@@ -147,7 +147,8 @@ ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
   batch.payload().height = state.tip.value.proposal_header.block_height;
   const auto response_limit =
       std::min<std::size_t>(query.max_response_bytes, kBulkRpcMaxMessageSize);
-  if (x23::xdr_size(batch) > response_limit) {
+  auto response_bytes = x23::xdr_size(batch);
+  if (response_bytes > response_limit) {
     co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchResponseTooLarge);
   }
   for (auto const &call : query.calls) {
@@ -170,14 +171,16 @@ ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
       break;
     }
     auto &payload = result.payload();
-    batch.payload().results.push_back(
-        TransactionViewResult{.output = std::move(payload.output),
-                              .gas_consumed = payload.gas_consumed,
-                              .events = std::move(payload.events)});
-    if (x23::xdr_size(batch) > response_limit) {
+    TransactionViewResult call_result{.output = std::move(payload.output),
+                                      .gas_consumed = payload.gas_consumed,
+                                      .events = std::move(payload.events)};
+    const auto call_bytes = x23::xdr_size(call_result);
+    if (call_bytes > response_limit - response_bytes) {
       co_return ViewGatewayBatchResult(
           Outcome::ViewGatewayBatchResponseTooLarge);
     }
+    response_bytes += call_bytes;
+    batch.payload().results.push_back(std::move(call_result));
   }
   if (std::chrono::steady_clock::now() >= deadline) {
     co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchDeadlineExceeded);
