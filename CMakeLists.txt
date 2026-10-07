@@ -23,6 +23,7 @@ option(BUILD_FUZZERS "Build fuzz targets" OFF)
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
 option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
 option(HOGD_FRAME_POINTERS "Keep frame pointers in Release builds for continuous profiling" ON)
+option(HOGD_RELEASE_DEBUGINFO "Emit debug info in Release builds for split debuginfo packaging" OFF)
 set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
 set(RUST_BUILD_CPU "native" CACHE STRING "Rust target CPU to build for (default 'native')")
 
@@ -93,11 +94,16 @@ message(STATUS "Using CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
 message(STATUS "Using CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
 
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0 -g")
-# Frame pointers default on for profiling; disable for benchmark comparisons with
-# scripts/build.sh ... -x "-DHOGD_FRAME_POINTERS=OFF". Debuginfo is split out at packaging.
-set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3 -g")
+# Frame pointers default on for profiling; -DHOGD_FRAME_POINTERS=OFF for benchmark comparisons.
+# Debug info defaults off because it multiplies per-TU compile memory; the release
+# workflow sets -DHOGD_RELEASE_DEBUGINFO=ON to ship split debuginfo.
+set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0 -g")
-set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3 -g")
+set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
+if(HOGD_RELEASE_DEBUGINFO)
+  string(APPEND CMAKE_C_FLAGS_RELEASE " -g")
+  string(APPEND CMAKE_CXX_FLAGS_RELEASE " -g")
+endif()
 if(HOGD_FRAME_POINTERS)
   string(APPEND CMAKE_C_FLAGS_RELEASE " -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer")
   string(APPEND CMAKE_CXX_FLAGS_RELEASE " -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer")
@@ -109,6 +115,7 @@ endif()
 
 message(STATUS "Using CMAKE_C_FLAGS_DEBUG: ${CMAKE_C_FLAGS_DEBUG}")
 message(STATUS "HOGD_FRAME_POINTERS: ${HOGD_FRAME_POINTERS}")
+message(STATUS "HOGD_RELEASE_DEBUGINFO: ${HOGD_RELEASE_DEBUGINFO}")
 message(STATUS "Using CMAKE_C_FLAGS_RELEASE: ${CMAKE_C_FLAGS_RELEASE}")
 message(STATUS "Using CMAKE_CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
 message(STATUS "Using CMAKE_CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")

@@ -30,7 +30,10 @@ endif()
 
 
 
-set(HOGD_RUST_FLAGS "-C target-cpu=${RUST_BUILD_CPU}" "-C debuginfo=line-tables-only")
+set(HOGD_RUST_FLAGS "-C target-cpu=${RUST_BUILD_CPU}")
+if(HOGD_RELEASE_DEBUGINFO)
+    list(APPEND HOGD_RUST_FLAGS "-C debuginfo=line-tables-only")
+endif()
 if(HOGD_FRAME_POINTERS)
     list(APPEND HOGD_RUST_FLAGS "-C force-frame-pointers=yes")
 endif()

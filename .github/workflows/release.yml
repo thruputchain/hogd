@@ -142,6 +142,7 @@ jobs:
             -t Release \
             -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
             hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
@@ -217,6 +218,7 @@ jobs:
           ./scripts/build.sh \
             -d build/znver5 -t Release -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=znver5" \
             -x "-DRUST_BUILD_CPU=znver5" \
             hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
