@@ -20,7 +20,7 @@
 
 #ifdef __linux__
 namespace heap_profile_test_symbols {
-[[gnu::noinline]] int
+[[gnu::noinline]] static int
 known_heap_frame(int value)
 {
   return value + 1;

@@ -73,8 +73,7 @@ public:
     : input_(path, std::ios::binary), size_(size)
   {}
 
-  std::string
-  read(Number offset, Number size)
+  std::string read(Number offset, Number size)
   {
     if (offset > size_ || size > size_ - offset ||
         size >
@@ -214,15 +213,14 @@ parse_elf(const std::string &path, Number size)
 
 class ElfHeapSymbolizer : public HeapSymbolizer {
 public:
-  std::string
-  build_id(const std::string &path) override
+  std::string build_id(const std::string &path) override
   {
     auto file = get(path);
     return file ? file->build_id : std::string{};
   }
 
-  std::optional<HeapSymbol>
-  symbol(const std::string &path, Number offset) override
+  std::optional<HeapSymbol> symbol(const std::string &path,
+                                   Number offset) override
   {
     auto file = get(path);
     if (!file)
@@ -262,8 +260,7 @@ private:
   };
   std::map<std::string, std::shared_ptr<const ElfFile>> files_;
 
-  std::shared_ptr<const ElfFile>
-  get(const std::string &path)
+  std::shared_ptr<const ElfFile> get(const std::string &path)
   {
     try {
       if (!file_path(path))
