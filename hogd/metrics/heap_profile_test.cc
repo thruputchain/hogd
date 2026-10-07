@@ -19,13 +19,15 @@
 #include <vector>
 
 #ifdef __linux__
+namespace {
 namespace heap_profile_test_symbols {
-[[gnu::noinline]] static int
+[[gnu::noinline]] int
 known_heap_frame(int value)
 {
   return value + 1;
 }
 } // namespace heap_profile_test_symbols
+} // namespace
 #endif
 
 namespace {
