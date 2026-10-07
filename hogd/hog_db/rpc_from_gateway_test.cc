@@ -140,6 +140,28 @@ TEST(HogDbGatewayRpcTest, ConfigPreservesStatedValuesAndResolvesDefaults)
   EXPECT_EQ(NetworkConfigParams(result.config().effective_config.v0())
                 .max_sha256_buffers,
             9U);
+  EXPECT_EQ(result.config().storage_cost_model, costs);
+}
+
+TEST(HogDbGatewayRpcTest, ConfigPricesRemainFixedAfterGenesis)
+{
+  HogDbDAO dao = make_dao();
+  const auto costs = StorageCostModel::default_cost_model().to_xdr();
+  ASSERT_TRUE(dao.write_cost_model(StorageCostModel(costs)));
+  RPCContext ctx(std::move(dao), nullptr);
+  DbTip tip{};
+  tip.value.proposal_header.block_height = BlockHeight{42};
+  tip.network_config.v(0);
+  ctx.set_tip(tip);
+  HogDbGatewayRpc gateway(ctx);
+
+  auto replacement = costs;
+  replacement.balance_cost = std::numeric_limits<uint64_t>::max();
+  ASSERT_FALSE(ctx.get_db().write_cost_model(StorageCostModel(replacement)));
+  const auto result = gateway.dbgateway_get_config()();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.config().tip, tip);
+  EXPECT_EQ(result.config().storage_cost_model, costs);
 }
 
 TEST(HogDbGatewayRpcTest, ConfigDoesNotInventMissingPrices)
