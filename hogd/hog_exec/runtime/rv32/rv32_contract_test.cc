@@ -712,13 +712,9 @@ TEST_F(Rv32ProductionMappingTest,
   constexpr uint32_t kKeyBytes = StorageKeyContractData{}.size();
   constexpr uint32_t kEntryAddress = 192;
 
-  // Two contracts run identical instruction streams and insert the same number
-  // of one-byte queue entries, differing only in whether every insert targets a
-  // fresh key. The distinct-key run first-touches kInsertCount storage keys;
-  // the same-key run touches one and then reuses the tx-local queue. An insert
-  // that first-touches a key must pay the deterministic kDBRPCCost load, so the
-  // gap is exactly the extra first-touch loads -- not zero, as it was before
-  // the fix.
+  // Identical instruction streams insert the same number of one-byte entries;
+  // distinct keys first-touch kInsertCount storage keys and the repeated key
+  // only one, so the distinct run pays one extra kDBRPCCost per insert.
   auto make_program = [&](bool distinct) {
     std::vector<uint32_t> program;
     std::vector<uint8_t> memory(256);

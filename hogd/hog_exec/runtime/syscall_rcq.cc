@@ -30,10 +30,8 @@ syscall_RetrocausalQueueInsert_inner(
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  // An insert is a storage operation: bill the storage access plus whatever
-  // first-touch load the insert incurred, the same way the bytestring and
-  // nnint reads do. Both syscall-visible exits pay it -- an error reached here
-  // has already done the frame walk and any snapshot load.
+  // An insert is a storage operation: bill the storage access plus any
+  // first-touch load, like the bytestring and nnint reads.
   auto const &[result, load_gas] = *status;
   if (!result) {
     co_return SyscallInnerResult{result.error().code(),
