@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <optional>
 #include <random>
-#include <span>
 #include <utility>
 #include <vector>
 
@@ -54,6 +53,14 @@ chain(size_t levels)
   return n;
 }
 
+AuthToken
+token(AuthTokenNode root)
+{
+  return AuthToken{.mint_address = address(0xee),
+                   .expiry_height = 1234,
+                   .root_node = std::move(root)};
+}
+
 Bytes
 encode(auto const &x)
 {
@@ -61,38 +68,45 @@ encode(auto const &x)
   return {buf.begin(), buf.end()};
 }
 
-// What the generated AuthTokenNode decoder makes of bytes: the node,
-// re-encoded, or nullopt if it rejects them.
+// What x23 makes of bytes decoded as an X: the value, re-encoded, or nullopt
+// if it rejects them.
+template<typename X>
 std::optional<Bytes>
-decode_as_node(Bytes const &bytes, size_t depth)
+decode_as(Bytes const &bytes, size_t depth)
 {
-  AuthTokenNode n;
+  X x;
   try {
-    x23::deserialize(&n, x23::BufView{std::as_bytes(std::span(bytes))}, depth);
+    x23::deserialize(&x, x23::BufView{bytes.data(), bytes.size()}, depth);
   } catch (x23::XdrException const &) {
     return std::nullopt;
   }
-  return encode(n);
+  return encode(x);
 }
 
-// The same, for decode_auth_subtoken.
-std::optional<Bytes>
-decode_as_subtoken(Bytes const &bytes, size_t depth)
+// Decoding into the shared types must accept exactly what the generated types
+// accept, and decode to the same value.
+void
+expect_same_node_decode(Bytes const &bytes, size_t depth = kDepth)
 {
-  Rc<AuthSubtoken> subtoken;
-  try {
-    subtoken = decode_auth_subtoken(std::as_bytes(std::span(bytes)), depth);
-  } catch (x23::XdrException const &) {
-    return std::nullopt;
-  }
-  return encode(*subtoken);
+  EXPECT_EQ(decode_as<Rc<AuthSubtoken>>(bytes, depth),
+            decode_as<AuthTokenNode>(bytes, depth))
+      << "input of " << bytes.size() << " bytes";
 }
 
 void
-expect_same_decode(Bytes const &bytes, size_t depth = kDepth)
+expect_same_token_decode(Bytes const &bytes, size_t depth = kDepth)
 {
-  EXPECT_EQ(decode_as_subtoken(bytes, depth), decode_as_node(bytes, depth))
+  EXPECT_EQ(decode_as<RegisteredAuthToken>(bytes, depth),
+            decode_as<AuthToken>(bytes, depth))
       << "input of " << bytes.size() << " bytes";
+}
+
+Rc<AuthSubtoken>
+decode_node(AuthTokenNode const &n)
+{
+  Rc<AuthSubtoken> root;
+  x23::deserialize(&root, x23::serialize(n));
+  return root;
 }
 
 void
@@ -107,7 +121,7 @@ put32(Bytes &bytes, size_t offset, uint32_t value)
 constexpr size_t kChildCountOffset = 32 + 4;
 
 std::vector<AuthTokenNode>
-sample_tokens()
+sample_nodes()
 {
   return {
       node(1, 0),
@@ -124,40 +138,64 @@ sample_tokens()
 
 } // namespace
 
-TEST(AuthSubtokenTest, DecodesValidTokensLikeAuthTokenNode)
+TEST(AuthSubtokenTest, DecodesValidNodesLikeAuthTokenNode)
 {
-  for (auto const &token : sample_tokens()) {
-    Bytes bytes = encode(token);
-    EXPECT_EQ(decode_as_subtoken(bytes, kDepth), bytes);
-    expect_same_decode(bytes);
+  for (auto const &n : sample_nodes()) {
+    Bytes bytes = encode(n);
+    EXPECT_EQ(decode_as<Rc<AuthSubtoken>>(bytes, kDepth), bytes);
+    expect_same_node_decode(bytes);
+  }
+}
+
+TEST(AuthSubtokenTest, DecodesValidTokensLikeAuthToken)
+{
+  for (auto const &n : sample_nodes()) {
+    Bytes bytes = encode(token(n));
+    EXPECT_EQ(decode_as<RegisteredAuthToken>(bytes, kDepth), bytes);
+    expect_same_token_decode(bytes);
   }
 }
 
 TEST(AuthSubtokenTest, DecodesTheTree)
 {
-  auto bytes = encode(node(1, 2, {node(2, 3, {node(4, 0)}), node(3, 1)}));
-  auto root = decode_auth_subtoken(std::as_bytes(std::span(bytes)), kDepth);
+  RegisteredAuthToken decoded;
+  x23::deserialize(&decoded,
+                   x23::serialize(token(
+                       node(1, 2, {node(2, 3, {node(4, 0)}), node(3, 1)}))),
+                   kDepth);
 
-  EXPECT_EQ(root->consumer_address, address(1));
-  EXPECT_EQ(root->payload, AuthTokenPayload(2, 1));
-  ASSERT_EQ(root->children.size(), 2U);
-  EXPECT_EQ(root->children[0].consumer_address, address(2));
-  EXPECT_EQ(root->children[0].payload, AuthTokenPayload(3, 2));
-  ASSERT_EQ(root->children[0].children.size(), 1U);
-  EXPECT_EQ(root->children[0].children[0].consumer_address, address(4));
-  EXPECT_TRUE(root->children[0].children[0].children.empty());
-  EXPECT_EQ(root->children[1].consumer_address, address(3));
-  EXPECT_TRUE(root->children[1].children.empty());
+  EXPECT_EQ(decoded.mint_address, address(0xee));
+  EXPECT_EQ(decoded.expiry_height, 1234);
+  auto const &root = *decoded.root_node;
+  EXPECT_EQ(root.consumer_address, address(1));
+  EXPECT_EQ(root.payload, AuthTokenPayload(2, 1));
+  ASSERT_EQ(root.child_nodes.size(), 2U);
+  auto const &child = *root.child_nodes[0];
+  EXPECT_EQ(child.consumer_address, address(2));
+  EXPECT_EQ(child.payload, AuthTokenPayload(3, 2));
+  ASSERT_EQ(child.child_nodes.size(), 1U);
+  EXPECT_EQ(child.child_nodes[0]->consumer_address, address(4));
+  EXPECT_TRUE(child.child_nodes[0]->child_nodes.empty());
+  EXPECT_EQ(root.child_nodes[1]->consumer_address, address(3));
+  EXPECT_TRUE(root.child_nodes[1]->child_nodes.empty());
 }
 
 TEST(AuthSubtokenTest, RejectsWhatAuthTokenNodeRejects)
 {
-  // Deeper than the limit.
+  // Deeper than the limit, as a bare node and as a token's root.
   for (size_t limit : {1U, 2U, 4U, 8U}) {
-    EXPECT_TRUE(decode_as_node(encode(chain(limit)), limit).has_value());
-    expect_same_decode(encode(chain(limit)), limit);
-    EXPECT_FALSE(decode_as_node(encode(chain(limit + 1)), limit).has_value());
-    expect_same_decode(encode(chain(limit + 1)), limit);
+    EXPECT_TRUE(
+        decode_as<AuthTokenNode>(encode(chain(limit)), limit).has_value());
+    EXPECT_FALSE(
+        decode_as<AuthTokenNode>(encode(chain(limit + 1)), limit).has_value());
+    expect_same_node_decode(encode(chain(limit)), limit);
+    expect_same_node_decode(encode(chain(limit + 1)), limit);
+    EXPECT_TRUE(
+        decode_as<AuthToken>(encode(token(chain(limit))), limit).has_value());
+    EXPECT_FALSE(decode_as<AuthToken>(encode(token(chain(limit + 1))), limit)
+                     .has_value());
+    expect_same_token_decode(encode(token(chain(limit))), limit);
+    expect_same_token_decode(encode(token(chain(limit + 1))), limit);
   }
 
   // More children than kAuthTokenMaxChildNodes.
@@ -165,46 +203,52 @@ TEST(AuthSubtokenTest, RejectsWhatAuthTokenNodeRejects)
       encode(node(1, 0, {node(2, 0), node(3, 0), node(4, 0), node(5, 0)}));
   put32(five_children, kChildCountOffset, 5);
   five_children.append_range(encode(node(6, 0)));
-  EXPECT_FALSE(decode_as_node(five_children, kDepth).has_value());
-  expect_same_decode(five_children);
+  EXPECT_FALSE(decode_as<AuthTokenNode>(five_children, kDepth).has_value());
+  expect_same_node_decode(five_children);
 
   Bytes huge_count = encode(node(1, 0));
   put32(huge_count, kChildCountOffset, 0xffffffff);
-  expect_same_decode(huge_count);
+  expect_same_node_decode(huge_count);
 
   // A payload longer than kAuthTokenMaxLen.
   Bytes long_payload = encode(node(1, kAuthTokenMaxLen));
   put32(long_payload, 32, kAuthTokenMaxLen + 1);
   long_payload.insert(long_payload.begin() + 36 + kAuthTokenMaxLen, 4, 0);
-  EXPECT_FALSE(decode_as_node(long_payload, kDepth).has_value());
-  expect_same_decode(long_payload);
+  EXPECT_FALSE(decode_as<AuthTokenNode>(long_payload, kDepth).has_value());
+  expect_same_node_decode(long_payload);
 
   // Nonzero padding after a payload.
   Bytes padding = encode(node(1, 1));
   padding.at(32 + 4 + 1) = 1;
-  EXPECT_FALSE(decode_as_node(padding, kDepth).has_value());
-  expect_same_decode(padding);
+  EXPECT_FALSE(decode_as<AuthTokenNode>(padding, kDepth).has_value());
+  expect_same_node_decode(padding);
 
   // Trailing bytes, and every truncation.
-  for (auto const &token : sample_tokens()) {
-    Bytes bytes = encode(token);
-    Bytes trailing = bytes;
-    trailing.insert(trailing.end(), 4, 0);
-    expect_same_decode(trailing);
-    for (size_t len = 0; len < bytes.size(); ++len) {
-      expect_same_decode(Bytes(bytes.begin(), bytes.begin() + len));
+  for (auto const &n : sample_nodes()) {
+    for (Bytes const &bytes : {encode(n), encode(token(n))}) {
+      Bytes trailing = bytes;
+      trailing.insert(trailing.end(), 4, 0);
+      expect_same_node_decode(trailing);
+      expect_same_token_decode(trailing);
+      for (size_t len = 0; len < bytes.size(); ++len) {
+        Bytes truncated(bytes.begin(), bytes.begin() + len);
+        expect_same_node_decode(truncated);
+        expect_same_token_decode(truncated);
+      }
     }
   }
 }
 
-TEST(AuthSubtokenTest, DecodesMutatedInputsLikeAuthTokenNode)
+TEST(AuthSubtokenTest, DecodesMutatedInputsLikeTheGeneratedTypes)
 {
   std::mt19937 rng(4363);
-  auto const tokens = sample_tokens();
+  auto const nodes = sample_nodes();
   size_t accepted = 0;
   for (int i = 0; i < 20'000; ++i) {
-    Bytes bytes = encode(tokens[rng() % tokens.size()]);
-    for (int n = (rng() % 3) + 1; n > 0 && !bytes.empty(); --n) {
+    auto const &n = nodes[rng() % nodes.size()];
+    bool as_token = rng() % 2 != 0;
+    Bytes bytes = as_token ? encode(token(n)) : encode(n);
+    for (int k = (rng() % 3) + 1; k > 0 && !bytes.empty(); --k) {
       size_t at = rng() % bytes.size();
       if (rng() % 2) {
         bytes[at] = static_cast<uint8_t>(rng());
@@ -217,46 +261,32 @@ TEST(AuthSubtokenTest, DecodesMutatedInputsLikeAuthTokenNode)
     if (rng() % 4 == 0) {
       bytes.resize(rng() % (bytes.size() + 1));
     }
-    if (decode_as_node(bytes, kDepth).has_value()) {
-      ++accepted;
+    if (as_token) {
+      if (decode_as<AuthToken>(bytes, kDepth).has_value()) {
+        ++accepted;
+      }
+      expect_same_token_decode(bytes);
     }
-    expect_same_decode(bytes);
+    else {
+      if (decode_as<AuthTokenNode>(bytes, kDepth).has_value()) {
+        ++accepted;
+      }
+      expect_same_node_decode(bytes);
+    }
   }
   // Enough mutations decode for the comparison to cover accepted inputs too.
   EXPECT_GT(accepted, 1'000U);
 }
 
-TEST(AuthSubtokenTest, DecodesAuthTokenLikeAuthToken)
-{
-  AuthToken token{.mint_address = address(9),
-                  .expiry_height = 1234,
-                  .root_node = node(1, 3, {node(2, 1)})};
-  Bytes bytes = encode(token);
-  auto [mint_address, expiry_height, root] =
-      decode_auth_token(std::as_bytes(std::span(bytes)), kDepth);
-  EXPECT_EQ(mint_address, token.mint_address);
-  EXPECT_EQ(expiry_height, token.expiry_height);
-  EXPECT_EQ(encode(*root), encode(token.root_node));
-
-  bytes.pop_back();
-  EXPECT_THROW(decode_auth_token(std::as_bytes(std::span(bytes)), kDepth),
-               x23::XdrException);
-}
-
 TEST(AuthSubtokenTest, CopiesShareChildren)
 {
-  auto root = make_auth_subtoken(node(1, 0, {node(2, 0), node(3, 0)}));
-  AuthSubtokenChildren copy = root->children;
+  auto root = decode_node(node(1, 0, {node(2, 0), node(3, 0)}));
+  auto copy = root->child_nodes;
   ASSERT_EQ(copy.size(), 2U);
   for (size_t i = 0; i < copy.size(); ++i) {
-    EXPECT_EQ(copy.nodes()[i].get(), root->children.nodes()[i].get());
-    EXPECT_EQ(copy.nodes()[i].use_count(), 2U);
+    EXPECT_EQ(copy[i].get(), root->child_nodes[i].get());
+    EXPECT_EQ(copy[i].use_count(), 2U);
   }
-
-  AuthSubtokenChildren moved = std::move(copy);
-  EXPECT_EQ(moved.size(), 2U);
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  EXPECT_TRUE(copy.empty());
 }
 
 } // namespace hogd

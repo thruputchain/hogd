@@ -5,7 +5,6 @@ add_xdr(
 add_dependencies(build_components_library_exception protocol)
 
 add_library(components_objects OBJECT
-  auth_subtoken.cc
   auth_token_registry.cc
   execution_mode.cc
   hash_buffers.cc

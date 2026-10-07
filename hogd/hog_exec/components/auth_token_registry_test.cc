@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <optional>
+#include <utility>
 
 #include "auth_token.hh"
 #include "hogd/base/types.h"
@@ -30,11 +31,13 @@ make_test_payload(uint32_t index)
   return x23::serialize(index);
 }
 
+// Registers token, decoded as the view path decodes a forwarded token.
 std::optional<uint32_t>
 register_token(AuthTokenRegistry &registry, AuthToken const &token)
 {
-  return registry.register_auth_token(token.mint_address, token.expiry_height,
-                                      make_auth_subtoken(token.root_node));
+  RegisteredAuthToken registered;
+  x23::deserialize(&registered, x23::serialize(token));
+  return registry.register_auth_token(std::move(registered));
 }
 } // namespace
 
@@ -58,9 +61,9 @@ TEST(AuthTokenRegistryTest, BasicTest)
   ASSERT_NE(result, nullptr);
   ASSERT_EQ(result->mint_address, make_test_address(1));
   ASSERT_EQ(result->expiry_height, 100);
-  ASSERT_EQ(result->node->consumer_address, make_test_address(2));
-  ASSERT_EQ(result->node->payload, make_test_payload(0ULL));
-  ASSERT_EQ(result->node->children.size(), 0);
+  ASSERT_EQ(result->root_node->consumer_address, make_test_address(2));
+  ASSERT_EQ(result->root_node->payload, make_test_payload(0ULL));
+  ASSERT_EQ(result->root_node->child_nodes.size(), 0);
 }
 
 TEST(AuthTokenRegistryTest, UnwrapTest)
@@ -96,25 +99,25 @@ TEST(AuthTokenRegistryTest, UnwrapTest)
   ASSERT_NE(result_1, nullptr);
   ASSERT_EQ(result_1->mint_address, make_test_address(1));
   ASSERT_EQ(result_1->expiry_height, 100);
-  ASSERT_EQ(result_1->node->consumer_address, make_test_address(3));
-  ASSERT_EQ(result_1->node->payload, make_test_payload(1ULL));
-  ASSERT_EQ(result_1->node->children.size(), 0);
+  ASSERT_EQ(result_1->root_node->consumer_address, make_test_address(3));
+  ASSERT_EQ(result_1->root_node->payload, make_test_payload(1ULL));
+  ASSERT_EQ(result_1->root_node->child_nodes.size(), 0);
   RegisteredAuthToken const *result_2 =
       registry.lookup_auth_token(result.new_token_id_start + 1);
   ASSERT_NE(result_2, nullptr);
   ASSERT_EQ(result_2->mint_address, make_test_address(1));
   ASSERT_EQ(result_2->expiry_height, 100);
-  ASSERT_EQ(result_2->node->consumer_address, make_test_address(4));
-  ASSERT_EQ(result_2->node->payload, make_test_payload(2ULL));
-  ASSERT_EQ(result_2->node->children.size(), 0);
+  ASSERT_EQ(result_2->root_node->consumer_address, make_test_address(4));
+  ASSERT_EQ(result_2->root_node->payload, make_test_payload(2ULL));
+  ASSERT_EQ(result_2->root_node->child_nodes.size(), 0);
   RegisteredAuthToken const *result_3 =
       registry.lookup_auth_token(result.new_token_id_start + 2);
   ASSERT_NE(result_3, nullptr);
   ASSERT_EQ(result_3->mint_address, make_test_address(1));
   ASSERT_EQ(result_3->expiry_height, 100);
-  ASSERT_EQ(result_3->node->consumer_address, make_test_address(5));
-  ASSERT_EQ(result_3->node->payload, make_test_payload(3ULL));
-  ASSERT_EQ(result_3->node->children.size(), 0);
+  ASSERT_EQ(result_3->root_node->consumer_address, make_test_address(5));
+  ASSERT_EQ(result_3->root_node->payload, make_test_payload(3ULL));
+  ASSERT_EQ(result_3->root_node->child_nodes.size(), 0);
   RegisteredAuthToken const *result_4 =
       registry.lookup_auth_token(result.new_token_id_start + 3);
   ASSERT_EQ(result_4, nullptr);
@@ -171,29 +174,31 @@ TEST(AuthTokenRegistryTest, UnwrapSharesChildrenWithTheParent)
   ASSERT_TRUE(root_id.has_value());
   RegisteredAuthToken const *root = registry.lookup_auth_token(root_id.value());
   ASSERT_NE(root, nullptr);
-  ASSERT_EQ(root->node->children.size(), 1U);
+  ASSERT_EQ(root->root_node->child_nodes.size(), 1U);
 
   // Each unwrapped id is the node inside its parent, not a copy of it.
   auto child_unwrap = registry.unwrap_auth_token(root_id.value());
   ASSERT_TRUE(child_unwrap.has_value());
   RegisteredAuthToken const *child_subtoken =
       registry.lookup_auth_token(child_unwrap->new_token_id_start);
-  ASSERT_EQ(child_subtoken->node.get(), root->node->children.nodes()[0].get());
+  ASSERT_EQ(child_subtoken->root_node.get(),
+            root->root_node->child_nodes[0].get());
 
   auto grandchild_unwrap =
       registry.unwrap_auth_token(child_unwrap->new_token_id_start);
   ASSERT_TRUE(grandchild_unwrap.has_value());
   RegisteredAuthToken const *grandchild_subtoken =
       registry.lookup_auth_token(grandchild_unwrap->new_token_id_start);
-  ASSERT_EQ(grandchild_subtoken->node.get(),
-            child_subtoken->node->children.nodes()[0].get());
+  ASSERT_EQ(grandchild_subtoken->root_node.get(),
+            child_subtoken->root_node->child_nodes[0].get());
 
   // Every node carries the token's mint address and expiry.
   ASSERT_EQ(grandchild_subtoken->mint_address, make_test_address(1));
   ASSERT_EQ(grandchild_subtoken->expiry_height, 100);
-  ASSERT_EQ(grandchild_subtoken->node->consumer_address, make_test_address(4));
-  ASSERT_EQ(grandchild_subtoken->node->payload, make_test_payload(2ULL));
-  ASSERT_TRUE(grandchild_subtoken->node->children.empty());
+  ASSERT_EQ(grandchild_subtoken->root_node->consumer_address,
+            make_test_address(4));
+  ASSERT_EQ(grandchild_subtoken->root_node->payload, make_test_payload(2ULL));
+  ASSERT_TRUE(grandchild_subtoken->root_node->child_nodes.empty());
 }
 
 // Pins the exact id-allocation contract that issue #2543 flagged (and that is

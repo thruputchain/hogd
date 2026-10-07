@@ -27,7 +27,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
-#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -2463,12 +2462,9 @@ SystemCallHandler::get_block_timepoint() const
 // == Auth token syscalls ==
 
 SyscallStatus<uint32_t>
-SystemCallHandler::mint_auth_token(ContractAddress const &mint_address,
-                                   BlockHeight expiry_height,
-                                   Rc<AuthSubtoken> root)
+SystemCallHandler::mint_auth_token(RegisteredAuthToken token)
 {
-  return invocation_frame_stack_.mint_auth_token(mint_address, expiry_height,
-                                                 std::move(root));
+  return invocation_frame_stack_.mint_auth_token(std::move(token));
 }
 
 SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>

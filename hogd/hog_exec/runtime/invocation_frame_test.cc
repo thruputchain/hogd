@@ -25,6 +25,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -58,11 +59,13 @@ protected:
     return address;
   }
 
+  // Mints token, decoded as the view path decodes a forwarded token.
   static SyscallStatus<uint32_t> mint(InvocationFrameStack &stack,
                                       AuthToken const &token)
   {
-    return stack.mint_auth_token(token.mint_address, token.expiry_height,
-                                 make_auth_subtoken(token.root_node));
+    RegisteredAuthToken registered;
+    x23::deserialize(&registered, x23::serialize(token));
+    return stack.mint_auth_token(std::move(registered));
   }
 
   // A forwarded-token list holding one id, built the way the Invoke syscall

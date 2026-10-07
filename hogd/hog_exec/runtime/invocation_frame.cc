@@ -17,7 +17,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
-#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_subtoken.h"
@@ -563,16 +562,12 @@ InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
 }
 
 SyscallStatus<uint32_t>
-InvocationFrameStack::mint_auth_token(ContractAddress const &mint_address,
-                                      BlockHeight expiry_height,
-                                      Rc<AuthSubtoken> root)
+InvocationFrameStack::mint_auth_token(RegisteredAuthToken token)
 {
   if (frame_stack_.empty()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  auto token_id =
-      auth_token_registry_.register_auth_token(mint_address, expiry_height,
-                                               std::move(root));
+  auto token_id = auth_token_registry_.register_auth_token(std::move(token));
   if (!token_id.has_value()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
@@ -590,7 +585,7 @@ InvocationFrameStack::consume_auth_token(uint32_t token_id)
   auto const *token = auth_token_registry_.lookup_auth_token(token_id);
   CHECK_PTR(token);
 
-  if (token->node->consumer_address != frame_stack_.back().address()) {
+  if (token->root_node->consumer_address != frame_stack_.back().address()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
@@ -606,7 +601,7 @@ InvocationFrameStack::consume_auth_token(uint32_t token_id)
   frame_stack_.back().remove_auth_tokens(
       std::span<uint32_t const>{&token_id, 1});
 
-  return ConsumeAuthTokenResult{.payload = &token->node->payload,
+  return ConsumeAuthTokenResult{.payload = &token->root_node->payload,
                                 .mint_address = &token->mint_address,
                                 .new_token_id_start =
                                     unwrap_result->new_token_id_start,

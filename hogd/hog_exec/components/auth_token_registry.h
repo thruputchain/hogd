@@ -3,21 +3,10 @@
 #include <optional>
 #include <unordered_map>
 
-#include "auth_token.hh"
-#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/components/auth_subtoken.h"
-#include "types.hh"
 
 namespace hogd {
-
-// A minted auth token, or a subtoken unwrapped from one: the token's mint
-// address and expiry height, and the node, shared with the token it came from.
-struct RegisteredAuthToken {
-  ContractAddress mint_address;
-  BlockHeight expiry_height;
-  Rc<AuthSubtoken> node;
-};
 
 struct AuthTokenUnwrapResult {
   uint32_t new_token_id_start;
@@ -26,16 +15,14 @@ struct AuthTokenUnwrapResult {
 
 class AuthTokenRegistry {
 public:
-  std::optional<uint32_t>
-  register_auth_token(ContractAddress const &mint_address,
-                      BlockHeight expiry_height, Rc<AuthSubtoken> root);
+  std::optional<uint32_t> register_auth_token(RegisteredAuthToken auth_token);
   RegisteredAuthToken const *lookup_auth_token(uint32_t token_id) const;
 
   std::optional<AuthTokenUnwrapResult> unwrap_auth_token(uint32_t token_id);
 
 private:
   struct AuthTokenEntry {
-    RegisteredAuthToken token;
+    RegisteredAuthToken auth_token;
     std::optional<AuthTokenUnwrapResult> unwrap_result;
   };
 

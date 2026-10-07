@@ -19,7 +19,6 @@
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
-#include "hogd/base/rc.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -445,8 +444,7 @@ public:
 
   RegisteredAuthToken const *lookup_auth_token(uint32_t token_id) const;
   [[nodiscard]] SyscallStatus<uint32_t>
-  mint_auth_token(ContractAddress const &mint_address,
-                  BlockHeight expiry_height, Rc<AuthSubtoken> root);
+  mint_auth_token(RegisteredAuthToken token);
 
   // payload and mint_address point into the registry, which keeps every token
   // for the rest of the transaction.
