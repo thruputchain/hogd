@@ -156,8 +156,7 @@ HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 x23::Async<DbGatewayConfigResult>
 HogDbGatewayRpc::dbgateway_get_config()
 {
-  constexpr int kMaxAttempts = 5;
-  for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+  for (;;) {
     co_await ctx_.co_wait_for_no_commit_publishing();
     DbTip tip = ctx_.get_tip();
     auto cost_model = ctx_.get_db().read_cost_model();
@@ -181,7 +180,6 @@ HogDbGatewayRpc::dbgateway_get_config()
     result.config().tip = std::move(tip);
     co_return result;
   }
-  co_return DbGatewayConfigResult(RPCError::kRPCUnrecoverable);
 }
 
 x23::Async<DbGatewayResult>
