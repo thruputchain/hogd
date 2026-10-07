@@ -24,6 +24,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/flat_key_set.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -435,7 +436,7 @@ public:
 
   // Auth token syscalls
   [[nodiscard]] SyscallStatus<uint32_t>
-  mint_auth_token(AuthToken const &auth_token);
+  mint_auth_token(RegisteredAuthToken token);
   [[nodiscard]] SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
