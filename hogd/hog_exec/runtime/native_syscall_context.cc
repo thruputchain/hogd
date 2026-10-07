@@ -42,10 +42,19 @@ x23::Async<SystemStatus<SyscallStatus<void>>>
 NativeSyscallContext::modify_native_token_balance(
     ContractAddress const &address, int128_t amount)
 {
-  // Priced as the equivalent kNonnegativeIntSetAdd, charged up front so this
-  // stays a plain forwarder. No load_gas: the write never reaches the database.
+  // Priced as the equivalent kNonnegativeIntSetAdd. Refuse before staging the
+  // write unless the frame can pay, so an exhausted child cannot push priced
+  // balance deltas past its gas budget -- mirrors native_token_balance above.
+  // No load_gas: the write never reaches the database.
+  if (kStorageAccessCost > gas_remaining()) {
+    // Saturate the meter so the caller's error becomes an OutOfGas fault.
+    consume_gas(kStorageAccessCost);
+    const SyscallStatus<void> refused =
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return refused;
+  }
   consume_gas(kStorageAccessCost);
-  return handler_.modify_native_token_balance(address, amount);
+  co_return co_await handler_.modify_native_token_balance(address, amount);
 }
 
 } // namespace hogd
