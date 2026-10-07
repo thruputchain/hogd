@@ -29,40 +29,16 @@
 #   2. HOGD_BUILD_JOBS=<n>            explicit request
 #   3. CI_CPUS=<n>                    container CPU allotment (docker -e)
 #   4. NPROC=<n>                      pinned in conf.sh or passed with docker -e.
-#                                     env.sh sets HOGD_NPROC_PINNED when conf.sh
-#                                     assigns NPROC, which is the only reliable
-#                                     signal: a pin equal to the detected core
-#                                     count is identical by value to no pin.
-#                                     Without that marker (macos-env.sh sources
-#                                     this file directly) we fall back to
-#                                     "differs from the detected core count".
+#      env.sh marks conf.sh assignments with HOGD_NPROC_PINNED, since a pin
+#      equal to the detected count is indistinguishable by value from no pin.
+#      Without the marker (macos-env.sh sources this file directly), compare
+#      NPROC with bare nproc's pre-clamp count to avoid mistaking a quota for a pin.
 #   5. derived:
 #        max(2, min(fast_cores + 1, usable_cores, RAM_GB / HOGD_GB_PER_JOB))
 #
-#      fast_cores counts *distinct fast physical cores this process can reach*.
-#      On Linux that is a two-step resolution, both steps filtered by the
-#      affinity mask from /proc/self/status, because lscpu and sysfs describe the
-#      whole machine while the process may be pinned to a subset:
-#        step 1  narrow the mask to the fast CPUs, when the platform says which:
-#                /sys/devices/cpu_core/cpus (Intel hybrid P-cores), else CPUs at
-#                maximum cpu_capacity (ARM big.LITTLE). Both list logical CPUs,
-#                so an 8-P-core Intel chip yields 16 IDs here -- these choose
-#                WHICH CPUs count, never how many cores there are. If the mask
-#                reaches no fast core at all (pinned entirely to E-cores), the
-#                unnarrowed mask is kept on purpose and those slow cores are
-#                counted: the rule exists to stop slow cores being counted
-#                alongside fast ones, not to idle a machine that has no others.
-#        step 2  count distinct (core, socket) pairs among the masked CPUs via
-#                lscpu, else sysfs topology. This is what drops SMT siblings,
-#                and it stays exact under asymmetric SMT, offline CPUs, and
-#                arbitrary pinning.
-#      On macOS the split is reported directly by hw.perflevel0.logicalcpu.
-#      Apple silicon has no SMT, so where that sysctl is missing (some VMs)
-#      using every core is already correct and needs no special case.
-#
-#      usable_cores is nproc/hw.ncpu, further clamped on Linux by the cgroup CPU
-#      quota, because `docker run --cpus=N` sets a CFS quota that nproc does not
-#      see (nproc reads the affinity mask, which --cpus does not touch).
+#      Fast cores are counted per distinct physical core, filtered by the
+#      affinity mask on Linux; macOS uses hw.perflevel0.logicalcpu.
+#      usable_cores is nproc/hw.ncpu, clamped on Linux by the cgroup CPU quota.
 #
 # HOGD_GB_PER_JOB (default 4) sets the memory budget per job. The margin over
 # the ~0.9 GB per-TU peak covers link steps, which are the memory high-water
@@ -75,7 +51,7 @@
 # and by the generated scripts/macos-env.sh, so it must not assume NPROC is
 # already set and must stay bash 3.2 compatible.
 
-# _hogd_is_pos_int <value> -- true for a positive decimal integer.
+# _hogd_is_pos_int <value>: true for a positive decimal integer.
 _hogd_is_pos_int() {
   case "${1:-}" in
   '' | *[!0-9]*) return 1 ;;
@@ -92,7 +68,7 @@ _hogd_sysctl_int() {
   unset _hogd_val
 }
 
-# _hogd_mask_size <cpu-list> [mask-list] -- how many CPUs of <cpu-list> the mask
+# _hogd_mask_size <cpu-list> [mask-list]: how many CPUs of <cpu-list> the mask
 # also contains. Both use Linux CPU-list syntax ("0-7,16-23"). An empty mask
 # means unrestricted, so the answer is just the size of <cpu-list>.
 _hogd_mask_size() {
@@ -121,7 +97,7 @@ _hogd_mask_size() {
     }'
 }
 
-# _hogd_mask_intersect <cpu-list> [mask-list] -- print the CPUs present in both,
+# _hogd_mask_intersect <cpu-list> [mask-list]: print the CPUs present in both,
 # as a comma-separated list. An empty mask means unrestricted, so <cpu-list> is
 # echoed back. Used to narrow the affinity mask down to just the fast cores.
 _hogd_mask_intersect() {
@@ -151,11 +127,8 @@ _hogd_mask_intersect() {
     }'
 }
 
-# _hogd_count_cores [mask-list] -- read "cpu,core,socket" lines on stdin and
-# print how many DISTINCT physical cores the mask can reach. This is what makes
-# the count affinity-correct: lscpu and sysfs both describe the whole machine,
-# so an unfiltered count would report every core on a 64-core host even when
-# the process is pinned to four CPUs.
+# _hogd_count_cores [mask-list]: read "cpu,core,socket" lines on stdin and count
+# distinct physical cores reachable through the mask, since topology is host-wide.
 _hogd_count_cores() {
   awk -F, -v b="${1:-}" '
     function expand(s, arr,   n, i, se, c, parts) {
@@ -185,10 +158,7 @@ _hogd_mem_src=none
 if [[ "$OSTYPE" == "darwin"* ]]; then
   _hogd_cores=$(_hogd_sysctl_int hw.ncpu)
 
-  # Apple silicon exposes the P-core count directly. If the sysctl is missing
-  # (some VMs flatten the topology) the shared fallback below uses every core,
-  # which is the right answer there: Apple silicon has no SMT, so physical and
-  # logical counts are identical.
+  # Use hw.perflevel0.logicalcpu, falling back to all cores (Apple silicon has no SMT).
   _hogd_fast_cores=$(_hogd_sysctl_int hw.perflevel0.logicalcpu)
   _hogd_is_pos_int "${_hogd_fast_cores}" && _hogd_fast_src=perflevel0
 
@@ -217,16 +187,12 @@ else
     _hogd_quota=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null || true)
     _hogd_period=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null || true)
   fi
-  # Keep the pre-clamp count: the NPROC fallback below compares against what a
-  # bare `nproc` would report, so a cgroup clamp cannot make an auto-detected
-  # NPROC look like a deliberate pin.
+  # Pre-clamp count: the NPROC pin check below compares against bare nproc.
   _hogd_cores_unclamped=${_hogd_cores}
 
   # "max" (v2) and "-1" (v1) both mean unlimited and fail the integer test.
   if _hogd_is_pos_int "${_hogd_quota}" && _hogd_is_pos_int "${_hogd_period}"; then
-    # Round DOWN, floor 1. This is an upper bound on CPU time we are allowed to
-    # consume, so --cpus=2.5 must yield 2; rounding up would oversubscribe the
-    # container's own quota by 20%.
+    # Round down with a floor of 1, so fractional CPU quotas are not exceeded.
     _hogd_quota_cpus=$((_hogd_quota / _hogd_period))
     [ "${_hogd_quota_cpus}" -lt 1 ] && _hogd_quota_cpus=1
     if _hogd_is_pos_int "${_hogd_cores}" && [ "${_hogd_quota_cpus}" -lt "${_hogd_cores}" ]; then
@@ -241,10 +207,8 @@ else
   # process may be pinned to a subset. An empty mask means unrestricted.
   _hogd_mask=$(awk '/^Cpus_allowed_list:/ {print $2}' /proc/self/status 2>/dev/null || true)
 
-  # Step 1: where the platform distinguishes fast cores from slow ones, narrow
-  # the mask to just the fast CPUs. These files list logical CPUs, not cores --
-  # Intel P-cores carry SMT siblings, so an 8-P-core chip lists 16 IDs here --
-  # so they select WHICH CPUs count, and step 2 does the counting.
+  # Step 1: narrow the mask to fast logical CPUs, including SMT siblings;
+  # step 2 counts physical cores.
   if [ -r /sys/devices/cpu_core/cpus ]; then
     # Intel hybrid: the kernel splits P-cores and E-cores into separate PMUs,
     # and /sys/devices/cpu_core/cpus lists exactly the P-core CPUs. Pinning a
@@ -255,11 +219,7 @@ else
       _hogd_mask=${_hogd_narrowed}
       _hogd_fast_src=cpu_core
     else
-      # The mask reaches no P-core at all: this process is pinned entirely to
-      # E-cores. Deliberately keep the unnarrowed mask and count those E-cores
-      # as usable. The fast-cores+1 rule exists to stop slow cores being counted
-      # ALONGSIDE fast ones, not to idle a machine that has nothing else -- eight
-      # E-cores should run eight compilers, not the floor of two.
+      # Pinned entirely to E-cores: keep the full mask so the machine is not idled.
       _hogd_fast_src=cpu_core_unreachable
     fi
     unset _hogd_cpu_list _hogd_narrowed
@@ -290,10 +250,8 @@ else
     unset _hogd_caps
   fi
 
-  # Step 2: count DISTINCT physical cores reachable through the mask. This drops
-  # SMT siblings without assuming the mask holds them in the same proportion as
-  # the host, and handles asymmetric SMT exactly. Offline CPUs never appear in
-  # the mask, so they fall out for free.
+  # Step 2: count distinct physical cores reachable through the mask, deduplicating
+  # SMT siblings even with asymmetric SMT or pinning and excluding offline CPUs.
   if command -v lscpu >/dev/null 2>&1; then
     _hogd_fast_cores=$(lscpu -p=CPU,CORE,SOCKET 2>/dev/null |
       _hogd_count_cores "${_hogd_mask}" || true)
@@ -323,11 +281,8 @@ else
   for _hogd_cg in /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes; do
     if [ -r "${_hogd_cg}" ]; then
       _hogd_cg_val=$(cat "${_hogd_cg}" 2>/dev/null || true)
-      # cgroup v2 spells "unlimited" as the string "max", which fails the integer
-      # test. cgroup v1 spells it as a near-INT64_MAX sentinel
-      # (commonly 9223372036854771712) that passes, so reject anything above a
-      # plausible machine -- 1 PiB. Left unhandled it does not fail loudly: it
-      # yields a mem_gb of ~8.6e9, which silently disables the RAM bound.
+      # cgroup v1 reports unlimited as a near-INT64_MAX sentinel; reject values above 1 PiB.
+      # cgroup v2's "max" fails the integer test.
       if _hogd_is_pos_int "${_hogd_cg_val}" &&
         [ "${_hogd_cg_val}" -le 1125899906842624 ]; then
         _hogd_mem_gb=$((_hogd_cg_val / 1073741824))
@@ -337,16 +292,12 @@ else
     fi
   done
   unset _hogd_cg _hogd_cg_val
-  # Key the fallback off whether a limit was FOUND, not off the rounded GB. A
-  # 512 MiB container rounds to 0 GB, and treating that as "not found" would
-  # silently substitute the host's RAM -- potentially hundreds of GB -- for a
-  # limit two orders of magnitude smaller.
+  # Key off whether a limit was found, since a small container rounds to 0 GB
+  # and must not fall back to the host's RAM.
   if [ "${_hogd_mem_src}" = none ] && [ -r /proc/meminfo ]; then
     _hogd_mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)
     if _hogd_is_pos_int "${_hogd_mem_kb}"; then
-      # MemTotal excludes firmware-reserved memory, so a nominal 16 GiB machine
-      # reports ~15.5 GiB. Round to nearest GiB, or it would be bucketed a whole
-      # job lower than the same hardware running macOS.
+      # MemTotal excludes reserved memory, so round to nearest GiB.
       _hogd_mem_gb=$(((_hogd_mem_kb + 524288) / 1048576))
       _hogd_mem_src=meminfo
     fi
@@ -386,12 +337,7 @@ if [ -z "${HOGD_BUILD_JOBS:-}" ] && [ -n "${CI_CPUS:-}" ]; then
   fi
 fi
 
-# A pinned NPROC is a deliberate bound and must not be raised. env.sh sets
-# HOGD_NPROC_PINNED when conf.sh assigns NPROC, which is the only reliable
-# signal -- a pin equal to the detected core count looks identical by value.
-# Without that marker (macos-env.sh sources this file directly) fall back to
-# "differs from the detected count", compared against the UNCLAMPED count so a
-# cgroup quota cannot make an auto-detected NPROC look like a pin.
+# Honor pinned NPROC as described in the precedence header.
 if [ -z "${HOGD_BUILD_JOBS:-}" ] && [ -n "${NPROC:-}" ] && _hogd_is_pos_int "${NPROC}"; then
   if [ "${HOGD_NPROC_PINNED:-0}" = "1" ] ||
     [ "${NPROC}" -ne "${_hogd_cores_unclamped}" ]; then
