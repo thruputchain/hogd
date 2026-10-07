@@ -2092,10 +2092,9 @@ SystemCallHandler::retrocausal_queue_insert(
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
 
-  // Bill the first-touch snapshot load the conversion below performs; every
-  // non-tx-local-queue variant reaches storage. note_item_load() charges
-  // kDBRPCCost once per key per tx -- gating on it rather than is_loaded() also
-  // bills a key an unpriced RCQ read (consume/peek) left loaded but uncharged.
+  // Bill the key's first-touch load; note_item_load() charges kDBRPCCost once
+  // per key per tx. Gate on it, not is_loaded(), so a load an unpriced RCQ read
+  // left uncharged is still billed.
   GasAmount load_gas = 0;
   if (!item_view->get<RetrocausalQueueItem>()) {
     load_gas = note_item_load(item_key);
