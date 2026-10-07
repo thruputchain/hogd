@@ -92,9 +92,14 @@ message(STATUS "Using CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
 message(STATUS "Using CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
 
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0 -g")
-set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
+# Continuous eBPF profiling needs frame pointers; debuginfo is split out at packaging.
+set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3 -g -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer")
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0 -g")
-set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
+set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3 -g -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer")
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_link_options("$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:-Wl,--build-id=sha1>")
+endif()
 
 message(STATUS "Using CMAKE_C_FLAGS_DEBUG: ${CMAKE_C_FLAGS_DEBUG}")
 message(STATUS "Using CMAKE_C_FLAGS_RELEASE: ${CMAKE_C_FLAGS_RELEASE}")

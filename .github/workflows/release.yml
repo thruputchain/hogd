@@ -194,6 +194,7 @@ jobs:
 
       - name: Prepare artifacts
         run: |
+          sudo apt-get install -y binutils
           ./scripts/package_hogd_validator_release.sh \
             build/release artifacts release "${{ matrix.architecture }}"
           ./scripts/package_hogd_validator_release.sh \
@@ -201,6 +202,10 @@ jobs:
 
           for archive in artifacts/*.tar.gz; do
             contents=$(tar -tzf "$archive")
+            if [[ "$archive" == *-debuginfo.tar.gz ]]; then
+              grep -Eq '^usr/lib/debug/\.build-id/[[:xdigit:]]{2}/[[:xdigit:]]+\.debug$' <<<"$contents"
+              continue
+            fi
             grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
           done
 
@@ -589,7 +594,7 @@ jobs:
           set -euo pipefail
           cd artifacts
           archives=(*.tar.gz)
-          test "${#archives[@]}" -eq 10
+          test "${#archives[@]}" -eq 19
           for archive in "${archives[@]}"; do
             test -s "$archive"
           done

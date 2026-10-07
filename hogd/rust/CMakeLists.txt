@@ -30,7 +30,8 @@ endif()
 
 
 
-corrosion_add_target_rustflags(unified_lib "-C target-cpu=${RUST_BUILD_CPU}")
+corrosion_add_target_rustflags(unified_lib "-C target-cpu=${RUST_BUILD_CPU}"
+    "-C force-frame-pointers=yes" "-C debuginfo=line-tables-only")
 message(STATUS "Rust target CPU: ${RUST_BUILD_CPU}")
 
 # Build list of features to enable
