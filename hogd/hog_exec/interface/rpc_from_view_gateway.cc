@@ -1,12 +1,12 @@
 #include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <functional>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -19,6 +19,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -117,23 +118,20 @@ ViewGatewayRpc::viewgateway_view_batch(ViewGatewayBatchQuery query)
 {
   const auto received = std::chrono::steady_clock::now();
   co_await default_threadpool().bg();
-  if (query.calls.empty() || query.budget_millis == 0 ||
-      query.budget_millis > kMaxViewBatchBudgetMillis ||
+  if (query.calls.empty() || query.budget_millis == 0 || query.max_gas == 0 ||
+      query.max_response_bytes == 0 ||
       (query.min_height && *query.min_height < 0)) {
     co_return ViewGatewayBatchResult(
         ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
   }
   std::uint64_t gas = 0;
-  std::size_t calldata_bytes = 0;
   for (auto &call : query.calls) {
-    if (call.invocation.gas_limit > kMaxViewBatchGas - gas ||
-        call.invocation.calldata.size() >
-            kMaxViewBatchCalldataBytes - calldata_bytes) {
+    if (call.invocation.gas_limit == 0 ||
+        call.invocation.gas_limit > query.max_gas - gas) {
       co_return ViewGatewayBatchResult(
           ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
     }
     gas += call.invocation.gas_limit;
-    calldata_bytes += call.invocation.calldata.size();
     call = normalize_public_view_query(std::move(call));
   }
   co_return co_await run_batch_with_retries(
@@ -147,6 +145,11 @@ ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
   using Outcome = ViewGatewayBatchOutcome;
   ViewGatewayBatchResult batch(Outcome::ViewGatewayBatchOk);
   batch.payload().height = state.tip.value.proposal_header.block_height;
+  const auto response_limit =
+      std::min<std::size_t>(query.max_response_bytes, kBulkRpcMaxMessageSize);
+  if (x23::xdr_size(batch) > response_limit) {
+    co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchResponseTooLarge);
+  }
   for (auto const &call : query.calls) {
     if (shutdown_flag_.load(std::memory_order_relaxed)) {
       co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
@@ -156,11 +159,6 @@ ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
           Outcome::ViewGatewayBatchDeadlineExceeded);
     }
     auto result = co_await run_view_attempt(call, state.tip, state);
-    if (batch_call_finished_test_hook_) {
-      co_await default_threadpool().async(batch_call_finished_test_hook_,
-                                          batch.payload().results.size(),
-                                          std::cref(result));
-    }
     switch (result.outcome()) {
     case ViewGatewayOutcome::ViewGatewayAbandoned:
       co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchAbandoned);
@@ -176,7 +174,7 @@ ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
         TransactionViewResult{.output = std::move(payload.output),
                               .gas_consumed = payload.gas_consumed,
                               .events = std::move(payload.events)});
-    if (x23::xdr_size(batch) > kMaxViewBatchResponseBytes) {
+    if (x23::xdr_size(batch) > response_limit) {
       co_return ViewGatewayBatchResult(
           Outcome::ViewGatewayBatchResponseTooLarge);
     }
@@ -192,7 +190,6 @@ ViewGatewayRpc::run_batch_with_retries(ViewGatewayBatchQuery const &query,
                                        ViewDeadline deadline)
 {
   using Outcome = ViewGatewayBatchOutcome;
-  bool refreshed_for_height = false;
   for (std::uint32_t attempt = 0; attempt < kMaxViewAttempts; ++attempt) {
     if (std::chrono::steady_clock::now() >= deadline) {
       co_return ViewGatewayBatchResult(
@@ -204,22 +201,6 @@ ViewGatewayRpc::run_batch_with_retries(ViewGatewayBatchQuery const &query,
     auto *state = co_await get_current_view_state();
     if (!state) {
       co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
-    }
-    if (query.min_height &&
-        state->get().tip.value.proposal_header.block_height <
-            *query.min_height &&
-        !refreshed_for_height) {
-      const auto id = state->get().block_id;
-      if (state->release_reference()) {
-        co_await gc_view_state(id);
-      }
-      request_refresh();
-      refreshed_for_height = true;
-      state = co_await get_current_view_state();
-      if (!state) {
-        co_return ViewGatewayBatchResult(
-            Outcome::ViewGatewayBatchInternalError);
-      }
     }
     const auto id = state->get().block_id;
     const auto height = state->get().tip.value.proposal_header.block_height;
