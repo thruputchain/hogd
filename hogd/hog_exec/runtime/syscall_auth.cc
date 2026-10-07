@@ -1,6 +1,5 @@
 
 
-#include "auth_token.hh"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -200,11 +199,12 @@ syscall_ConsumeAuthToken_inner(
   }
 
   auto const &result = *status;
+  auto const &payload = result.token.root_node->payload;
 
-  output_token_minter = *result.mint_address;
+  output_token_minter = result.token.mint_address;
 
-  auto payload_bytes = std::as_bytes(
-      std::span<const uint8_t>{result.payload->data(), result.payload->size()});
+  auto payload_bytes =
+      std::as_bytes(std::span<const uint8_t>{payload.data(), payload.size()});
   output_auth_payload_written_len =
       copy_to_guest_buffer(output_auth_payload, payload_bytes);
 
@@ -215,8 +215,8 @@ syscall_ConsumeAuthToken_inner(
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kConsumeAuthToken>()) {
     trace_data->outputs.emplace(SyscallConsumeAuthTokenOutputs{
-        .payload = *result.payload,
-        .token_minter = *result.mint_address,
+        .payload = payload,
+        .token_minter = result.token.mint_address,
         .auth_payload_written_len = output_auth_payload_written_len,
         .unwrapped_token_id_start = result.new_token_id_start,
         .unwrapped_token_id_count = result.new_token_id_count});
