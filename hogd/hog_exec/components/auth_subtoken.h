@@ -8,7 +8,6 @@
 
 #include "auth_token.hh"
 #include "hogd/base/rc.h"
-#include "hogd/base/rc_xdr.h"
 #include "types.hh"
 #include "x23/utility.h"
 #include "x23/vec.h"
