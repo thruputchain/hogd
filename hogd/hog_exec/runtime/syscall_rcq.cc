@@ -36,14 +36,13 @@ syscall_RetrocausalQueueInsert_inner(
   // has already done the frame walk and any snapshot load.
   auto const &[result, load_gas] = *status;
   if (!result) {
-    co_return SyscallInnerResult{
-        result.error().code(),
-        WrappedGasAmount{kStorageAccessCost + load_gas}};
+    co_return SyscallInnerResult{result.error().code(),
+                                 WrappedGasAmount{kStorageAccessCost +
+                                                  load_gas}};
   }
 
-  co_return SyscallInnerResult{
-      SyscallErrorCode::kSyscallErrorCodeNone,
-      WrappedGasAmount{kStorageAccessCost + load_gas}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{kStorageAccessCost + load_gas}};
 };
 
 MaybeAsyncSyscallInnerResult
