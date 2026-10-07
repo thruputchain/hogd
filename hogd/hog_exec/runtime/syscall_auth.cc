@@ -14,6 +14,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
@@ -143,8 +144,9 @@ syscall_MintAuthToken_inner(
     std::span<const std::byte> input_serialized_auth_token,
     uint32_t &output_token_id)
 {
-  AuthToken auth_token{.mint_address = syscall_handler.get_current_address(),
-                       .expiry_height = input_expiry_height};
+  RegisteredAuthToken auth_token{.mint_address =
+                                     syscall_handler.get_current_address(),
+                                 .expiry_height = input_expiry_height};
 
   // Check expiry height is in the future
   if (input_expiry_height < syscall_handler.get_block_height()) {
@@ -165,7 +167,7 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
-  auto status = syscall_handler.mint_auth_token(auth_token);
+  auto status = syscall_handler.mint_auth_token(std::move(auth_token));
   if (!status) {
     return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }

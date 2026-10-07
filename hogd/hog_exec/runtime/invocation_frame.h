@@ -23,6 +23,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
@@ -441,10 +442,12 @@ public:
     return AddressAndKey{.address = frame_stack_.back().address(), .key = key};
   }
 
-  AuthToken const *lookup_auth_token(uint32_t token_id) const;
+  RegisteredAuthToken const *lookup_auth_token(uint32_t token_id) const;
   [[nodiscard]] SyscallStatus<uint32_t>
-  mint_auth_token(AuthToken const &auth_token);
+  mint_auth_token(RegisteredAuthToken token);
 
+  // payload and mint_address point into the registry, which keeps every token
+  // for the rest of the transaction.
   struct ConsumeAuthTokenResult {
     AuthTokenPayload const *payload;
     ContractAddress const *mint_address;

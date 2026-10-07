@@ -7,12 +7,12 @@
 #include <utility>
 #include <vector>
 
-#include "auth_token.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -70,7 +70,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
 
   // Forwarded tokens arrive serialized; decode them under the chain's depth
   // limit, as MintAuthToken decodes the tokens it mints.
-  std::vector<AuthToken> forwarded_tokens;
+  std::vector<RegisteredAuthToken> forwarded_tokens;
   try {
     for (auto const &bytes : query.forwarded_tokens) {
       x23::deserialize(
@@ -93,8 +93,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   std::vector<uint32_t> forwarded_token_ids;
   forwarded_token_ids.reserve(forwarded_tokens.size());
 
-  for (auto const &token : forwarded_tokens) {
-    auto token_id = syscall_handler.mint_auth_token(token);
+  for (auto &token : forwarded_tokens) {
+    auto token_id = syscall_handler.mint_auth_token(std::move(token));
     if (!token_id.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }

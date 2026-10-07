@@ -18,7 +18,6 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
-#include "auth_token.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
@@ -33,6 +32,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -2462,9 +2462,9 @@ SystemCallHandler::get_block_timepoint() const
 // == Auth token syscalls ==
 
 SyscallStatus<uint32_t>
-SystemCallHandler::mint_auth_token(AuthToken const &auth_token)
+SystemCallHandler::mint_auth_token(RegisteredAuthToken token)
 {
-  return invocation_frame_stack_.mint_auth_token(auth_token);
+  return invocation_frame_stack_.mint_auth_token(std::move(token));
 }
 
 SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>

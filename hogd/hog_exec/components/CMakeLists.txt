@@ -23,6 +23,7 @@ target_link_libraries(components crypto hog_exec_common)
 # Own test executable (same pattern as runtime_test)
 add_library(components_test_objects OBJECT
   alias_guard_test.cc
+  auth_subtoken_test.cc
   auth_token_registry_test.cc
   borrowed_contract_batch_test.cc
   contract_result_test.cc
