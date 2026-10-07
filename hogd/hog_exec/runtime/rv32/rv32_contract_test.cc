@@ -729,11 +729,11 @@ TEST_F(Rv32ProductionMappingTest,
                                static_cast<int32_t>(key_address),
                                static_cast<int32_t>(kEntryAddress), 1});
       // Trap unless the insert returned kSyscallErrorCodeNone (0), so a failed
-      // insert faults the run rather than silently satisfying the gas check:
-      // beq a0, x0, +8 skips the unimp on success. Added to both programs, so
-      // it does not affect the distinct-vs-same gas difference.
-      program.push_back(rv32::test_program::branch(/*beq=*/0, /*a0=*/10,
-                                                   /*x0=*/0, /*imm=*/8));
+      // insert faults the run rather than silently satisfying the gas check.
+      // The branch is beq a0, x0, +8, which skips the following unimp on
+      // success; added to both programs, so the distinct-vs-same gas difference
+      // is unchanged.
+      program.push_back(rv32::test_program::branch(0, 10, 0, 8));
       program.push_back(kCanonicalUnimp);
     }
     append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
