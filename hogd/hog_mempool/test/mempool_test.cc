@@ -816,9 +816,10 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
 
   constexpr size_t kNumBlocks = 5;
   for (size_t i = 0; i < kNumBlocks; i++) {
-    // We submit each duplicate tx at a different block height so that hog_db is
-    // forced to reject duplicate uniquifiers rather than the mempool scheduler
-    // identifying duplicate txs.
+    // Change the hash while reusing the uniquifier so that hog_db rejects the
+    // replay and the previous successful commit does not override the failure
+    // outcome of this new (duplicate) tx.
+    txs[0].tx.invocation.gas_limit--;
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
     EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
@@ -874,6 +875,13 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
     auto res_commit =
         commit_block(server, db_tip, res_nominate.proposed_block());
     ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+    const SchedulerTransactionOutcome outcome =
+        server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+            {sha256(txs[0].tx)})()[0];
+    EXPECT_EQ(outcome.status,
+              i == 0 ? SchedulerTransactionStatus::SchedulerTransactionSucceeded
+                     : SchedulerTransactionStatus::SchedulerTransactionRetry);
+    EXPECT_EQ(outcome.height, proposal.header.block_height);
   }
 
   SchedulerGetTipResult get_tip =
@@ -1449,6 +1457,12 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   // [ready_accounts_].
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, db_tip.value.proposal_header.block_height + 1);
 }
 
 // [CommitOfExcludedAccountTxSucceeds] through the validated-block commit path,
@@ -1497,6 +1511,12 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, db_tip.value.proposal_header.block_height + 1);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
 

@@ -92,6 +92,7 @@ public:
 
   x23::Async<void> record_transaction_outcome(
       const TransactionHash &tx_hash, SchedulerTransactionStatus status,
+      BlockHeight height,
       SchedulerTransactionErrorSource error_source =
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
       int32_t error_code = 0);
