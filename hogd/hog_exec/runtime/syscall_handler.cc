@@ -2082,8 +2082,10 @@ SystemCallHandler::retrocausal_queue_insert(
 {
   if (queue_entry.size() > kQueueEntryMaxLen) {
     co_return StorageRead<void>{
-        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-        0};
+        .result =
+            SyscallError{
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+        .load_gas = 0};
   }
   const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
@@ -2112,14 +2114,16 @@ SystemCallHandler::retrocausal_queue_insert(
     co_return queue_item.error();
   }
   if (!queue_item.value().has_value()) {
-    co_return StorageRead<void>{queue_item.value().error(), load_gas};
+    co_return StorageRead<void>{.result = queue_item.value().error(),
+                                .load_gas = load_gas};
   }
 
   // Now we have either grabbed the preexisting RCQItem, or created a new one.
   // In either case, we can now insert the new entry.
-  co_return StorageRead<void>{queue_item.value().value()->insert_entry(
-                                  queue_entry_from_span(queue_entry)),
-                              load_gas};
+  co_return StorageRead<void>{.result =
+                                  queue_item.value().value()->insert_entry(
+                                      queue_entry_from_span(queue_entry)),
+                              .load_gas = load_gas};
 }
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
