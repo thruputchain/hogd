@@ -293,6 +293,10 @@ if(BUILD_BENCHMARKS)
   # different syscall.
   set_property(TARGET rv32_syscall_entry_bench
                PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+  # Same for the interpreter's codegen options (see rv32_runtime_objects).
+  target_compile_options(rv32_syscall_entry_bench PRIVATE
+    ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS})
 endif()
 
 add_executable(
