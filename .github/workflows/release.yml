@@ -16,7 +16,7 @@ env:
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.30-rc.2"
+  HOGD_DISTRIBUTION_VERSION: "0.1.30-rc.5"
 
 permissions:
   contents: write
@@ -142,6 +142,7 @@ jobs:
             -t Release \
             -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
             hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
@@ -194,6 +195,7 @@ jobs:
 
       - name: Prepare artifacts
         run: |
+          sudo apt-get install -y binutils
           ./scripts/package_hogd_validator_release.sh \
             build/release artifacts release "${{ matrix.architecture }}"
           ./scripts/package_hogd_validator_release.sh \
@@ -201,6 +203,10 @@ jobs:
 
           for archive in artifacts/*.tar.gz; do
             contents=$(tar -tzf "$archive")
+            if [[ "$archive" == *-debuginfo.tar.gz ]]; then
+              grep -Eq '^usr/lib/debug/\.build-id/[[:xdigit:]]{2}/[[:xdigit:]]+\.debug$' <<<"$contents"
+              continue
+            fi
             grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
           done
 
@@ -212,6 +218,7 @@ jobs:
           ./scripts/build.sh \
             -d build/znver5 -t Release -c gcc \
             -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=znver5" \
             -x "-DRUST_BUILD_CPU=znver5" \
             hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
@@ -589,7 +596,7 @@ jobs:
           set -euo pipefail
           cd artifacts
           archives=(*.tar.gz)
-          test "${#archives[@]}" -eq 10
+          test "${#archives[@]}" -eq 19
           for archive in "${archives[@]}"; do
             test -s "$archive"
           done

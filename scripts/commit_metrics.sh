@@ -4,6 +4,13 @@ set -e
 SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 source ${SCRIPT_DIR}/git_info.sh
 METRICS_HISTORY_BRANCH=${METRICS_HISTORY_BRANCH:-main}
+# The repo token in the commit message. metrics_history's alert workflows
+# (scripts/parse_commit.sh there) read the last three tokens as
+# "<repo> <branch> <commit>" and only check commits whose repo is exactly
+# "hogd", so a pipeline that files a partial set of metrics on purpose sets
+# this to something else to stay out of the missing-metrics alerts. Must not
+# contain spaces.
+METRICS_COMMIT_REPO=${METRICS_COMMIT_REPO:-hogd}
 
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
@@ -20,7 +27,7 @@ fi
 echo "Committer name: $committer_name"
 echo "Committer email: $committer_email"
 
-echo "Commit message: Add metrics for $GIT_branch $GIT_commit"
+echo "Commit message: Add metrics for $METRICS_COMMIT_REPO $GIT_branch $GIT_commit"
 
 stage_present_metrics() {
   if [ ! -d metrics ] || ! find metrics -type f -print -quit | grep -q .; then
@@ -50,7 +57,7 @@ prepare_metrics_commit() {
 
   GIT_COMMITTER_NAME="$committer_name" \
     GIT_COMMITTER_EMAIL="$committer_email" \
-    git commit -m "Add metrics for hogd $GIT_branch $GIT_commit" --author "$committer_name <$committer_email>" --quiet
+    git commit -m "Add metrics for $METRICS_COMMIT_REPO $GIT_branch $GIT_commit" --author "$committer_name <$committer_email>" --quiet
 }
 
 while true; do

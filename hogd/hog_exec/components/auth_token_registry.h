@@ -3,8 +3,8 @@
 #include <optional>
 #include <unordered_map>
 
-#include "auth_token.hh"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 
 namespace hogd {
 
@@ -15,14 +15,14 @@ struct AuthTokenUnwrapResult {
 
 class AuthTokenRegistry {
 public:
-  std::optional<uint32_t> register_auth_token(AuthToken auth_token);
-  AuthToken const *lookup_auth_token(uint32_t token_id) const;
+  std::optional<uint32_t> register_auth_token(RegisteredAuthToken auth_token);
+  RegisteredAuthToken const *lookup_auth_token(uint32_t token_id) const;
 
   std::optional<AuthTokenUnwrapResult> unwrap_auth_token(uint32_t token_id);
 
 private:
   struct AuthTokenEntry {
-    AuthToken auth_token;
+    RegisteredAuthToken auth_token;
     std::optional<AuthTokenUnwrapResult> unwrap_result;
   };
 

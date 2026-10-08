@@ -297,8 +297,11 @@ file_measurement() {
     echo 'no openssl cross-check output to file'
   fi
 
+  # Filed under its own repo token: this run commits only the rv32 calibration
+  # metrics, which metrics_history's missing-metrics checks would otherwise
+  # flag as a hogd main commit with every other expected metric missing.
   echo 'commit metrics'
-  ./scripts/commit_metrics.sh
+  METRICS_COMMIT_REPO=hogd-rv32-gas-calibration ./scripts/commit_metrics.sh
 }
 
 METRICS_RESULT=0

@@ -5,15 +5,15 @@
 #include <optional>
 #include <utility>
 
-#include "auth_token.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 
 namespace hogd {
 
 std::optional<uint32_t>
-AuthTokenRegistry::register_auth_token(AuthToken auth_token)
+AuthTokenRegistry::register_auth_token(RegisteredAuthToken auth_token)
 {
   if (next_token_id_ == std::numeric_limits<uint32_t>::max()) {
     return std::nullopt;
@@ -25,7 +25,7 @@ AuthTokenRegistry::register_auth_token(AuthToken auth_token)
   return token_id;
 }
 
-AuthToken const *
+RegisteredAuthToken const *
 AuthTokenRegistry::lookup_auth_token(uint32_t token_id) const
 {
   auto it = auth_tokens_.find(token_id);
@@ -42,7 +42,7 @@ AuthTokenRegistry::unwrap_auth_token(uint32_t token_id)
     return entry.unwrap_result;
   }
   auto const &auth_token = entry.auth_token;
-  auto child_nodes = auth_token.root_node.child_nodes;
+  auto const &child_nodes = auth_token.root_node->child_nodes;
   if (child_nodes.empty()) {
     return AuthTokenUnwrapResult{.new_token_id_start = 0,
                                  .new_token_id_count = 0};
@@ -58,12 +58,12 @@ AuthTokenRegistry::unwrap_auth_token(uint32_t token_id)
   next_token_id_ += new_token_id_count;
 
   for (uint32_t i = 0; i < new_token_id_count; i++) {
-    auto child_node = child_nodes[i];
     uint32_t child_token_id = new_token_id_start + i;
-    AuthToken child_auth_token =
-        AuthToken{.mint_address = auth_token.mint_address,
-                  .expiry_height = auth_token.expiry_height,
-                  .root_node = child_node};
+    // Shares the child's node with the parent rather than copying it.
+    RegisteredAuthToken child_auth_token =
+        RegisteredAuthToken{.mint_address = auth_token.mint_address,
+                            .expiry_height = auth_token.expiry_height,
+                            .root_node = child_nodes[i]};
     auto [_, success] =
         auth_tokens_.emplace(child_token_id, std::move(child_auth_token));
     assert(success);

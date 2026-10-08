@@ -210,11 +210,15 @@ TEST(Scheduler, LatestFailedTransactionOutcomeWins)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
+  scheduler->set_current_block(0);
   scheduler->record_transaction_outcome(
       tx_hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+      scheduler->current_block(),
       SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
       static_cast<int32_t>(
           SchedulerErrorCode::SchedulerErrorHogAgeUnavailable))();
+
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().height, 0);
 
   const SchedGatewaySubmitOutcomeBatch outcomes =
       scheduler->add_txs({tx}, {tx_hash})();
@@ -223,11 +227,20 @@ TEST(Scheduler, LatestFailedTransactionOutcomeWins)
   EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().status,
             SchedulerTransactionStatus::SchedulerTransactionPending);
 
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().height, 0);
+
+  scheduler->set_current_block(43);
+  const SchedulerTransactionOutcome pending =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(pending.status,
+            SchedulerTransactionStatus::SchedulerTransactionPending);
+  EXPECT_EQ(pending.height, 43);
   const TransactionHashBatch tx_hashes{tx_hash};
   scheduler->remove_from_scheduler(
       x23::span<const TransactionHash>(tx_hashes))();
   scheduler->record_transaction_outcome(
       tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      scheduler->current_block(),
       SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
       static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired))();
 
@@ -240,6 +253,7 @@ TEST(Scheduler, LatestFailedTransactionOutcomeWins)
       SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler);
   EXPECT_EQ(outcome.error_code,
             static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
+  EXPECT_EQ(outcome.height, 43);
 }
 
 TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
@@ -252,13 +266,16 @@ TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->record_transaction_outcome(
-      tx_hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded)();
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      /*height=*/42,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorNone, 0)();
   const SchedGatewaySubmitOutcomeBatch outcomes =
       scheduler->add_txs({tx}, {tx_hash})();
   ASSERT_EQ(outcomes.size(), 1UL);
   EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   scheduler->record_transaction_outcome(
       tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      scheduler->current_block(),
       SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
       static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired))();
 
@@ -268,6 +285,7 @@ TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
             SchedulerTransactionStatus::SchedulerTransactionSucceeded);
   EXPECT_EQ(outcome.error_source,
             SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+  EXPECT_EQ(outcome.height, 42);
 }
 
 TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)

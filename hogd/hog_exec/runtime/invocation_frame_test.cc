@@ -13,6 +13,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -24,6 +25,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -57,6 +59,15 @@ protected:
     return address;
   }
 
+  // Mints token, decoded as the view path decodes a forwarded token.
+  static SyscallStatus<uint32_t> mint(InvocationFrameStack &stack,
+                                      AuthToken const &token)
+  {
+    RegisteredAuthToken registered;
+    x23::deserialize(&registered, x23::serialize(token));
+    return stack.mint_auth_token(std::move(registered));
+  }
+
   // A forwarded-token list holding one id, built the way the Invoke syscall
   // builds it.
   static ValidatedAuthTokens forward(uint32_t token_id)
@@ -76,7 +87,7 @@ TEST_F(InvocationFrameTest, MintAuthToken)
                                      .payload = {},
                                      .child_nodes = {}}};
 
-  auto token_id = stack.mint_auth_token(auth_token);
+  auto token_id = mint(stack, auth_token);
   ASSERT_TRUE(token_id.has_value());
   ASSERT_EQ(token_id.value(), 0);
 
@@ -100,7 +111,7 @@ TEST_F(InvocationFrameTest, ForwardAuthToken)
                                      .payload = {},
                                      .child_nodes = {}}};
 
-  auto token_id = stack.mint_auth_token(auth_token);
+  auto token_id = mint(stack, auth_token);
   ASSERT_TRUE(token_id.has_value());
   ASSERT_EQ(token_id.value(), 0);
 
@@ -138,7 +149,7 @@ TEST_F(InvocationFrameTest, RevertsRestoreToken)
                                      .payload = {},
                                      .child_nodes = {}}};
 
-  auto token_id = stack.mint_auth_token(auth_token);
+  auto token_id = mint(stack, auth_token);
   ASSERT_TRUE(token_id.has_value());
   ASSERT_EQ(token_id.value(), 0);
 
@@ -159,7 +170,7 @@ TEST_F(InvocationFrameTest, RevertsRestoreToken)
                                                make_test_address(2),
                                            .payload = {},
                                            .child_nodes = {}}};
-  auto child_token_id = stack.mint_auth_token(child_auth_token);
+  auto child_token_id = mint(stack, child_auth_token);
   ASSERT_TRUE(child_token_id.has_value());
   ASSERT_EQ(child_token_id.value(), 1);
 
@@ -198,7 +209,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
                                      .payload = {},
                                      .child_nodes = {}}};
 
-  auto token_id = stack.mint_auth_token(auth_token);
+  auto token_id = mint(stack, auth_token);
   ASSERT_TRUE(token_id.has_value());
 
   ASSERT_TRUE(
@@ -329,7 +340,7 @@ TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
                        .root_node = {.consumer_address = make_test_address(1),
                                      .payload = {},
                                      .child_nodes = {}}};
-  auto token_id = stack.mint_auth_token(auth_token);
+  auto token_id = mint(stack, auth_token);
   ASSERT_TRUE(token_id.has_value());
 
   ASSERT_TRUE(stack
@@ -352,7 +363,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
                                      .payload = {},
                                      .child_nodes = {}}};
 
-  auto token_id = stack.mint_auth_token(auth_token);
+  auto token_id = mint(stack, auth_token);
   ASSERT_TRUE(token_id.has_value());
 
   // forward token to child, which manually reverts
