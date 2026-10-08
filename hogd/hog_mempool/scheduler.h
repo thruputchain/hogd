@@ -97,6 +97,12 @@ public:
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
       int32_t error_code = 0);
 
+  // Records successful commits in bounded batches, sharing pruning and lock
+  // acquisition across transactions. Existing committed outcomes keep their
+  // original height, just as in [record_transaction_outcome].
+  x23::Async<void> record_committed_transaction_outcomes(
+      x23::span<const TransactionHash> tx_hashes, BlockHeight height);
+
   x23::Async<void> clear_transaction_outcome_if_not_already_committed(
       const TransactionHash &tx_hash);
 
@@ -340,6 +346,12 @@ private:
   bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
   x23::Async<void> prune_transaction_outcomes();
+  // These helpers require [transaction_outcomes_lock_].
+  void prune_transaction_outcomes_locked(BlockHeight height);
+  void
+  record_transaction_outcome_locked(const TransactionHash &tx_hash,
+                                    const SchedulerTransactionOutcome &outcome,
+                                    BlockHeight processed_height);
 
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;

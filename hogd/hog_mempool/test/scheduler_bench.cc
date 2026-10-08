@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -146,6 +147,53 @@ BENCHMARK(bm_scheduler_add_txs)
     ->Arg(128)
     ->UseManualTime()
     ->Unit(benchmark::kMicrosecond);
+
+void
+bm_scheduler_record_transaction_outcomes(benchmark::State &state)
+{
+  Scheduler scheduler(/*current_block=*/0, nullptr);
+  std::vector<TransactionHash> hashes(state.range(0));
+  for (size_t i = 0; i < hashes.size(); ++i) {
+    std::memcpy(hashes[i].data(), &i, sizeof(i));
+  }
+  BlockHeight height = 0;
+  std::jthread lookup_reader;
+  if (state.range(2)) {
+    lookup_reader = std::jthread([&](std::stop_token stop) {
+      while (!stop.stop_requested()) {
+        benchmark::DoNotOptimize(
+            scheduler.lookup_transaction_outcome(hashes.back())());
+      }
+    });
+  }
+  for (auto _ : state) {
+    height += Scheduler::kTransactionOutcomeBlockLifetime;
+    scheduler.set_current_block(height);
+    [&]() -> x23::Async<void> {
+      if (state.range(1)) {
+        co_await scheduler.record_committed_transaction_outcomes(
+            x23::span<const TransactionHash>(hashes), height);
+      }
+      else {
+        for (const TransactionHash &hash : hashes) {
+          co_await scheduler.record_transaction_outcome(
+              hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+              height);
+        }
+      }
+    }()();
+  }
+  state.SetItemsProcessed(state.iterations() * hashes.size());
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_scheduler_record_transaction_outcomes)
+    // Arguments: transaction count, use batching, concurrent outcome lookup.
+    ->Args({1'000'000, 0, 0})
+    ->Args({1'000'000, 1, 0})
+    ->Args({1'000'000, 0, 1})
+    ->Args({1'000'000, 1, 1})
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
 
 } // namespace
 

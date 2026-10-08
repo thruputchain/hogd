@@ -288,6 +288,80 @@ TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
   EXPECT_EQ(outcome.height, 42);
 }
 
+TEST(Scheduler, BatchCommittedOutcomesPreserveSuccessAndReplaceFailure)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHash first{};
+  TransactionHash second{};
+  second[0] = 1;
+  const TransactionHashBatch hashes{first, second, first};
+  scheduler.record_transaction_outcome(
+      first, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      /*height=*/7)();
+  scheduler.record_transaction_outcome(
+      second, SchedulerTransactionStatus::SchedulerTransactionRetry,
+      /*height=*/9,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+      /*error_code=*/123)();
+
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  const SchedulerTransactionOutcome first_outcome =
+      scheduler.lookup_transaction_outcome(first)();
+  EXPECT_EQ(first_outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(first_outcome.height, 7);
+  const SchedulerTransactionOutcome second_outcome =
+      scheduler.lookup_transaction_outcome(second)();
+  EXPECT_EQ(second_outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(second_outcome.height, 10);
+  EXPECT_EQ(second_outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+  EXPECT_EQ(second_outcome.error_code, 0);
+}
+
+TEST(Scheduler, BatchCommittedOutcomesExpireFromProcessingHeight)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  const TransactionHashBatch hashes{TransactionHash{}};
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/7)();
+  scheduler.set_current_block(10 + Scheduler::kTransactionOutcomeBlockLifetime -
+                              1);
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 7);
+  scheduler.increment_current_block()();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().status,
+            SchedulerTransactionStatus::SchedulerTransactionNotFound);
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/60)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 60);
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>{}, /*height=*/61)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 60);
+}
+
+TEST(Scheduler, BatchCommittedOutcomesRecordEveryTransaction)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHashBatch hashes;
+  for (size_t i = 0; i < 5000; ++i) {
+    TransactionHash hash{};
+    hash[0] = static_cast<uint8_t>(i);
+    hash[1] = static_cast<uint8_t>(i >> 8);
+    hashes.push_back(hash);
+  }
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  for (const TransactionHash &hash : hashes) {
+    const SchedulerTransactionOutcome outcome =
+        scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+  }
+}
+
 TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)
 {
   HogAge hog_age{};

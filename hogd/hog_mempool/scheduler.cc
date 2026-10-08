@@ -429,11 +429,14 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
 x23::Async<void>
 Scheduler::prune_transaction_outcomes()
 {
-  const BlockHeight height = current_block();
-
   x23::CoroGuard cg;
   co_await cg(transaction_outcomes_lock_);
+  prune_transaction_outcomes_locked(current_block());
+}
 
+void
+Scheduler::prune_transaction_outcomes_locked(BlockHeight height)
+{
   while (!transaction_outcomes_order_.empty() &&
          height - transaction_outcomes_order_.front().processed_height >=
              kTransactionOutcomeBlockLifetime) {
@@ -448,11 +451,56 @@ Scheduler::record_transaction_outcome(
     BlockHeight height, SchedulerTransactionErrorSource error_source,
     int32_t error_code)
 {
-  co_await prune_transaction_outcomes();
-
   x23::CoroGuard cg;
   co_await cg(transaction_outcomes_lock_);
+  const BlockHeight processed_height = current_block();
+  prune_transaction_outcomes_locked(processed_height);
+  record_transaction_outcome_locked(
+      tx_hash,
+      SchedulerTransactionOutcome{.status = status,
+                                  .error_source = error_source,
+                                  .error_code = error_code,
+                                  .height = height},
+      processed_height);
+}
 
+x23::Async<void>
+Scheduler::record_committed_transaction_outcomes(
+    x23::span<const TransactionHash> tx_hashes, BlockHeight height)
+{
+  if (tx_hashes.empty()) {
+    co_return;
+  }
+  co_await default_coropoll().pool_.bg();
+
+  const SchedulerTransactionOutcome outcome{
+      .status = SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      .error_source =
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+      .error_code = 0,
+      .height = height,
+  };
+  // Release the lock between chunks so outcome lookups and admission do not
+  // have to wait for a whole million-transaction block.
+  constexpr size_t kChunkSize = 4096;
+  for (size_t start = 0; start < tx_hashes.size(); start += kChunkSize) {
+    x23::CoroGuard cg;
+    co_await cg(transaction_outcomes_lock_);
+    const BlockHeight processed_height = current_block();
+    prune_transaction_outcomes_locked(processed_height);
+    const size_t end = std::min(start + kChunkSize, tx_hashes.size());
+    for (size_t i = start; i < end; ++i) {
+      record_transaction_outcome_locked(tx_hashes[i], outcome,
+                                        processed_height);
+    }
+  }
+}
+
+void
+Scheduler::record_transaction_outcome_locked(
+    const TransactionHash &tx_hash, const SchedulerTransactionOutcome &outcome,
+    BlockHeight processed_height)
+{
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
     // Once a tx is committed, its committed outcome is never overwritten by a
@@ -462,7 +510,7 @@ Scheduler::record_transaction_outcome(
     // by the outcome for a duplicate tx that is submitted after.
     if (it->second->outcome.status ==
         SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
-      co_return;
+      return;
     }
     transaction_outcomes_order_.erase(it->second);
     transaction_outcomes_.erase(it);
@@ -479,14 +527,8 @@ Scheduler::record_transaction_outcome(
 
   transaction_outcomes_order_.push_back(TransactionOutcomeEntry{
       .tx_hash = tx_hash,
-      .outcome =
-          SchedulerTransactionOutcome{
-              .status = status,
-              .error_source = error_source,
-              .error_code = error_code,
-              .height = height,
-          },
-      .processed_height = current_block(),
+      .outcome = outcome,
+      .processed_height = processed_height,
   });
   transaction_outcomes_[tx_hash] = std::prev(transaction_outcomes_order_.end());
 }
@@ -515,10 +557,9 @@ Scheduler::clear_transaction_outcome_if_not_already_committed(
 x23::Async<SchedulerTransactionOutcome>
 Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 {
-  co_await prune_transaction_outcomes();
-
   x23::CoroGuard cg;
   co_await cg(transaction_outcomes_lock_);
+  prune_transaction_outcomes_locked(current_block());
 
   if (auto it = transaction_outcomes_.find(tx_hash);
       it != transaction_outcomes_.end()) {
