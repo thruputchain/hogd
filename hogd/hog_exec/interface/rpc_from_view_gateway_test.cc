@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <functional>
@@ -20,6 +21,7 @@
 #include "built_contracts/manual_revert_test.h"
 #include "built_contracts/view_gateway_test.h"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
@@ -41,6 +43,7 @@
 #include "types.hh"
 #include "view.hh"
 #include "view_gateway.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
