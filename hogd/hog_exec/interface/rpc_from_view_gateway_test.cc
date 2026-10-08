@@ -541,7 +541,6 @@ public:
     return ViewGatewayBatchQuery{.calls = {first, second},
                                  .min_height = {},
                                  .budget_millis = 30'000,
-                                 .max_gas = 160'000'000,
                                  .max_response_bytes = 1'048'576};
   }
 
@@ -616,7 +615,6 @@ TEST_F(ViewGatewayBatchTest, IsolatesWritesAndPreservesCallerAndMixedOutcomes)
   ViewGatewayBatchQuery query{.calls = {write, read},
                               .min_height = {},
                               .budget_millis = 30'000,
-                              .max_gas = 160'000'000,
                               .max_response_bytes = 1'048'576};
   for (uint32_t mode = 0; mode < 3; ++mode) {
     auto call = read;
@@ -697,18 +695,10 @@ TEST_F(ViewGatewayBatchTest, RejectsInvalidBatchBeforeExecution)
   query.budget_millis = 0;
   invalid(query);
   query = batch();
-  query.max_gas = 0;
-  invalid(query);
-  query = batch();
   query.max_response_bytes = 0;
   invalid(query);
   query = batch();
   query.min_height = -1;
-  invalid(query);
-  query = batch();
-  query.calls[0].invocation.gas_limit = UINT64_MAX;
-  invalid(query);
-  query.calls[0].invocation.gas_limit = query.max_gas;
   invalid(query);
   query = batch();
   query.calls[0].invocation.gas_limit = 0;
@@ -740,7 +730,6 @@ TEST_F(ViewGatewayBatchTest, UsesGatewayBudgetsInsteadOfProtocolDefaults)
   x23::Defer cleanup([&] { gateway.shut_down(); });
   auto query = batch();
   query.calls.resize(17, query.calls[0]);
-  query.max_gas = 170'000'000;
   query.budget_millis = 60'000;
   auto result = gateway.viewgateway_view_batch(query)();
   ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
@@ -748,6 +737,30 @@ TEST_F(ViewGatewayBatchTest, UsesGatewayBudgetsInsteadOfProtocolDefaults)
   query.max_response_bytes = 1;
   EXPECT_EQ(gateway.viewgateway_view_batch(query)().outcome(),
             ViewGatewayBatchOutcome::ViewGatewayBatchResponseTooLarge);
+}
+
+TEST_F(ViewGatewayBatchTest, EachCallKeepsItsOwnGasLimit)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  auto query = batch();
+  query.calls[1] = query.calls[0];
+  query.calls[0].invocation.gas_limit = 1;
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  ASSERT_EQ(result.payload().results.size(), 2U);
+  EXPECT_EQ(result.payload().results[0].output.status_code(),
+            InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(result.payload().results[0].gas_consumed, 1U);
+  EXPECT_EQ(result.payload().results[1].output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_GT(result.payload().results[1].gas_consumed, 1U);
+  EXPECT_LE(result.payload().results[1].gas_consumed,
+            query.calls[1].invocation.gas_limit);
 }
 
 TEST_F(ViewGatewayBatchTest, IncludesEventsInTheAggregateResponseLimit)
@@ -764,7 +777,6 @@ TEST_F(ViewGatewayBatchTest, IncludesEventsInTheAggregateResponseLimit)
   ViewGatewayBatchQuery query{.calls = {call},
                               .min_height = {},
                               .budget_millis = 30'000,
-                              .max_gas = 160'000'000,
                               .max_response_bytes = 1'048'576};
   auto result = gateway.viewgateway_view_batch(query)();
   ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);

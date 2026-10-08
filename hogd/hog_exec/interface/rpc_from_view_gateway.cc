@@ -118,20 +118,17 @@ ViewGatewayRpc::viewgateway_view_batch(ViewGatewayBatchQuery query)
 {
   const auto received = std::chrono::steady_clock::now();
   co_await default_threadpool().bg();
-  if (query.calls.empty() || query.budget_millis == 0 || query.max_gas == 0 ||
+  if (query.calls.empty() || query.budget_millis == 0 ||
       query.max_response_bytes == 0 ||
       (query.min_height && *query.min_height < 0)) {
     co_return ViewGatewayBatchResult(
         ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
   }
-  std::uint64_t gas = 0;
   for (auto &call : query.calls) {
-    if (call.invocation.gas_limit == 0 ||
-        call.invocation.gas_limit > query.max_gas - gas) {
+    if (call.invocation.gas_limit == 0) {
       co_return ViewGatewayBatchResult(
           ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
     }
-    gas += call.invocation.gas_limit;
     call = normalize_public_view_query(std::move(call));
   }
   co_return co_await run_batch_with_retries(
