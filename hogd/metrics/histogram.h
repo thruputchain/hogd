@@ -179,8 +179,7 @@ struct HistogramImpl : Metric {
       return;
     }
     const size_t idx = static_cast<size_t>(
-        std::lower_bound(upper_bounds_.begin(), upper_bounds_.end(), value) -
-        upper_bounds_.begin());
+        std::ranges::lower_bound(upper_bounds_, value) - upper_bounds_.begin());
     buckets_[idx].fetch_add(1, std::memory_order_relaxed);
     sum_.fetch_add(value, std::memory_order_relaxed);
   }

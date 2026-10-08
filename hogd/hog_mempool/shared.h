@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -172,14 +173,21 @@ mempool_duration_ms(double seconds)
 }
 
 // Upper bounds, in seconds, for RPC and scheduler work: 100 us to 5 s.
-inline const std::vector<double> kMempoolWorkLatencyBounds = {
+inline constexpr std::array<double, 15> kMempoolWorkLatencyBounds = {
     0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025,
     0.05,   0.1,     0.25,   0.5,   1,      2.5,   5};
 
 // Upper bounds, in seconds, for time between commits. Dense around the ~2 s
 // devnet round so a slowdown shows up within a bucket or two.
-inline const std::vector<double> kMempoolRoundLatencyBounds = {
+inline constexpr std::array<double, 15> kMempoolRoundLatencyBounds = {
     0.25, 0.5, 1, 1.5, 1.75, 2, 2.25, 2.5, 3, 4, 5, 7.5, 10, 20, 60};
+
+template<size_t N>
+std::vector<double>
+latency_bounds(const std::array<double, N> &bounds)
+{
+  return {bounds.begin(), bounds.end()};
+}
 
 inline void
 MempoolMetrics::init()
@@ -328,37 +336,37 @@ MempoolMetrics::init()
   submit_unvetted_duration_seconds = metrics.histogram(
       kComponent, "submit_unvetted_duration_seconds",
       "Duration of unvetted transaction submission RPCs in seconds.",
-      kMempoolWorkLatencyBounds);
+      latency_bounds(kMempoolWorkLatencyBounds));
   submit_vetted_duration_seconds = metrics.histogram(
       kComponent, "submit_vetted_duration_seconds",
       "Duration of vetted transaction submission RPCs in seconds.",
-      kMempoolWorkLatencyBounds);
+      latency_bounds(kMempoolWorkLatencyBounds));
   nomination_duration_seconds =
       metrics.histogram(kComponent, "nomination_duration_seconds",
                         "Duration of nomination RPCs in seconds.",
-                        kMempoolWorkLatencyBounds);
+                        latency_bounds(kMempoolWorkLatencyBounds));
   validation_duration_seconds =
       metrics.histogram(kComponent, "validation_duration_seconds",
                         "Duration of validation RPCs in seconds.",
-                        kMempoolWorkLatencyBounds);
+                        latency_bounds(kMempoolWorkLatencyBounds));
   commit_duration_seconds =
       metrics.histogram(kComponent, "commit_duration_seconds",
                         "Duration of successful commit RPCs in seconds.",
-                        kMempoolWorkLatencyBounds);
+                        latency_bounds(kMempoolWorkLatencyBounds));
   commit_interval_seconds = metrics.histogram(
       kComponent, "commit_interval_seconds",
       "Time from the end of one successful commit to the start of the next, "
       "in seconds.",
-      kMempoolRoundLatencyBounds);
+      latency_bounds(kMempoolRoundLatencyBounds));
   block_period_seconds = metrics.histogram(
       kComponent, "block_period_seconds",
       "Time from the start of one successful commit to the start of the next, "
       "in seconds: the round time.",
-      kMempoolRoundLatencyBounds);
+      latency_bounds(kMempoolRoundLatencyBounds));
   scheduler_remove_duration_seconds =
       metrics.histogram(kComponent, "scheduler_remove_duration_seconds",
                         "Duration of scheduler removal passes in seconds.",
-                        kMempoolWorkLatencyBounds);
+                        latency_bounds(kMempoolWorkLatencyBounds));
 
   metrics.mark_done_with_init(kComponent);
 }
