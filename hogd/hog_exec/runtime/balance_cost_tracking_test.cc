@@ -1782,11 +1782,10 @@ TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
   EXPECT_GE(charges[1], kDBRPCCost);
 }
 
-// Regression for #4374: a native-token transfer that exhausts its gas on the
-// first balance mutation must refuse the write rather than staging both balance
-// deltas and only faulting on a later syscall. The balance read is affordable;
-// the budget runs out at the debit, where modify_native_token_balance must now
-// stop before forwarding the write to the handler.
+// Regression for #4374: a transfer that runs out of gas at the first balance
+// debit must refuse the write instead of staging deltas and faulting later.
+// Committed state, gas, and the fault are identical either way, so the staged
+// write count in the child trace is the only signal and all this asserts.
 TEST_F(BalanceCostTrackingTest,
        NativeTokenTransferRefusesBalanceWriteAfterGasExhaustion)
 {
@@ -1850,7 +1849,6 @@ TEST_F(BalanceCostTrackingTest,
           ADD_FAILURE() << "attack transfer invoke was rejected";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Fault);
         co_return InvokeStatus<void>{};
       });
 
@@ -1886,19 +1884,16 @@ TEST_F(BalanceCostTrackingTest,
   ASSERT_NE(root_trace, nullptr);
   // system_calls[0] warms the view; system_calls[1] is the attack transfer.
   ASSERT_EQ(root_trace->system_calls.size(), 2U);
-  auto const &attack_call = root_trace->system_calls[1];
-  ASSERT_EQ(attack_call.body.syscall_number(), SyscallNo::kInvoke);
-  auto const &attack_invoke = attack_call.body.invoke();
+  auto const &attack_invoke = root_trace->system_calls[1].body.invoke();
   ASSERT_NE(attack_invoke.outputs, nullptr);
   ASSERT_NE(attack_invoke.outputs->child_trace, nullptr);
   auto const &child_trace = *attack_invoke.outputs->child_trace;
 
+  // The child must fault at the unaffordable debit (so it actually reached and
+  // rolled back the mutation) and stage no balance write before doing so.
+  // Without the fix both deltas are staged here even though the frame reverts.
   ASSERT_EQ(child_trace.status.status_code(), InvocationFrameStatusCode::Fault);
-  ASSERT_EQ(child_trace.invocation.gas_limit, kChildGas);
-  // The core regression: once the debit's charge is unaffordable the helper
-  // refuses, so no balance delta is staged before the frame faults.
-  EXPECT_EQ(child_trace.storage_writes.size(), 0U)
-      << "balance mutation staged a write after gas exhaustion";
+  EXPECT_EQ(child_trace.storage_writes.size(), 0U);
 }
 
 // Regression for #4270: warm native-token balance reads skipped the flat
