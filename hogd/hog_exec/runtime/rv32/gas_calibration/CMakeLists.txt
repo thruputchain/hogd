@@ -52,10 +52,11 @@ set(HOGD_RV32_GAS_CXX_FLAGS
   "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${HOGD_RV32_GAS_BUILD_TYPE_UPPER}}")
 # The interpreter's own options follow the global flags (see
 # rv32_runtime_objects); record them too, or a frame-pointer-free engine is
-# reported as built with -fno-omit-frame-pointer.
+# reported as built with -fno-omit-frame-pointer. The separator sits inside the
+# Release-only expression so other configurations record what they did before.
 if(HOGD_RV32_INTERPRETER_COMPILE_OPTIONS)
   string(APPEND HOGD_RV32_GAS_CXX_FLAGS
-    " ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}")
+    "$<$<CONFIG:Release>: ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}>")
 endif()
 target_compile_definitions(
   rv32_gas_calibration
