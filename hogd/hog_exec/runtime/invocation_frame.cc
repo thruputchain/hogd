@@ -96,9 +96,7 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   total_try_invoke_depth_ = frame.total_try_invoke_depth_;
 
   // The tokens forwarded to the child leave this frame now that the child has
-  // committed. The tokens it returned via the Return syscall join this frame
-  // under new ids, in the order the child listed them; a returned forwarded
-  // token is no exception.
+  // committed. The tokens it returned join this frame under new ids, in order.
   remove_auth_tokens(child_forwarded_auth_tokens_);
   child_forwarded_auth_tokens_.clear();
   child_returned_auth_token_ids_.clear();

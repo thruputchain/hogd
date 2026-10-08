@@ -2405,7 +2405,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
         std::memcpy(returned.data(), auth_token_buf.data(), sizeof(uint32_t));
         EXPECT_EQ(returned[0], token_id + 1);
 
-        // Token was explicitly returned — caller owns it under the new id.
+        // Token was explicitly returned: caller owns it under the new id.
         CopyableInvokeInputs inputs2{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
@@ -3081,15 +3081,8 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// Issue #2543 asked whether a manually reverted child's consume should leave a
-// mark on later id allocation. Auth token ids are frame-local, so it cannot:
-//
-//   * A token minted by the caller after the reverted consume takes the
-//     caller's next id, exactly as on a path that never did the reverted
-//     consume.
-//   * Each child numbers its forwarded token 0 and the unwrapped children after
-//     it, so consuming the same token again in a new child gives the same range
-//     as the reverted consume, and the same range as the control path.
+// #2543: auth token ids are frame-local, so a manually reverted child's consume
+// leaves no mark on later id allocation.
 TEST_F(SyscallAuthTokenTest, RevertedConsumeLeavesNoTraceOnAuthTokenIds)
 {
   constexpr ContractAddress kCallerAddress = make_contract_address(0);
@@ -3468,12 +3461,8 @@ TEST_F(SyscallAuthTokenTest, OutOfGasChildCannotReturnMintedAuthToken)
   }
 }
 
-// Ids are frame-local, so the order of each list is what says which token is
-// which: a frame numbers its forwarded tokens 0..N-1 in the order its parent
-// listed them, and returned tokens take the parent's next ids in the order the
-// child listed them. The tokens carry distinct payloads and pass through both
-// lists out of order, so serving either from an unordered set scrambles the
-// payloads the consumer sees.
+// Ids are frame-local, so list order determines which token is which; distinct
+// payloads catch any reordering.
 TEST_F(SyscallAuthTokenTest,
        ForwardedAndReturnedAuthTokenListsKeepContractOrder)
 {
@@ -3545,10 +3534,8 @@ TEST_F(SyscallAuthTokenTest,
       });
   auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
 
-  // Caller: mints tokens with payloads 0, 1, 2 (ids 0..2) and forwards them as
-  // [2, 0, 1]. The child returns its [1, 2, 0], which is the caller's
-  // [0, 1, 2], and they come back as the caller's next ids, 3..5. The caller
-  // then forwards [5, 3, 4], which is payloads [2, 0, 1], to the consumer.
+  // Caller mints payloads 0..2, forwards them rotated, and re-forwards the
+  // returned ids to the consumer.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
