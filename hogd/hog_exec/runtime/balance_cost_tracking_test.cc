@@ -1782,10 +1782,8 @@ TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
   EXPECT_GE(charges[1], kDBRPCCost);
 }
 
-// Regression for #4374: a transfer that runs out of gas at the first balance
-// debit must refuse the write instead of staging deltas and faulting later.
-// Committed state, gas, and the fault are identical either way, so the staged
-// write count in the child trace is the only signal and all this asserts.
+// Regression for #4374: a transfer that exhausts gas at the first balance
+// debit must refuse the write rather than stage deltas and fault later.
 TEST_F(BalanceCostTrackingTest,
        NativeTokenTransferRefusesBalanceWriteAfterGasExhaustion)
 {
@@ -1889,9 +1887,7 @@ TEST_F(BalanceCostTrackingTest,
   ASSERT_NE(attack_invoke.outputs->child_trace, nullptr);
   auto const &child_trace = *attack_invoke.outputs->child_trace;
 
-  // The child must fault at the unaffordable debit (so it actually reached and
-  // rolled back the mutation) and stage no balance write before doing so.
-  // Without the fix both deltas are staged here even though the frame reverts.
+  // Must fault at the unaffordable debit and stage no balance write.
   ASSERT_EQ(child_trace.status.status_code(), InvocationFrameStatusCode::Fault);
   EXPECT_EQ(child_trace.storage_writes.size(), 0U);
 }
