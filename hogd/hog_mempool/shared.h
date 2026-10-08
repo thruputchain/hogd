@@ -118,9 +118,7 @@ public:
   Metrics::Gauge last_commit_interval_ms;
   Metrics::Gauge last_scheduler_remove_duration_ms;
 
-  // Every observation, in seconds, beside the last-value gauges above. A 15 s
-  // scrape of a gauge keeps one commit in about seven and truncates
-  // sub-millisecond work to 0, so quantiles need these.
+  // Full distributions, in seconds, for the gauges above.
   Metrics::Histogram submit_unvetted_duration_seconds;
   Metrics::Histogram submit_vetted_duration_seconds;
   Metrics::Histogram nomination_duration_seconds;

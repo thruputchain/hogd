@@ -145,12 +145,8 @@ private:
   std::atomic<size_t> overflow_ = 0;
 };
 
-// A Prometheus histogram with explicit upper bounds. Each bound is inclusive
-// (`le`), values above the last bound land only in `+Inf`, and the exposition
-// carries `_bucket`, `_sum` and `_count` with `_count` equal to `+Inf`.
-//
-// Bounds must be finite and strictly increasing. Record in base units
-// (seconds, bytes) so the series follow Prometheus naming.
+// A Prometheus histogram. Upper bounds are inclusive (`le`) and must be finite
+// and strictly increasing; record values in base units (seconds, bytes).
 struct HistogramImpl : Metric {
   HistogramImpl(std::string description, std::vector<double> upper_bounds)
     : Metric(std::move(description)), upper_bounds_(std::move(upper_bounds)),

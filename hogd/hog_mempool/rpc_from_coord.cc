@@ -3300,10 +3300,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
                           remove_from_scheduler_size);
         info("schedulercoord_commit_block ret");
-        // Successful ordinary commits only. The first after start has no
-        // previous commit, and the genesis ceremony (height 1, also committed
-        // through here) is not a round: seeding from it would put the whole
-        // bootstrap gap into the first sample.
+        // Skip the first commit after start and the genesis ceremony (height
+        // 1): neither is a round.
         if (last_commit_started_) {
           MempoolMetrics::instance().commit_interval_seconds.record(
               std::chrono::duration<double>(commit_started_at - last_commit_)
