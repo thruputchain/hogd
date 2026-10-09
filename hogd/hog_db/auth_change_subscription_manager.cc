@@ -1,6 +1,5 @@
 #include "auth_change_subscription_manager.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -21,6 +20,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"

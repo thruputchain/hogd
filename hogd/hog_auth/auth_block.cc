@@ -1,7 +1,6 @@
 #include "hogd/hog_auth/auth_server.h"
 
 #include <algorithm>
-#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -12,6 +11,7 @@
 #include "hogd/hog_auth/status.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
@@ -81,8 +81,7 @@ AuthServer::verify_transactions(BlockID block_id,
       co_await verify_transactions_at_height((*context)->parent.height, txs,
                                              max_parallelism);
   if (!parent_is_current(**context)) {
-    std::fill(result.begin(), result.end(),
-              AuthErrorCode::kAuthStaleBlockHeight);
+    std::ranges::fill(result, AuthErrorCode::kAuthStaleBlockHeight);
   }
   co_return result;
 }
