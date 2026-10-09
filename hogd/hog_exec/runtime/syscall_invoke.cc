@@ -79,7 +79,7 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
 {
   output_len = syscall_handler.get_calldata().size();
   output_auth_token_count =
-      syscall_handler.get_parent_supplied_auth_tokens().size();
+      syscall_handler.get_parent_supplied_auth_token_count();
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetCalldataLen>()) {
@@ -107,15 +107,27 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                            std::as_bytes(
                                std::span(calldata.data(), calldata.size())));
 
-  auto span_auth_token_list = syscall_handler.get_parent_supplied_auth_tokens();
-  output_auth_token_written_len =
-      copy_to_guest_buffer(output_auth_token_list,
-                           std::as_bytes(span_auth_token_list));
+  // The frame's forwarded tokens are its ids 0..N-1. As copy_to_guest_buffer
+  // does, write the ids that fit and report the full length.
+  uint32_t auth_token_count =
+      syscall_handler.get_parent_supplied_auth_token_count();
+  size_t ids_that_fit =
+      std::min<size_t>(auth_token_count,
+                       output_auth_token_list.size() / sizeof(uint32_t));
+  for (uint32_t id = 0; id < ids_that_fit; ++id) {
+    std::memcpy(output_auth_token_list.data() + (id * sizeof(uint32_t)), &id,
+                sizeof(id));
+  }
+  output_auth_token_written_len = static_cast<RuntimeMemoryLength>(
+      size_t{auth_token_count} * sizeof(uint32_t));
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
     x23::Vec<uint32_t, 0xffffffff> auth_token_list;
-    auth_token_list.append_range(span_auth_token_list);
+    auth_token_list.reserve(auth_token_count);
+    for (uint32_t id = 0; id < auth_token_count; ++id) {
+      auth_token_list.push_back(id);
+    }
     trace_data->outputs.emplace(
         SyscallGetCalldataOutputs{.calldata = calldata,
                                   .auth_tokens = auth_token_list});

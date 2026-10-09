@@ -1446,11 +1446,11 @@ SystemCallHandler::get_calldata() const
   return invocation_frame_stack_.get_active_frame_calldata();
 }
 
-std::span<const uint32_t>
-SystemCallHandler::get_parent_supplied_auth_tokens() const
+uint32_t
+SystemCallHandler::get_parent_supplied_auth_token_count() const
 {
   return invocation_frame_stack_
-      .get_current_frame_parent_supplied_auth_tokens();
+      .get_current_frame_parent_supplied_auth_token_count();
 }
 
 NondeterministicProposalData const &

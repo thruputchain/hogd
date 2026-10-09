@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "auth_token.hh"
 #include "ffi_enums.hh"
@@ -73,6 +74,47 @@ protected:
   static ValidatedAuthTokens forward(uint32_t token_id)
   {
     return *ValidatedAuthTokens::parse(std::as_bytes(std::span(&token_id, 1)));
+  }
+
+  static ValidatedAuthTokens forward(std::vector<uint32_t> const &token_ids)
+  {
+    return *ValidatedAuthTokens::parse(std::as_bytes(std::span(token_ids)));
+  }
+
+  // A token minted by address 0 for consumer, with leaf children for the
+  // consumers in children.
+  static AuthToken make_token(uint8_t consumer,
+                              std::vector<uint8_t> const &children = {})
+  {
+    AuthToken token{.mint_address = make_test_address(0),
+                    .expiry_height = 100,
+                    .root_node = {.consumer_address =
+                                      make_test_address(consumer),
+                                  .payload = {consumer},
+                                  .child_nodes = {}}};
+    for (auto child : children) {
+      token.root_node.child_nodes.push_back(
+          AuthTokenNode{.consumer_address = make_test_address(child),
+                        .payload = {child},
+                        .child_nodes = {}});
+    }
+    return token;
+  }
+
+  // The node the active frame holds under token_id, or null if it owns none.
+  static AuthSubtoken const *node(InvocationFrameStack const &stack,
+                                  uint32_t token_id)
+  {
+    auto const *token = stack.lookup_auth_token(token_id);
+    return token != nullptr ? token->root_node.get() : nullptr;
+  }
+
+  void finish_child(InvocationFrameStack &stack, bool expect_revert = false)
+  {
+    auto result =
+        stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result.value().second, expect_revert);
   }
 };
 
@@ -447,6 +489,154 @@ TEST_F(InvocationFrameTest, ChildFramesShareParentBytestring)
   auto const &root_item = *stack.get_item_view(addrkey)->get<BytestringItem>();
   EXPECT_EQ(root_item.bytes().data(), root_data);
   EXPECT_TRUE(std::ranges::equal(root_item.bytes(), payload));
+}
+
+// A frame numbers its forwarded tokens 0..N-1, in the order its parent listed
+// them, whatever ids the parent held them under.
+TEST_F(InvocationFrameTest, ForwardedTokensAreTheChildsFirstIds)
+{
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+  for (uint8_t consumer : {5, 6, 7}) {
+    ASSERT_TRUE(mint(stack, make_token(consumer)).has_value());
+  }
+  auto const *a = node(stack, 0);
+  auto const *b = node(stack, 1);
+  auto const *c = node(stack, 2);
+
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(1), Calldata{}, 0, forward({2, 0}))
+          .has_value());
+  EXPECT_EQ(stack.get_current_frame_parent_supplied_auth_token_count(), 2U);
+  EXPECT_EQ(node(stack, 0), c);
+  EXPECT_EQ(node(stack, 1), a);
+  EXPECT_EQ(node(stack, 2), nullptr);
+
+  // The child mints after its forwarded tokens.
+  auto minted = mint(stack, make_token(8));
+  ASSERT_TRUE(minted.has_value());
+  EXPECT_EQ(minted.value(), 2U);
+
+  finish_child(stack);
+
+  // The forwarded tokens left the parent; the rest keep their ids.
+  EXPECT_EQ(node(stack, 0), nullptr);
+  EXPECT_EQ(node(stack, 1), b);
+  EXPECT_EQ(node(stack, 2), nullptr);
+  EXPECT_EQ(stack.get_current_frame_parent_supplied_auth_token_count(), 0U);
+}
+
+// Tokens a child returns take the parent's next ids, in the order the child
+// listed them, a returned forwarded token included.
+TEST_F(InvocationFrameTest, ReturnedTokensTakeTheParentsNextIds)
+{
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+  ASSERT_TRUE(mint(stack, make_token(5)).has_value());
+  ASSERT_TRUE(mint(stack, make_token(6)).has_value());
+  auto const *a = node(stack, 0);
+  auto const *b = node(stack, 1);
+
+  ASSERT_TRUE(stack.start_frame(make_test_address(1), Calldata{}, 0, forward(1))
+                  .has_value());
+  auto minted = mint(stack, make_token(7));
+  ASSERT_TRUE(minted.has_value());
+  ASSERT_EQ(minted.value(), 1U);
+  auto const *d = node(stack, 1);
+
+  stack.set_active_frame_return(InvocationFrameOutput(
+                                    InvocationFrameStatusCode::Return),
+                                {1, 0});
+  finish_child(stack);
+
+  EXPECT_TRUE(
+      std::ranges::equal(stack.get_active_frame_child_returned_auth_token_ids(),
+                         std::vector<uint32_t>{2, 3}));
+  EXPECT_EQ(node(stack, 0), a);
+  EXPECT_EQ(node(stack, 1), nullptr);
+  EXPECT_EQ(node(stack, 2), d);
+  EXPECT_EQ(node(stack, 3), b);
+}
+
+// Consuming a token gives its children the frame's next ids, and they share
+// their nodes with the consumed token.
+TEST_F(InvocationFrameTest, ConsumeGivesChildrenTheFramesNextIds)
+{
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+  ASSERT_TRUE(mint(stack, make_token(5)).has_value());
+  ASSERT_TRUE(mint(stack, make_token(1, {1, 1})).has_value());
+  auto const *t = node(stack, 1);
+
+  ASSERT_TRUE(stack.start_frame(make_test_address(1), Calldata{}, 0, forward(1))
+                  .has_value());
+  auto consumed = stack.consume_auth_token(0);
+  ASSERT_TRUE(consumed.has_value());
+  EXPECT_EQ(consumed->token.root_node.get(), t);
+  EXPECT_EQ(consumed->token.mint_address, make_test_address(0));
+  EXPECT_EQ(consumed->new_token_id_start, 1U);
+  EXPECT_EQ(consumed->new_token_id_count, 2U);
+
+  EXPECT_EQ(node(stack, 0), nullptr);
+  EXPECT_EQ(node(stack, 1), t->child_nodes[0].get());
+  EXPECT_EQ(node(stack, 2), t->child_nodes[1].get());
+  EXPECT_EQ(stack.lookup_auth_token(1)->mint_address, make_test_address(0));
+  EXPECT_EQ(stack.lookup_auth_token(1)->expiry_height, 100U);
+
+  auto minted = mint(stack, make_token(9));
+  ASSERT_TRUE(minted.has_value());
+  EXPECT_EQ(minted.value(), 3U);
+}
+
+// The consume result keeps the consumed token alive after the frame drops it.
+TEST_F(InvocationFrameTest, ConsumeResultHoldsTheConsumedToken)
+{
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+  ASSERT_TRUE(mint(stack, make_token(0)).has_value());
+
+  auto consumed = stack.consume_auth_token(0);
+  ASSERT_TRUE(consumed.has_value());
+  EXPECT_EQ(node(stack, 0), nullptr);
+  EXPECT_EQ(consumed->token.root_node.use_count(), 1U);
+  EXPECT_EQ(consumed->token.root_node->payload, AuthTokenPayload{0});
+}
+
+// A child that consumes a forwarded token and then reverts leaves nothing
+// behind: the parent keeps the token under its id, and a later child that
+// consumes it numbers the children afresh.
+TEST_F(InvocationFrameTest, RevertedConsumeLeavesNoTrace)
+{
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+  ASSERT_TRUE(mint(stack, make_token(1, {1, 1})).has_value());
+  auto const *t = node(stack, 0);
+
+  for (bool revert : {true, false}) {
+    ASSERT_TRUE(
+        stack.start_frame(make_test_address(1), Calldata{}, 0, forward(0))
+            .has_value());
+    auto consumed = stack.consume_auth_token(0);
+    ASSERT_TRUE(consumed.has_value());
+    EXPECT_EQ(consumed->new_token_id_start, 1U);
+    EXPECT_EQ(consumed->new_token_id_count, 2U);
+    if (revert) {
+      stack.set_active_frame_return(
+          InvocationFrameOutput(InvocationFrameStatusCode::Fault));
+    }
+    finish_child(stack, revert);
+    EXPECT_EQ(node(stack, 0), revert ? t : nullptr);
+  }
+
+  // The parent's ids never moved.
+  auto minted = mint(stack, make_token(2));
+  ASSERT_TRUE(minted.has_value());
+  EXPECT_EQ(minted.value(), 1U);
 }
 
 } // namespace hogd

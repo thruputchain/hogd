@@ -82,28 +82,28 @@ constexpr bool kArgNestsSignedToken = [] {
   }
 }();
 
-// Assign the parent-supplied auth-token handles to `args`' SignedToken
-// arguments in declaration order; false when the counts differ.
+// Assign the parent-supplied auth-token handles, the frame's ids 0..N-1, to
+// `args`' SignedToken arguments in declaration order; false when the counts
+// differ.
 template<typename... Args>
 bool
-assign_auth_handles(std::tuple<Args...> &args,
-                    std::span<const uint32_t> handles)
+assign_auth_handles(std::tuple<Args...> &args, uint32_t handle_count)
 {
   static_assert(!(kArgNestsSignedToken<Args> || ...),
                 "SignedToken nested inside an argument type is unsupported");
   constexpr size_t kSignedCount =
       (size_t{std::is_same_v<Args, SignedToken>} + ... + 0);
-  if (handles.size() != kSignedCount) {
+  if (handle_count != kSignedCount) {
     return false;
   }
-  size_t next = 0;
+  uint32_t next = 0;
   std::apply(
       [&](auto &...arg) {
         (
             [&](auto &a) {
               if constexpr (std::is_same_v<std::remove_cvref_t<decltype(a)>,
                                            SignedToken>) {
-                a.handle = handles[next++];
+                a.handle = next++;
               }
             }(arg),
             ...);
@@ -234,7 +234,7 @@ public:
           co_return decoding_args_abort();
         }
         if (!detail::assign_auth_handles(
-                *args, ctx.handler().get_parent_supplied_auth_tokens())) {
+                *args, ctx.handler().get_parent_supplied_auth_token_count())) {
           co_return decoding_args_abort();
         }
 

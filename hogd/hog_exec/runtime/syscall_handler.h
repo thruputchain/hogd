@@ -325,7 +325,8 @@ public:
   // Get the auth tokens supplied by the parent frame.
   // Incorrect to call method when no invocation is running.
   // Span invalidated when call frame changes.
-  std::span<const uint32_t> get_parent_supplied_auth_tokens() const;
+  // The active frame's forwarded tokens are its ids 0..N-1.
+  uint32_t get_parent_supplied_auth_token_count() const;
 
   AuthClaim const &get_auth_claim() const;
 
