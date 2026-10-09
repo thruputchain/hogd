@@ -786,5 +786,69 @@ TEST_F(StrictIndexerTest,
             block.identity.consensus_hash);
 }
 
+TEST_F(StrictIndexerTest, TamperedReceiptPayloadIsRefusedAfterReopen)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction body = make_body(902, 0x92);
+  IndexerCommittedBlock block =
+      make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+
+  const TransactionHash tx_hash = sha256(body.signed_tx.tx);
+  const ContractAddress emitter =
+      block.payload.event_logs.front().events.front().contract_address;
+
+  // Forge the stored receipt: keep the height, transaction body, and event
+  // shape the join guards check, but overwrite only the served event bytes.
+  TxEventLog replacement_log = block.payload.event_logs.front();
+  auto &forged_bytes = replacement_log.events.front().serialized_event;
+  forged_bytes.clear();
+  const uint8_t forged[] = {0xDE, 0xAD, 0xBE, 0xEF};
+  for (uint8_t byte : forged) {
+    forged_bytes.push_back(byte);
+  }
+  constexpr BlockHeight height = 1;
+  std::string replacement_value(reinterpret_cast<const char *>(&height),
+                                sizeof(height));
+  const x23::Buf serialized_body = x23::serialize(body);
+  replacement_value.append(reinterpret_cast<const char *>(
+                               serialized_body.data()),
+                           serialized_body.size());
+  const x23::Buf serialized_log = x23::serialize(replacement_log);
+  replacement_value.append(reinterpret_cast<const char *>(
+                               serialized_log.data()),
+                           serialized_log.size());
+  std::string tx_key;
+  IndexerKeyFormat::make_tx_key(tx_key, tx_hash);
+
+  db_.reset();
+  overwrite_column_family(path_, IndexerKeyFormat::kTxIndexColumnFamily, tx_key,
+                          replacement_value);
+
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+
+  // Direct hydration refuses the receipt whose bytes no longer match the
+  // committed event root rather than returning the forged payload.
+  auto events = reopened->get_tx_events(tx_hash);
+  EXPECT_FALSE(events.has_value());
+
+  // The public event-explorer query path drops the tampered receipt instead
+  // of serving the attacker-chosen bytes under the original identifiers.
+  EventFilter filter;
+  filter.contract_addresses.push_back(emitter);
+  EventQuery query;
+  query.filters.push_back(std::move(filter));
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 10;
+  auto page = reopened->get_events(query);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_TRUE(page->events.empty());
+}
+
 } // namespace
 } // namespace hogd

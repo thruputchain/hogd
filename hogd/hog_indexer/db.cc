@@ -390,6 +390,25 @@ make_tx_value(BlockHeight block_height, const ProposedTransaction &body,
   return value;
 }
 
+// Commitment over a single transaction's authenticated event-root leaf
+// (TxEventLog || nondeterministic proposal data -- the exact preimage
+// compute_indexer_payload_roots folds into the committed events_hash).  It is
+// persisted apart from the mutable tx_index value so that a data-directory
+// rewrite of a committed receipt, which can preserve the height, tx hash,
+// sequence, and emitter the join guards check while altering the served event
+// bytes, is detected on hydration instead of being served under the original
+// identifiers.
+SHA256Hash
+compute_receipt_digest(const ProposedTransaction &body,
+                       const TxEventLog &event_log)
+{
+  x23::Buf leaf;
+  serialize_event_commitment_leaf(leaf, event_log,
+                                  body.nondeterministic_proposal_data);
+  return sha256(x23::BufView(reinterpret_cast<const uint8_t *>(leaf.data()),
+                             leaf.size()));
+}
+
 IndexerStatus<bool>
 column_family_has_rows(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *handle)
 {
@@ -1375,6 +1394,12 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
       }
 
       batch.Put(tx_cf_handle_, key, make_tx_value(height, body, event_log));
+      const SHA256Hash receipt_digest = compute_receipt_digest(body, event_log);
+      batch.Put(
+          db_->DefaultColumnFamily(),
+          IndexerKeyFormat::make_receipt_digest_meta_key(event_log.tx_hash),
+          rocksdb::Slice(reinterpret_cast<const char *>(receipt_digest.data()),
+                         receipt_digest.size()));
       uint32_t sequence_number = 0;
       for (const TxEmittedEvent &emitted_event : event_log.events) {
         IndexerKeyFormat::make_contract_key(key, emitted_event.contract_address,
@@ -1527,6 +1552,36 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
         highest_indexed_block_.load(std::memory_order_acquire);
     if (watermark == kNoBlocksIndexed || record.height > watermark) {
       return IndexerError(IndexerErrorCode::kDBNotFound);
+    }
+    // Strict ingestion persists a commitment to each receipt's authenticated
+    // event-root leaf in a metadata row that lives apart from this tx_index
+    // value.  Recompute it from the parsed receipt and refuse to serve if it
+    // no longer matches: a data-directory rewrite of the stored event bytes
+    // (which the block/emitter join guards cannot catch, since it preserves
+    // every field they compare) does not touch that commitment.  A missing
+    // digest means the row predates this commitment or was written by the
+    // legacy bulk path, so it is left unverified rather than rejected.
+    std::string digest_bytes;
+    const rocksdb::Status digest_status =
+        db_->Get(read_options, db_->DefaultColumnFamily(),
+                 IndexerKeyFormat::make_receipt_digest_meta_key(tx_hash),
+                 &digest_bytes);
+    if (digest_status.ok()) {
+      const SHA256Hash expected =
+          compute_receipt_digest(record.tx, record.events);
+      if (digest_bytes.size() != expected.size() ||
+          std::memcmp(digest_bytes.data(), expected.data(), expected.size()) !=
+              0) {
+        error("indexer receipt for tx {} does not match its committed event "
+              "root; refusing to serve a tampered payload",
+              HexArray(tx_hash).str());
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+    }
+    else if (!digest_status.IsNotFound()) {
+      error("failed to read indexer receipt digest: {}",
+            digest_status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
     }
     return record;
   } catch (const x23::XdrBadInput &e) {

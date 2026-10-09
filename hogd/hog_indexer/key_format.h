@@ -24,6 +24,11 @@ public:
   // Value: little-endian BlockHeight || XDR ProposedTransaction ||
   //        XDR TxEventLog
   // Other indices reference records here by transaction hash.
+  //
+  // The value carries no commitment of its own, so strict ingestion also
+  // persists a receipt-digest metadata row (see below) that lives apart from
+  // this value and binds the served receipt bytes to the authenticated event
+  // root.  Hydration recomputes the digest and refuses a tampered receipt.
 
   // Column family: contract_index
   // This index is responsible for allowing searches of events by contract
@@ -60,9 +65,16 @@ public:
       "meta:indexer_durable:block:";
   static constexpr std::string_view kEpochHistoryMetaKeyPrefix =
       "meta:indexer_durable:epoch:";
+  // Per-receipt commitment written by strict ingestion. The value is a 32-byte
+  // SHA256 over the transaction's authenticated event-root leaf, stored apart
+  // from the mutable tx_index value so that a data-directory rewrite of a
+  // committed receipt is caught before the forged payload is served.
+  static constexpr std::string_view kReceiptDigestMetaKeyPrefix =
+      "meta:indexer_durable:receipt:";
   static std::string make_block_identity_meta_key(BlockHeight block_height);
   static std::string
   make_epoch_history_meta_key(const ProtocolCommit &protocol);
+  static std::string make_receipt_digest_meta_key(SHA256Hash const &tx_hash);
 
   // Transaction index key format:
   //   tx_hash (32 bytes)

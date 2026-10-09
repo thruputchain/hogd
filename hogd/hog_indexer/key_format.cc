@@ -33,6 +33,14 @@ IndexerKeyFormat::make_epoch_history_meta_key(const ProtocolCommit &protocol)
   return key;
 }
 
+std::string
+IndexerKeyFormat::make_receipt_digest_meta_key(SHA256Hash const &tx_hash)
+{
+  std::string key(kReceiptDigestMetaKeyPrefix);
+  key.append(reinterpret_cast<const char *>(tx_hash.data()), tx_hash.size());
+  return key;
+}
+
 void
 IndexerKeyFormat::make_tx_key(std::string &key, SHA256Hash const &tx_hash)
 {
