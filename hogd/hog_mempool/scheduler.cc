@@ -488,7 +488,7 @@ Scheduler::record_committed_transaction_outcomes(
   };
   std::array<std::vector<TransactionHash>, kTransactionOutcomeShards> batches;
   for (auto &batch : batches) {
-    batch.reserve(tx_hashes.size() / kTransactionOutcomeShards + 1);
+    batch.reserve((tx_hashes.size() / kTransactionOutcomeShards) + 1);
   }
   for (const auto &hash : tx_hashes) {
     batches[transaction_outcome_shard_index(hash)].push_back(hash);
