@@ -8,10 +8,10 @@
 
 #include "auth_rpc.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_auth/status.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
