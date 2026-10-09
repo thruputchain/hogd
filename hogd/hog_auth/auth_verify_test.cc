@@ -10,6 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -95,9 +96,9 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
   mock_db().set(address, auth_data);
   mock_db().compute_key_changes_for_current_height();
 
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
 
   Transaction tx{};
   tx.invocation.invoked_address = address;
@@ -109,7 +110,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 
   x23::Vec<SignedTransaction> stx_vec{stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(1, stx_span)();
+  auto result = auth_server().verify_transactions_at_height(1, stx_span)();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
 }
@@ -140,9 +141,9 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   mock_db().set(address3, AddressAuthData{});
   mock_db().compute_key_changes_for_current_height();
 
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   Transaction tx1{};
   tx1.invocation.invoked_address = address1;
@@ -171,7 +172,7 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(0, stx_span)();
+  auto result = auth_server().verify_transactions_at_height(0, stx_span)();
 
   ASSERT_EQ(result.size(), 3);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
@@ -179,11 +180,11 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
 
   // batch verify
-  EXPECT_EQ(auth_server().verify_batch(0, {stx1, stx2, stx3})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {stx1, stx2, stx3})(),
             AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(auth_server().verify_batch(0, {stx2, stx3})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {stx2, stx3})(),
             AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(auth_server().verify_batch(0, {stx2, stx2, stx2})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {stx2, stx2, stx2})(),
             AuthErrorCode::kAuthSuccess);
 }
 
@@ -194,9 +195,9 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
 
   // No auth data is registered for the derived address.
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   auto derived_address = pubkey_auth_address(preimage);
   ASSERT_TRUE(derived_address.has_value());
@@ -211,11 +212,11 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
 
   x23::Vec<SignedTransaction> stx_vec{stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(0, stx_span)();
+  auto result = auth_server().verify_transactions_at_height(0, stx_span)();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
 
-  EXPECT_EQ(auth_server().verify_batch(0, {stx})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {stx})(),
             AuthErrorCode::kAuthSuccess);
 
   // A bad signature still fails.
@@ -226,7 +227,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
 
   x23::Vec<SignedTransaction> bad_vec{bad_stx};
   x23::span<SignedTransaction> bad_span(bad_vec);
-  auto bad_result = auth_server().verify_transactions(0, bad_span)();
+  auto bad_result = auth_server().verify_transactions_at_height(0, bad_span)();
   ASSERT_EQ(bad_result.size(), 1);
   EXPECT_EQ(bad_result[0], AuthErrorCode::kAuthFailed);
 }
@@ -240,9 +241,9 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
   ContractAddress address = *derived_address;
 
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   Transaction tx{};
   tx.invocation.invoked_address = address;
@@ -256,7 +257,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
   x23::span<SignedTransaction> stx_span(stx_vec);
 
   // Valid at height 0 (no auth entry).
-  auto result0 = auth_server().verify_transactions(0, stx_span)();
+  auto result0 = auth_server().verify_transactions_at_height(0, stx_span)();
   ASSERT_EQ(result0.size(), 1);
   EXPECT_EQ(result0[0], AuthErrorCode::kAuthSuccess);
 
@@ -267,16 +268,17 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
   mock_db().increment_height(); // height 1
   mock_db().set(address, auth_data);
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
 
   // The same pubkey-claim tx is now rejected.
-  auto result1 = auth_server().verify_transactions(1, stx_span)();
+  auto result1 = auth_server().verify_transactions_at_height(1, stx_span)();
   ASSERT_EQ(result1.size(), 1);
   EXPECT_EQ(result1[0], AuthErrorCode::kAuthFailed);
 
-  EXPECT_EQ(auth_server().verify_batch(1, {stx})(), AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch_at_height(1, {stx})(),
+            AuthErrorCode::kAuthFailed);
 }
 
 TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
@@ -292,9 +294,9 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
   auth_data.required_weight = 1;
   mock_db().set(address, auth_data);
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   Transaction pubkey_tx{};
   pubkey_tx.invocation.invoked_address = address;
@@ -316,30 +318,30 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
   x23::span<SignedTransaction> stx_span(stx_vec);
 
   // Registered accounts must use their source-address auth data.
-  auto result0 = auth_server().verify_transactions(0, stx_span)();
+  auto result0 = auth_server().verify_transactions_at_height(0, stx_span)();
   ASSERT_EQ(result0.size(), 2);
   EXPECT_EQ(result0[0], AuthErrorCode::kAuthFailed);
   EXPECT_EQ(result0[1], AuthErrorCode::kAuthSuccess);
-  EXPECT_EQ(auth_server().verify_batch(0, {pubkey_stx})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {pubkey_stx})(),
             AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(auth_server().verify_batch(0, {source_stx})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {source_stx})(),
             AuthErrorCode::kAuthSuccess);
 
   // Deleting the auth entry reverses which claim type is accepted.
   mock_db().increment_height(); // height 1
   mock_db().delete_address(address);
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
 
-  auto result1 = auth_server().verify_transactions(1, stx_span)();
+  auto result1 = auth_server().verify_transactions_at_height(1, stx_span)();
   ASSERT_EQ(result1.size(), 2);
   EXPECT_EQ(result1[0], AuthErrorCode::kAuthSuccess);
   EXPECT_EQ(result1[1], AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(auth_server().verify_batch(1, {pubkey_stx})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(1, {pubkey_stx})(),
             AuthErrorCode::kAuthSuccess);
-  EXPECT_EQ(auth_server().verify_batch(1, {source_stx})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(1, {source_stx})(),
             AuthErrorCode::kAuthFailed);
 }
 
@@ -367,9 +369,9 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
   }
 
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   x23::Vec<SignedTransaction> stx_vec;
   for (size_t i = 0; i < kTotalTxs; i++) {
@@ -387,7 +389,8 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 
   x23::span<SignedTransaction> stx_span(stx_vec);
   const auto result =
-      auth_server().verify_transactions(0, stx_span, kMaxParallelism)();
+      auth_server().verify_transactions_at_height(0, stx_span,
+                                                  kMaxParallelism)();
 
   ASSERT_EQ(result.size(), kTotalTxs);
   for (AuthErrorCode status : result) {
@@ -416,9 +419,9 @@ TEST_F(AuthVerifyTest, ZeroRequiredWeightAuthDataAdmitsUnsignedSourceClaim)
   mock_db().set(zero_weight_address, zero_weight_auth_data);
   mock_db().set(one_weight_address, one_weight_auth_data);
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   auto make_unsigned_stx = [](ContractAddress const &address) {
     SignedTransaction stx{};
@@ -435,17 +438,17 @@ TEST_F(AuthVerifyTest, ZeroRequiredWeightAuthDataAdmitsUnsignedSourceClaim)
   x23::Vec<SignedTransaction> stx_vec{zero_weight_stx, one_weight_stx,
                                       missing_stx};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(0, stx_span)();
+  auto result = auth_server().verify_transactions_at_height(0, stx_span)();
   ASSERT_EQ(result.size(), 3);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
   EXPECT_EQ(result[1], AuthErrorCode::kAuthFailed);
   EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
 
-  EXPECT_EQ(auth_server().verify_batch(0, {zero_weight_stx})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {zero_weight_stx})(),
             AuthErrorCode::kAuthSuccess);
-  EXPECT_EQ(auth_server().verify_batch(0, {one_weight_stx})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {one_weight_stx})(),
             AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(auth_server().verify_batch(0, {missing_stx})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {missing_stx})(),
             AuthErrorCode::kAuthFailed);
 }
 

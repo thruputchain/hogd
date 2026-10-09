@@ -83,8 +83,9 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 
 x23::Async<void>
 AuthServer::register_auth_data_updates(
-    BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes)
+    DBAuthTip tip, ChunkedVector<KeyChangeBatch> key_changes)
 {
+  const BlockHeight height = tip.height;
   // TODO(geoff): this logic will break if there's a sharded db, and i.e.
   // multiple batches of updates from the same block height. Probably the
   // simplest solution will be to have a separate coro futex and separate auth
@@ -138,6 +139,7 @@ AuthServer::register_auth_data_updates(
         height, *key_change.auth_data);
     auth_data_cache_.put(key_change.address, entry);
   }
+  publish_tip(tip);
   current_height_futex_.store(height);
   current_height_futex_.broadcast(&default_threadpool());
   co_await Health::instance().set_current_block_height(height);
@@ -157,11 +159,13 @@ x23::Async<void>
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 AuthServer::subscribe_to_auth_data_changes(AuthCard card)
 {
-  BlockHeight current_height =
+  const DBAuthTip tip =
       co_await dbauth_client_.subscribe_to_auth_data_changes(card);
+  const BlockHeight current_height = tip.height;
   if (current_height != -1) {
     bool initialized = current_height_futex_.rmw([&](auto &value) {
       if (value == kUninitializedHeight) {
+        publish_tip(tip);
         value = current_height;
         return true;
       }
@@ -220,9 +224,9 @@ wrapper_over_cap(const SignedTransaction &tx)
 } // namespace
 
 x23::Async<AuthErrorCodeBatch>
-AuthServer::verify_transactions(BlockHeight height,
-                                std::span<const SignedTransaction> txs,
-                                size_t max_parallelism)
+AuthServer::verify_transactions_at_height(
+    BlockHeight height, std::span<const SignedTransaction> txs,
+    size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
   co_await default_coropoll().pool_.bg();
@@ -297,7 +301,8 @@ AuthServer::verify_transactions(BlockHeight height,
 }
 
 x23::Async<AuthErrorCode>
-AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
+AuthServer::verify_batch_at_height(BlockHeight height,
+                                   SignedTransactionBatch txs)
 {
   Ed25519SignatureVerifier signature_verifier;
   for (const auto &tx : txs) {

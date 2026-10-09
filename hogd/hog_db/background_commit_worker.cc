@@ -120,14 +120,14 @@ dispatch_balance_deltas(
 } // namespace
 
 void
-BackgroundCommitWorker::submit_job(BlockHeight block_height,
+BackgroundCommitWorker::submit_job(DBAuthTip tip,
                                    PerThread<KeyChangeBatch> key_changes,
                                    PerThread<std::vector<Delta>> balance_deltas)
 {
   std::unique_lock lock(mutex_);
   jobs_.emplace(Job{.key_change_batch_ = std::move(key_changes),
                     .balance_deltas_ = std::move(balance_deltas),
-                    .block_height_ = block_height});
+                    .tip_ = tip});
   cv_.notify_one();
 }
 
@@ -142,22 +142,22 @@ BackgroundCommitWorker::commit_job(Job &job)
   // fail stop.
   try {
     auth_change_subscription_manager_.detached_publish_auth_changes(
-        job.block_height_, std::move(job.key_change_batch_));
+        job.tip_, std::move(job.key_change_batch_));
     if (sched_db_client_) {
-      dispatch_balance_deltas(job.block_height_, std::move(job.balance_deltas_),
+      dispatch_balance_deltas(job.tip_.height, std::move(job.balance_deltas_),
                               max_deltas_per_chunk_, *sched_db_client_);
     }
   } catch (const std::exception &e) {
     [&]() noexcept {
       panic("background commit of block {} failed; its scheduler callback is "
             "lost: {}",
-            job.block_height_, e.what());
+            job.tip_.height, e.what());
     }();
   } catch (...) {
     [&]() noexcept {
       panic("background commit of block {} failed; its scheduler callback is "
             "lost",
-            job.block_height_);
+            job.tip_.height);
     }();
   }
 }

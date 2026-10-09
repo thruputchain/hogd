@@ -54,9 +54,9 @@ TEST_F(AuthServerTest, BasicLookup)
   BlockHeight height = mock_db().get_current_height();
   ASSERT_EQ(height, 2);
 
-  auth_server().register_auth_data_updates(height,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(height), .height = height},
+      mock_db().get_key_changes_at_height(1))();
 
   auto result = auth_server().lookup_auth_data(height, address)();
   ASSERT_TRUE(result.has_value());
@@ -89,9 +89,13 @@ TEST_F(AuthServerTest, ChunkedKeyChangesApplyOnceTheRunIsComplete)
   AuthDBRpc rpc;
   rpc.set_auth_server(auth_server());
   // The empty second chunk arrives first; the run completes on the first.
-  rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{
-      .height = height, .chunk_index = 1, .chunk_count = 2, .changes = {}})();
-  rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{.height = height,
+  rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{.block_id = 202,
+                                                      .height = height,
+                                                      .chunk_index = 1,
+                                                      .chunk_count = 2,
+                                                      .changes = {}})();
+  rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{.block_id = 202,
+                                                      .height = height,
                                                       .chunk_index = 0,
                                                       .chunk_count = 2,
                                                       .changes = changes})();
@@ -103,6 +107,8 @@ TEST_F(AuthServerTest, ChunkedKeyChangesApplyOnceTheRunIsComplete)
   ASSERT_TRUE(result.value()->second.has_value());
   EXPECT_NE(result.value()->second->public_keys[2], nullptr);
   EXPECT_EQ(result.value()->second->public_keys[1], nullptr);
+  EXPECT_EQ(auth_server().open_block(202, 203), RPCError::kRPCNone);
+  EXPECT_EQ(auth_server().abandon_block(203)(), RPCError::kRPCNone);
 }
 
 // Test lookup of non-existent auth data
@@ -113,9 +119,9 @@ TEST_F(AuthServerTest, LookupNonExistent)
   mock_db().increment_height(); // height 1
   mock_db().increment_height(); // height 2
   // initialize the auth server at height 2
-  auth_server().register_auth_data_updates(2,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+      mock_db().get_key_changes_at_height(1))();
 
   auto result =
       auth_server().lookup_auth_data(mock_db().get_current_height(), address)();
@@ -141,20 +147,21 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
   mock_db().increment_height(); // height 3
 
   // make sure the auth server starts initialized at height 1
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
 
   std::jthread thread([&] {
     auth_server().register_auth_data_updates(
-        3, mock_db().get_key_changes_at_height(3))();
+        DBAuthTip{.block_id = static_cast<BlockID>(3), .height = 3},
+        mock_db().get_key_changes_at_height(3))();
   });
   // let that thread start running for a bit
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  auth_server().register_auth_data_updates(2,
-                                           mock_db().get_key_changes_at_height(
-                                               2))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+      mock_db().get_key_changes_at_height(2))();
 
   thread.join();
 
@@ -179,7 +186,9 @@ TEST_F(AuthServerTest, StaleBlockHeight)
 
   auto key_changes = mock_db().get_key_changes_at_height(1);
   ASSERT_EQ(key_changes.size(), 0);
-  auth_server().register_auth_data_updates(1, key_changes)();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      key_changes)();
 
   auto result = auth_server().lookup_auth_data(1, address)();
 
@@ -206,9 +215,9 @@ TEST_F(AuthServerTest, StaleBlockHeight)
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), AuthErrorCode::kAuthStaleBlockHeight);
 
-  auth_server().register_auth_data_updates(2,
-                                           mock_db().get_key_changes_at_height(
-                                               2))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+      mock_db().get_key_changes_at_height(2))();
 
   // now get the actual data
   result = auth_server().lookup_auth_data(2, address)();
@@ -234,12 +243,12 @@ TEST_F(AuthServerTest, StaleHeightUsesUnchangedCachedAuthData)
   mock_db().set(address, auth_data);
   mock_db().increment_height(); // height 2
 
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
-  auth_server().register_auth_data_updates(2,
-                                           mock_db().get_key_changes_at_height(
-                                               2))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+      mock_db().get_key_changes_at_height(2))();
 
   AuthStatus<AuthCacheEntry> result =
       auth_server().lookup_auth_data(1, address)();
@@ -260,12 +269,12 @@ TEST_F(AuthServerTest, StaleHeightRejectsDeletedCachedAuthData)
   mock_db().delete_address(address);
   mock_db().compute_key_changes_for_current_height();
 
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
-  auth_server().register_auth_data_updates(2,
-                                           mock_db().get_key_changes_at_height(
-                                               2))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+      mock_db().get_key_changes_at_height(2))();
 
   AuthStatus<AuthCacheEntry> result =
       auth_server().lookup_auth_data(1, address)();
@@ -283,12 +292,12 @@ TEST_F(AuthServerTest, StaleHeightRejectsChangedCachedAuthData)
   mock_db().set(address, make_test_auth_data(2));
   mock_db().compute_key_changes_for_current_height();
 
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
-  auth_server().register_auth_data_updates(2,
-                                           mock_db().get_key_changes_at_height(
-                                               2))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+      mock_db().get_key_changes_at_height(2))();
 
   AuthStatus<AuthCacheEntry> result =
       auth_server().lookup_auth_data(1, address)();
@@ -320,22 +329,22 @@ TEST_F(AuthServerTest, QueriesDelayed)
   sequence.wait(false);
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
-  auth_server().register_auth_data_updates(2,
-                                           mock_db().get_key_changes_at_height(
-                                               2))();
-  auth_server().register_auth_data_updates(3,
-                                           mock_db().get_key_changes_at_height(
-                                               3))();
-  auth_server().register_auth_data_updates(4,
-                                           mock_db().get_key_changes_at_height(
-                                               4))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+      mock_db().get_key_changes_at_height(2))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(3), .height = 3},
+      mock_db().get_key_changes_at_height(3))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(4), .height = 4},
+      mock_db().get_key_changes_at_height(4))();
   sequence = true;
-  auth_server().register_auth_data_updates(5,
-                                           mock_db().get_key_changes_at_height(
-                                               5))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(5), .height = 5},
+      mock_db().get_key_changes_at_height(5))();
 
   thread.join();
 }
@@ -355,12 +364,12 @@ TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
   // Unlike QueriesDelayed, start with an auth server that's properly
   // initialized, but just missing recent updates.
 
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
-  auth_server().register_auth_data_updates(2,
-                                           mock_db().get_key_changes_at_height(
-                                               2))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+      mock_db().get_key_changes_at_height(2))();
 
   std::atomic<bool> sequence = false;
 
@@ -374,22 +383,22 @@ TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
   sequence.wait(false);
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  auth_server().register_auth_data_updates(3,
-                                           mock_db().get_key_changes_at_height(
-                                               3))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(3), .height = 3},
+      mock_db().get_key_changes_at_height(3))();
   // make sure that the waiting thread wakes up and then goes back to sleep
   // TODO(geoff): I don't have a good way to test whether the thread actually
   // wakes and goes back to sleep.  That's not required for correct external
   // behavior of the auth server, but I do want to test the logic for when
   // threads decide to stop waiting.
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  auth_server().register_auth_data_updates(4,
-                                           mock_db().get_key_changes_at_height(
-                                               4))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(4), .height = 4},
+      mock_db().get_key_changes_at_height(4))();
   sequence = true;
-  auth_server().register_auth_data_updates(5,
-                                           mock_db().get_key_changes_at_height(
-                                               5))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(5), .height = 5},
+      mock_db().get_key_changes_at_height(5))();
 
   thread.join();
 }
@@ -408,9 +417,9 @@ TEST_F(AuthServerTest, InitializeFromLateBlock)
   mock_db().delete_address(address);
   mock_db().compute_key_changes_for_current_height();
 
-  auth_server().register_auth_data_updates(3,
-                                           mock_db().get_key_changes_at_height(
-                                               3))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(3), .height = 3},
+      mock_db().get_key_changes_at_height(3))();
 
   auto result = auth_server().lookup_auth_data(3, address)();
   ASSERT_TRUE(result.has_value());
@@ -419,9 +428,9 @@ TEST_F(AuthServerTest, InitializeFromLateBlock)
   ASSERT_FALSE(result.value()->second.has_value());
 
   // stale block updates don't break things
-  auth_server().register_auth_data_updates(1,
-                                           mock_db().get_key_changes_at_height(
-                                               1))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      mock_db().get_key_changes_at_height(1))();
 
   result = auth_server().lookup_auth_data(3, address)();
   ASSERT_TRUE(result.has_value());
@@ -461,7 +470,8 @@ public:
     release_intro_.wait(false);
 
     DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
-    ret.current_height() = return_height_;
+    ret.tip() = DBAuthTip{.block_id = static_cast<BlockID>(return_height_),
+                          .height = return_height_};
     co_return ret;
   }
 
@@ -508,10 +518,15 @@ TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
   KeyChangeBatch key_changes;
   key_changes.push_back(KeyChange{.address = make_test_address(99),
                                   .auth_data = std::move(auth_data_ptr)});
-  race_auth_server.register_auth_data_updates(1, std::move(key_changes))();
+  race_auth_server.register_auth_data_updates(DBAuthTip{.block_id = 101,
+                                                        .height = 1},
+                                              std::move(key_changes))();
 
   db_server->impl()->release_intro(1);
   subscribe_thread.join();
+  EXPECT_EQ(race_auth_server.open_block(101, 102), RPCError::kRPCNone);
+  EXPECT_EQ(race_auth_server.open_block(1, 103), RPCError::kRPCBadBlockID);
+  EXPECT_EQ(race_auth_server.abandon_block(102)(), RPCError::kRPCNone);
 
   // The racing update should have won initialization — verify by checking
   // that a lookup at height 1 succeeds (futex is at height 1).
@@ -558,7 +573,8 @@ public:
   x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard /*card*/) const
   {
     DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
-    ret.current_height() = intro_height_;
+    ret.tip() = DBAuthTip{.block_id = static_cast<BlockID>(intro_height_),
+                          .height = intro_height_};
     co_return ret;
   }
 
@@ -640,9 +656,9 @@ TEST_F(AuthServerTest, CacheEntryLifetimeSurvivesReplacement)
 
   mock_db().set(address, old_auth_data);
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   auto lookup = auth_server().lookup_auth_data(0, address)();
   ASSERT_TRUE(lookup.has_value());
@@ -657,7 +673,9 @@ TEST_F(AuthServerTest, CacheEntryLifetimeSurvivesReplacement)
   KeyChangeBatch key_changes;
   key_changes.push_back(
       KeyChange{.address = address, .auth_data = std::move(updated_auth_data)});
-  auth_server().register_auth_data_updates(1, std::move(key_changes))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+      std::move(key_changes))();
 
   EXPECT_EQ(raw_ptr->last_written_height, 11);
   EXPECT_EQ(retained_entry->second.value(), old_auth_data);
@@ -668,14 +686,15 @@ TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
   const ContractAddress address = make_test_address(50);
   mock_db().set(address, make_test_auth_data(1));
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   SignedTransaction stx{};
   stx.tx.invocation.invoked_address = address;
 
-  auto results = auth_server().verify_transactions(0, std::span(&stx, 1))();
+  auto results =
+      auth_server().verify_transactions_at_height(0, std::span(&stx, 1))();
   ASSERT_EQ(results.size(), 1);
 }
 
@@ -696,9 +715,9 @@ TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
   auth_data.required_weight = 1;
   mock_db().set(address, auth_data);
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   auto sign = [&](const Transaction &tx) {
     SignedTransaction stx{.tx = tx};
@@ -731,15 +750,16 @@ TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
   ASSERT_GT(x23::xdr_size(over_cap), kMaxBytesSignedTransaction);
 
   std::array<SignedTransaction, 2> stxs{at_cap, over_cap};
-  auto results = auth_server().verify_transactions(0, std::span(stxs))();
+  auto results =
+      auth_server().verify_transactions_at_height(0, std::span(stxs))();
   ASSERT_EQ(results.size(), 2);
   EXPECT_EQ(results[0], AuthErrorCode::kAuthSuccess);
   EXPECT_EQ(results[1], AuthErrorCode::kAuthFailed);
 
   // The batch path applies the same gate.
-  EXPECT_EQ(auth_server().verify_batch(0, {at_cap})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {at_cap})(),
             AuthErrorCode::kAuthSuccess);
-  EXPECT_EQ(auth_server().verify_batch(0, {at_cap, over_cap})(),
+  EXPECT_EQ(auth_server().verify_batch_at_height(0, {at_cap, over_cap})(),
             AuthErrorCode::kAuthFailed);
 }
 
@@ -748,9 +768,9 @@ TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)
   const ContractAddress address = make_test_address(50);
   mock_db().set(address, make_test_auth_data(1));
   mock_db().compute_key_changes_for_current_height();
-  auth_server().register_auth_data_updates(0,
-                                           mock_db().get_key_changes_at_height(
-                                               0))();
+  auth_server().register_auth_data_updates(
+      DBAuthTip{.block_id = static_cast<BlockID>(0), .height = 0},
+      mock_db().get_key_changes_at_height(0))();
 
   SignedTransaction stx{};
   stx.tx.invocation.invoked_address = address;
@@ -765,14 +785,16 @@ TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)
       KeyChangeBatch changes;
       changes.push_back(
           KeyChange{.address = address, .auth_data = std::move(ptr)});
-      auth_server().register_auth_data_updates(h, std::move(changes))();
+      auth_server().register_auth_data_updates(
+          DBAuthTip{.block_id = static_cast<BlockID>(h), .height = h},
+          std::move(changes))();
       current_h.store(h, std::memory_order_release);
     }
   });
 
   for (int i = 0; i < 1000; i++) {
     BlockHeight h = current_h.load(std::memory_order_acquire);
-    auth_server().verify_transactions(h, std::span(&stx, 1))();
+    auth_server().verify_transactions_at_height(h, std::span(&stx, 1))();
   }
   done = true;
 }

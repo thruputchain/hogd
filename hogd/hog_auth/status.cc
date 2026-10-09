@@ -16,6 +16,8 @@ AuthErrorCategory::message(int code) const
     return "kAuthFailed";
   case AuthErrorCode::kAuthStaleBlockHeight:
     return "kAuthStaleBlockHeight";
+  case AuthErrorCode::kAuthBadBlockID:
+    return "kAuthBadBlockID";
   case AuthErrorCode::kAuthInternal:
     return "kAuthInternal";
     break;

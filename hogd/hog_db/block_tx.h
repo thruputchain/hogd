@@ -20,6 +20,7 @@
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
@@ -57,7 +58,8 @@ public:
 
   // commit applies the staged ChangeSet to the database.
   // Requires close() to have been called first.
-  HogDbStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
+  HogDbStatus<void> commit(BlockID block_id,
+                           WorkerPool &pool = WorkerPool::get_default_pool());
 
   // lock reserves the right to apply change to an item.
   // Lock returns the amount of storage tokens at least as large as what will

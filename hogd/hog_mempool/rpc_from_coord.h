@@ -451,6 +451,9 @@ private:
   };
 
   // Returns with [commit_guard] held, so results stay valid through admission.
+  x23::Async<AuthErrorCodeBatch> verify_auth(DBAuthTip parent,
+                                             const SignedTransactionBatch &txs);
+
   x23::Async<AuthErrorCodeBatch>
   verify_submission(const SignedTransactionBatch &txs,
                     x23::CoroGuard &commit_guard);

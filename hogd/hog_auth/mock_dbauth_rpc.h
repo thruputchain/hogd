@@ -108,7 +108,7 @@ public:
   static x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
     DBAuthIntroResult ret(DBAuthIntroOutcome::kIntroSuccess);
-    ret.current_height() = -1;
+    ret.tip() = DBAuthTip{.block_id = 0, .height = -1};
     co_return ret;
   }
 

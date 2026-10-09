@@ -39,8 +39,7 @@ public:
       std::shared_ptr<sched_db_client_t> sched_db_client,
       size_t max_deltas_per_chunk = kMaxDeltasPerChunk);
 
-  void submit_job(BlockHeight block_height,
-                  PerThread<KeyChangeBatch> key_changes,
+  void submit_job(DBAuthTip tip, PerThread<KeyChangeBatch> key_changes,
                   PerThread<std::vector<Delta>> balance_deltas);
 
   ~BackgroundCommitWorker()
@@ -53,7 +52,7 @@ private:
   struct Job {
     PerThread<KeyChangeBatch> key_change_batch_;
     PerThread<std::vector<Delta>> balance_deltas_;
-    BlockHeight block_height_;
+    DBAuthTip tip_;
   };
 
   void commit_worker(std::stop_token &stoken);

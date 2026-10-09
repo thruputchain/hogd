@@ -368,7 +368,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
   auto hash_result = block_tx.get().close(base_hash);
   ASSERT_TRUE(hash_result.has_value());
   StorageLongHash incremental_hash = *hash_result;
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
   EXPECT_EQ(incremental_hash, db_.compute_full_db_hash())
       << "both entries are hashed consistently; nothing diverges";
 
@@ -422,7 +423,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto block_result = db_.read_retrocausal_queue_block(rcq_key, 1);
   ASSERT_TRUE(block_result.has_value());
@@ -468,7 +470,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto committed = db_.read_nnint128(data_key);
   ASSERT_TRUE(committed.has_value());
@@ -513,7 +516,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto committed = db_.read_nnint128(data_key);
   ASSERT_TRUE(committed.has_value());
@@ -558,7 +562,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto committed = db_.read_nnint128(data_key);
   ASSERT_TRUE(committed.has_value());
@@ -616,7 +621,8 @@ TEST_F(PermanentExclusiveNarrowWaiDbTest,
   }
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto committed = db_.read_nnint128(data_key);
   ASSERT_TRUE(committed.has_value());

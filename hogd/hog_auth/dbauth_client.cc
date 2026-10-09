@@ -31,12 +31,12 @@ DBAuthClient::lookup_auth_data(BlockHeight height, ContractAddress address)
   co_return AuthError(AuthErrorCode::kAuthInternal);
 }
 
-x23::Async<BlockHeight>
+x23::Async<DBAuthTip>
 DBAuthClient::subscribe_to_auth_data_changes(AuthCard const &card)
 {
   DBAuthIntroResult res = co_await client_.dbauth_intro(card);
   CHECK_EQ(res.outcome(), DBAuthIntroOutcome::kIntroSuccess);
-  co_return res.current_height();
+  co_return res.tip();
 }
 
 } // namespace hogd

@@ -180,8 +180,9 @@ public:
                                               KeyChangeBatch key_changes)
   {
     CHECK_PTR(auth_server_.get());
-    return auth_server_->register_auth_data_updates(height,
-                                                    std::move(key_changes));
+    return auth_server_->register_auth_data_updates(
+        DBAuthTip{.block_id = ctx_->get_tip().id, .height = height},
+        std::move(key_changes));
   }
 
   void set_dbtip(const DbTip &db_tip)

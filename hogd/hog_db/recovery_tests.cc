@@ -263,7 +263,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     auto hash_result = btx->get().close(ctx.get_tip().storage_long_hash);
     ASSERT_TRUE(hash_result.has_value());
     db_hash = *hash_result;
-    ASSERT_TRUE((btx->get()).commit().has_value());
+    ASSERT_TRUE((btx->get()).commit(1).has_value());
     ConsensusValue value{};
     value.proposal_header.block_height = 1;
     ASSERT_TRUE(ctx.update_dbtip(1, value, db_hash).has_value());
@@ -389,7 +389,9 @@ insert_into_recovered_rcq(uint64_t live_entries)
   EXPECT_TRUE(invoke_tx.commit());
 
   EXPECT_TRUE(block_tx.get().close(StorageLongHash{}).has_value());
-  EXPECT_TRUE(block_tx.get().commit().has_value());
+  EXPECT_TRUE(block_tx.get()
+                  .commit(static_cast<BlockID>(block_tx.get().get_height()))
+                  .has_value());
 
   auto updated = dao.read_retrocausal_queue_metadata(rcq_key);
   EXPECT_TRUE(updated.has_value());

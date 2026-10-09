@@ -35,7 +35,7 @@ public:
   x23::Async<AuthStatus<std::optional<AddressAuthData>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
-  x23::Async<BlockHeight> subscribe_to_auth_data_changes(AuthCard const &card);
+  x23::Async<DBAuthTip> subscribe_to_auth_data_changes(AuthCard const &card);
 
 private:
   // Sharded DB is not yet implemented.

@@ -267,7 +267,8 @@ TEST(HogDbGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
 
     auto db_hash = block_tx.get().close(base_hash);
     ASSERT_TRUE(db_hash.has_value());
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   HogDbStatus<int128_t> dao_value = dao.read_nnint128(item_key);

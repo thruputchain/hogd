@@ -2,9 +2,11 @@
 
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 
 #include "address_auth.hh"
@@ -43,15 +45,28 @@ public:
 
   NetworkHash const &network_hash() const { return network_hash_; }
 
+  RPCError open_block(BlockID parent_id, BlockID block_id);
+  x23::Async<RPCError> close_block(BlockID block_id);
+  x23::Async<RPCError> commit_block(BlockID block_id);
+  x23::Async<RPCError> abandon_block(BlockID block_id);
+
+  x23::Async<AuthErrorCodeBatch>
+  verify_transactions(BlockID block_id, std::span<const SignedTransaction> txs,
+                      size_t max_parallelism = 1);
+  x23::Async<AuthErrorCode> verify_batch(BlockID block_id,
+                                         SignedTransactionBatch txs);
+
+  // The single-version lookup backend, also used by direct verifier tests.
+  // RPC callers must go through a block context above.
   // The height supplied here should be the height returned by
   // DB::get_dbtip().height. That height is the count of the number of blocks
   // that have been committed.
   x23::Async<AuthErrorCodeBatch>
-  verify_transactions(BlockHeight height,
-                      std::span<const SignedTransaction> txs,
-                      size_t max_parallelism = 1);
-  x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
-                                         SignedTransactionBatch txs);
+  verify_transactions_at_height(BlockHeight height,
+                                std::span<const SignedTransaction> txs,
+                                size_t max_parallelism = 1);
+  x23::Async<AuthErrorCode> verify_batch_at_height(BlockHeight height,
+                                                   SignedTransactionBatch txs);
 
   x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
@@ -65,7 +80,7 @@ public:
   // blocks of updates concurrently, we might process the second before the
   // first.  In this case, the first will be dropped.
   x23::Async<void>
-  register_auth_data_updates(BlockHeight height,
+  register_auth_data_updates(DBAuthTip tip,
                              ChunkedVector<KeyChangeBatch> key_changes);
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card);
@@ -77,6 +92,26 @@ public:
   }
 
 private:
+  enum class BlockState { kOpen, kClosing, kClosed, kCommitting, kAbandoned };
+  struct BlockContext {
+    explicit BlockContext(DBAuthTip parent_tip) : parent(parent_tip) {}
+    DBAuthTip parent;
+    BlockState state = BlockState::kOpen; // guarded by blocks_lock_
+    x23::CoroFutex<size_t> active{0};
+    // Pending, selected by DB, or rejected by a different committed block.
+    x23::CoroFutex<int> decision{0};
+  };
+
+  AuthStatus<std::shared_ptr<BlockContext>>
+  begin_verification(BlockID block_id);
+  static void finish_verification(BlockContext &context);
+  bool parent_is_current(const BlockContext &context);
+  void publish_tip(DBAuthTip tip);
+
+  std::mutex blocks_lock_;
+  std::unordered_map<BlockID, std::shared_ptr<BlockContext>> blocks_;
+  std::optional<DBAuthTip> committed_tip_;
+
   x23::Async<AuthStatus<AuthCacheEntry>>
   populate_auth_data(BlockHeight height, ContractAddress const &address);
 
@@ -122,13 +157,14 @@ public:
     CHECK_PTR(auth_server_);
 
     std::optional<KeyChangeRunAssembler::Run> run =
-        run_assembler_.push(chunk.height,
+        run_assembler_.push({chunk.height, chunk.block_id},
                             ChunkPosition{.index = chunk.chunk_index,
                                           .count = chunk.chunk_count},
                             std::move(chunk.changes));
     if (run.has_value()) {
-      co_await auth_server_->register_auth_data_updates(run->key,
-                                                        std::move(run->parts));
+      co_await auth_server_->register_auth_data_updates(
+          DBAuthTip{.block_id = run->key.second, .height = run->key.first},
+          std::move(run->parts));
     }
   }
 
@@ -140,7 +176,8 @@ public:
   }
 
 private:
-  using KeyChangeRunAssembler = ChunkRunAssembler<BlockHeight, KeyChangeBatch>;
+  using KeyChangeRunAssembler =
+      ChunkRunAssembler<std::pair<BlockHeight, BlockID>, KeyChangeBatch>;
 
   AuthServer *auth_server_ = nullptr;
   KeyChangeRunAssembler run_assembler_;
@@ -160,9 +197,33 @@ public:
     auth_server_ = &auth_server;
   }
 
+  x23::Async<RPCError> authmempool_open_block(BlockID parent_id,
+                                              BlockID block_id)
+  {
+    CHECK_PTR(auth_server_);
+    co_return auth_server_->open_block(parent_id, block_id);
+  }
+
+  x23::Async<RPCError> authmempool_close_block(BlockID block_id)
+  {
+    CHECK_PTR(auth_server_);
+    return auth_server_->close_block(block_id);
+  }
+
+  x23::Async<RPCError> authmempool_commit_block(BlockID block_id)
+  {
+    CHECK_PTR(auth_server_);
+    return auth_server_->commit_block(block_id);
+  }
+
+  x23::Async<RPCError> authmempool_abandon_block(BlockID block_id)
+  {
+    CHECK_PTR(auth_server_);
+    return auth_server_->abandon_block(block_id);
+  }
+
   x23::Async<AuthErrorCodeBatch>
-  authmempool_verify_transactions(BlockHeight height,
-                                  SignedTransactionBatch txs)
+  authmempool_verify_transactions(BlockID block_id, SignedTransactionBatch txs)
   {
     CHECK_PTR(auth_server_);
 
@@ -170,16 +231,16 @@ public:
     // Because auth_server_->verify_transactions does not hold onto the txs
     // input after verify_transactions returns, it is safe to pass a span to it.
     co_return co_await auth_server_->verify_transactions(
-        height, std::span<const SignedTransaction>(txs.begin(), txs.end()),
+        block_id, std::span<const SignedTransaction>(txs.begin(), txs.end()),
         /*max_parallelism=*/available_parallelism());
   }
 
-  x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
+  x23::Async<AuthErrorCode> authmempool_verify_batch(BlockID block_id,
                                                      SignedTransactionBatch txs)
   {
     CHECK_PTR(auth_server_);
 
-    return auth_server_->verify_batch(height, std::move(txs));
+    return auth_server_->verify_batch(block_id, std::move(txs));
   }
 
 private:
