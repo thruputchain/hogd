@@ -324,8 +324,8 @@ private:
   x23::Async<bool> account_is_ready(const ContractAddress &account,
                                     bool remove_expired_txs);
 
-  x23::Async<bool> add_txs_helper(const SignedTransaction &tx,
-                                  const TransactionHash &tx_hash);
+  bool add_txs_helper(const SignedTransaction &tx,
+                      const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
   x23::Async<void> cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,

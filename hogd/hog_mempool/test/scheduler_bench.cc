@@ -201,6 +201,32 @@ BENCHMARK(bm_scheduler_record_transaction_outcomes)
     ->Unit(benchmark::kMillisecond);
 
 void
+bm_scheduler_expire_transaction_outcomes(benchmark::State &state)
+{
+  Scheduler scheduler(/*current_block=*/0, nullptr);
+  std::vector<TransactionHash> hashes(state.range(0));
+  for (size_t i = 0; i < hashes.size(); ++i) {
+    std::memcpy(hashes[i].data(), &i, sizeof(i));
+  }
+  for (auto _ : state) {
+    scheduler.record_committed_transaction_outcomes(
+        x23::span<const TransactionHash>(hashes), scheduler.current_block())();
+    scheduler.set_current_block(scheduler.current_block() +
+                                Scheduler::kTransactionOutcomeBlockLifetime -
+                                1);
+    ElapsedTimer timer;
+    scheduler.increment_current_block()();
+    state.SetIterationTime(timer.elapsed());
+  }
+  state.SetItemsProcessed(state.iterations() * hashes.size());
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_scheduler_expire_transaction_outcomes)
+    ->Arg(1'000'000)
+    ->UseManualTime()
+    ->Unit(benchmark::kMillisecond);
+
+void
 bm_scheduler_admit_large_batch(benchmark::State &state)
 {
   MempoolTestInfra server;

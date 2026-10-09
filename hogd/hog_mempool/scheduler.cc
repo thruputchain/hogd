@@ -431,10 +431,30 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
 x23::Async<void>
 Scheduler::prune_transaction_outcomes()
 {
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(kTransactionOutcomeShards);
   for (auto &shard : transaction_outcome_shards_) {
-    x23::CoroGuard cg;
-    co_await cg(shard.lock);
-    prune_transaction_outcomes_locked(shard, current_block());
+    handles.push_back([](Scheduler &scheduler,
+                         TransactionOutcomeShard &shard) -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
+      x23::CoroGuard cg;
+      co_await cg(shard.lock);
+      prune_transaction_outcomes_locked(shard, scheduler.current_block());
+    }(*this, shard));
+  }
+  // Drain all workers even if one fails: they still reference this scheduler.
+  std::exception_ptr first_exception;
+  for (auto &handle : handles) {
+    try {
+      co_await handle;
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
+  }
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
   }
 }
 
@@ -653,19 +673,10 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
-x23::Async<bool>
+bool
 Scheduler::add_txs_helper(const SignedTransaction &tx,
                           const TransactionHash &tx_hash)
 {
-  // If a duplicate of [tx] has already been submitted and failed, its failed
-  // outcome is currently being stored. Once [tx] is enqueued, the "outcome"
-  // should be updated to a pending status. Thus, to ensure this pending outcome
-  // is reported properly, we clear any existing failed outcome for [tx]. Note
-  // that once a tx is committed, its committed outcome is never overwritten by
-  // a duplicate tx's outcome, which is why only a failed outcome is
-  // overwritten.
-  co_await clear_transaction_outcome_if_not_already_committed(tx_hash);
-
   const ContractAddress &account = tx.tx.invocation.invoked_address;
   const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
@@ -690,7 +701,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // perspective of anyone accessing the tx in [txs_].
     tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   }
-  co_return account_state->txs.insert({key, *tx_ptr}).second;
+  return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
 bool
@@ -762,7 +773,16 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
           continue;
         }
         const TransactionHash &tx_hash = tx_hashes[tx_idx];
-        if (co_await scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
+        // Only failed outcomes need clearing before resubmission. Check
+        // before entering a coroutine so the common success-only path does
+        // not allocate coroutine frames for each incoming transaction.
+        const size_t shard_index = transaction_outcome_shard_index(tx_hash);
+        const auto &shard = scheduler.transaction_outcome_shards_[shard_index];
+        if (shard.failed_outcomes.load(std::memory_order_acquire) != 0) {
+          co_await scheduler.clear_transaction_outcome_if_not_already_committed(
+              tx_hash);
+        }
+        if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
           num_added++;
         }
       }
