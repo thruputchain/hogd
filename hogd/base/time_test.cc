@@ -12,7 +12,7 @@ TEST(TimeTest, UtcTimeFields)
   using namespace std::chrono;
   const system_clock::time_point tp = sys_days{year{2026} / 10 / 9} +
                                       hours{19} + minutes{4} + seconds{9} +
-                                      nanoseconds{46318862};
+                                      microseconds{46318};
   const UtcTime utc(tp);
   EXPECT_EQ(utc.year, 2026);
   EXPECT_EQ(utc.month, 10U);
@@ -20,6 +20,7 @@ TEST(TimeTest, UtcTimeFields)
   EXPECT_EQ(utc.hours, 19);
   EXPECT_EQ(utc.minutes, 4);
   EXPECT_EQ(utc.seconds, 9);
+  EXPECT_EQ(system_clock::duration{utc.subseconds}, microseconds{46318});
 }
 
 TEST(TimeTest, UtcTimeIso8601MatchesChronoFormat)
