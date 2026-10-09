@@ -10,6 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"

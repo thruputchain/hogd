@@ -4119,7 +4119,7 @@ TEST_F(HogDbTest, AuthDataNarrowReturnsStaleBlockOnBaseMismatch)
     ASSERT_TRUE(itx_b.sync_balance_locks());
     ASSERT_TRUE(itx_b.commit());
     ASSERT_TRUE(block_tx_b.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx_b.get().commit());
+    ASSERT_TRUE(block_tx_b.get().commit(2));
   }
 
   AuthDataChangeArgs second_args{};
@@ -4805,7 +4805,7 @@ TEST_F(HogDbTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
     ASSERT_TRUE(itx_b.commit());
   }
   ASSERT_TRUE(block_b.get().close_skip_hash_for_testing());
-  ASSERT_TRUE(block_b.get().commit());
+  ASSERT_TRUE(block_b.get().commit(2));
 
   // Simulate what RPCContext::invalidate_siblings does when B commits.
   block_a.get().invalidate();
@@ -4904,7 +4904,7 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlock)
   ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
   stale_block_tx.get().invalidate();
   ASSERT_TRUE(sibling_block_tx.get().commit(
-      static_cast<BlockID>(block_tx.get().get_height())));
+      static_cast<BlockID>(sibling_block_tx.get().get_height())));
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(trigger_key));
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(control_key));
 
@@ -5060,7 +5060,7 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
   stale_block_tx.get().invalidate();
   ASSERT_TRUE(sibling_block_tx.get().commit(
-      static_cast<BlockID>(block_tx.get().get_height())));
+      static_cast<BlockID>(sibling_block_tx.get().get_height())));
   ASSERT_FALSE(db_.read_retrocausal_queue_block(queue_key, 1));
 
   // Roll back the savepoint. The restore re-derives the depth-0 consume cost by
@@ -5179,7 +5179,7 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
   ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
   stale_block_tx.get().invalidate();
   ASSERT_TRUE(sibling_block_tx.get().commit(
-      static_cast<BlockID>(block_tx.get().get_height())));
+      static_cast<BlockID>(sibling_block_tx.get().get_height())));
   ASSERT_TRUE(db_.read_retrocausal_queue_metadata(key));
 
   // Before the fix, the stale exclusive commit computed a committed cost

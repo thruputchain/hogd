@@ -18,6 +18,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "hogd/hog_db/background_commit_worker.h"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/rpc_common.h"

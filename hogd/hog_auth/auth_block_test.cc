@@ -2,12 +2,24 @@
 
 #include <atomic>
 #include <format>
+#include <span>
 #include <utility>
 
+#include "auth_card.hh"
+#include "auth_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
+#include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/auth_server_test_framework.h"
+#include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_auth/mock_dbauth_rpc.h"
+#include "rpc_types.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 namespace {
@@ -72,7 +84,8 @@ TEST_F(AuthBlockTest, LateCommitAndStaleViews)
 
 class BlockingLookupDBAuthRpc : public MockDBAuthRpc {
 public:
-  x23::Async<DBAuthResult> authdb_get_auth_data(BlockHeight, ContractAddress)
+  x23::Async<DBAuthResult> authdb_get_auth_data(BlockHeight /*height*/,
+                                                ContractAddress /*address*/)
   {
     entered.store(true);
     entered.notify_all();
@@ -112,11 +125,12 @@ TEST_F(AuthBlockTest, CloseAndAbandonDrainAdmittedVerification)
 class BlockingMempoolAuthRpc {
 public:
   using rpc_service = MempoolAuth1;
-  static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard)
+  static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
   {
     co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
   }
-  x23::Async<void> mempoolauth_auth_data_changed(BlockHeight, KeyChangeBatch)
+  x23::Async<void> mempoolauth_auth_data_changed(BlockHeight /*height*/,
+                                                 KeyChangeBatch /*changes*/)
   {
     entered.store(true);
     entered.notify_all();

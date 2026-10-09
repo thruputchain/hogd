@@ -20,6 +20,7 @@
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/vec.h"
 

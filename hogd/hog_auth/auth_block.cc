@@ -1,13 +1,20 @@
 #include "hogd/hog_auth/auth_server.h"
 
 #include <algorithm>
-#include <limits>
+#include <cstddef>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <utility>
 
+#include "auth_rpc.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/hog_auth/status.h"
+#include "rpc_types.hh"
+#include "transaction.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
