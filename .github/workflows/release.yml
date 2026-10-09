@@ -231,6 +231,8 @@ jobs:
             -x "-DBUILD_ARCHITECTURE=znver5" \
             -x "-DRUST_BUILD_CPU=znver5" \
             hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
+          binaries=(hog_db/hog-db hog_exec/hog-exec hog_mempool/hog-mempool hog_auth/hog-auth hog_event/hog-event hog_indexer/hog-indexer devnode/hog-devnode devnode/hog-hosted-bootstrap)
+          ./scripts/check-max-glibcxx.sh 3.4.33 "${binaries[@]/#/build/znver5/hogd/}"
           ./scripts/package_hogd_validator_release.sh \
             build/znver5 artifacts release x86_64 znver5
 
