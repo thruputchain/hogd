@@ -5,7 +5,6 @@
 #include <iterator>
 #include <limits>
 #include <map>
-#include <numeric>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -49,10 +48,8 @@ InvocationFrame::InvocationFrame(
     event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
     auth_tokens_(std::move(forwarded_auth_tokens)),
-    parent_supplied_auth_token_ids_(auth_tokens_.size())
-{
-  std::ranges::iota(parent_supplied_auth_token_ids_, uint32_t{0});
-}
+    forwarded_auth_token_count_(static_cast<uint32_t>(auth_tokens_.size()))
+{}
 
 void
 InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)

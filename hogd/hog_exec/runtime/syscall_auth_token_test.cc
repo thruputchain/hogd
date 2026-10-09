@@ -3646,6 +3646,105 @@ TEST_F(SyscallAuthTokenTest,
                                            x23::serialize(1U)}));
 }
 
+// GetCalldata writes the frame's forwarded ids, 0..N-1, as far as the buffer
+// allows, leaves the rest of the buffer untouched, and reports the full length.
+TEST_F(SyscallAuthTokenTest, GetCalldataTruncatesTheAuthTokenList)
+{
+  constexpr ContractAddress kCallerAddress = make_contract_address(0);
+  constexpr ContractAddress kChildAddress = make_contract_address(1);
+  constexpr uint32_t kTokenCount = 3;
+  constexpr uint32_t kUnwritten = 0xdeadbeef;
+
+  std::vector<std::vector<uint32_t>> lists;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        for (size_t buffer_ids : {2U, 3U, 4U}) {
+          std::vector<uint32_t> list(buffer_ids, kUnwritten);
+          std::array<std::byte, 16> calldata_buf{};
+          RuntimeMemoryLength written_len = 0;
+          RuntimeMemoryLength auth_token_written_len = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kGetCalldata>(
+              std::span<std::byte>{calldata_buf}, written_len,
+              std::as_writable_bytes(std::span(list)), auth_token_written_len);
+          EXPECT_TRUE(res.has_value());
+          EXPECT_EQ(res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+          EXPECT_EQ(auth_token_written_len, kTokenCount * sizeof(uint32_t));
+          lists.push_back(std::move(list));
+        }
+        co_return InvokeStatus<void>{};
+      });
+  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        AuthTokenNode root_node{.consumer_address = kChildAddress,
+                                .payload = x23::serialize(42U),
+                                .child_nodes = {}};
+        auto serialized = x23::serialize(root_node);
+        std::array<uint32_t, kTokenCount> minted{};
+        for (auto &token_id : minted) {
+          auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+              BlockHeight{1000},
+              std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                             serialized.data()),
+                                         serialized.size()},
+              token_id);
+          EXPECT_TRUE(mint_res.has_value());
+          EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        }
+
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kChildAddress, std::span<const std::byte>{},
+            std::span<uint32_t const>{minted}, inputs, CopyableInvokeOutputs{});
+        EXPECT_TRUE(invoke_res.has_value());
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(child_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(0);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
+  auto child_xdr = make_native_contract(1);
+  write_contract(child_xdr);
+  write_deployment(kChildAddress, child_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kCallerAddress,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+
+  EXPECT_EQ(lists, (std::vector<std::vector<uint32_t>>{{0, 1},
+                                                       {0, 1, 2},
+                                                       {0, 1, 2, kUnwritten}}));
+}
+
 // Plain-invoke twin of ReadOnlyInvokeDropsUnreturnedForwardedAuthTokens: a
 // forwarded token the child neither consumes nor returns leaves the caller
 // when the child commits.

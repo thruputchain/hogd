@@ -250,10 +250,11 @@ public:
     }
   }
 
-  // This frame's ids for the tokens its parent forwarded: 0..N-1.
-  std::span<const uint32_t> get_parent_supplied_auth_token_ids() const
+  // The number of tokens this frame's parent forwarded to it, which are its
+  // ids 0..N-1.
+  uint32_t forwarded_auth_token_count() const
   {
-    return parent_supplied_auth_token_ids_;
+    return forwarded_auth_token_count_;
   }
 
   HashBuffers hash_buffers_;
@@ -305,7 +306,7 @@ private:
   // (consumed, or forwarded to a child that committed) leaves an empty entry,
   // so ids are never reused.
   std::vector<RegisteredAuthToken> auth_tokens_;
-  std::vector<uint32_t> parent_supplied_auth_token_ids_;
+  uint32_t forwarded_auth_token_count_;
   // This frame's ids for the tokens forwarded to the running child; they leave
   // auth_tokens_ only when that child commits successfully.
   std::vector<uint32_t> child_forwarded_auth_tokens_;
@@ -417,11 +418,11 @@ public:
     return frame_stack_.back().calldata();
   }
 
-  std::span<const uint32_t>
-  get_current_frame_parent_supplied_auth_tokens() const
+  // The active frame's forwarded tokens are its ids 0..N-1.
+  uint32_t get_current_frame_parent_supplied_auth_token_count() const
   {
     assert(!frame_stack_.empty());
-    return frame_stack_.back().get_parent_supplied_auth_token_ids();
+    return frame_stack_.back().forwarded_auth_token_count();
   }
 
   void log_event(TxEmittedEvent event)

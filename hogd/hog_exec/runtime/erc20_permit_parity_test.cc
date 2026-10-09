@@ -5,6 +5,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <string>
@@ -397,11 +398,12 @@ protected:
             relay_method(sc, i),
             [token, step = steps[i]](
                 NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-              auto parent = ctx.handler().get_parent_supplied_auth_tokens();
+              std::vector<uint32_t> parent(
+                  ctx.handler().get_parent_supplied_auth_token_count());
+              std::ranges::iota(parent, uint32_t{0});
               Record record;
-              co_await append_invoke_record(
-                  ctx, token, step.method, step.calldata,
-                  std::vector<uint32_t>(parent.begin(), parent.end()), record);
+              co_await append_invoke_record(ctx, token, step.method,
+                                            step.calldata, parent, record);
               ctx.handler().set_return_buffer(ReturnBuffer(record.begin(),
                                                            record.end()),
                                               false, {});

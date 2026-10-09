@@ -508,9 +508,7 @@ TEST_F(InvocationFrameTest, ForwardedTokensAreTheChildsFirstIds)
   ASSERT_TRUE(
       stack.start_frame(make_test_address(1), Calldata{}, 0, forward({2, 0}))
           .has_value());
-  EXPECT_TRUE(
-      std::ranges::equal(stack.get_current_frame_parent_supplied_auth_tokens(),
-                         std::vector<uint32_t>{0, 1}));
+  EXPECT_EQ(stack.get_current_frame_parent_supplied_auth_token_count(), 2U);
   EXPECT_EQ(node(stack, 0), c);
   EXPECT_EQ(node(stack, 1), a);
   EXPECT_EQ(node(stack, 2), nullptr);
@@ -526,7 +524,7 @@ TEST_F(InvocationFrameTest, ForwardedTokensAreTheChildsFirstIds)
   EXPECT_EQ(node(stack, 0), nullptr);
   EXPECT_EQ(node(stack, 1), b);
   EXPECT_EQ(node(stack, 2), nullptr);
-  EXPECT_TRUE(stack.get_current_frame_parent_supplied_auth_tokens().empty());
+  EXPECT_EQ(stack.get_current_frame_parent_supplied_auth_token_count(), 0U);
 }
 
 // Tokens a child returns take the parent's next ids, in the order the child
