@@ -32,7 +32,7 @@ public:
     if (card.protocol != version::kHogdProtocol()) {
       co_return DBAuthIntroResult(DBAuthIntroOutcome::kIntroFailure);
     }
-    std::optional<BlockHeight> last_published =
+    std::optional<DBAuthTip> last_published =
         co_await ctx_.get_auth_change_subscription_manager()
             .add_full_auth_change_subscriber(std::move(card));
     if (!last_published) {
@@ -44,8 +44,12 @@ public:
     // height's publish (it was dispatched before the insert), reporting the
     // bare committed height would leave its auth server parked on the missing
     // height forever (issue #2814). Covering it makes the missed height stale.
-    ret.current_height() =
-        std::max(get_expected_query_height(), *last_published);
+    const DbTip current = ctx_.get_tip();
+    const DBAuthTip current_tip{.block_id = current.id,
+                                .height =
+                                    current.value.proposal_header.block_height};
+    ret.tip() = current_tip.height >= last_published->height ? current_tip
+                                                             : *last_published;
     co_return ret;
   }
 

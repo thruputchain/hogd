@@ -139,7 +139,8 @@ protected:
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     StorageLongHash incremental_hash = *hash_result;
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
 
     StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash);
@@ -180,7 +181,8 @@ protected:
       return {};
     }
     StorageLongHash incremental_hash = *hash_result;
-    bool committed = static_cast<bool>(block_tx.get().commit());
+    bool committed = static_cast<bool>(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
     EXPECT_TRUE(committed);
     if (!committed) {
       return {};
@@ -677,7 +679,8 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
   ASSERT_TRUE(invoke_tx.commit());
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto res = db_.read_address_balance(addr3);
   ASSERT_TRUE(res);
@@ -853,7 +856,8 @@ TEST_F(HogDbTest, BalanceTransferReducesByCost)
   ASSERT_TRUE(invoke_tx.commit());
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   // Read back the sender's balance
   auto sender_balance = db_.read_address_balance(sender_addr);
@@ -911,7 +915,8 @@ TEST_F(HogDbTest, DuplicateBytestringRefundNearMaxBalanceCommits)
   ASSERT_TRUE(duplicate.commit());
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto balance = db_.read_address_balance(addr);
   ASSERT_TRUE(balance);
@@ -978,7 +983,8 @@ TEST_F(HogDbTest, DuplicateBytestringRefundLeavesAddCapacityForLaterTransfer)
   ASSERT_TRUE(transfer_tx.commit());
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   // Charged for exactly one materialized row, and credited the full transfer.
   auto balance = db_.read_address_balance(addr);
@@ -1025,7 +1031,8 @@ TEST_F(HogDbTest, NewBalanceHogAgeIsAllZeroes)
   ASSERT_TRUE(invoke_tx.commit());
 
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto age = db_.read_address_average_hog_age(recipient_addr);
   ASSERT_TRUE(age);
@@ -1316,7 +1323,8 @@ TEST_F(HogDbTest, TwoTransfersToSameAddressCostOnce)
 
   // Commit the block transaction
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   // Verify sender's balance
   auto sender_balance = db_.read_address_balance(sender_addr);
@@ -1547,7 +1555,8 @@ TEST_F(HogDbTest, DbHashDeltaNNIntLockUsesCanonicalXdrBytes)
   auto hash_result = block_tx.get().close(base_hash);
   ASSERT_TRUE(hash_result.has_value());
   StorageLongHash incremental_hash = *hash_result;
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto final_balance = db_.read_address_balance(contract_addr);
   ASSERT_TRUE(final_balance);
@@ -1600,7 +1609,8 @@ TEST_F(HogDbTest, InvariantsAcceptCanonicalBalanceBytes)
 
   auto hash_result = block_tx.get().close(base_hash);
   ASSERT_TRUE(hash_result.has_value());
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   EXPECT_TRUE(db_.check_invariants());
 }
@@ -1936,7 +1946,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
     ASSERT_TRUE(invoke_tx.commit());
 
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Capture the db hash after normal operations
@@ -2031,7 +2042,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   StorageLongHash db_hash_before_consume = db_.compute_full_db_hash();
@@ -2062,7 +2074,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
       ASSERT_TRUE(r.has_value());
       db_hash_after_consume = *r;
     }
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Verify incremental db hash produced by the block tx matches the db hash
@@ -2121,7 +2134,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   StorageLongHash db_hash_before_delete = db_.compute_full_db_hash();
@@ -2154,7 +2168,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
       ASSERT_TRUE(r.has_value());
       db_hash_after_delete = *r;
     }
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Verify incremental db hash produced by the block tx matches the db hash
@@ -2218,7 +2233,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   StorageLongHash db_hash_before_delete = db_.compute_full_db_hash();
@@ -2244,7 +2260,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
       ASSERT_TRUE(r.has_value());
       db_hash_after_delete = *r;
     }
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Verify incremental db hash produced by the block tx matches the db hash
@@ -2315,7 +2332,8 @@ TEST_F(HogDbTest,
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   StorageLongHash db_hash_before_type_change = db_.compute_full_db_hash();
@@ -2342,7 +2360,8 @@ TEST_F(HogDbTest,
       ASSERT_TRUE(r.has_value());
       db_hash_after_type_change = *r;
     }
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Verify incremental db hash produced by the block tx matches the db hash
@@ -2412,7 +2431,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   StorageLongHash db_hash_before_type_change = db_.compute_full_db_hash();
@@ -2438,7 +2458,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
       ASSERT_TRUE(r.has_value());
       db_hash_after_type_change = *r;
     }
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Verify incremental db hash produced by the block tx matches the db hash
@@ -2522,7 +2543,8 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Fully consume all entries
@@ -2547,7 +2569,8 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Sanity: all blocks and metadata should be gone
@@ -2629,7 +2652,8 @@ TEST_F(HogDbTest, ReplayCacheGCOnlyRunsOnCommittedReplayCacheTouch)
     invoke_tx.abort();
 
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   auto replay_meta_after_abort = db_.read_address_replay_cache_meta(addr);
@@ -2967,7 +2991,8 @@ TEST_F(HogDbTest, AuthDataCreateThenDeleteMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Block 2 on db_: delete the auth data
@@ -2986,7 +3011,8 @@ TEST_F(HogDbTest, AuthDataCreateThenDeleteMatchesEmptyDb)
     ASSERT_TRUE(invoke_tx.sync_balance_locks());
     ASSERT_TRUE(invoke_tx.commit());
     ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // db2 has no auth operations — hashes should match
@@ -3122,7 +3148,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameNNInt128Key)
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     StorageLongHash incremental_hash = *hash_result;
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
 
     StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
@@ -3315,7 +3342,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameRCQ)
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     StorageLongHash incremental_hash = *hash_result;
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
 
     StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
@@ -3408,7 +3436,8 @@ TEST_F(HogDbTest, TwoInvokeTXsSameReplayCache)
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     StorageLongHash incremental_hash = *hash_result;
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
 
     StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
@@ -3479,7 +3508,8 @@ TEST_F(HogDbTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
     StorageLongHash incremental_hash = *hash_result;
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
 
     StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
@@ -3523,7 +3553,8 @@ TEST_F(HogDbTest, AbortedFreshHeightDoesNotPersistEmptyReplayCacheHeight)
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   auto meta = db_.read_address_replay_cache_meta(addr);
@@ -3577,7 +3608,8 @@ TEST_F(HogDbTest, AbortedFreshHeightStaysAbsentInNextBlock)
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   // Block 2 touches the replay cache on the same address for a different
@@ -3637,7 +3669,8 @@ TEST_F(HogDbTest, AbortedOneOfTwoFreshReservationsKeepsFreshHeight)
 
     auto hash_result = block_tx.get().close(base_hash);
     ASSERT_TRUE(hash_result.has_value());
-    ASSERT_TRUE(block_tx.get().commit());
+    ASSERT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
   }
 
   auto meta = db_.read_address_replay_cache_meta(addr);
@@ -3710,7 +3743,8 @@ TEST_F(HogDbTest, AbortedFreshHeightHashEquivalentToCleanBlock)
 
     auto hash_result = block_tx.get().close(base_hash);
     EXPECT_TRUE(hash_result.has_value());
-    EXPECT_TRUE(block_tx.get().commit());
+    EXPECT_TRUE(block_tx.get().commit(
+        static_cast<BlockID>(block_tx.get().get_height())));
 
     return dao.compute_full_db_hash();
   };
@@ -4591,7 +4625,8 @@ TEST_F(HogDbTest, ExclusiveDeployStaysLockedAfterCommitAndPersists)
 
   auto incremental_hash = block_tx.get().close(base_hash);
   ASSERT_TRUE(incremental_hash.has_value());
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 
   auto stored = db_.read_address_metadata(addr);
   ASSERT_TRUE(stored);
@@ -4718,7 +4753,8 @@ TEST_F(HogDbTest, ViewingBlockTXCommitRejectsWrite)
                                  BlockExecutionMode::kBlockExecutionModeViewing,
                                  static_cast<uint32_t>(kMaxSavepointDepth));
 
-  auto result = block_tx.get().commit();
+  auto result =
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height()));
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code(), HogDbCode::kInvalidExecutorBehavior);
 }
@@ -4867,7 +4903,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlock)
 
   ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
   stale_block_tx.get().invalidate();
-  ASSERT_TRUE(sibling_block_tx.get().commit());
+  ASSERT_TRUE(sibling_block_tx.get().commit(
+      static_cast<BlockID>(block_tx.get().get_height())));
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(trigger_key));
   ASSERT_FALSE(db_.read_retrocausal_queue_metadata(control_key));
 
@@ -4940,7 +4977,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
   // Block is not poisoned, close and commit succeed.
   ASSERT_FALSE(block_tx.get().is_poisoned());
   ASSERT_TRUE(block_tx.get().close(parent_hash));
-  ASSERT_TRUE(block_tx.get().commit());
+  ASSERT_TRUE(
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height())));
 }
 
 // Regression: rollback_to_savepoint must not crash or leave inconsistent state
@@ -5021,7 +5059,8 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   }
   ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
   stale_block_tx.get().invalidate();
-  ASSERT_TRUE(sibling_block_tx.get().commit());
+  ASSERT_TRUE(sibling_block_tx.get().commit(
+      static_cast<BlockID>(block_tx.get().get_height())));
   ASSERT_FALSE(db_.read_retrocausal_queue_block(queue_key, 1));
 
   // Roll back the savepoint. The restore re-derives the depth-0 consume cost by
@@ -5139,7 +5178,8 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
 
   ASSERT_TRUE(sibling_block_tx.get().close(parent_hash));
   stale_block_tx.get().invalidate();
-  ASSERT_TRUE(sibling_block_tx.get().commit());
+  ASSERT_TRUE(sibling_block_tx.get().commit(
+      static_cast<BlockID>(block_tx.get().get_height())));
   ASSERT_TRUE(db_.read_retrocausal_queue_metadata(key));
 
   // Before the fix, the stale exclusive commit computed a committed cost

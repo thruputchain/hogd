@@ -40,16 +40,16 @@ public:
   // of KeyChangeChunk records, each thread's batch a part of the run, and
   // returns once every subscriber has acknowledged every chunk.
   x23::Detached
-  detached_publish_auth_changes(BlockHeight height,
+  detached_publish_auth_changes(DBAuthTip tip,
                                 PerThread<KeyChangeBatch> key_changes);
-  x23::Async<void> publish_auth_changes(BlockHeight height,
+  x23::Async<void> publish_auth_changes(DBAuthTip tip,
                                         PerThread<KeyChangeBatch> key_changes);
   // Adds a subscriber. Returns nullopt on failure. On success, returns the
   // highest auth-change height already dispatched to other subscribers at the
   // moment this one was inserted (-1 if none) — the caller must report an intro
   // height >= this value so the new subscriber doesn't park forever on a height
   // whose publish it missed (issue #2814).
-  x23::Async<std::optional<BlockHeight>>
+  x23::Async<std::optional<DBAuthTip>>
   add_full_auth_change_subscriber(AuthCard card);
 
   ~AuthChangeSubscriptionManager() { inhibit_.destroy_wait(); }
@@ -63,7 +63,7 @@ private:
   // copy of the client, so a run outlives the map entry it was started from.
   struct ForwardKeyChangeChunk {
     auth_db_client_t client;
-    BlockHeight height;
+    DBAuthTip tip;
 
     x23::Async<void> operator()(ChunkPosition position,
                                 ChunkItems<KeyChange> changes);
@@ -87,7 +87,7 @@ private:
   // a PendingPublish per client. Lock is released when this coroutine returns;
   // the caller awaits the futures unlocked, and [parts] must outlive them.
   x23::Async<std::vector<PendingPublish>>
-  start_forward_key_changes(BlockHeight height,
+  start_forward_key_changes(DBAuthTip tip,
                             const std::vector<KeyChangeBatch> &parts);
 
   // Under lock_: erase the entry for `card` only if it still holds the client
@@ -98,10 +98,10 @@ private:
   erase_client_if_stale(const AuthCard &card,
                         const rpc_stream_t *expected_client_id);
 
-  // Under lock_: replace-or-insert one client. Returns last_published_height_
+  // Under lock_: replace-or-insert one client. Returns last_published_tip_
   // captured under the same lock, so the insert and the reported watermark are
   // consistent w.r.t. publishes (issue #2814).
-  x23::Async<BlockHeight> insert_client(AuthCard card, auth_db_client_t client);
+  x23::Async<DBAuthTip> insert_client(AuthCard card, auth_db_client_t client);
 
   size_t max_key_changes_per_chunk_;
   x23::CoroLock lock_;
@@ -109,7 +109,7 @@ private:
   // Highest height passed to start_forward_key_changes so far (-1 if none).
   // Guarded by lock_. Lets a newly added subscriber learn the highest publish
   // it may have just missed, so its intro height can cover it (issue #2814).
-  BlockHeight last_published_height_ = -1;
+  DBAuthTip last_published_tip_{.block_id = 0, .height = -1};
   x23::DestroyInhibit inhibit_;
 };
 

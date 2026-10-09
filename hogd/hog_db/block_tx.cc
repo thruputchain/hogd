@@ -293,7 +293,7 @@ BlockTX::read_balance_base(const Address &addr)
 }
 
 HogDbStatus<void>
-BlockTX::commit(WorkerPool &pool)
+BlockTX::commit(BlockID block_id, WorkerPool &pool)
 {
   if (is_poisoned()) {
     return HogDbError(HogDbCode::kInternal);
@@ -389,7 +389,9 @@ BlockTX::commit(WorkerPool &pool)
         },
         pool);
 
-    background_commit_worker_.submit_job(block_height_, std::move(key_changes),
+    background_commit_worker_.submit_job(DBAuthTip{.block_id = block_id,
+                                                   .height = block_height_},
+                                         std::move(key_changes),
                                          std::move(balance_deltas));
   } catch (const std::exception &e) {
     // panic() formats its message with allocating calls and is not noexcept,

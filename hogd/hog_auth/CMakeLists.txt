@@ -1,5 +1,6 @@
 add_library(hog_auth
     auth_server.cc
+    auth_block.cc
     dbauth_client.cc
     status.cc
 )
@@ -11,6 +12,7 @@ target_link_libraries(hog_auth
 )
 
 add_executable(hog_auth_test
+    auth_block_test.cc
     auth_data_cache_test.cc
     auth_server_test.cc
     auth_verify_test.cc

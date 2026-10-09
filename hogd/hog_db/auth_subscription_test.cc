@@ -168,7 +168,9 @@ protected:
     HogDbStatus<StorageLongHash> db_hash =
         block_tx->get().close(ctx.get_tip().storage_long_hash);
     ASSERT_TRUE(db_hash.has_value());
-    ASSERT_TRUE(block_tx->get().commit().has_value());
+    ASSERT_TRUE(block_tx->get()
+                    .commit(static_cast<BlockID>(block_tx->get().get_height()))
+                    .has_value());
 
     // Tip intentionally NOT advanced: the DAO now holds the kNextHeight auth
     // row while the committed height is still kAcceptedHeight.
@@ -253,7 +255,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  HogDbStatus<void> commit_result = block_tx.get().commit();
+  HogDbStatus<void> commit_result =
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height()));
   ASSERT_TRUE(commit_result);
 
   // Wait for changes to be received
@@ -308,7 +311,10 @@ TEST_F(AuthSubscriptionTest, AuthChangesOverTheChunkBoundArriveWhole)
     published.insert(address);
     key_changes->push_back(KeyChange{.address = address, .auth_data = {}});
   }
-  manager.publish_auth_changes(kHeight, std::move(key_changes))();
+  manager.publish_auth_changes(DBAuthTip{.block_id =
+                                             static_cast<BlockID>(kHeight),
+                                         .height = kHeight},
+                               std::move(key_changes))();
 
   mock_auth_server_->impl()->wait_for_changes(kHeight);
   auto received = mock_auth_server_->impl()->get_changes_at_height(kHeight);
@@ -367,7 +373,8 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  HogDbStatus<void> commit_result = block_tx.get().commit();
+  HogDbStatus<void> commit_result =
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height()));
   ASSERT_TRUE(commit_result);
 
   // Wait for changes to be received
@@ -454,7 +461,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   // Close and commit BlockTX (should succeed even though auth server is down)
   // The subscription manager should handle the error gracefully
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  HogDbStatus<void> commit_result = block_tx.get().commit();
+  HogDbStatus<void> commit_result =
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height()));
   ASSERT_TRUE(commit_result)
       << "BlockTX commit should succeed even if auth server is down";
 
@@ -526,7 +534,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
   // Close and commit BlockTX (writes to database and publishes auth changes)
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
-  HogDbStatus<void> commit_result = block_tx.get().commit();
+  HogDbStatus<void> commit_result =
+      block_tx.get().commit(static_cast<BlockID>(block_tx.get().get_height()));
   ASSERT_TRUE(commit_result);
 
   // Verify that the good server still received the change
@@ -618,8 +627,9 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
   // (since processed_height_ is still 0).
   {
     PerThread<KeyChangeBatch> key_changes;
-    subscription_manager_.detached_publish_auth_changes(2,
-                                                        std::move(key_changes));
+    subscription_manager_.detached_publish_auth_changes(
+        DBAuthTip{.block_id = static_cast<BlockID>(2), .height = 2},
+        std::move(key_changes));
   }
 
   auto arrive_deadline =
@@ -636,8 +646,9 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
   // server's gate, and the test will time out below.
   {
     PerThread<KeyChangeBatch> key_changes;
-    subscription_manager_.detached_publish_auth_changes(1,
-                                                        std::move(key_changes));
+    subscription_manager_.detached_publish_auth_changes(
+        DBAuthTip{.block_id = static_cast<BlockID>(1), .height = 1},
+        std::move(key_changes));
   }
 
   auto complete_deadline =
@@ -741,7 +752,8 @@ TEST_F(AuthSubscriptionTest, IntroHeightCoversAlreadyPublishedHeight)
   {
     PerThread<KeyChangeBatch> key_changes;
     ctx.get_auth_change_subscription_manager().publish_auth_changes(
-        kPublishedHeight, std::move(key_changes))();
+        DBAuthTip{.block_id = 505, .height = kPublishedHeight},
+        std::move(key_changes))();
   }
 
   HogDbAuthRpc rpc(ctx);
@@ -749,7 +761,8 @@ TEST_F(AuthSubscriptionTest, IntroHeightCoversAlreadyPublishedHeight)
   ASSERT_EQ(result.outcome(), DBAuthIntroOutcome::kIntroSuccess);
   // Before the fix this is kCommittedHeight (4) — the wedge. After the fix it
   // covers the dispatched publish (>= 5), so height 5 is dropped as stale.
-  EXPECT_GE(result.current_height(), kPublishedHeight);
+  EXPECT_EQ(result.tip().height, kPublishedHeight);
+  EXPECT_EQ(result.tip().block_id, 505);
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)

@@ -188,7 +188,7 @@ HogDbSchedRpc::commit_block(BlockID id, ConsensusValue value,
   {
     RPCContext::CommitPublicationGuard publication_guard(ctx_, id);
 
-    HogDbStatus<void> ret = btx->get().commit();
+    HogDbStatus<void> ret = btx->get().commit(id);
     if (!ret) {
       // Cleanup the block tx if commit failed.
       return ret.error();

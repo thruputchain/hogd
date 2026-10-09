@@ -302,6 +302,36 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
 }
 
 x23::Async<AuthErrorCodeBatch>
+MempoolCoordinatorRpc::verify_auth(DBAuthTip parent,
+                                   const SignedTransactionBatch &txs)
+{
+  if (txs.empty()) {
+    co_return AuthErrorCodeBatch{};
+  }
+  // Admission checks use a short-lived view of the committed parent. Candidate
+  // block contexts are managed alongside the corresponding DB snapshots.
+  const BlockID id = BlockIdGenerator::generate(BlockIdLane::kMempool);
+  if (co_await auth_client_->authmempool_open_block(parent.block_id, id) !=
+      RPCError::kRPCNone) {
+    AuthErrorCodeBatch stale;
+    stale.resize(txs.size(), AuthErrorCode::kAuthStaleBlockHeight);
+    co_return stale;
+  }
+  AuthErrorCodeBatch result;
+  std::exception_ptr error;
+  try {
+    result = co_await auth_client_->authmempool_verify_transactions(id, txs);
+  } catch (...) {
+    error = std::current_exception();
+  }
+  co_await auth_client_->authmempool_abandon_block(id);
+  if (error) {
+    std::rethrow_exception(error);
+  }
+  co_return result;
+}
+
+x23::Async<AuthErrorCodeBatch>
 MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
                                          x23::CoroGuard &commit_guard)
 {
@@ -349,6 +379,8 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     std::unordered_set<ContractAddress, SipHash24Hasher> dirty =
         std::exchange(pending->dirty, {});
     verify_height = height;
+    const DBAuthTip parent{.block_id = last_committed_block_.id,
+                           .height = height};
     commit_guard.reset();
 
     SignedTransactionBatch retry_txs;
@@ -363,9 +395,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
       co_await submission_auth_test_hook_(verify_height, retry_txs,
                                           /*after_auth=*/false);
     }
-    const AuthErrorCodeBatch verified =
-        co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                               retry_txs);
+    const AuthErrorCodeBatch verified = co_await verify_auth(parent, retry_txs);
     if (submission_auth_test_hook_) {
       co_await submission_auth_test_hook_(verify_height, retry_txs,
                                           /*after_auth=*/true);
@@ -753,8 +783,19 @@ x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                        BlockExecutionMode mode)
 {
-  co_return co_await db_sched_client_->dbsched_create_snapshot(prev_block_id,
-                                                               block_id, mode);
+  const auto result =
+      co_await db_sched_client_->dbsched_create_snapshot(prev_block_id,
+                                                         block_id, mode);
+  if (result != DbSchedResult::DbSchedResultOK) {
+    co_return result;
+  }
+  const auto auth =
+      co_await auth_client_->authmempool_open_block(prev_block_id, block_id);
+  if (auth != RPCError::kRPCNone) {
+    co_await db_sched_client_->dbsched_abandon_snapshot(block_id);
+    co_return DbSchedResult::DbSchedResultInvalidParentId;
+  }
+  co_return result;
 }
 
 x23::Async<RPCError>
@@ -766,7 +807,9 @@ MempoolCoordinatorRpc::eventsched_open_block(BlockID block_id)
 x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
-  co_return co_await db_sched_client_->dbsched_abandon_snapshot(block_id);
+  const auto auth = co_await auth_client_->authmempool_abandon_block(block_id);
+  const auto db = co_await db_sched_client_->dbsched_abandon_snapshot(block_id);
+  co_return auth == RPCError::kRPCNone ? db : DbSchedResult::DbSchedResultError;
 }
 
 x23::Async<RPCError>
@@ -778,6 +821,10 @@ MempoolCoordinatorRpc::eventsched_abandon_block(BlockID block_id)
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
+  if (co_await auth_client_->authmempool_close_block(block_id) !=
+      RPCError::kRPCNone) {
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
   co_return co_await db_sched_client_->dbsched_close_snapshot(block_id);
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
@@ -803,7 +850,18 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
 {
-  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
+  auto result =
+      co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
+  if (result.result() != DbSchedResult::DbSchedResultOK) {
+    co_return result;
+  }
+  // Auth's commit barrier waits for the DB update to be applied locally, not
+  // for its callback into this mempool (which holds commit_lock_ here).
+  if (co_await auth_client_->authmempool_commit_block(block_id) !=
+      RPCError::kRPCNone) {
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
+  co_return result;
 }
 
 x23::Async<void>
@@ -1866,7 +1924,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   co_await wait_for_auth_data(/*expected_height=*/0);
 
   AuthErrorCodeBatch auth_results =
-      co_await auth_client_->authmempool_verify_transactions(0, txs);
+      co_await verify_auth(DBAuthTip{.block_id = 0, .height = 0}, txs);
   if (auth_results.size() != txs.size() ||
       std::ranges::any_of(auth_results, [](AuthErrorCode auth_result) {
         return auth_result != AuthErrorCode::kAuthSuccess;
@@ -3386,8 +3444,9 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     txs += change_txs;
   }
   AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(
-          scheduler_->current_block(), txs);
+      co_await verify_auth(DBAuthTip{.block_id = last_committed_block_.id,
+                                     .height = scheduler_->current_block()},
+                           txs);
   CHECK_EQ(auth_ret.size(), tx_hashes.size());
   x23::Vec<TransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {

@@ -92,8 +92,8 @@ run_block(size_t num_deltas, size_t max_deltas_per_chunk,
     balance_deltas->push_back(make_delta(i));
   }
   PerThread<KeyChangeBatch> key_changes;
-  worker.submit_job(/*block_height=*/9, std::move(key_changes),
-                    std::move(balance_deltas));
+  worker.submit_job(DBAuthTip{.block_id = static_cast<BlockID>(9), .height = 9},
+                    std::move(key_changes), std::move(balance_deltas));
 
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(10);

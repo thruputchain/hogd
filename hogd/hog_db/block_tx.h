@@ -57,7 +57,8 @@ public:
 
   // commit applies the staged ChangeSet to the database.
   // Requires close() to have been called first.
-  HogDbStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
+  HogDbStatus<void> commit(BlockID block_id,
+                           WorkerPool &pool = WorkerPool::get_default_pool());
 
   // lock reserves the right to apply change to an item.
   // Lock returns the amount of storage tokens at least as large as what will
