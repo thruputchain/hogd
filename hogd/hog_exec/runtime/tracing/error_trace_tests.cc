@@ -52,7 +52,7 @@ SyscallTrace
 get_calldata_entry(GasAmount gas, Calldata const &calldata)
 {
   SyscallTraceBody body(SyscallNo::kGetCalldata);
-  SyscallGetCalldataOutputs outputs;
+  SyscallGetCalldataOutputs outputs{.auth_token_count = 0};
   outputs.calldata.append_range(calldata);
   body.get_calldata().outputs = std::move(outputs);
   return make_entry(gas, gas - kSyscallBaseCost, std::move(body),
