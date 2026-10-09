@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <list>
 #include <map>
@@ -243,6 +244,21 @@ private:
     BlockHeight processed_height;
   };
 
+  static constexpr size_t kTransactionOutcomeShards = 64;
+  static_assert(kMaxTransactionOutcomes % kTransactionOutcomeShards == 0);
+  struct TransactionOutcomeShard {
+    x23::CoroLock lock;
+    std::list<TransactionOutcomeEntry> order;
+    std::unordered_map<TransactionHash,
+                       std::list<TransactionOutcomeEntry>::iterator,
+                       SipHash24Hasher>
+        outcomes;
+  };
+  static size_t transaction_outcome_shard_index(const TransactionHash &hash)
+  {
+    return SipHash24Hasher{}(hash) % kTransactionOutcomeShards;
+  }
+
   struct TxKey {
     BlockHeight expiry_block_height;
     TransactionHash tx_hash;
@@ -346,12 +362,12 @@ private:
   bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
   x23::Async<void> prune_transaction_outcomes();
-  // These helpers require [transaction_outcomes_lock_].
-  void prune_transaction_outcomes_locked(BlockHeight height);
-  void
-  record_transaction_outcome_locked(const TransactionHash &tx_hash,
-                                    const SchedulerTransactionOutcome &outcome,
-                                    BlockHeight processed_height);
+  // These helpers require [shard.lock].
+  static void prune_transaction_outcomes_locked(TransactionOutcomeShard &shard,
+                                                BlockHeight height);
+  static void record_transaction_outcome_locked(
+      TransactionOutcomeShard &shard, const TransactionHash &tx_hash,
+      const SchedulerTransactionOutcome &outcome, BlockHeight processed_height);
 
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
@@ -376,12 +392,10 @@ private:
   std::atomic<ssize_t> tx_cache_size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
 
-  x23::CoroLock transaction_outcomes_lock_;
-  std::list<TransactionOutcomeEntry> transaction_outcomes_order_;
-  std::unordered_map<TransactionHash,
-                     std::list<TransactionOutcomeEntry>::iterator,
-                     SipHash24Hasher>
-      transaction_outcomes_;
+  // Each shard owns an equal share of the capacity and evicts its oldest
+  // outcomes at that limit. Keyed hashing distributes transaction hashes.
+  std::array<TransactionOutcomeShard, kTransactionOutcomeShards>
+      transaction_outcome_shards_;
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for

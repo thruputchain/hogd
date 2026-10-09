@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <exception>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -429,19 +430,22 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
 x23::Async<void>
 Scheduler::prune_transaction_outcomes()
 {
-  x23::CoroGuard cg;
-  co_await cg(transaction_outcomes_lock_);
-  prune_transaction_outcomes_locked(current_block());
+  for (auto &shard : transaction_outcome_shards_) {
+    x23::CoroGuard cg;
+    co_await cg(shard.lock);
+    prune_transaction_outcomes_locked(shard, current_block());
+  }
 }
 
 void
-Scheduler::prune_transaction_outcomes_locked(BlockHeight height)
+Scheduler::prune_transaction_outcomes_locked(TransactionOutcomeShard &shard,
+                                             BlockHeight height)
 {
-  while (!transaction_outcomes_order_.empty() &&
-         height - transaction_outcomes_order_.front().processed_height >=
+  while (!shard.order.empty() &&
+         height - shard.order.front().processed_height >=
              kTransactionOutcomeBlockLifetime) {
-    transaction_outcomes_.erase(transaction_outcomes_order_.front().tx_hash);
-    transaction_outcomes_order_.pop_front();
+    shard.outcomes.erase(shard.order.front().tx_hash);
+    shard.order.pop_front();
   }
 }
 
@@ -451,12 +455,14 @@ Scheduler::record_transaction_outcome(
     BlockHeight height, SchedulerTransactionErrorSource error_source,
     int32_t error_code)
 {
+  auto &shard =
+      transaction_outcome_shards_[transaction_outcome_shard_index(tx_hash)];
   x23::CoroGuard cg;
-  co_await cg(transaction_outcomes_lock_);
+  co_await cg(shard.lock);
   const BlockHeight processed_height = current_block();
-  prune_transaction_outcomes_locked(processed_height);
+  prune_transaction_outcomes_locked(shard, processed_height);
   record_transaction_outcome_locked(
-      tx_hash,
+      shard, tx_hash,
       SchedulerTransactionOutcome{.status = status,
                                   .error_source = error_source,
                                   .error_code = error_code,
@@ -480,29 +486,62 @@ Scheduler::record_committed_transaction_outcomes(
       .error_code = 0,
       .height = height,
   };
-  // Release the lock between chunks so outcome lookups and admission do not
-  // have to wait for a whole million-transaction block.
-  constexpr size_t kChunkSize = 4096;
-  for (size_t start = 0; start < tx_hashes.size(); start += kChunkSize) {
-    x23::CoroGuard cg;
-    co_await cg(transaction_outcomes_lock_);
-    const BlockHeight processed_height = current_block();
-    prune_transaction_outcomes_locked(processed_height);
-    const size_t end = std::min(start + kChunkSize, tx_hashes.size());
-    for (size_t i = start; i < end; ++i) {
-      record_transaction_outcome_locked(tx_hashes[i], outcome,
-                                        processed_height);
+  std::array<std::vector<TransactionHash>, kTransactionOutcomeShards> batches;
+  for (auto &batch : batches) {
+    batch.reserve(tx_hashes.size() / kTransactionOutcomeShards + 1);
+  }
+  for (const auto &hash : tx_hashes) {
+    batches[transaction_outcome_shard_index(hash)].push_back(hash);
+  }
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(kTransactionOutcomeShards);
+  for (size_t i = 0; i < batches.size(); ++i) {
+    if (batches[i].empty()) {
+      continue;
     }
+    handles.push_back(
+        [](Scheduler &scheduler, TransactionOutcomeShard &shard,
+           const std::vector<TransactionHash> &batch,
+           SchedulerTransactionOutcome outcome) -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
+          // Release the shard lock between chunks to let lookups and
+          // admission make progress during a large commit.
+          constexpr size_t kChunkSize = 4096;
+          for (size_t start = 0; start < batch.size(); start += kChunkSize) {
+            x23::CoroGuard cg;
+            co_await cg(shard.lock);
+            const BlockHeight processed_height = scheduler.current_block();
+            prune_transaction_outcomes_locked(shard, processed_height);
+            const size_t end = std::min(start + kChunkSize, batch.size());
+            for (size_t j = start; j < end; ++j) {
+              record_transaction_outcome_locked(shard, batch[j], outcome,
+                                                processed_height);
+            }
+          }
+        }(*this, transaction_outcome_shards_[i], batches[i], outcome));
+  }
+  // Drain every worker before releasing the batches referenced by workers.
+  std::exception_ptr first_exception;
+  for (auto &handle : handles) {
+    try {
+      co_await handle;
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
+  }
+  if (first_exception) {
+    std::rethrow_exception(first_exception);
   }
 }
 
 void
 Scheduler::record_transaction_outcome_locked(
-    const TransactionHash &tx_hash, const SchedulerTransactionOutcome &outcome,
-    BlockHeight processed_height)
+    TransactionOutcomeShard &shard, const TransactionHash &tx_hash,
+    const SchedulerTransactionOutcome &outcome, BlockHeight processed_height)
 {
-  if (auto it = transaction_outcomes_.find(tx_hash);
-      it != transaction_outcomes_.end()) {
+  if (auto it = shard.outcomes.find(tx_hash); it != shard.outcomes.end()) {
     // Once a tx is committed, its committed outcome is never overwritten by a
     // different outcome for a duplicate tx.
     //
@@ -512,36 +551,40 @@ Scheduler::record_transaction_outcome_locked(
         SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
       return;
     }
-    transaction_outcomes_order_.erase(it->second);
-    transaction_outcomes_.erase(it);
+    shard.order.erase(it->second);
+    shard.outcomes.erase(it);
   }
 
-  CHECK_LE(transaction_outcomes_.size(), kMaxTransactionOutcomes);
-  if (transaction_outcomes_.size() == kMaxTransactionOutcomes) {
-    // [transaction_outcomes_] is at capacity, so remove a tx outcome from it so
-    // we have room to add a new outcome.
-    transaction_outcomes_.erase(transaction_outcomes_order_.front().tx_hash);
-    transaction_outcomes_order_.pop_front();
+  CHECK_LE(shard.outcomes.size(),
+           (kMaxTransactionOutcomes / kTransactionOutcomeShards));
+  if (shard.outcomes.size() ==
+      (kMaxTransactionOutcomes / kTransactionOutcomeShards)) {
+    // Evict the oldest outcome in this shard to keep total capacity bounded.
+    shard.outcomes.erase(shard.order.front().tx_hash);
+    shard.order.pop_front();
   }
-  CHECK_LT(transaction_outcomes_.size(), kMaxTransactionOutcomes);
+  CHECK_LT(shard.outcomes.size(),
+           (kMaxTransactionOutcomes / kTransactionOutcomeShards));
 
-  transaction_outcomes_order_.push_back(TransactionOutcomeEntry{
+  shard.order.push_back(TransactionOutcomeEntry{
       .tx_hash = tx_hash,
       .outcome = outcome,
       .processed_height = processed_height,
   });
-  transaction_outcomes_[tx_hash] = std::prev(transaction_outcomes_order_.end());
+  shard.outcomes[tx_hash] = std::prev(shard.order.end());
 }
 
 x23::Async<void>
 Scheduler::clear_transaction_outcome_if_not_already_committed(
     const TransactionHash &tx_hash)
 {
+  auto &shard =
+      transaction_outcome_shards_[transaction_outcome_shard_index(tx_hash)];
   x23::CoroGuard cg;
-  co_await cg(transaction_outcomes_lock_);
+  co_await cg(shard.lock);
 
-  if (auto it = transaction_outcomes_.find(tx_hash);
-      it != transaction_outcomes_.end() &&
+  if (auto it = shard.outcomes.find(tx_hash);
+      it != shard.outcomes.end() &&
       // Once a tx is committed, its committed outcome is never overwritten by a
       // different outcome for a duplicate tx.
       //
@@ -549,20 +592,21 @@ Scheduler::clear_transaction_outcome_if_not_already_committed(
       // overwritten by the outcome for a duplicate tx that is submitted after.
       it->second->outcome.status !=
           SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
-    transaction_outcomes_order_.erase(it->second);
-    transaction_outcomes_.erase(it);
+    shard.order.erase(it->second);
+    shard.outcomes.erase(it);
   }
 }
 
 x23::Async<SchedulerTransactionOutcome>
 Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 {
+  auto &shard =
+      transaction_outcome_shards_[transaction_outcome_shard_index(tx_hash)];
   x23::CoroGuard cg;
-  co_await cg(transaction_outcomes_lock_);
-  prune_transaction_outcomes_locked(current_block());
+  co_await cg(shard.lock);
+  prune_transaction_outcomes_locked(shard, current_block());
 
-  if (auto it = transaction_outcomes_.find(tx_hash);
-      it != transaction_outcomes_.end()) {
+  if (auto it = shard.outcomes.find(tx_hash); it != shard.outcomes.end()) {
     co_return it->second->outcome;
   }
   cg.reset();

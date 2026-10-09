@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -359,6 +360,36 @@ TEST(Scheduler, BatchCommittedOutcomesRecordEveryTransaction)
     EXPECT_EQ(outcome.status,
               SchedulerTransactionStatus::SchedulerTransactionSucceeded);
     EXPECT_EQ(outcome.height, 10);
+  }
+}
+
+TEST(Scheduler, BatchCommitWinsOverConcurrentRetryOutcomes)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHashBatch hashes;
+  for (size_t i = 0; i < 8192; ++i) {
+    TransactionHash hash{};
+    hash[0] = static_cast<uint8_t>(i);
+    hashes.push_back(hash);
+  }
+  std::jthread retries([&] {
+    for (const auto &hash : hashes) {
+      scheduler.record_transaction_outcome(
+          hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+          /*height=*/9,
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+          /*error_code=*/123)();
+    }
+  });
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  retries.join();
+  for (const auto &hash : hashes) {
+    const auto outcome = scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+    EXPECT_EQ(outcome.error_code, 0);
   }
 }
 
