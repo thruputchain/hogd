@@ -93,44 +93,22 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                           std::span<std::byte> output_buffer,
                           RuntimeMemoryLength &output_written_len,
-                          std::span<std::byte> output_auth_token_list,
-                          RuntimeMemoryLength &output_auth_token_written_len)
+                          uint32_t &output_auth_token_count)
 {
-  if (output_auth_token_list.size() % sizeof(uint32_t) != 0) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
-  }
-
   auto const &calldata = syscall_handler.get_calldata();
   output_written_len =
       copy_to_guest_buffer(output_buffer,
                            std::as_bytes(
                                std::span(calldata.data(), calldata.size())));
-
-  // The frame's forwarded tokens are its ids 0..N-1. As copy_to_guest_buffer
-  // does, write the ids that fit and report the full length.
-  uint32_t auth_token_count =
+  // The frame's forwarded tokens are its ids 0..N-1.
+  output_auth_token_count =
       syscall_handler.get_parent_supplied_auth_token_count();
-  size_t ids_that_fit =
-      std::min<size_t>(auth_token_count,
-                       output_auth_token_list.size() / sizeof(uint32_t));
-  for (uint32_t id = 0; id < ids_that_fit; ++id) {
-    std::memcpy(output_auth_token_list.data() + (id * sizeof(uint32_t)), &id,
-                sizeof(id));
-  }
-  output_auth_token_written_len = static_cast<RuntimeMemoryLength>(
-      size_t{auth_token_count} * sizeof(uint32_t));
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
-    x23::Vec<uint32_t, 0xffffffff> auth_token_list;
-    auth_token_list.reserve(auth_token_count);
-    for (uint32_t id = 0; id < auth_token_count; ++id) {
-      auth_token_list.push_back(id);
-    }
     trace_data->outputs.emplace(
         SyscallGetCalldataOutputs{.calldata = calldata,
-                                  .auth_tokens = auth_token_list});
+                                  .auth_token_count = output_auth_token_count});
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
