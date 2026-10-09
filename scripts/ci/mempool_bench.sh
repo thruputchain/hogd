@@ -184,6 +184,9 @@ if [[ $coordinator_status -ne 0 ]]; then
   exit "$coordinator_status"
 fi
 
+echo 'coordinator benchmark results'
+cat coordinator_output.txt
+
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
 
