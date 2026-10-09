@@ -1,6 +1,10 @@
+#include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <format>
 #include <iostream>
@@ -59,6 +63,88 @@ do_panic(std::string_view fmt, const std::source_location &loc,
 
 namespace {
 
+#ifndef NDEBUG
+thread_local bool log_in_progress = false;
+
+[[noreturn]] void
+abort_recursive_log() noexcept
+{
+  constexpr char message[] =
+      "recursive logging detected; ConsoleLogger formatters must not log\n";
+  (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+  std::abort();
+}
+
+class LogRecursionGuard {
+public:
+  LogRecursionGuard() noexcept
+  {
+    if (log_in_progress)
+      abort_recursive_log();
+    log_in_progress = true;
+  }
+
+  ~LogRecursionGuard() noexcept { log_in_progress = false; }
+
+  LogRecursionGuard(const LogRecursionGuard &) = delete;
+  LogRecursionGuard &operator=(const LogRecursionGuard &) = delete;
+};
+#endif // NDEBUG
+
+constexpr std::size_t kLogBufferSize = 16 * 1024;
+constexpr std::size_t kLogSuffixSize = 4; // "...\n"
+
+thread_local std::array<char, kLogBufferSize> log_buffer;
+
+class TruncatingOutputIterator {
+public:
+  using difference_type = std::ptrdiff_t;
+
+  TruncatingOutputIterator(char *&out, char *end, bool &truncated) noexcept
+    : out_(&out), end_(end), truncated_(&truncated)
+  {}
+
+  TruncatingOutputIterator &operator*() noexcept { return *this; }
+  TruncatingOutputIterator &operator++() noexcept { return *this; }
+  TruncatingOutputIterator operator++(int) noexcept { return *this; }
+
+  TruncatingOutputIterator &operator=(char c) noexcept
+  {
+    if (*out_ != end_) {
+      **out_ = c;
+      ++*out_;
+    }
+    else {
+      *truncated_ = true;
+    }
+    return *this;
+  }
+
+private:
+  char **out_;
+  char *end_;
+  bool *truncated_;
+};
+
+void
+write_stderr(std::string_view line) noexcept
+{
+  int saved_errno = errno;
+  ::flockfile(stderr);
+  while (!line.empty()) {
+    ssize_t written = ::write(STDERR_FILENO, line.data(), line.size());
+    if (written > 0) {
+      line.remove_prefix(static_cast<std::size_t>(written));
+      continue;
+    }
+    if (written < 0 && errno == EINTR)
+      continue;
+    break;
+  }
+  ::funlockfile(stderr);
+  errno = saved_errno;
+}
+
 constexpr std::string_view
 log_level_to_string(LogLevel level)
 {
@@ -116,24 +202,32 @@ ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
   if (level > max_level_)
     return;
 
+#ifndef NDEBUG
+  LogRecursionGuard recursion_guard;
+#endif
+
   // record the current timestamp
   const auto now = std::chrono::system_clock::now();
 
   // extract the filename
   std::string_view filename = detail::source_basename(loc.file_name());
 
-  // generate the log message
-  std::string buf;
-  std::format_to(std::back_inserter(buf), "{}{}{}[{:%m%d %H:%M:%OS} {}:{}]{} ",
-                 ansi_color(Style::kBold), log_level_to_char(level),
-                 ansi_color(Style::kNormal, Color::kBlue), now, filename,
-                 loc.line(), ansi_reset());
-  std::vformat_to(std::back_inserter(buf), fmt, args);
-  std::format_to(std::back_inserter(buf), "\n");
-
-  // write to stderr
-  // todo(amb): maybe write to the fd directly.
-  std::osyncstream(std::cerr) << buf;
+  char *out = log_buffer.data();
+  char *end = log_buffer.data() + log_buffer.size() - kLogSuffixSize;
+  bool truncated = false;
+  std::format_to(TruncatingOutputIterator(out, end, truncated),
+                 "\e[1m{}\e[0;34m[{:%m%d %H:%M:%OS} {}:{}]\e[0m ",
+                 log_level_to_char(level), now, filename, loc.line());
+  std::vformat_to(TruncatingOutputIterator(out, end, truncated), fmt, args);
+  if (truncated) {
+    *out++ = '.';
+    *out++ = '.';
+    *out++ = '.';
+  }
+  *out++ = '\n';
+  write_stderr(
+      std::string_view(log_buffer.data(),
+                       static_cast<std::size_t>(out - log_buffer.data())));
 }
 
 void
