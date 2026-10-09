@@ -554,11 +554,11 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
           }
           std::array<std::byte, 8> buffer{};
           uint32_t written_len = 0;
-          std::array<std::byte, 4> token_buffer{};
-          uint32_t token_written_len = 0;
+          uint32_t returned_auth_token_start = 0;
+          uint32_t returned_auth_token_count = 0;
           auto fetched = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
               std::span<std::byte>(buffer), written_len,
-              std::span<std::byte>(token_buffer), token_written_len);
+              returned_auth_token_start, returned_auth_token_count);
           if (!fetched.has_value() ||
               *fetched != SyscallErrorCode::kSyscallErrorCodeNone ||
               written_len != outputs.return_buffer_len) {

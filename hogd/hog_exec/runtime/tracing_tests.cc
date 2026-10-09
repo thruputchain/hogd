@@ -701,10 +701,11 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
         EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         RuntimeMemoryLength return_written_len = 0;
-        RuntimeMemoryLength ids_written_len = 0;
+        uint32_t returned_auth_token_start = 0;
+        uint32_t returned_auth_token_count = 0;
         auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
-            std::span<std::byte>{}, return_written_len, std::span<std::byte>{},
-            ids_written_len);
+            std::span<std::byte>{}, return_written_len,
+            returned_auth_token_start, returned_auth_token_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         // Full length reported even though the contract's buffer was empty.

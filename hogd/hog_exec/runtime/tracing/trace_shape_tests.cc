@@ -135,7 +135,10 @@ SyscallTrace
 get_returned_buffer_entry(GasAmount gas, std::span<const uint8_t> buffer)
 {
   SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
-  SyscallGetReturnedBufferOutputs outputs;
+  // The callee returns no auth tokens, and the caller holds none, so the
+  // empty range starts at id 0.
+  SyscallGetReturnedBufferOutputs outputs{.returned_auth_token_start = 0,
+                                          .returned_auth_token_count = 0};
   outputs.buffer.append_range(buffer);
   body.get_returned_buffer().outputs = std::move(outputs);
   return make_entry(gas, gas - kSyscallBaseCost, std::move(body), ok_status());

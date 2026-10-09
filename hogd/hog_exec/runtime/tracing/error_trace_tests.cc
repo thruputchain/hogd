@@ -118,8 +118,8 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(98'966, tx.tx.invocation.calldata));
   {
-    // No child frame ran, and the restored-token span is misaligned (3
-    // bytes); the buffer-availability check wins and no outputs are written.
+    // No child frame ran, so there is no buffer to return and no outputs are
+    // written.
     SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
     expected.push_back(make_entry(
         98'747, 98'747 - kSyscallBaseCost, std::move(body),

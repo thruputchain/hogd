@@ -334,7 +334,8 @@ public:
   // Error if most recent child did call set_return_buffer.
   [[nodiscard]] SystemStatus<SyscallStatus<const ReturnBuffer *>>
   get_return_buffer() const;
-  std::span<const uint32_t> get_returned_auth_token_ids() const;
+  // The ids the most recent child's returned tokens took in this frame.
+  AuthTokenIdRange get_returned_auth_tokens() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
   bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
   // Called by the Return syscall.

@@ -166,13 +166,14 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   }
 
   // Fetch the child's return or abort payload as the SDK does.
-  // No auth tokens are forwarded; returned token IDs are discarded.
+  // No auth tokens are forwarded; returned tokens are ignored.
   std::vector<uint8_t> return_buf(outputs.return_buffer_len);
   RuntimeMemoryLength return_written = 0;
-  RuntimeMemoryLength auth_written = 0;
+  uint32_t returned_auth_token_start = 0;
+  uint32_t returned_auth_token_count = 0;
   auto get = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
       std::as_writable_bytes(std::span(return_buf)), return_written,
-      std::span<std::byte>{}, auth_written);
+      returned_auth_token_start, returned_auth_token_count);
   if (!get.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(get.error());
   }
