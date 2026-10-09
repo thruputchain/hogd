@@ -109,6 +109,12 @@ public:
   ThreadedMachinePreInstantiation &
   operator=(const ThreadedMachinePreInstantiation &) = delete;
 
+  // Size of the zero-padded declared image each instantiation copies.
+  [[nodiscard]] uint32_t memory_image_size() const
+  {
+    return static_cast<uint32_t>(initial_memory_image_.size());
+  }
+
 private:
   ThreadedMachinePreInstantiation(std::vector<Slot> exec,
                                   std::vector<uint8_t> initial_memory_image,

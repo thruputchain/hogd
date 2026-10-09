@@ -72,10 +72,24 @@ x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
 Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 {
   using result_t = std::pair<InvokeStatus<void>, GasAmount>;
+
+  // Charge the memory-image restore up front: the bill scales with image size,
+  // and a child that cannot afford it faults out of gas before the copy
+  // (#4354).
+  const uint64_t memory_restore_gas = contract_->memory_restore_gas();
+  if (memory_restore_gas > gas_limit) {
+    return result_t{InvokeError{InvokeErrorCode::OutOfGas}, gas_limit};
+  }
+
   auto machine_noexcept =
       [&]() noexcept -> InvokeStatus<rv32::ThreadedMachine> {
     try {
       rv32::ThreadedMachine machine = contract_->instantiate(gas_limit);
+      // Debit the restore cost checked above (guaranteed to fit); the rest of
+      // the budget meters the guest's instructions.
+      [[maybe_unused]] const bool afforded =
+          machine.consume_gas(memory_restore_gas);
+      assert(afforded);
       machine.seed_method_id(method_id);
       return machine;
     } catch (std::exception const &e) {

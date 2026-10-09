@@ -704,6 +704,41 @@ TEST_F(Rv32ProductionMappingTest,
             (kReadCount - 1) * kDBRPCCost);
 }
 
+// Regression test for #4354: with the restore metered, identical code with
+// larger declared memory costs the restore-cost delta.
+TEST_F(Rv32ProductionMappingTest, MemoryImageRestorationIsGasMetered)
+{
+  constexpr uint32_t kSmallMemoryBytes = 64;
+  constexpr uint32_t kLargeMemoryBytes = rv32::kDefaultMaxMemoryBytes;
+
+  std::vector<uint32_t> program;
+  append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+
+  const auto small_addr =
+      deploy_words(program, 0, std::vector<uint8_t>(kSmallMemoryBytes));
+  const auto large_addr =
+      deploy_words(program, 1, std::vector<uint8_t>(kLargeMemoryBytes));
+
+  const auto small_result = invoke_deployed(small_addr, 1'000'000);
+  const auto large_result = invoke_deployed(large_addr, 1'000'000);
+  ASSERT_TRUE(small_result.is_root_success());
+  ASSERT_TRUE(large_result.is_root_success());
+
+  // Identical code, so the gas gap is exactly the extra restore cost.
+  EXPECT_EQ(large_result.gas_consumed_ - small_result.gas_consumed_,
+            rv32_memory_restore_gas(kLargeMemoryBytes) -
+                rv32_memory_restore_gas(kSmallMemoryBytes));
+
+  // Starved of restore gas, out-of-gas shows up as the whole limit consumed
+  // (see HostSyscallOutOfGasConsumesWholeLimit).
+  const GasAmount large_restore_gas =
+      rv32_memory_restore_gas(kLargeMemoryBytes);
+  const auto starved_result =
+      invoke_deployed(large_addr, large_restore_gas - 1);
+  ASSERT_FALSE(starved_result.is_root_success());
+  EXPECT_EQ(starved_result.gas_consumed_, large_restore_gas - 1);
+}
+
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
 {
   // A single straight-line run whose total gas exceeds the chunk cap is split

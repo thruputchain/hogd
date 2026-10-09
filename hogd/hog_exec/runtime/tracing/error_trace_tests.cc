@@ -116,17 +116,17 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(98'966, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(98'070, tx.tx.invocation.calldata));
   {
     // No child frame ran, and the restored-token span is misaligned (3
     // bytes); the buffer-availability check wins and no outputs are written.
     SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
     expected.push_back(make_entry(
-        98'747, 98'747 - kSyscallBaseCost, std::move(body),
+        97'851, 97'851 - kSyscallBaseCost, std::move(body),
         status_with(
             SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable)));
   }
-  expected.push_back(empty_return_entry(98'650));
+  expected.push_back(empty_return_entry(97'754));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -157,13 +157,13 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(98'982, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(98'086, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kGetCurrentAddress);
     body.get_current_address().outputs =
         SyscallGetCurrentAddressOutputs{.address = addr};
     expected.push_back(
-        make_entry(98'874, 98'874 - kSyscallBaseCost, std::move(body),
+        make_entry(97'978, 97'978 - kSyscallBaseCost, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
@@ -180,10 +180,10 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
         .flags = 0,
     };
     expected.push_back(
-        make_entry(98'773, 98'773 - kSyscallBaseCost, std::move(body),
+        make_entry(97'877, 97'877 - kSyscallBaseCost, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
-  expected.push_back(empty_return_entry(98'663));
+  expected.push_back(empty_return_entry(97'767));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
