@@ -6,10 +6,20 @@
 #include "hogd/base/time.h"
 
 namespace hogd {
+namespace {
+
+using std::chrono::duration_cast;
+using std::chrono::hours;
+using std::chrono::microseconds;
+using std::chrono::minutes;
+using std::chrono::nanoseconds;
+using std::chrono::seconds;
+using std::chrono::sys_days;
+using std::chrono::system_clock;
+using std::chrono::year;
 
 TEST(TimeTest, UtcTimeFields)
 {
-  using namespace std::chrono;
   const system_clock::time_point tp = sys_days{year{2026} / 10 / 9} +
                                       hours{19} + minutes{4} + seconds{9} +
                                       microseconds{46318};
@@ -25,7 +35,6 @@ TEST(TimeTest, UtcTimeFields)
 
 TEST(TimeTest, UtcTimeIso8601MatchesChronoFormat)
 {
-  using namespace std::chrono;
   const system_clock::time_point tp =
       sys_days{year{2026} / 1 / 2} + hours{3} + minutes{4} + seconds{5} +
       duration_cast<system_clock::duration>(nanoseconds{6000});
@@ -34,7 +43,6 @@ TEST(TimeTest, UtcTimeIso8601MatchesChronoFormat)
 
 TEST(TimeTest, UtcTimeBeforeEpoch)
 {
-  using namespace std::chrono;
   const UtcTime utc(sys_days{year{1969} / 12 / 31} + hours{23} + minutes{59} +
                     seconds{59});
   EXPECT_EQ(utc.year, 1969);
@@ -46,4 +54,5 @@ TEST(TimeTest, UtcTimeBeforeEpoch)
   EXPECT_EQ(utc.subseconds, 0);
 }
 
+} // namespace
 } // namespace hogd
