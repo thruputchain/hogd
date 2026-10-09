@@ -382,10 +382,13 @@ Benchmark::run()
   }
 
   // commit changes to the ramdb.
-  auto ret = block.get().commit(workers_).and_then([this] {
-    // persist everything to the database.
-    return db_.commit().transform([](uint64_t lsn) {});
-  });
+  auto ret =
+      block.get()
+          .commit(static_cast<BlockID>(block.get().get_height()), workers_)
+          .and_then([this] {
+            // persist everything to the database.
+            return db_.commit().transform([](uint64_t lsn) {});
+          });
   if (!ret)
     fail(ret.error());
 
@@ -569,8 +572,12 @@ RCQBenchmark::run_sequential()
       workers_.for_each_parallel(work_items, insert_fn, std::max(width, 1UL));
 
       close_block(block_tx.get());
-      HogDbStatus<void> ret = block_tx.get().commit(workers_).and_then(
-          [this] { return db_.commit().transform([](uint64_t) {}); });
+      HogDbStatus<void> ret =
+          block_tx.get()
+              .commit(static_cast<BlockID>(block_tx.get().get_height()),
+                      workers_)
+              .and_then(
+                  [this] { return db_.commit().transform([](uint64_t) {}); });
       if (!ret)
         fail(ret.error());
       info("committed block {}/{}", block, num_blocks);
@@ -649,8 +656,12 @@ RCQBenchmark::run_sequential()
       workers_.for_each_parallel(queue_indices, consume_fn, 1);
 
       close_block(block_tx.get());
-      auto ret = block_tx.get().commit(workers_).and_then(
-          [this] { return db_.commit().transform([](uint64_t) {}); });
+      auto ret = block_tx.get()
+                     .commit(static_cast<BlockID>(block_tx.get().get_height()),
+                             workers_)
+                     .and_then([this] {
+                       return db_.commit().transform([](uint64_t) {});
+                     });
       if (!ret)
         fail(ret.error());
 
@@ -861,8 +872,12 @@ RCQBenchmark::run_concurrent()
           1e-9;
 
       close_block(block_tx.get());
-      auto ret = block_tx.get().commit(workers_).and_then(
-          [this] { return db_.commit().transform([](uint64_t) {}); });
+      auto ret = block_tx.get()
+                     .commit(static_cast<BlockID>(block_tx.get().get_height()),
+                             workers_)
+                     .and_then([this] {
+                       return db_.commit().transform([](uint64_t) {});
+                     });
       if (!ret)
         fail(ret.error());
       info("committed block {}/{}", block, num_blocks);

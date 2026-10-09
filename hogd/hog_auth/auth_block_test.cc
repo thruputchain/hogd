@@ -45,8 +45,8 @@ TEST_F(AuthBlockTest, CommitWaitsForTheSelectedBlockAndRejectsItsSibling)
   ASSERT_EQ(auth.close_block(102)(), RPCError::kRPCNone);
   auto selected = auth.commit_block(101);
   auto sibling = auth.commit_block(102);
-  EXPECT_FALSE(x23::get_awaiter(selected).await_ready());
-  EXPECT_FALSE(x23::get_awaiter(sibling).await_ready());
+  EXPECT_FALSE(selected.operator co_await().await_ready());
+  EXPECT_FALSE(sibling.operator co_await().await_ready());
   auth.register_auth_data_updates(DBAuthTip{.block_id = 101, .height = 1},
                                   {})();
   EXPECT_EQ(selected(), RPCError::kRPCNone);
@@ -98,10 +98,10 @@ TEST_F(AuthBlockTest, CloseAndAbandonDrainAdmittedVerification)
   auto verification = auth.verify_transactions(101, std::span(&tx, 1));
   db->impl()->entered.wait(false);
   auto close = auth.close_block(101);
-  EXPECT_FALSE(x23::get_awaiter(close).await_ready());
+  EXPECT_FALSE(close.operator co_await().await_ready());
   EXPECT_EQ(auth.verify_batch(101, {})(), AuthErrorCode::kAuthBadBlockID);
   auto abandon = auth.abandon_block(101);
-  EXPECT_FALSE(x23::get_awaiter(abandon).await_ready());
+  EXPECT_FALSE(abandon.operator co_await().await_ready());
   db->impl()->released.store(true);
   db->impl()->released.broadcast(&default_threadpool());
   EXPECT_EQ(verification().size(), 1);
@@ -148,7 +148,7 @@ TEST_F(AuthBlockTest, CommitDoesNotWaitForMempoolAcknowledgement)
                                       {});
   mempool->impl()->entered.wait(false);
   EXPECT_EQ(commit(), RPCError::kRPCNone);
-  EXPECT_FALSE(x23::get_awaiter(update).await_ready());
+  EXPECT_FALSE(update.operator co_await().await_ready());
   mempool->impl()->released.store(true);
   mempool->impl()->released.broadcast(&default_threadpool());
   update();

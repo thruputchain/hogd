@@ -183,6 +183,7 @@ submit_outcome_for_auth(AuthErrorCode code)
     return SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected;
   case AuthErrorCode::kAuthStaleBlockHeight:
     return SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
+  case AuthErrorCode::kAuthBadBlockID:
   case AuthErrorCode::kAuthInternal:
     return SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
   }
