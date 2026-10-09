@@ -6,6 +6,7 @@
 #include <exception>
 #include <iterator>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -444,8 +445,7 @@ Scheduler::prune_transaction_outcomes_locked(TransactionOutcomeShard &shard,
   while (!shard.order.empty() &&
          height - shard.order.front().processed_height >=
              kTransactionOutcomeBlockLifetime) {
-    shard.outcomes.erase(shard.order.front().tx_hash);
-    shard.order.pop_front();
+    erase_transaction_outcome_locked(shard, shard.order.begin());
   }
 }
 
@@ -551,8 +551,7 @@ Scheduler::record_transaction_outcome_locked(
         SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
       return;
     }
-    shard.order.erase(it->second);
-    shard.outcomes.erase(it);
+    erase_transaction_outcome_locked(shard, it->second);
   }
 
   CHECK_LE(shard.outcomes.size(),
@@ -560,8 +559,7 @@ Scheduler::record_transaction_outcome_locked(
   if (shard.outcomes.size() ==
       (kMaxTransactionOutcomes / kTransactionOutcomeShards)) {
     // Evict the oldest outcome in this shard to keep total capacity bounded.
-    shard.outcomes.erase(shard.order.front().tx_hash);
-    shard.order.pop_front();
+    erase_transaction_outcome_locked(shard, shard.order.begin());
   }
   CHECK_LT(shard.outcomes.size(),
            (kMaxTransactionOutcomes / kTransactionOutcomeShards));
@@ -572,6 +570,24 @@ Scheduler::record_transaction_outcome_locked(
       .processed_height = processed_height,
   });
   shard.outcomes[tx_hash] = std::prev(shard.order.end());
+  if (outcome.status !=
+      SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+    shard.failed_outcomes.fetch_add(1, std::memory_order_release);
+  }
+}
+
+void
+Scheduler::erase_transaction_outcome_locked(
+    TransactionOutcomeShard &shard,
+    std::list<TransactionOutcomeEntry>::iterator entry)
+{
+  const bool failed = entry->outcome.status !=
+                      SchedulerTransactionStatus::SchedulerTransactionSucceeded;
+  shard.outcomes.erase(entry->tx_hash);
+  shard.order.erase(entry);
+  if (failed) {
+    shard.failed_outcomes.fetch_sub(1, std::memory_order_release);
+  }
 }
 
 x23::Async<void>
@@ -580,6 +596,9 @@ Scheduler::clear_transaction_outcome_if_not_already_committed(
 {
   auto &shard =
       transaction_outcome_shards_[transaction_outcome_shard_index(tx_hash)];
+  if (shard.failed_outcomes.load(std::memory_order_acquire) == 0) {
+    co_return;
+  }
   x23::CoroGuard cg;
   co_await cg(shard.lock);
 
@@ -592,8 +611,7 @@ Scheduler::clear_transaction_outcome_if_not_already_committed(
       // overwritten by the outcome for a duplicate tx that is submitted after.
       it->second->outcome.status !=
           SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
-    shard.order.erase(it->second);
-    shard.outcomes.erase(it);
+    erase_transaction_outcome_locked(shard, it->second);
   }
 }
 

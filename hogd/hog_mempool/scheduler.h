@@ -253,6 +253,10 @@ private:
                        std::list<TransactionOutcomeEntry>::iterator,
                        SipHash24Hasher>
         outcomes;
+    // Admission only clears failed outcomes. Most shards contain successes
+    // exclusively, so avoid locking and probing the large success cache in
+    // that case. Writers update this count while holding [lock].
+    std::atomic<size_t> failed_outcomes = 0;
   };
   static size_t transaction_outcome_shard_index(const TransactionHash &hash)
   {
@@ -368,6 +372,9 @@ private:
   static void record_transaction_outcome_locked(
       TransactionOutcomeShard &shard, const TransactionHash &tx_hash,
       const SchedulerTransactionOutcome &outcome, BlockHeight processed_height);
+  static void erase_transaction_outcome_locked(
+      TransactionOutcomeShard &shard,
+      std::list<TransactionOutcomeEntry>::iterator entry);
 
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;

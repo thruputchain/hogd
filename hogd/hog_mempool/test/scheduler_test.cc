@@ -393,6 +393,45 @@ TEST(Scheduler, BatchCommitWinsOverConcurrentRetryOutcomes)
   }
 }
 
+TEST(Scheduler, ClearFailureAfterOutcomeReplacementAndExpiry)
+{
+  Scheduler scheduler(/*current_block=*/0, nullptr);
+  const TransactionHash hash{};
+  const auto record_failure = [&] {
+    scheduler.record_transaction_outcome(
+        hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+        scheduler.current_block(),
+        SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+        /*error_code=*/123)();
+  };
+  const auto clear_failure = [&] {
+    scheduler.clear_transaction_outcome_if_not_already_committed(hash)();
+    EXPECT_EQ(scheduler.lookup_transaction_outcome(hash)().status,
+              SchedulerTransactionStatus::SchedulerTransactionNotFound);
+  };
+  for (size_t i = 0; i < 2; ++i) {
+    record_failure();
+    clear_failure();
+  }
+  record_failure();
+  scheduler.record_transaction_outcome(
+      hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      /*height=*/0)();
+  scheduler.clear_transaction_outcome_if_not_already_committed(hash)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hash)().status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+
+  scheduler.set_current_block(Scheduler::kTransactionOutcomeBlockLifetime);
+  scheduler.increment_current_block()();
+  record_failure();
+  clear_failure();
+  record_failure();
+  scheduler.set_current_block(2 * Scheduler::kTransactionOutcomeBlockLifetime);
+  scheduler.increment_current_block()();
+  record_failure();
+  clear_failure();
+}
+
 TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)
 {
   HogAge hog_age{};

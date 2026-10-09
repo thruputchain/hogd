@@ -1,10 +1,11 @@
 #include <benchmark/benchmark.h>
 
 #include <array>
-#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <ranges>
+#include <stop_token>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -15,14 +16,18 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/init.h"
+#include "sched_coord.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/x23/async.h"
+#include "x23/x23/vec.h"
 
 namespace hogd {
 
@@ -159,7 +164,7 @@ bm_scheduler_record_transaction_outcomes(benchmark::State &state)
   BlockHeight height = 0;
   std::jthread lookup_reader;
   if (state.range(2)) {
-    lookup_reader = std::jthread([&](std::stop_token stop) {
+    lookup_reader = std::jthread([&](const std::stop_token &stop) {
       while (!stop.stop_requested()) {
         benchmark::DoNotOptimize(
             scheduler.lookup_transaction_outcome(hashes.back())());
@@ -193,6 +198,54 @@ BENCHMARK(bm_scheduler_record_transaction_outcomes)
     ->Args({1'000'000, 0, 1})
     ->Args({1'000'000, 1, 1})
     ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
+
+void
+bm_scheduler_admit_large_batch(benchmark::State &state)
+{
+  MempoolTestInfra server;
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  const auto num_txs = static_cast<size_t>(state.range(0));
+  const auto accounts = make_benchmark_accounts(10'000);
+  seed_benchmark_hog_ages(server, accounts);
+  scheduler->read_average_hog_ages(
+      x23::XdrVec<ContractAddress>(accounts.begin(), accounts.end()))();
+
+  fib_client_t fib_client(accounts[0]);
+  const SignedTransaction prototype = generate_unsigned_txs(fib_client, 1)[0];
+  SignedTransactionBatch txs(num_txs, prototype);
+  TransactionHashBatch hashes(num_txs);
+  WorkerPool::get_default_pool().for_each_parallel(
+      std::views::iota(size_t{0}, num_txs), [&](size_t i) {
+        txs[i].tx.invocation.invoked_address = accounts[i % accounts.size()];
+        txs[i].tx.uniquifier.nonce = i;
+        hashes[i] = sha256(txs[i].tx);
+      });
+  // Model a warmed-up e2e run: admission probes the outcome cache even for
+  // new hashes, while millions of older committed outcomes are retained.
+  {
+    std::vector<TransactionHash> committed(state.range(1));
+    for (size_t i = 0; i < committed.size(); ++i) {
+      std::memcpy(committed[i].data(), &i, sizeof(i));
+    }
+    scheduler->record_committed_transaction_outcomes(
+        x23::span<const TransactionHash>(committed), /*height=*/0)();
+  }
+  for (auto _ : state) {
+    ElapsedTimer timer;
+    const auto outcomes = scheduler->add_txs(txs, hashes)();
+    state.SetIterationTime(timer.elapsed());
+    benchmark::DoNotOptimize(outcomes);
+    scheduler->remove_from_scheduler(
+        x23::span<const TransactionHash>(hashes))();
+  }
+  state.SetItemsProcessed(state.iterations() * num_txs);
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_scheduler_admit_large_batch)
+    ->Args({1'000'000, 0})
+    ->Args({1'000'000, 20'000'000})
+    ->UseManualTime()
     ->Unit(benchmark::kMillisecond);
 
 } // namespace
