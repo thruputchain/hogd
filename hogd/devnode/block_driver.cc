@@ -16,6 +16,7 @@
 #include "proposal_hash.h"
 #include "sched_coord.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 namespace {
