@@ -43,6 +43,7 @@ add_library(base_test_objects OBJECT
   rc_test.cc
   status_test.cc
   string_test.cc
+  time_test.cc
   unique_function_test.cc
   wide_integral_test.cc
   worker_pool_test.cc

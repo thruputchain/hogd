@@ -179,6 +179,15 @@ jobs:
             build/debug/hogd/devnode/hog-devnode \
             build/debug/hogd/devnode/hog-hosted-bootstrap
 
+      # Linux binaries must stay runnable on hosts whose libstdc++ is GCC 14's
+      # (GLIBCXX_3.4.33), even though they are built with GCC 15.
+      - name: Check Linux binaries for libstdc++ compatibility
+        run: |
+          binaries=(hog_db/hog-db hog_exec/hog-exec hog_mempool/hog-mempool hog_auth/hog-auth hog_event/hog-event hog_indexer/hog-indexer devnode/hog-devnode devnode/hog-hosted-bootstrap)
+          ./scripts/check-max-glibcxx.sh 3.4.33 \
+            "${binaries[@]/#/build/release/hogd/}" \
+            "${binaries[@]/#/build/debug/hogd/}"
+
       - name: Verify distribution version
         run: |
           set -euo pipefail
