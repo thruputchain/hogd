@@ -42,6 +42,7 @@
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
+#include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -3933,6 +3934,58 @@ TEST(Mempool, RestartRejectsDatabaseFromAnotherNetwork)
   EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
   EXPECT_EQ(tip.db_tip().value.proposal_header.network_hash,
             MempoolTestInfra::kNetworkHash);
+}
+
+// A recovered tip at the maximum BlockHeight has no representable successor:
+// schedulercoord_propose_block() computes block_height + 1, which would be
+// signed INT64_MAX + 1. hog_db's startup already rejects such a tip; the
+// mempool keeps the same backstop in finish_init(), so a stack restarted over a
+// tampered tip fails the coordinator intro instead of overflowing its first
+// proposal.
+TEST(Mempool, RestartRejectsRecoveredMaxBlockHeightTip)
+{
+  TmpDir db_dir;
+
+  // Bring the stack up and commit genesis so the database carries a real tip.
+  {
+    MempoolTestInfra server(
+        MempoolTestInfra::Options{.db_directory = db_dir.directory()});
+    const SchedulerGetTipResult tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    ASSERT_GE(tip.db_tip().value.proposal_header.block_height, 1);
+  }
+
+  // Rewrite only the committed tip height to the maximum BlockHeight and
+  // commit, leaving the row otherwise intact, so the restart recovers a
+  // tampered tip.
+  {
+    // Matches the ramdb heap size the stack opens the database with.
+    constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024;
+    DBStatus<uint64_t> lsn = Database::check(db_dir.directory(), kRamDbBytes);
+    ASSERT_TRUE(lsn.has_value());
+    DBStatus<std::unique_ptr<Database>> ramdb =
+        Database::open_lsn(db_dir.directory(), *lsn, kRamDbBytes);
+    ASSERT_TRUE(ramdb.has_value());
+    HogDbDAO dao(RAMDB(std::move(*ramdb)));
+
+    HogDbStatus<DbTip> tip = dao.read_dbtip();
+    ASSERT_TRUE(tip.has_value());
+    DbTip tampered = *tip;
+    tampered.value.proposal_header.block_height =
+        std::numeric_limits<BlockHeight>::max();
+    ASSERT_TRUE(dao.write_dbtip(tampered).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  }
+
+  // The mempool rejects the coordinator intro that recovers the tampered tip,
+  // which fails startup rather than overflowing the successor height.
+  const MempoolTestInfra::Options restart_options{
+      .skip_genesis_block = true,
+      .network_hash = MempoolTestInfra::kNetworkHash,
+      .db_directory = db_dir.directory()};
+  EXPECT_THROW(
+      { MempoolTestInfra rejected(restart_options); }, x23::XdrCallFailed);
 }
 
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)

@@ -521,6 +521,18 @@ private:
       if (db_res.result() == DbSchedResult::DbSchedResultOK) {
         const DbTip &recovered_tip = db_res.db_tip();
         CHECK_GE(recovered_tip.value.proposal_header.block_height, 0);
+        // The successor height is block_height + 1, evaluated in signed
+        // BlockHeight arithmetic in schedulercoord_propose_block(). A tip at
+        // the maximum representable height has no representable successor, so
+        // reject the recovered tip here -- as hog_db's own startup already does
+        // (startup_validation.cc) -- instead of overflowing on the first
+        // proposal. A live chain never reaches this height; it only appears on
+        // a tampered recovered tip (#4399).
+        if (recovered_tip.value.proposal_header.block_height ==
+            std::numeric_limits<BlockHeight>::max()) {
+          throw std::runtime_error(
+              "recovered tip is at the maximum committed block height");
+        }
         // The recovered tip is the identity of the chain behind hog_db. No
         // registration card carries a network hash, so this is the only place
         // a shard holding another network's state can be caught before its tip
