@@ -1421,6 +1421,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
 
   MempoolMetrics::instance().last_scheduler_remove_duration_ms.record(
       mempool_duration_ms(c));
+  MempoolMetrics::instance().scheduler_remove_duration_seconds.record(c);
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }

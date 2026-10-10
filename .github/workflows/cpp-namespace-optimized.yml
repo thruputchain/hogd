@@ -223,6 +223,16 @@ jobs:
           ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror"
           -x -DCRASHDUMP_ON_TIMEOUT=ON
 
+      # Shipped binaries must not need GCC 15's libstdc++ (see release.yml).
+      - name: Check libstdc++ compatibility
+        run: >-
+          ./scripts/check-max-glibcxx.sh 3.4.33
+          build/gcc/hogd/hog_db/hog-db build/gcc/hogd/hog_exec/hog-exec
+          build/gcc/hogd/hog_mempool/hog-mempool build/gcc/hogd/hog_auth/hog-auth
+          build/gcc/hogd/hog_event/hog-event build/gcc/hogd/hog_indexer/hog-indexer
+          build/gcc/hogd/devnode/hog-devnode
+          build/gcc/hogd/devnode/hog-hosted-bootstrap
+
       - name: Run Tests
         run: |
           cd build/gcc
