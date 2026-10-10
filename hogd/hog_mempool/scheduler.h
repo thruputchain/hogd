@@ -236,8 +236,29 @@ public:
   x23::CoroLock global_lock_;
 
 private:
-  struct TransactionOutcomeEntry {
+  // Reuse the keyed hash calculated for shard selection during map probes
+  // and eviction. The cached value is internal; transaction identity remains
+  // the original SHA-256 hash.
+  struct TransactionOutcomeKey {
     TransactionHash tx_hash;
+    size_t cached_hash;
+
+    explicit TransactionOutcomeKey(const TransactionHash &hash)
+      : tx_hash(hash), cached_hash(SipHash24Hasher{}(hash))
+    {}
+    bool operator==(const TransactionOutcomeKey &other) const
+    {
+      return tx_hash == other.tx_hash;
+    }
+  };
+  struct TransactionOutcomeHasher {
+    size_t operator()(const TransactionOutcomeKey &key) const noexcept
+    {
+      return key.cached_hash;
+    }
+  };
+  struct TransactionOutcomeEntry {
+    TransactionOutcomeKey key;
     SchedulerTransactionOutcome outcome;
     // We record the height since we use the height to evict tx outcomes that
     // are at least [kTransactionOutcomeBlockLifetime] blocks old.
@@ -249,9 +270,9 @@ private:
   struct TransactionOutcomeShard {
     x23::CoroLock lock;
     std::list<TransactionOutcomeEntry> order;
-    std::unordered_map<TransactionHash,
+    std::unordered_map<TransactionOutcomeKey,
                        std::list<TransactionOutcomeEntry>::iterator,
-                       SipHash24Hasher>
+                       TransactionOutcomeHasher>
         outcomes;
     // Admission only clears failed outcomes. Most shards contain successes
     // exclusively, so avoid locking and probing the large success cache in
@@ -261,6 +282,12 @@ private:
   static size_t transaction_outcome_shard_index(const TransactionHash &hash)
   {
     return SipHash24Hasher{}(hash) % kTransactionOutcomeShards;
+  }
+
+  static size_t
+  transaction_outcome_shard_index(const TransactionOutcomeKey &key)
+  {
+    return key.cached_hash % kTransactionOutcomeShards;
   }
 
   struct TxKey {
@@ -370,7 +397,7 @@ private:
   static void prune_transaction_outcomes_locked(TransactionOutcomeShard &shard,
                                                 BlockHeight height);
   static void record_transaction_outcome_locked(
-      TransactionOutcomeShard &shard, const TransactionHash &tx_hash,
+      TransactionOutcomeShard &shard, const TransactionOutcomeKey &key,
       const SchedulerTransactionOutcome &outcome, BlockHeight processed_height);
   static void erase_transaction_outcome_locked(
       TransactionOutcomeShard &shard,
