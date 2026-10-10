@@ -109,7 +109,7 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
   return *snapshot_cost;
 }
 
-HogDbStatus<int128_t>
+HogDbStatus<BlockTX::LockResult>
 BlockTX::lock(const ItemKey &key, ItemChange &change,
               std::optional<DbConflictCode> *conflict_reason)
 {
@@ -127,8 +127,11 @@ BlockTX::lock(const ItemKey &key, ItemChange &change,
 
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     ctx.conflict_reason = conflict_reason;
-    return do_lock(*lock, change, ctx)
-        .and_then([](auto /*unused*/) -> HogDbStatus<int128_t> { return 0; });
+    auto storage_cost = do_lock(*lock, change, ctx);
+    if (!storage_cost) {
+      return storage_cost.error();
+    }
+    return LockResult{.lock = lock, .storage_cost = 0};
   }
 
   auto *item = item_locks_.insert_or_get(key, [&] {
@@ -139,30 +142,29 @@ BlockTX::lock(const ItemKey &key, ItemChange &change,
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
   ctx.conflict_reason = conflict_reason;
-  return do_lock(*item, change, ctx);
+  auto storage_cost = do_lock(*item, change, ctx);
+  if (!storage_cost) {
+    return storage_cost.error();
+  }
+  return LockResult{.lock = item, .storage_cost = *storage_cost};
 }
 
 HogDbStatus<int128_t>
-BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
-                     const ItemChange &new_change,
+BlockTX::modify_lock(ItemLock &lock, const ItemKey &key,
+                     const ItemChange &old_change, const ItemChange &new_change,
                      std::optional<DbConflictCode> *conflict_reason)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.get(key.get_address());
-    CHECK_PTR(lock);
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     ctx.conflict_reason = conflict_reason;
-    return do_modify_lock(*lock, old_change, new_change, ctx)
+    return do_modify_lock(lock, old_change, new_change, ctx)
         .and_then([](auto /*unused*/) -> HogDbStatus<int128_t> { return 0; });
   }
 
-  auto *lock = item_locks_.get(key);
-  CHECK_PTR(lock);
-
   LockContext ctx(&db_, block_height_, key, &cost_model_);
   ctx.conflict_reason = conflict_reason;
-  auto r = do_modify_lock(*lock, old_change, new_change, ctx);
+  auto r = do_modify_lock(lock, old_change, new_change, ctx);
   if (!r && is_invalidated()) [[unlikely]] {
     // Catches the narrow race where a sibling invalidated us *during*
     // do_modify_lock: its DAO block removal made an RCQ consume's past-block
@@ -178,44 +180,28 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
 }
 
 void
-BlockTX::unlock(const ItemKey &key, ItemChange &change)
+BlockTX::unlock(ItemLock &lock, const ItemKey &key, ItemChange &change)
 {
-  // no storage cost for address balances.
-  if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.get(key.get_address());
-    CHECK_PTR(lock);
-    LockContext ctx(&db_, block_height_, key, &cost_model_);
-    do_unlock_item(*lock, change, ctx);
-    return;
-  }
-
-  auto *lock = item_locks_.get(key);
-  CHECK_PTR(lock);
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  do_unlock_item(*lock, change, ctx);
+  do_unlock_item(lock, change, ctx);
 }
 
 HogDbStatus<int128_t>
-BlockTX::commit_change(const ItemKey &key, ItemChange change)
+BlockTX::commit_change(ItemLock &lock, const ItemKey &key, ItemChange change)
 {
   // TODO(geoff): In many cases we can evaluate here whether or not the item
   // change commit_change is a no-op.  In such cases, we can avoid acquiring the
   // lock.
   if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.get(key.get_address());
-    CHECK_PTR(lock);
     LockContext ctx(&db_, block_height_, key, &cost_model_);
-    auto r = lock->commit_change(std::move(change), ctx);
+    auto r = lock.commit_change(std::move(change), ctx);
     if (!r.has_value()) {
       return r.error();
     }
     return 0;
   }
-  auto *lock = item_locks_.get(key);
-  CHECK_PTR(lock);
-
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  auto r = lock->commit_change(std::move(change), ctx);
+  auto r = lock.commit_change(std::move(change), ctx);
 
   // Reject the commit if a sibling invalidated this block. An exclusive RCQ
   // commit revalidates against the live DAO and computes its committed cost
