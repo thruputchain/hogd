@@ -596,8 +596,8 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
   return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
-// Preserve assumed auth, caller context, and forwarded tokens; clear invoke flags.
-// Views skip signature checks and never commit writes.
+// Views assume auth without signature checks and never commit writes.
+// Preserve caller context and forwarded tokens, but clear invoke flags.
 TransactionViewQuery
 normalize_public_view_query(TransactionViewQuery query)
 {
