@@ -429,7 +429,7 @@ load_log_file(
         debug("out of memory in recovery buffer");
         return DBError(DBCode::kNoMemory);
       }
-      ret = read_full(r, dst->get_all());
+      ret = read_full(r, allocator.item_all(dst));
       if (!ret) {
         if (ret.error() == ENODATA)
           goto eof;

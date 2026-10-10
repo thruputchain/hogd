@@ -1372,8 +1372,10 @@ TEST(ScalableMapRecoveryConcurrency, ApplyChangeAndExpandRaceCompactor)
   auto apply_put = [&](const std::string &key, const std::string &val) {
     ItemHeader *rec = fresh_record(kNormal, key.size(), val.size());
     ASSERT_NE(rec, nullptr);
-    std::ranges::copy(std::as_bytes(std::span(key)), rec->get_key().begin());
-    std::ranges::copy(std::as_bytes(std::span(val)), rec->get_value().begin());
+    std::ranges::copy(std::as_bytes(std::span(key)),
+                      s.la->item_key(rec).begin());
+    std::ranges::copy(std::as_bytes(std::span(val)),
+                      s.la->item_value(rec).begin());
     rec->lsn = ++lsn;
     ASSERT_TRUE(static_cast<bool>(s.map.apply_change(rec)));
   };
@@ -1381,7 +1383,8 @@ TEST(ScalableMapRecoveryConcurrency, ApplyChangeAndExpandRaceCompactor)
   auto apply_remove = [&](const std::string &key) {
     ItemHeader *rec = fresh_record(kTombstone, key.size(), 0);
     ASSERT_NE(rec, nullptr);
-    std::ranges::copy(std::as_bytes(std::span(key)), rec->get_key().begin());
+    std::ranges::copy(std::as_bytes(std::span(key)),
+                      s.la->item_key(rec).begin());
     rec->lsn = ++lsn;
     ASSERT_TRUE(static_cast<bool>(s.map.apply_change(rec)));
   };
@@ -1450,8 +1453,8 @@ TEST(ScalableMapRecoveryConcurrency, ApplyChangeAndExpandRaceCompactor)
   // The map must contain exactly the oracle's key/value pairs.
   std::unordered_map<std::string, std::string> found;
   s.map.for_each([&](ItemHeader *h) {
-    std::span<std::byte> k = h->get_key();
-    std::span<std::byte> v = h->get_value();
+    std::span<std::byte> k = s.la->item_key(h);
+    std::span<std::byte> v = s.la->item_value(h);
     auto [it, inserted] = found.emplace(
         std::string(reinterpret_cast<const char *>(k.data()), k.size()),
         std::string(reinterpret_cast<const char *>(v.data()), v.size()));
@@ -1491,8 +1494,10 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
     const std::string val = make_value(i, 32);
     ItemHeader *rec = src->alloc(kNormal, /*type=*/0, key.size(), val.size());
     ASSERT_NE(rec, nullptr);
-    std::ranges::copy(std::as_bytes(std::span(key)), rec->get_key().begin());
-    std::ranges::copy(std::as_bytes(std::span(val)), rec->get_value().begin());
+    std::ranges::copy(std::as_bytes(std::span(key)),
+                      s.la->item_key(rec).begin());
+    std::ranges::copy(std::as_bytes(std::span(val)),
+                      s.la->item_value(rec).begin());
     rec->lsn = static_cast<uint64_t>(i) + 1;
     ASSERT_TRUE(static_cast<bool>(s.map.apply_change(rec)));
     if (i == 0)

@@ -86,34 +86,36 @@ struct ItemHeader {
   // total_bytes returns the size of the item in bytes including the header.
   size_t total_bytes() const { return sizeof(*this) + kv_bytes(); }
 
-  // get_key returns a span of the key data.
-  std::span<std::byte> get_key()
+  // key_at, value_at, key_and_value_at, and all_at return the record's trailing
+  // key/value spans. `base` must point to this record's first byte through a
+  // pointer that carries the backing std::byte[] array's provenance (supply it
+  // via LogletAllocator::base_of). Advancing a byte pointer converted from
+  // `this` instead would leave the placement-constructed header object's
+  // representation, so reaching the key/value tail that way is undefined; only
+  // base_of's pointer reaches the tail within the one backing array (#4396, cf.
+  // #4329). Callers go through LogletAllocator::item_key etc., which supply the
+  // correct base.
+private:
+  friend class LogletAllocator;
+
+  std::span<std::byte> key_at(std::byte *base) const
   {
-    auto *buf = reinterpret_cast<std::byte *>(this) + sizeof(*this);
-    return {buf, key_len};
+    return {base + sizeof(*this), key_len};
   }
 
-  // get_value returns a span of the value data.
-  std::span<std::byte> get_value()
+  std::span<std::byte> value_at(std::byte *base) const
   {
-    auto *buf = reinterpret_cast<std::byte *>(this) + sizeof(*this) + key_len;
-    return {buf, value_len};
+    return {base + sizeof(*this) + key_len, value_len};
   }
 
-  // get_key_and_value returns a contiguous span of the key data and the value
-  // data.
-  std::span<std::byte> get_key_and_value()
+  std::span<std::byte> key_and_value_at(std::byte *base) const
   {
-    auto *buf = reinterpret_cast<std::byte *>(this) + sizeof(*this);
-    return {buf, kv_bytes()};
+    return {base + sizeof(*this), kv_bytes()};
   }
 
-  // get_all returns a contiguous span of the key data, the value data, and any
-  // alignment padding.
-  std::span<std::byte> get_all()
+  std::span<std::byte> all_at(std::byte *base) const
   {
-    auto *buf = reinterpret_cast<std::byte *>(this) + sizeof(*this);
-    return {buf, align_up(kv_bytes(), alignof(ItemHeader))};
+    return {base + sizeof(*this), align_up(kv_bytes(), alignof(ItemHeader))};
   }
 };
 
@@ -400,6 +402,28 @@ public:
     return loglets_[static_cast<size_t>(offset) / kLogletRegionSize];
   }
 
+  // item_key, item_value, item_key_and_value, and item_all return an item's
+  // trailing key/value spans through a pointer carrying base_addr_'s
+  // std::byte[] provenance, so the arithmetic stays within the one backing
+  // array rather than leaving the placement-constructed header object (#4396,
+  // cf. #4329).
+  std::span<std::byte> item_key(ItemHeader *item) const
+  {
+    return item->key_at(base_of(item));
+  }
+  std::span<std::byte> item_value(ItemHeader *item) const
+  {
+    return item->value_at(base_of(item));
+  }
+  std::span<std::byte> item_key_and_value(ItemHeader *item) const
+  {
+    return item->key_and_value_at(base_of(item));
+  }
+  std::span<std::byte> item_all(ItemHeader *item) const
+  {
+    return item->all_at(base_of(item));
+  }
+
   // size returns the size in bytes of all loglets together.
   size_t size() const { return len_; }
 
@@ -448,6 +472,16 @@ private:
     auto *pos = reinterpret_cast<std::byte *>(item);
     return pos >= base_addr_ &&
            pos + sizeof(*item) + item->kv_bytes() <= base_addr_ + len_;
+  }
+
+  // base_of returns a pointer to item's first byte that carries base_addr_'s
+  // std::byte[] array provenance, so item_key/item_value/... can derive the
+  // trailing spans without leaving the header object (#4396). Re-basing through
+  // base_addr_ anchors the result's provenance to the one backing array.
+  std::byte *base_of(ItemHeader *item) const
+  {
+    assert(item_is_within(item));
+    return base_addr_ + (reinterpret_cast<std::byte *>(item) - base_addr_);
   }
 
   // mem_is_low returns true if memory is low (and should be reclaimed).

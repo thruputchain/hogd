@@ -102,9 +102,9 @@ ScalableMap::get(std::span<const std::byte> key)
 {
   auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
   for (; *bu != nullptr; bu = &(*bu)->next) {
-    if ((*bu)->get_key() == key) {
+    if (allocator_.item_key(*bu) == key) {
       return DBItem{.type = (*bu)->type,
-                    .value = make_byte_buffer((*bu)->get_value())};
+                    .value = make_byte_buffer(allocator_.item_value(*bu))};
     }
   }
   return DBError(DBCode::kNotFound);
@@ -115,10 +115,10 @@ ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type)
 {
   auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
   for (; *bu != nullptr; bu = &(*bu)->next) {
-    if ((*bu)->get_key() == key) {
+    if (allocator_.item_key(*bu) == key) {
       if ((*bu)->type != type)
         return DBError(DBCode::kTypeMismatch);
-      return make_byte_buffer((*bu)->get_value());
+      return make_byte_buffer(allocator_.item_value(*bu));
     }
   }
   return DBError(DBCode::kNotFound);
@@ -130,12 +130,13 @@ ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type,
 {
   auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
   for (; *bu != nullptr; bu = &(*bu)->next) {
-    if ((*bu)->get_key() == key) {
-      if ((*bu)->type != type || (*bu)->get_value().size() != val_out.size())
+    if (allocator_.item_key(*bu) == key) {
+      if ((*bu)->type != type ||
+          allocator_.item_value(*bu).size() != val_out.size())
         return DBError(DBCode::kTypeMismatch);
 
       // success, copy out the item's value.
-      std::ranges::copy((*bu)->get_value(), val_out.begin());
+      std::ranges::copy(allocator_.item_value(*bu), val_out.begin());
       return {};
     }
   }
@@ -147,10 +148,10 @@ ScalableMap::get_size(std::span<const std::byte> key)
 {
   auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
   for (; *bu != nullptr; bu = &(*bu)->next) {
-    if ((*bu)->get_key() != key)
+    if (allocator_.item_key(*bu) != key)
       continue;
 
-    return (*bu)->get_value().size();
+    return allocator_.item_value(*bu).size();
   }
   return DBError(DBCode::kNotFound);
 }
@@ -160,7 +161,7 @@ ScalableMap::get_type(std::span<const std::byte> key)
 {
   auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
   for (; *bu != nullptr; bu = &(*bu)->next) {
-    if ((*bu)->get_key() != key)
+    if (allocator_.item_key(*bu) != key)
       continue;
 
     return (*bu)->type;
@@ -182,8 +183,8 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
   ItemHeader *item = allocator_.alloc(type, key.size(), val.size());
   if (!item) [[unlikely]]
     return DBError(DBCode::kNoMemory);
-  std::ranges::copy(key, item->get_key().begin());
-  std::ranges::copy(val, item->get_value().begin());
+  std::ranges::copy(key, allocator_.item_key(item).begin());
+  std::ranges::copy(val, allocator_.item_value(item).begin());
 
   // Write to on-disk log first.
   size_t hash = calculate_hash(key);
@@ -201,7 +202,7 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
 
   // Check if the key already exists.
   for (; *bu != nullptr; bu = &(*bu)->next) {
-    if ((*bu)->get_key() == key) {
+    if (allocator_.item_key(*bu) == key) {
       // If the item that is about to be overwritten should be included in an
       // ongoing snapshot, make sure the snapshot gets a copy of the item.
       // This must be done under the bucket lock because we must ensure the
@@ -210,12 +211,12 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
         mutation_cb_(*bu);
 
       // Is the item size unchanged? Update in place.
-      if ((*bu)->get_value().size() == val.size()) {
+      if (allocator_.item_value(*bu).size() == val.size()) {
         (*bu)->type = type;
         // Updating the LSN for update-in-place ensures that we don't
         // inadvertently forward this new value into an ongoing snapshot.
         (*bu)->lsn = new_lsn;
-        std::ranges::copy(val, (*bu)->get_value().begin());
+        std::ranges::copy(val, allocator_.item_value(*bu).begin());
         allocator_.free<true>(item);
         return {};
       }
@@ -248,7 +249,7 @@ ScalableMap::remove(std::span<const std::byte> key)
   auto [ul, bu, cnt] = acquire_bucket(hash);
   record.reset();
   for (; *bu != nullptr; bu = &(*bu)->next) {
-    if ((*bu)->get_key() == key) {
+    if (allocator_.item_key(*bu) == key) {
       // See comment in put(). Forwards the item to an ongoing snapshot
       // that should include it before removing it.
       if (mutation_cb_)
@@ -271,7 +272,7 @@ ScalableMap::apply_change(ItemHeader *hdr)
   // The compactor runs concurrently during recovery and relocates items via
   // modify_locked() under the per-bucket mutex, so go through acquire_bucket()
   // (like put/remove) rather than touching buckets_ directly.
-  const size_t hash = calculate_hash(hdr->get_key());
+  const size_t hash = calculate_hash(allocator_.item_key(hdr));
 
   switch (hdr->storage) {
 
@@ -279,24 +280,27 @@ ScalableMap::apply_change(ItemHeader *hdr)
   {
     // Allocate before taking the bucket lock: alloc() can block on the
     // compactor, which also takes that lock — see put().
-    ItemHeader *item = allocator_.alloc(hdr->type, hdr->get_key().size(),
-                                        hdr->get_value().size());
+    ItemHeader *item =
+        allocator_.alloc(hdr->type, allocator_.item_key(hdr).size(),
+                         allocator_.item_value(hdr).size());
     if (!item) [[unlikely]]
       return DBError(DBCode::kNoMemory);
-    std::ranges::copy(hdr->get_key_and_value(),
-                      item->get_key_and_value().begin());
+    std::ranges::copy(allocator_.item_key_and_value(hdr),
+                      allocator_.item_key_and_value(item).begin());
     item->lsn = hdr->lsn;
 
     auto [ul, bu, cnt] = acquire_bucket(hash);
 
     // Check if the key already exists.
     for (; *bu != nullptr; bu = &(*bu)->next) {
-      if ((*bu)->get_key() == hdr->get_key()) {
+      if (allocator_.item_key(*bu) == allocator_.item_key(hdr)) {
         // Is the item size unchanged? Update in place.
-        if ((*bu)->get_value().size() == hdr->get_value().size()) {
+        if (allocator_.item_value(*bu).size() ==
+            allocator_.item_value(hdr).size()) {
           (*bu)->type = hdr->type;
           (*bu)->lsn = hdr->lsn;
-          std::ranges::copy(hdr->get_value(), (*bu)->get_value().begin());
+          std::ranges::copy(allocator_.item_value(hdr),
+                            allocator_.item_value(*bu).begin());
           // Rewind is safe: this thread just allocated item and nothing else
           // allocated on it since.
           allocator_.free<true>(item);
@@ -321,7 +325,7 @@ ScalableMap::apply_change(ItemHeader *hdr)
   {
     auto [ul, bu, cnt] = acquire_bucket(hash);
     for (; *bu != nullptr; bu = &(*bu)->next) {
-      if ((*bu)->get_key() == hdr->get_key()) {
+      if (allocator_.item_key(*bu) == allocator_.item_key(hdr)) {
         unlink(bu);
         counter_dec(cnt);
         break;
@@ -389,7 +393,8 @@ ScalableMap::do_expand()
     std::mutex &mu = mutexes_[idx & (mutexes_.size() - 1)];
     std::lock_guard guard(mu);
     for (ItemHeader **bu = &buckets_[idx]; *bu != nullptr;) {
-      size_t new_idx = calculate_hash((*bu)->get_key()) & (buckets_.size() - 1);
+      size_t new_idx =
+          calculate_hash(allocator_.item_key(*bu)) & (buckets_.size() - 1);
       ItemHeader **new_bu = &buckets_[new_idx];
 
       // continue if the item's bucket didn't change.
@@ -423,7 +428,7 @@ ScalableMap::modify_locked(
   size_t hash = calculate_hash(key);
   auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
-    if ((*bu)->get_key() == key) {
+    if (allocator_.item_key(*bu) == key) {
       fn(bu, hash);
       return true;
     }

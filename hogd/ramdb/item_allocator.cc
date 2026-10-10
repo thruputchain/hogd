@@ -212,7 +212,7 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
 
     // try to move the item to the new loglet.
     [[maybe_unused]] bool found = map_->modify_locked(
-        src_item->get_key(),
+        allocator_.item_key(src_item),
         [this, alloc_loglet, src_item, &bytes_moved,
          &stats](ItemHeader **hptr, size_t /* hash */) mutable {
           // modify_locked matched by key, not by pointer. A concurrent
@@ -242,8 +242,8 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
           }
 
           // copy the item's key and value to the new location.
-          std::ranges::copy(src_item->get_key_and_value(),
-                            dst_item->get_key_and_value().begin());
+          std::ranges::copy(allocator_.item_key_and_value(src_item),
+                            allocator_.item_key_and_value(dst_item).begin());
 
           // point the map to the new location (bucket lock is held).
           dst_item->next = src_item->next;

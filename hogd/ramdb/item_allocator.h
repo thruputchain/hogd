@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <span>
 #include <vector>
 
 #include "hogd/base/perthread.h"
@@ -112,6 +113,28 @@ public:
   // WARNING: Can block while waiting for memory to be freed, so must be called
   // without holding locks needed for compaction.
   ItemHeader *alloc(uint8_t type, size_t key_len, size_t value_len);
+
+  // item_key, item_value, item_key_and_value, and item_all return an item's
+  // trailing key/value spans through a pointer carrying the backing array's
+  // provenance (see LogletAllocator::item_key). Deriving these from the
+  // ItemHeader pointer itself would leave the header object's representation
+  // (#4396).
+  std::span<std::byte> item_key(ItemHeader *item) const
+  {
+    return allocator_.item_key(item);
+  }
+  std::span<std::byte> item_value(ItemHeader *item) const
+  {
+    return allocator_.item_value(item);
+  }
+  std::span<std::byte> item_key_and_value(ItemHeader *item) const
+  {
+    return allocator_.item_key_and_value(item);
+  }
+  std::span<std::byte> item_all(ItemHeader *item) const
+  {
+    return allocator_.item_all(item);
+  }
 
   // free deletes an item. Usually, the underlying memory will be reclaimed
   // later during compaction.

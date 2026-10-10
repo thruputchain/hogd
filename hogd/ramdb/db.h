@@ -370,8 +370,9 @@ inline void
 Database::get_each(GetEachCallback fn)
 {
   assert(active_);
-  map_.for_each([&fn](ItemHeader *hdr) {
-    fn(hdr->get_key(), hdr->type, hdr->get_value());
+  map_.for_each([this, &fn](ItemHeader *hdr) {
+    fn(loglet_allocator_->item_key(hdr), hdr->type,
+       loglet_allocator_->item_value(hdr));
   });
 }
 
@@ -380,8 +381,9 @@ Database::get_each_parallel(GetEachCallback fn, size_t width, WorkerPool &pool)
 {
   assert(active_);
   map_.for_each_parallel(
-      [&fn](ItemHeader *hdr) {
-        fn(hdr->get_key(), hdr->type, hdr->get_value());
+      [this, &fn](ItemHeader *hdr) {
+        fn(loglet_allocator_->item_key(hdr), hdr->type,
+           loglet_allocator_->item_value(hdr));
       },
       width, pool);
 }

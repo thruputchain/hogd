@@ -329,13 +329,14 @@ ScopedDiskWrite::modify(ItemHeader *src, bool use_src_lsn)
   // lsn re-assignment and key/value copy below overwrite anything this clear
   // overlaps. The guard avoids forming an out-of-range pointer when the
   // payload is empty.
-  if (std::span<std::byte> all = dst->get_all();
+  if (std::span<std::byte> all = w_.allocator_.item_all(dst);
       all.size() >= alignof(ItemHeader)) [[likely]]
     std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
                 alignof(ItemHeader));
   dst->lsn = use_src_lsn ? src->lsn : w_.cur_lsn_;
   dst->clear_next();
-  std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
+  std::ranges::copy(w_.allocator_.item_key_and_value(src),
+                    w_.allocator_.item_key_and_value(dst).begin());
   return {dst->lsn};
 }
 
@@ -355,13 +356,13 @@ ScopedDiskWrite::remove(std::span<const std::byte> key)
   // zero the alignment padding; the lsn store and key copy below overwrite
   // any overlap. The guard avoids forming an out-of-range pointer when the
   // payload is empty (reachable via remove() with an empty key).
-  if (std::span<std::byte> all = hdr->get_all();
+  if (std::span<std::byte> all = w_.allocator_.item_all(hdr);
       all.size() >= alignof(ItemHeader)) [[likely]]
     std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
                 alignof(ItemHeader));
   hdr->lsn = w_.cur_lsn_;
   hdr->clear_next();
-  std::ranges::copy(key, hdr->get_key().begin());
+  std::ranges::copy(key, w_.allocator_.item_key(hdr).begin());
   return {};
 }
 
