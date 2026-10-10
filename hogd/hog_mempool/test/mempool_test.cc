@@ -1695,7 +1695,10 @@ TEST(Mempool, CommitRecordsLatencyHistograms)
          {"block_period_seconds", "commit_interval_seconds"}) {
       const std::optional<double> recorded =
           prometheus_sample(dump, std::format("mempool_{}_sum", name));
-      ASSERT_TRUE(recorded.has_value()) << name;
+      if (!recorded.has_value()) {
+        ADD_FAILURE() << name << " has no _sum sample";
+        continue;
+      }
       EXPECT_GT(*recorded, 0.0) << name;
       EXPECT_LE(*recorded, rounds_elapsed_seconds) << name;
     }
