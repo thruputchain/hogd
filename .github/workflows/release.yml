@@ -39,7 +39,8 @@ jobs:
             machine: aarch64
             build_architecture: armv8.2-a
             rust_build_cpu: neoverse-n1
-            nproc: 8
+            # 16 vCPU / 32 GB runner; leave memory headroom for -O3 -g TUs.
+            nproc: 12
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
