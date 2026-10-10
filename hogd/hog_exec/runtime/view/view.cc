@@ -109,11 +109,15 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     co_return ExpectedViewResult{TransactionViewStatus::InternalError};
   }
 
-  // Admission checks invoke() expects its caller to have run.
+  // Admission checks invoke() expects its caller to have run: the frame-level
+  // checks first, then that the caller owns the tokens it forwards.
   auto admitted =
       syscall_handler.validate_new_invocation(query.invocation.invoked_address,
-                                              query.invoke_flags,
-                                              *forwarded_auth_tokens);
+                                              query.invoke_flags);
+  if (admitted.has_value()) {
+    admitted =
+        syscall_handler.validate_forwarded_auth_tokens(*forwarded_auth_tokens);
+  }
   if (!admitted.has_value()) {
     info("view transaction failed with SyscallErrorCode::{}",
          admitted.error().code());

@@ -368,7 +368,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // error() log, which can throw.
   auto admitted =
       to_handler().validate_new_invocation(invocation.invoked_address,
-                                           frame_flags, ValidatedAuthTokens{});
+                                           frame_flags);
   if (!admitted.has_value()) {
     finish_pending_trace(admitted.error().code());
     error("mock invocation frame refused: {}", admitted.error().code());

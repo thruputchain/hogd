@@ -39,15 +39,26 @@ public:
   ValidatedAuthTokens(ValidatedAuthTokens &&) noexcept = default;
   ValidatedAuthTokens &operator=(ValidatedAuthTokens &&) noexcept = default;
 
+  // O(1) check that the span is a whole number of ids, split from parse() so a
+  // caller can run it before admission (#4403). Else InvalidSyscallInput.
+  [[nodiscard]] static SyscallStatus<void>
+  validate_shape(std::span<const std::byte> bytes)
+  {
+    if (bytes.size() % sizeof(uint32_t) != 0) {
+      return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
+    return {};
+  }
+
   // Parses a contract-supplied byte span, which may be unaligned.
   // InvalidSyscallInput when the length is not a multiple of sizeof(uint32_t)
   // or an id repeats.
   [[nodiscard]] static SyscallStatus<ValidatedAuthTokens>
   parse(std::span<const std::byte> bytes)
   {
-    if (bytes.size() % sizeof(uint32_t) != 0) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    if (auto shape = validate_shape(bytes); !shape.has_value()) {
+      return shape.error();
     }
     std::vector<uint32_t> parsed_ids(bytes.size() / sizeof(uint32_t));
     if (!bytes.empty()) {

@@ -371,9 +371,8 @@ SystemCallHandler::root_invoke()
 
   // Root frame: only the depth bound can refuse here. Rejected before any
   // frame ran, so deterministic, as handle_root_host_fn_status() reports it.
-  auto admitted =
-      validate_new_invocation(root_invocation.invoked_address,
-                              std::to_underlying(InvokeFlag::None), {});
+  auto admitted = validate_new_invocation(root_invocation.invoked_address,
+                                          std::to_underlying(InvokeFlag::None));
   if (!admitted.has_value()) {
     co_return finalize_after_root_frame(
         InvokeResult{.result_ = InvokeError{InvokeErrorCode::Deterministic},
@@ -784,17 +783,16 @@ SystemCallHandler::get_msg_sender() const
 }
 
 SyscallStatus<void>
-SystemCallHandler::validate_new_invocation(
-    ContractAddress const &address, InvokeFlagSet flags,
-    ValidatedAuthTokens const &owned_auth_tokens) const
+SystemCallHandler::validate_new_invocation(ContractAddress const &address,
+                                           InvokeFlagSet flags) const
 {
   if (!validate_invoke_flags(flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   // Reentrance and the depth bound are both conditions of the calling frame,
-  // and both sit above the auth-token check so that either is reported even
-  // when the caller also forwarded a token it does not own (#2973 established
-  // that for reentrance).
+  // and both sit above the auth-token check (validate_forwarded_auth_tokens)
+  // so that either is reported even when the caller also forwarded a token it
+  // does not own (#2973 established that for reentrance).
   //
   // Reentrance first: it says the call can never succeed anywhere in this
   // chain, where the depth bound says only that this frame is too deep and a
@@ -813,6 +811,13 @@ SystemCallHandler::validate_new_invocation(
       config_params().max_cross_invoke_depth) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded};
   }
+  return {};
+}
+
+SyscallStatus<void>
+SystemCallHandler::validate_forwarded_auth_tokens(
+    ValidatedAuthTokens const &owned_auth_tokens) const
+{
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(
           owned_auth_tokens.set())) {

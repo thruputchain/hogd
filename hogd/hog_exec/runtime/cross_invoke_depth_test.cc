@@ -358,14 +358,14 @@ TEST_F(CrossInvokeDepthOneTest, DepthBeatsUnownedAuthToken)
                    SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded));
 }
 
-// Duplicate ids are rejected by syscall_Invoke_inner before the handler is
-// reached at all.
-TEST_F(CrossInvokeDepthOneTest, DuplicateAuthTokenIdsBeatDepth)
+// Depth outranks a duplicate id: detecting the duplicate needs the token list
+// materialized, which #4403 deferred until after admission.
+TEST_F(CrossInvokeDepthOneTest, DepthBeatsDuplicateAuthTokenIds)
 {
   run_probe(2, invoke_expecting_rejection(
                    make_contract_address(1),
                    std::to_underlying(InvokeFlag::None), {7, 7},
-                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+                   SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded));
 }
 
 // validate_invoke_flags admits only TryInvoke and ReadOnly, and runs before

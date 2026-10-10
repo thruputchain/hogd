@@ -167,10 +167,12 @@ public:
   //   under the cross-invoke depth bound;
   //   does this call hold up -- auth tokens owned by the caller.
   //
-  // Reentrance and the depth bound are conditions of the calling frame, so
-  // they outrank the request's own validity: a reentrant or too-deep invoke
-  // reports that even when it also forwards a token it does not own (#2973
-  // established this for reentrance; the depth bound follows the same rule).
+  // Reentrance and the depth bound are conditions of the calling frame, so they
+  // outrank the request's own validity: a reentrant or too-deep invoke reports
+  // that even when it forwards an unowned or duplicate token id (#2973 settled
+  // this for reentrance; depth follows). A misaligned span is caught earlier by
+  // validate_shape. Neither of these checks needs the parsed list, so they run
+  // before ValidatedAuthTokens::parse (#4403).
   //
   // Callers must run this before invoke(); invoke() does not repeat it.
   //
@@ -178,8 +180,13 @@ public:
   // a plain load off the tip the snapshot cache loaded when the block was
   // opened.
   [[nodiscard]] SyscallStatus<void>
-  validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
-                          ValidatedAuthTokens const &owned_auth_tokens) const;
+  validate_new_invocation(ContractAddress const &address,
+                          InvokeFlagSet flags) const;
+
+  // Checks the caller owns every token it forwards. Runs after the frame-level
+  // checks admit the call, so a rejected call never parses the list (#4403).
+  [[nodiscard]] SyscallStatus<void> validate_forwarded_auth_tokens(
+      ValidatedAuthTokens const &owned_auth_tokens) const;
 
   // Copy events from the currently active invocation frame.
   x23::Vec<TxEmittedEvent> copy_active_frame_events() const

@@ -128,22 +128,36 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
         WrappedGasAmount{0}};
   }
 
-  // Materialized once; the frame stack takes the list over without copying.
+  // The span's shape (a whole number of ids) is an O(1) check, so it runs
+  // before admission: a misaligned span is rejected without materializing
+  // anything (#2327).
+  if (auto shape =
+          ValidatedAuthTokens::validate_shape(input_owned_auth_token_ids);
+      !shape.has_value()) {
+    co_return SyscallInnerResult{shape.error().code(), WrappedGasAmount{0}};
+  }
+
+  // Admission first: a rejection reports gas 0, so materializing the token list
+  // or copying calldata beforehand would be unpriced work (#4403, #2973).
+  auto admitted = syscall_handler.validate_new_invocation(input_address,
+                                                          input_inputs.flags);
+  if (!admitted.has_value()) {
+    co_return SyscallInnerResult{admitted.error().code(), WrappedGasAmount{0}};
+  }
+
+  // Admitted: materialize the list once (the frame stack takes it over without
+  // copying) and confirm the caller owns every token it forwards.
   auto owned_auth_tokens =
       ValidatedAuthTokens::parse(input_owned_auth_token_ids);
   if (!owned_auth_tokens.has_value()) {
     co_return SyscallInnerResult{owned_auth_tokens.error().code(),
                                  WrappedGasAmount{0}};
   }
-
-  // Admission before the calldata is copied: a rejection reports gas 0, so
-  // copying first would be unpriced, length-proportional work a contract could
-  // repeat at will (#2973). invoke() relies on this having run.
-  auto admitted =
-      syscall_handler.validate_new_invocation(input_address, input_inputs.flags,
-                                              *owned_auth_tokens);
-  if (!admitted.has_value()) {
-    co_return SyscallInnerResult{admitted.error().code(), WrappedGasAmount{0}};
+  if (auto tokens_owned =
+          syscall_handler.validate_forwarded_auth_tokens(*owned_auth_tokens);
+      !tokens_owned.has_value()) {
+    co_return SyscallInnerResult{tokens_owned.error().code(),
+                                 WrappedGasAmount{0}};
   }
 
   Calldata calldata;
