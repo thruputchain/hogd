@@ -114,11 +114,8 @@ public:
   // without holding locks needed for compaction.
   ItemHeader *alloc(uint8_t type, size_t key_len, size_t value_len);
 
-  // item_key, item_value, item_key_and_value, and item_all return an item's
-  // trailing key/value spans through a pointer carrying the backing array's
-  // provenance (see LogletAllocator::item_key). Deriving these from the
-  // ItemHeader pointer itself would leave the header object's representation
-  // (#4396).
+  // Forward to LogletAllocator::item_key etc. (see there for provenance,
+  // #4396).
   std::span<std::byte> item_key(ItemHeader *item) const
   {
     return allocator_.item_key(item);

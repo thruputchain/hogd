@@ -86,15 +86,10 @@ struct ItemHeader {
   // total_bytes returns the size of the item in bytes including the header.
   size_t total_bytes() const { return sizeof(*this) + kv_bytes(); }
 
-  // key_at, value_at, key_and_value_at, and all_at return the record's trailing
-  // key/value spans. `base` must point to this record's first byte through a
-  // pointer that carries the backing std::byte[] array's provenance (supply it
-  // via LogletAllocator::base_of). Advancing a byte pointer converted from
-  // `this` instead would leave the placement-constructed header object's
-  // representation, so reaching the key/value tail that way is undefined; only
-  // base_of's pointer reaches the tail within the one backing array (#4396, cf.
-  // #4329). Callers go through LogletAllocator::item_key etc., which supply the
-  // correct base.
+  // key_at/value_at/key_and_value_at/all_at return the trailing key/value
+  // spans. `base` must be this record's first byte from
+  // LogletAllocator::base_of so the span stays within the backing byte array,
+  // not the header object (#4396).
 private:
   friend class LogletAllocator;
 
@@ -402,11 +397,9 @@ public:
     return loglets_[static_cast<size_t>(offset) / kLogletRegionSize];
   }
 
-  // item_key, item_value, item_key_and_value, and item_all return an item's
-  // trailing key/value spans through a pointer carrying base_addr_'s
-  // std::byte[] provenance, so the arithmetic stays within the one backing
-  // array rather than leaving the placement-constructed header object (#4396,
-  // cf. #4329).
+  // item_key/item_value/item_key_and_value/item_all return an item's trailing
+  // key/value spans anchored on base_addr_'s backing array (via base_of,
+  // #4396).
   std::span<std::byte> item_key(ItemHeader *item) const
   {
     return item->key_at(base_of(item));
@@ -474,10 +467,8 @@ private:
            pos + sizeof(*item) + item->kv_bytes() <= base_addr_ + len_;
   }
 
-  // base_of returns a pointer to item's first byte that carries base_addr_'s
-  // std::byte[] array provenance, so item_key/item_value/... can derive the
-  // trailing spans without leaving the header object (#4396). Re-basing through
-  // base_addr_ anchors the result's provenance to the one backing array.
+  // base_of returns item's first byte re-based through base_addr_ so the result
+  // carries the backing array's provenance (#4396).
   std::byte *base_of(ItemHeader *item) const
   {
     assert(item_is_within(item));
