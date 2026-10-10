@@ -10,8 +10,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
