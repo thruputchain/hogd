@@ -3938,12 +3938,8 @@ TEST(Mempool, RestartRejectsDatabaseFromAnotherNetwork)
             MempoolTestInfra::kNetworkHash);
 }
 
-// A recovered tip at the maximum BlockHeight has no representable successor:
-// schedulercoord_propose_block() computes block_height + 1, which would be
-// signed INT64_MAX + 1. hog_db's startup already rejects such a tip; the
-// mempool keeps the same backstop in finish_init(), so a stack restarted over a
-// tampered tip fails the coordinator intro instead of overflowing its first
-// proposal.
+// A recovered tip at the maximum BlockHeight has no representable successor, so
+// the mempool fails the coordinator intro instead of overflowing (#4399).
 TEST(Mempool, RestartRejectsRecoveredMaxBlockHeightTip)
 {
   TmpDir db_dir;
