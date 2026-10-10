@@ -20,6 +20,7 @@
 #include "auth_token.hh"
 #include "built_contracts/authclaim_test.h"
 #include "built_contracts/default_wallet.h"
+#include "built_contracts/default_wallet.hh"
 #include "built_contracts/manual_revert_test.h"
 #include "built_contracts/view_gateway_test.h"
 #include "executor_to_db_rpc.hh"
@@ -50,6 +51,7 @@
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {
@@ -615,8 +617,9 @@ TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
       CryptographicScheme::Ed25519);
   wallet_query.auth_claim.pubkey_preimage().pubkey.ed25519().fill(42);
   const auto owner =
-      pubkey_auth_address(wallet_query.auth_claim.pubkey_preimage()).value();
-  ContractTraitClient<default_wallet::DefaultWallet> wallet(owner);
+      pubkey_auth_address(wallet_query.auth_claim.pubkey_preimage());
+  ASSERT_TRUE(owner.has_value());
+  ContractTraitClient<default_wallet::DefaultWallet> wallet(*owner);
   const auto inner = make_read_query().invocation;
   x23::Vec<default_wallet::WalletCall, 0xffffffff> calls{
       {.target = inner.invoked_address,
