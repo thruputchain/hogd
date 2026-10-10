@@ -815,7 +815,7 @@ SystemCallHandler::validate_new_invocation(
   }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(
-          owned_auth_tokens.set())) {
+          owned_auth_tokens.ids())) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   return {};
@@ -1303,13 +1303,6 @@ SystemCallHandler::get_return_buffer() const
 bool
 SystemCallHandler::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
-{
-  return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
-}
-
-bool
-SystemCallHandler::check_auth_tokens_owned(
-    AuthTokenIdSet const &token_ids) const
 {
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }

@@ -63,7 +63,9 @@ using wallet_bytes_t = wallet_bytes_vec_t::value_type;
 
 // Reference constants (implementation.rs).
 constexpr size_t kMaxCalls = 16;
-constexpr size_t kMaxReturnDataBytes = kMaxReturnBufferLen; // 1024
+// Mirrors implementation.rs, which compiles its own limit in, so this
+// follows that contract rather than kConfigParamMaxReturnBufferLen.
+constexpr size_t kMaxReturnDataBytes = 1024;
 
 // Mirrors require_root_invocation(): GetMsgSender must fail with exactly
 // IsRootTransaction. Returns whether this is a root invocation; host-level

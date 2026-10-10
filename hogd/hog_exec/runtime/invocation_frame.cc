@@ -277,7 +277,7 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
                                   ValidatedAuthTokens &&owned_auth_tokens)
 {
   assert(frame_stack_.empty() ||
-         check_auth_tokens_owned(owned_auth_tokens.set()));
+         check_auth_tokens_owned(owned_auth_tokens.ids()));
 
   size_t event_count =
       frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
@@ -285,7 +285,7 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
       frame_stack_.empty() ? 0
                            : frame_stack_.back().get_total_try_invoke_depth();
 
-  auto forwarded_ids = std::move(owned_auth_tokens).release().first;
+  auto forwarded_ids = std::move(owned_auth_tokens).release();
   // A root frame has no parent to forward it tokens.
   assert(!frame_stack_.empty() || forwarded_ids.empty());
 
@@ -635,16 +635,6 @@ InvocationFrameStack::consume_auth_token(uint32_t token_id)
 bool
 InvocationFrameStack::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
-{
-  assert(!frame_stack_.empty());
-  return std::ranges::all_of(token_ids, [&](uint32_t token_id) {
-    return frame_stack_.back().check_owns_auth_token(token_id);
-  });
-}
-
-bool
-InvocationFrameStack::check_auth_tokens_owned(
-    AuthTokenIdSet const &token_ids) const
 {
   assert(!frame_stack_.empty());
   return std::ranges::all_of(token_ids, [&](uint32_t token_id) {
