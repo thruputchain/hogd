@@ -618,7 +618,9 @@ TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
   wallet_query.auth_claim.pubkey_preimage().pubkey.ed25519().fill(42);
   const auto owner =
       pubkey_auth_address(wallet_query.auth_claim.pubkey_preimage());
-  ASSERT_TRUE(owner.has_value());
+  if (!owner.has_value()) {
+    FAIL() << "Expected an Ed25519 authorization address";
+  }
   ContractTraitClient<default_wallet::DefaultWallet> wallet(*owner);
   const auto inner = make_read_query().invocation;
   x23::Vec<default_wallet::WalletCall, 0xffffffff> calls{
