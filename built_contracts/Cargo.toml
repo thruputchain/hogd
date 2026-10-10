@@ -45,6 +45,7 @@ members = [
     "local_test_contracts/invoke_malformed_tokens_test",
     "local_test_contracts/itc_erc20_permit",
     "local_test_contracts/tx_context_test",
+    "local_test_contracts/view_sequence_test",
 ]
 
 [workspace.package]

@@ -1,0 +1,22 @@
+[package]
+name = "view_sequence_test"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+sdk = { workspace = true }
+groundhog-erc20-if = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[features]
+entrypoints = []
+dev = ["sdk/dev"]
+std = ["sdk/std"]
+
+[[bin]]
+name = "view_sequence_test"
+path = "src/main.rs"
+required-features = ["entrypoints"]

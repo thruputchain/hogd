@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -14,13 +15,17 @@
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
+#include "built_contracts/default_wallet.h"
 #include "built_contracts/fibonacci.h"
+#include "built_contracts/itc_erc20.h"
 #include "built_contracts/read_only_test.h"
+#include "built_contracts/view_sequence_test.h"
 #include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -188,6 +193,199 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+TEST_F(ViewTest, GenericContractObservesSourceAndPubkeyClaims)
+{
+  const auto address = NativeContractTestFramework::make_contract_address(51);
+  const auto child = NativeContractTestFramework::make_contract_address(52);
+  auto fixture =
+      ContractTraitMeta<view_sequence_test::ViewSequenceTest>::load_rv32();
+  framework_.write_contract(fixture);
+  framework_.write_deployment(address, fixture);
+  framework_.write_deployment(child, fixture);
+  ContractTraitClient<view_sequence_test::ViewSequenceTest> client(address);
+  const auto source_call =
+      client.make_invocation<u8"check_source_claim">(10'000'000, uint32_t{3},
+                                                     uint32_t{5});
+  AuthClaim source(AuthClaimType::kSourceAddressAuthData);
+  source.source_address_claim() = {.allowed_keys = 5, .required_weight = 3};
+  auto result = run_view(make_query(source_call, source));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  // Omission retains the default zero-weight claim. Contract checks still run.
+  result = run_view(make_query(source_call));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Fault);
+  result = run_view(make_query(
+      client.make_invocation<u8"check_source_claim">(10'000'000, uint32_t{0},
+                                                     uint32_t{0})));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  AuthClaim pubkey(AuthClaimType::kPubkeySignature);
+  pubkey.pubkey_preimage().pubkey.scheme(CryptographicScheme::Ed25519);
+  pubkey.pubkey_preimage().pubkey.ed25519().fill(42);
+  pubkey.pubkey_preimage().nonce = 7;
+  const auto key = pubkey.pubkey_preimage().pubkey.ed25519();
+  const auto pubkey_call =
+      client.make_invocation<u8"check_pubkey_claim">(10'000'000, key,
+                                                     uint64_t{7});
+  result = run_view(make_query(pubkey_call, pubkey));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  pubkey.pubkey_preimage().nonce = 8;
+  result = run_view(make_query(pubkey_call, pubkey));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Fault);
+
+  // The transaction claim also reaches ordinary nested contract calls. It is
+  // independent of both the root contract address and its optional parent.
+  const auto nested =
+      client.make_invocation<u8"check_nested_source_claim">(10'000'000, child,
+                                                            uint32_t{3},
+                                                            uint32_t{5});
+  result = run_view(make_query_with_parent(nested, kFibAddress, source));
+  ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(result.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+}
+
+TEST_F(ViewTest, RealWalletRootSimulatesDependentCallsWithoutPersisting)
+{
+  const auto input = NativeContractTestFramework::make_contract_address(51);
+  const auto collateral =
+      NativeContractTestFramework::make_contract_address(52);
+  const auto debt = NativeContractTestFramework::make_contract_address(53);
+  const auto market = NativeContractTestFramework::make_contract_address(54);
+  const auto receiver = NativeContractTestFramework::make_contract_address(55);
+  AuthClaim auth(AuthClaimType::kPubkeySignature);
+  auth.pubkey_preimage().pubkey.scheme(CryptographicScheme::Ed25519);
+  auth.pubkey_preimage().pubkey.ed25519().fill(42);
+  const auto owner = pubkey_auth_address(auth.pubkey_preimage()).value();
+  auto token = ContractTraitMeta<itc_erc20::ERC20>::load_rv32();
+  auto fixture =
+      ContractTraitMeta<view_sequence_test::ViewSequenceTest>::load_rv32();
+  framework_.write_contract(token);
+  framework_.write_contract(fixture);
+  for (auto const &address : {input, collateral, debt}) {
+    framework_.write_deployment(address, token);
+    framework_.setup_grant_storage_token(address, 1'000'000'000);
+  }
+  framework_.write_deployment(market, fixture);
+  framework_.setup_grant_storage_token(market, 1'000'000'000);
+  framework_.setup_grant_storage_token(owner, 1'000'000'000);
+  auto context = make_hog_exec_context();
+  auto root = [&](std::vector<Invocation> const &calls) {
+    x23::Vec<default_wallet::WalletCall, 0xffffffff> children;
+    for (auto const &call : calls) {
+      children.push_back({.target = call.invoked_address,
+                          .entrypoint = call.entrypoint,
+                          .gas_limit = call.gas_limit,
+                          .calldata = call.calldata});
+    }
+    ContractTraitClient<default_wallet::DefaultWallet> wallet(owner);
+    return wallet.make_invocation<u8"execute">(100'000'000, children);
+  };
+  auto execute = [&](Invocation const &invocation) {
+    SignedTransaction tx{};
+    tx.tx.auth_claim = auth;
+    tx.tx.invocation = invocation;
+    tx.tx.uniquifier = framework_.make_new_uniquifier();
+    auto handler = framework_.make_new_system_call_handler(tx, *context);
+    auto outcome = handler.root_invoke()();
+    EXPECT_TRUE(outcome.is_root_success());
+    auto output = handler.get_most_recent_frame_output();
+    EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+    auto events = handler.get_most_recent_frame_events();
+    EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+    EXPECT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})());
+    framework_.advance_block();
+    return std::pair{output, events};
+  };
+  const auto amount = std::tuple<int64_t, uint64_t>{0, 100};
+  ContractTraitClient<itc_erc20::ERC20> input_client(input),
+      collateral_client(collateral), debt_client(debt);
+  execute(root(
+      {input_client.make_invocation<u8"initialize">(10'000'000, owner),
+       collateral_client.make_invocation<u8"initialize">(10'000'000, owner),
+       debt_client.make_invocation<u8"initialize">(10'000'000, owner),
+       input_client.make_invocation<u8"mint">(10'000'000, owner, amount),
+       collateral_client.make_invocation<u8"mint">(10'000'000, market, amount),
+       debt_client.make_invocation<u8"mint">(10'000'000, market, amount),
+       input_client.make_invocation<u8"adjust_allowance">(10'000'000, market,
+                                                          amount),
+       collateral_client.make_invocation<u8"adjust_allowance">(
+           10'000'000, market, amount)}));
+  ContractTraitClient<view_sequence_test::ViewSequenceTest> market_client(
+      market);
+  const auto swap = market_client.make_invocation<u8"swap">(10'000'000, input,
+                                                            collateral, amount);
+  const auto borrow =
+      market_client.make_invocation<u8"borrow">(10'000'000, collateral, debt,
+                                                amount);
+  const auto transfer =
+      debt_client.make_invocation<u8"transfer">(10'000'000, receiver, amount);
+  const auto read = root(
+      {input_client.make_invocation<u8"get_balance_of">(10'000'000, owner),
+       collateral_client.make_invocation<u8"get_balance_of">(10'000'000, owner),
+       debt_client.make_invocation<u8"get_balance_of">(10'000'000, receiver),
+       market_client.make_invocation<u8"debt">(10'000'000, owner)});
+  const auto before = run_view(make_query(read, auth));
+  ASSERT_EQ(before.status(), TransactionViewStatus::Ok);
+  ASSERT_EQ(before.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  const auto invocation = root(
+      {swap, borrow, transfer,
+       debt_client.make_invocation<u8"get_balance_of">(10'000'000, receiver),
+       market_client.make_invocation<u8"debt">(10'000'000, owner)});
+  // Exercise real wallet checks, not a simulator-specific sequence loop.
+  for (auto const &claim : {AuthClaim{}, [&] {
+                              auto wrong = auth;
+                              wrong.pubkey_preimage().nonce = 1;
+                              return wrong;
+                            }()}) {
+    const auto rejected = run_view(make_query(invocation, claim));
+    ASSERT_EQ(rejected.status(), TransactionViewStatus::Ok);
+    EXPECT_EQ(rejected.result().output.status_code(),
+              InvocationFrameStatusCode::Abort);
+  }
+  for (auto const &invalid : {root({borrow, transfer}), root({transfer}),
+                              root({borrow, swap, transfer})}) {
+    const auto failed = run_view(make_query(invalid, auth));
+    ASSERT_EQ(failed.status(), TransactionViewStatus::Ok);
+    EXPECT_NE(failed.result().output.status_code(),
+              InvocationFrameStatusCode::Return);
+    EXPECT_TRUE(failed.result().events.empty());
+  }
+  auto low_gas = invocation;
+  low_gas.gas_limit = 1;
+  const auto exhausted = run_view(make_query(low_gas, auth));
+  ASSERT_EQ(exhausted.status(), TransactionViewStatus::Ok);
+  EXPECT_EQ(exhausted.result().output.status_code(),
+            InvocationFrameStatusCode::Fault);
+  const auto simulated = run_view(make_query(invocation, auth));
+  ASSERT_EQ(simulated.status(), TransactionViewStatus::Ok);
+  ASSERT_EQ(simulated.result().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(simulated.result().events.size(), 5U);
+  EXPECT_EQ(run_view(make_query(read, auth)).result().output,
+            before.result().output);
+  EXPECT_EQ(run_view(make_query(invocation, auth)).result().output,
+            simulated.result().output);
+  const auto actual = execute(invocation);
+  EXPECT_EQ(actual.first, simulated.result().output);
+  EXPECT_TRUE(std::ranges::equal(actual.second, simulated.result().events));
+  EXPECT_NE(run_view(make_query(read, auth)).result().output,
+            before.result().output);
+}
 
 TEST_F(ViewTest, BasicViewReturnsOkWithCorrectOutput)
 {

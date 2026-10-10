@@ -231,6 +231,7 @@ add_riscv_builds(
     integration_test_contracts/delegate_call_test
     integration_test_contracts/ed25519_verify_wrapper
     integration_test_contracts/view_gateway_test
+    local_test_contracts/view_sequence_test
     integration_test_contracts/cxs_roundtrip
     integration_test_contracts/txs_roundtrip
     local_test_contracts/airdrop_faucet
@@ -313,6 +314,7 @@ add_contract_header(nnint_output_fault_test)
 add_contract_header(output_alias_test)
 add_contract_header(calldata_wrapper)
 add_contract_header(view_gateway_test)
+add_contract_header(view_sequence_test)
 add_contract_header(airdrop_faucet)
 add_contract_header(auth_weight_test)
 add_contract_header(drip_faucet "${CURRENT_RELATIVE_SOURCE_DIR}/drip_faucet.hh")
