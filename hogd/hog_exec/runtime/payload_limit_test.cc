@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -10,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "exec_result.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -22,6 +23,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "invoke_args.hh"
 #include "network_config.hh"
+#include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
