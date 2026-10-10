@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -38,8 +39,10 @@ constexpr uint32_t kMaxAuthTokens = 4;
 constexpr uint32_t kMaxCalldataLen = 64;
 constexpr uint32_t kMaxReturnBufferLenCfg = 128;
 
-constexpr ContractAddress kCallerAddress = make_contract_address(0);
-constexpr ContractAddress kChildAddress = make_contract_address(1);
+constexpr ContractAddress kCallerAddress =
+    NativeContractTestFramework::make_contract_address(0);
+constexpr ContractAddress kChildAddress =
+    NativeContractTestFramework::make_contract_address(1);
 
 } // namespace
 
