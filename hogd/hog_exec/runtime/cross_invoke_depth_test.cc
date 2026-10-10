@@ -89,7 +89,7 @@ invoke_expecting_rejection(ContractAddress const &next, InvokeFlagSet flags,
              NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
     CopyableInvokeOutputs outputs{
         .return_buffer_len = UINT32_MAX,
-        .returned_auth_token_len = UINT32_MAX,
+        .returned_auth_token_count = UINT32_MAX,
         .frame_status = InvocationFrameStatusCode::Abort,
     };
     CopyableInvokeInputs inputs{
@@ -109,7 +109,7 @@ invoke_expecting_rejection(ContractAddress const &next, InvokeFlagSet flags,
       co_return InvokeError{InvokeErrorCode::Deterministic};
     }
     if (outputs.return_buffer_len != UINT32_MAX ||
-        outputs.returned_auth_token_len != UINT32_MAX ||
+        outputs.returned_auth_token_count != UINT32_MAX ||
         outputs.frame_status != InvocationFrameStatusCode::Abort) {
       ADD_FAILURE() << "a rejected invoke wrote to the caller's outputs";
       co_return InvokeError{InvokeErrorCode::Deterministic};

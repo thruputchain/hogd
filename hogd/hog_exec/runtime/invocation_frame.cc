@@ -56,7 +56,7 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
 {
   assert(frame.should_revert());
   child_return_output_ = std::move(frame.to_return_output_);
-  child_returned_auth_token_ids_.clear();
+  child_returned_auth_tokens_ = {};
 
   // The forwarded tokens never left this frame, so a reverted child has
   // nothing to give back.
@@ -93,18 +93,22 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   total_try_invoke_depth_ = frame.total_try_invoke_depth_;
 
   // The tokens forwarded to the child leave this frame now that the child has
-  // committed. The tokens it returned join this frame under new ids, in order.
+  // committed. The tokens it returned join this frame under consecutive new
+  // ids, in order.
   remove_auth_tokens(child_forwarded_auth_tokens_);
   child_forwarded_auth_tokens_.clear();
-  child_returned_auth_token_ids_.clear();
-  child_returned_auth_token_ids_.reserve(frame.returned_auth_token_ids_.size());
+  child_returned_auth_tokens_ = {.start = static_cast<uint32_t>(
+                                     next_auth_token_id()),
+                                 .count = 0};
   for (auto child_token_id : frame.returned_auth_token_ids_) {
     // Return ends the child, so it still owns every token it returned.
     auto token_id = add_auth_token(frame.take_auth_token(child_token_id));
     if (!token_id.has_value()) {
       panic("a frame cannot hold 2^32 auth tokens within any gas limit");
     }
-    child_returned_auth_token_ids_.push_back(*token_id);
+    assert(*token_id == child_returned_auth_tokens_.start +
+                            child_returned_auth_tokens_.count);
+    ++child_returned_auth_tokens_.count;
   }
 }
 
@@ -126,7 +130,7 @@ InvocationFrame::commit_failed_child_frame()
 {
   child_return_output_ =
       InvocationFrameOutput{InvocationFrameStatusCode::Fault};
-  child_returned_auth_token_ids_.clear();
+  child_returned_auth_tokens_ = {};
   // The forwarded tokens never left this frame, so a failed child has nothing
   // to give back.
   child_forwarded_auth_tokens_.clear();

@@ -551,9 +551,9 @@ TEST_F(InvocationFrameTest, ReturnedTokensTakeTheParentsNextIds)
                                 {1, 0});
   finish_child(stack);
 
-  EXPECT_TRUE(
-      std::ranges::equal(stack.get_active_frame_child_returned_auth_token_ids(),
-                         std::vector<uint32_t>{2, 3}));
+  auto returned = stack.get_active_frame_child_returned_auth_tokens();
+  EXPECT_EQ(returned.start, 2U);
+  EXPECT_EQ(returned.count, 2U);
   EXPECT_EQ(node(stack, 0), a);
   EXPECT_EQ(node(stack, 1), nullptr);
   EXPECT_EQ(node(stack, 2), d);

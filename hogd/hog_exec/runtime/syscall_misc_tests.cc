@@ -836,7 +836,7 @@ TEST_F(SyscallMiscTests, RcqReadCapPrecedence)
 
 // #38: with no child return buffer, a misaligned restored-auth-token span
 // still reports kNoReturnBufferAvailable: the buffer-availability check
-// precedes the alignment check (the opposite convention from GetCalldata).
+// precedes the alignment check.
 TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
 {
   auto handler = make_new_system_call_handler(

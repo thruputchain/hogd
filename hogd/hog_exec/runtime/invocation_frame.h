@@ -43,6 +43,12 @@ namespace hogd {
 class PerTransactionDatabaseProxy;
 struct InvokeResult;
 
+// The consecutive auth token ids start..start+count-1 of one frame.
+struct AuthTokenIdRange {
+  uint32_t start = 0;
+  uint32_t count = 0;
+};
+
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {
 public:
@@ -65,7 +71,8 @@ public:
   // The value of the last _child_ call frame's return value.
   // Set to nullopt before any child call happens.
   std::optional<InvocationFrameOutput> child_return_output_ = std::nullopt;
-  std::vector<uint32_t> child_returned_auth_token_ids_;
+  // The ids the last child's returned tokens took in this frame.
+  AuthTokenIdRange child_returned_auth_tokens_;
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &&frame);
@@ -405,11 +412,10 @@ public:
     return frame_stack_.back().child_return_output_;
   }
 
-  std::span<const uint32_t>
-  get_active_frame_child_returned_auth_token_ids() const
+  AuthTokenIdRange get_active_frame_child_returned_auth_tokens() const
   {
     assert(!frame_stack_.empty());
-    return frame_stack_.back().child_returned_auth_token_ids_;
+    return frame_stack_.back().child_returned_auth_tokens_;
   }
 
   const Calldata &get_active_frame_calldata() const

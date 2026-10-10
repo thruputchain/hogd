@@ -1314,12 +1314,11 @@ SystemCallHandler::check_auth_tokens_owned(
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }
 
-std::span<const uint32_t>
-SystemCallHandler::get_returned_auth_token_ids() const
+AuthTokenIdRange
+SystemCallHandler::get_returned_auth_tokens() const
 {
   assert(!invocation_frame_stack_.empty());
-  return invocation_frame_stack_
-      .get_active_frame_child_returned_auth_token_ids();
+  return invocation_frame_stack_.get_active_frame_child_returned_auth_tokens();
 }
 
 void
