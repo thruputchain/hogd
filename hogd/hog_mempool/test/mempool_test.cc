@@ -61,6 +61,8 @@
 #include "hogd/http/http_test.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
+#include "hogd/ramdb/db.h"
+#include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
