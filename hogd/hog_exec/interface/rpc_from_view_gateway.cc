@@ -81,8 +81,10 @@ make_view_database_identifier(std::string const &db_executor_address)
 
 ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
                                std::string const &event_host,
-                               std::uint16_t event_exec_port)
-  : db_proxy_(make_view_database_identifier(db_executor_address)),
+                               std::uint16_t event_exec_port,
+                               std::uint64_t max_view_gas)
+  : max_view_gas_(max_view_gas),
+    db_proxy_(make_view_database_identifier(db_executor_address)),
     event_server_proxy_(x23::HostPort{event_host, event_exec_port})
 {
   refresh_thread_ = std::jthread(
@@ -109,7 +111,7 @@ ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
   // takes its query by reference and would be left pointing at this frame's
   // local once the frame went away.
   co_await default_threadpool().bg();
-  query = normalize_public_view_query(std::move(query));
+  query = normalize_public_view_query(std::move(query), max_view_gas_);
   co_return co_await run_view_with_retries(query);
 }
 
@@ -610,8 +612,13 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
 // sees via GetMsgSender — is safe and gives off-chain tooling the ability
 // to simulate calls from any context.
 TransactionViewQuery
-normalize_public_view_query(TransactionViewQuery query)
+normalize_public_view_query(TransactionViewQuery query,
+                            std::uint64_t max_view_gas)
 {
+  // Views bypass scheduler balance admission. Never let a caller purchase
+  // effectively unlimited worker time by supplying UINT64_MAX as gas.
+  query.invocation.gas_limit =
+      std::min(query.invocation.gas_limit, max_view_gas);
   query.auth_claim = make_public_view_auth_claim();
   query.invoke_flags = std::to_underlying(InvokeFlag::None);
   return query;
