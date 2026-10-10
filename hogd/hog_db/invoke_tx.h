@@ -29,6 +29,7 @@
 
 namespace hogd {
 
+class ItemLock;
 class RPCContext;
 
 // BlockTXRef owns an InvokeTX's counted reference to a PerThreadARC<BlockTX>.
@@ -246,7 +247,7 @@ private:
   // The handle must not enlarge each saved version: depth and pointer share
   // the 16-byte slot that previously contained depth and alignment padding.
   static_assert(sizeof(ItemVersion) ==
-                sizeof(ItemChange) + 2 * sizeof(int128_t));
+                sizeof(ItemChange) + (2 * sizeof(int128_t)));
 
   struct StorageBalanceVersion {
     // The amount of storage that was manually transferred (by explicit contract
