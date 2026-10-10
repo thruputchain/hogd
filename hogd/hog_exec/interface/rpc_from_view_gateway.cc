@@ -15,7 +15,6 @@
 #include <thread>
 #include <utility>
 
-#include "auth_claim.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
