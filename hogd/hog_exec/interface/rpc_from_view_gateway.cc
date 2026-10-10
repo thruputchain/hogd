@@ -596,10 +596,8 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
   return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
-// A view assumes the supplied authorization claim without verifying signatures.
-// Normal contract checks still run, but writes never commit. Preserve caller
-// context and forwarded tokens; public views cannot request special invoke
-// flags.
+// Preserve assumed auth, caller context, and forwarded tokens; clear invoke flags.
+// Views skip signature checks and never commit writes.
 TransactionViewQuery
 normalize_public_view_query(TransactionViewQuery query)
 {
