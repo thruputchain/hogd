@@ -16,6 +16,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -1451,6 +1452,232 @@ TEST_P(RCQTest, NetZeroTouchOnCommittedBytestringLeavesKeyAbsent)
   advance_block();
 
   EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
+}
+
+// A wrong-type read still loads the committed value, so it pays storage access
+// plus a cold load on the first touch of each key.
+TEST_P(RCQTest, WrongTypeReadsChargeStorageAndColdLoadGas)
+{
+  constexpr uint8_t kReadCount = 4;
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, // Persist distinct NNInts for the wrong-type RCQ reads.
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                for (unsigned i = 0; i < kReadCount; ++i) {
+                  auto key = make_storage_key(std::format("nnint{}", i));
+                  const int128_t value = i + 1;
+                  auto result =
+                      co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                          key, &value, int128_t{0});
+                  if (!result.has_value() ||
+                      result.value() !=
+                          SyscallErrorCode::kSyscallErrorCodeNone) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                }
+                co_return InvokeStatus<void>{};
+              });
+  fns.emplace(
+      1, // Calldata: [operation (consume/peek/peek-len), distinct_keys].
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto const &calldata = ctx.handler().get_calldata();
+        const uint8_t operation = calldata.at(0);
+        const bool distinct_keys = calldata.at(1) != 0;
+
+        for (unsigned i = 0; i < kReadCount; ++i) {
+          auto key =
+              make_storage_key(std::format("nnint{}", distinct_keys ? i : 0U));
+          HostFnStatus<SyscallErrorCode> result =
+              SyscallErrorCode::kSyscallErrorCodeNone;
+          if (operation < 2) {
+            uint32_t output = 0;
+            RuntimeMemoryLength written_len = 0;
+            result = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, operation == 1,
+                std::as_writable_bytes(std::span(&output, 1)), written_len);
+          }
+          else {
+            RuntimeMemoryLength output_len = 0;
+            result = co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                key, output_len);
+          }
+
+          if (!result.has_value() ||
+              result.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = contract_address_,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {},
+                        },
+                    .uniquifier = make_new_uniquifier(),
+                },
+        },
+        *context);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  }
+  advance_block();
+
+  auto read_gas = [&](uint8_t operation, bool distinct_keys) {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = contract_address_,
+                            .entrypoint = entrypoint_from_method_id(1),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = Calldata({operation, distinct_keys}),
+                        },
+                    .uniquifier = make_new_uniquifier(),
+                },
+        },
+        *context);
+    auto result = handler.root_invoke()();
+    EXPECT_TRUE(result.is_root_success());
+    return result.gas_consumed_;
+  };
+
+  // First touch of a key pays the cold load; later touches in the same tx warm.
+  constexpr GasAmount kWarmRead = kSyscallBaseCost + kStorageAccessCost;
+  constexpr GasAmount kRepeatedKeyGas = (kReadCount * kWarmRead) + kDBRPCCost;
+  constexpr GasAmount kDistinctKeyGas = kReadCount * (kWarmRead + kDBRPCCost);
+
+  for (uint8_t operation = 0; operation < 3; ++operation) {
+    const GasAmount repeated_key_gas = read_gas(operation, false);
+    advance_block();
+    const GasAmount distinct_key_gas = read_gas(operation, true);
+    advance_block();
+
+    EXPECT_EQ(repeated_key_gas, kRepeatedKeyGas)
+        << "operation " << static_cast<unsigned>(operation);
+    EXPECT_EQ(distinct_key_gas, kDistinctKeyGas)
+        << "operation " << static_cast<unsigned>(operation)
+        << " must charge a cold load for each distinct key";
+  }
+}
+
+// A committed-queue read is priced like a wrong-type read; the per-EXPECT
+// comments below cover the cold/warm split.
+TEST_P(RCQTest, CommittedQueueReadChargesStorageAndColdLoadGas)
+{
+  const StorageKeyContractData key = make_storage_key("rcq_gas");
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, // Insert each calldata byte as a one-byte queue entry.
+      [key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        for (uint8_t value : ctx.handler().get_calldata()) {
+          auto result =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                  key, std::as_bytes(std::span(&value, 1)));
+          if (!result.has_value() ||
+              result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
+  fns.emplace(
+      1, // Consume calldata[0] entries; each must succeed.
+      [key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        const uint8_t count = ctx.handler().get_calldata().at(0);
+        for (uint8_t i = 0; i < count; ++i) {
+          uint32_t output = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto result =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  key, /*peek=*/false,
+                  std::as_writable_bytes(std::span(&output, 1)), written_len);
+          if (!result.has_value() ||
+              result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = contract_address_,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = Calldata({1, 2}),
+                        },
+                    .uniquifier = make_new_uniquifier(),
+                },
+        },
+        *context);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  }
+  advance_block();
+
+  // Reads run without committing, so the committed queue stays intact for the
+  // next measurement.
+  auto consume_gas = [&](uint8_t count) {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{
+                            .invoked_address = contract_address_,
+                            .entrypoint = entrypoint_from_method_id(1),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = Calldata({count}),
+                        },
+                    .uniquifier = make_new_uniquifier(),
+                },
+        },
+        *context);
+    auto result = handler.root_invoke()();
+    EXPECT_TRUE(result.is_root_success());
+    return result.gas_consumed_;
+  };
+
+  const GasAmount one_consume_gas = consume_gas(1);
+  advance_block();
+  const GasAmount two_consume_gas = consume_gas(2);
+
+  // A single cold consume pays the storage access and the cold database load.
+  EXPECT_EQ(one_consume_gas,
+            kSyscallBaseCost + kStorageAccessCost + kDBRPCCost);
+  // The second consume is served from the frame's RetrocausalQueueItem, so it
+  // adds only the syscall crossing: no second storage-access or load charge.
+  EXPECT_EQ(two_consume_gas, one_consume_gas + kSyscallBaseCost);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

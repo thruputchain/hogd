@@ -414,8 +414,12 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
+  // [read_body_gas] receives the dynamic gas this read owes beyond the syscall
+  // crossing (zero when answered from the frame); callers charge it on success
+  // and on error.
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
-  retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
+  retrocausal_queue_consume(StorageKeyContractData const &key, bool peek,
+                            GasAmount &read_body_gas);
 
   // == Native token syscalls ==
   // The load cost get_native_token_balance() would charge now, without loading.

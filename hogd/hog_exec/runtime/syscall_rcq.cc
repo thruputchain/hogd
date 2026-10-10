@@ -46,16 +46,20 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
                                       std::span<std::byte> output_queue_entry,
                                       RuntimeMemoryLength &output_written_len)
 {
+  GasAmount read_body_gas = 0;
   auto status =
-      co_await syscall_handler.retrocausal_queue_consume(input_key, input_peek);
+      co_await syscall_handler.retrocausal_queue_consume(input_key, input_peek,
+                                                         read_body_gas);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
+  // Both syscall-visible exits pay for the committed-storage read the handler
+  // already performed. See syscall_BytestringGet_inner.
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{read_body_gas}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -72,7 +76,7 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{read_body_gas}};
 }
 
 MaybeAsyncSyscallInnerResult
@@ -81,17 +85,21 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
                                       RuntimeMemoryLength &output_len)
 {
 
+  GasAmount read_body_gas = 0;
   auto status =
       co_await syscall_handler.retrocausal_queue_consume(input_key,
-                                                         /*peek=*/true);
+                                                         /*peek=*/true,
+                                                         read_body_gas);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
+  // Both syscall-visible exits pay for the committed-storage read; see
+  // syscall_RetrocausalQueueConsume_inner.
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{read_body_gas}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -105,7 +113,7 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{read_body_gas}};
 }
 
 } // namespace hogd
