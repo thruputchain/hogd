@@ -492,7 +492,6 @@ public:
   consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
-  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
 
   size_t size() const { return frame_stack_.size(); }
 

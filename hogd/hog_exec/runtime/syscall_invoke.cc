@@ -128,6 +128,20 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
         WrappedGasAmount{0}};
   }
 
+  // Length first, so an oversized list costs the comparison rather than the
+  // parse. Parsing is proportional to the span and a rejection reports gas 0,
+  // which is what let a contract repeat it for the syscall crossing (#4174).
+  // Rejected as InvalidSyscallInput, the same code a malformed or duplicated
+  // list already reports, so the precedence pinned by
+  // DuplicateAuthTokenIdsBeatDepth is unchanged.
+  if (input_owned_auth_token_ids.size() >
+      static_cast<size_t>(syscall_handler.config_params().max_auth_tokens) *
+          sizeof(uint32_t)) {
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
+  }
+
   // Materialized once; the frame stack takes the list over without copying.
   auto owned_auth_tokens =
       ValidatedAuthTokens::parse(input_owned_auth_token_ids);
@@ -144,6 +158,15 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                                               *owned_auth_tokens);
   if (!admitted.has_value()) {
     co_return SyscallInnerResult{admitted.error().code(), WrappedGasAmount{0}};
+  }
+
+  // Checked here rather than before admission: the copy below is the work
+  // worth refusing (#4040), and reentrance and the depth bound keep reporting
+  // their own codes for a call this would also reject.
+  if (input_calldata.size() > syscall_handler.config_params().max_calldata_len) {
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 
   Calldata calldata;
@@ -214,7 +237,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   // contract bindings in the SDK for this call has a signature of (&[u8], bool)
   // -> !, which could lead to UB in the contract code if that function then
   // returns an error.
-  if (input_buffer.size() > kMaxReturnBufferLen) {
+  if (input_buffer.size() > syscall_handler.config_params().max_return_buffer_len) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
@@ -223,14 +246,23 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
-  // Ordered ids go to the parent; set() only serves the duplicate check.
+  // Length first, as on Invoke: every rejection here is Exit at gas 0, so the
+  // parse is work a parent can repeat by catching the child fault (#4042).
+  if (input_returned_auth_token_ids.size() >
+      static_cast<size_t>(syscall_handler.config_params().max_auth_tokens) *
+          sizeof(uint32_t)) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
+  // Ordered ids go to the parent; the sorted scan only serves the duplicate
+  // check.
   auto returned_auth_tokens =
       ValidatedAuthTokens::parse(input_returned_auth_token_ids);
   if (!returned_auth_tokens.has_value()) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
-  if (!syscall_handler.check_auth_tokens_owned(returned_auth_tokens->set())) {
+  if (!syscall_handler.check_auth_tokens_owned(returned_auth_tokens->ids())) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
@@ -246,7 +278,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 
   syscall_handler.set_return_buffer(
       std::move(buffer), input_revert_frame,
-      std::move(*returned_auth_tokens).release().first);
+      std::move(*returned_auth_tokens).release());
 
   return {HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
 }
