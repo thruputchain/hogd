@@ -28,14 +28,12 @@ inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 16;
 // contracts without bound, which is #2190.
 inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
 
-// Not permissive, for the same reason: a chain predating these parameters
-// bounded neither list by anything but the memory holding it, so the executor
-// parsed a contract-sized span before it could reject the call (#4174, #4040).
-// Both sit far above any plausible call and far below what guest memory
-// admits, which is 16384 ids or 65536 calldata bytes at the default RV32
-// memory size.
+// Unbounded before these parameters, so a contract-sized span was parsed or
+// copied before the call could be rejected (#4174, #4040). The calldata
+// default matches guest memory, so it bounds a root invocation's calldata
+// without failing any sub-invoke that runs today.
 inline constexpr uint32_t kDefaultMaxAuthTokens = 64;
-inline constexpr uint32_t kDefaultMaxCalldataLen = 16384;
+inline constexpr uint32_t kDefaultMaxCalldataLen = 65536;
 
 // The value the wire type fixed before the parameter existed, so a chain that
 // does not state one keeps exactly the limit it already ran under.

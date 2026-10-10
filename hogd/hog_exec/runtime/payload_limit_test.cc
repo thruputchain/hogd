@@ -48,11 +48,9 @@ constexpr ContractAddress kChildAddress =
 
 } // namespace
 
-// kConfigParamMaxAuthTokens, kConfigParamMaxCalldataLen and
-// kConfigParamMaxReturnBufferLen bound the three contract-sized payloads the
-// Invoke and Return syscalls carry. Each is refused before the work it would
-// cost: the auth-token list before it is parsed, the calldata before it is
-// copied, the return buffer before it is staged.
+// Each of the three payload bounds is refused before the work it would cost:
+// the token list before the parse, the calldata before the copy, the return
+// buffer before it is staged.
 class PayloadLimitTest : public ::testing::Test,
                          public NativeContractTestFramework {
 public:
@@ -138,10 +136,8 @@ private:
   }
 };
 
-// One id past the limit is refused as invalid input, before the list is parsed
-// and before a child frame exists. The ids are not owned either, but the
-// length gate is what answers first: it runs ahead of the parse that the
-// ownership check depends on.
+// The ids are unowned too, but the length gate answers first: it runs ahead of
+// the parse the ownership check depends on.
 TEST_F(PayloadLimitTest, InvokeOverAuthTokenLimitIsRejected)
 {
   bool child_invoked = false;

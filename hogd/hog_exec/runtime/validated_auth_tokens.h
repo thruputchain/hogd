@@ -14,11 +14,9 @@
 
 namespace hogd {
 
-// Auth-token ids checked once for shape: whole uint32_t values, no repeats.
-// ids() keeps the order the contract gave, which is consensus-visible: a child
-// reads the forwarded list back through GetCalldata and a parent reads the
-// returned one through GetReturnedBuffer. Ownership is checked by the frame
-// stack, not here.
+// Auth-token ids checked once for shape: whole uint32_t values, no repeats,
+// contract order preserved because it is consensus-visible. Ownership is the
+// frame stack's to check, not this type's.
 class ValidatedAuthTokens {
 public:
   ValidatedAuthTokens() = default;

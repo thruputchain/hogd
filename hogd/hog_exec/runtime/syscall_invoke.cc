@@ -160,9 +160,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{admitted.error().code(), WrappedGasAmount{0}};
   }
 
-  // Checked here rather than before admission: the copy below is the work
-  // worth refusing (#4040), and reentrance and the depth bound keep reporting
-  // their own codes for a call this would also reject.
+  // After admission, so reentrance and depth keep their own codes (#4040).
   if (input_calldata.size() >
       syscall_handler.config_params().max_calldata_len) {
     co_return SyscallInnerResult{
