@@ -1649,6 +1649,8 @@ TEST(Mempool, CommitRecordsLatencyHistograms)
   };
 
   // The first ordinary commit has no previous round to measure against.
+  const std::chrono::steady_clock::time_point rounds_started_at =
+      std::chrono::steady_clock::now();
   nominate_and_commit();
   EXPECT_EQ(metrics.nomination_duration_seconds.count(), 1UL);
   EXPECT_EQ(metrics.commit_duration_seconds.count(), 2UL);
@@ -1660,13 +1662,28 @@ TEST(Mempool, CommitRecordsLatencyHistograms)
   EXPECT_EQ(metrics.commit_interval_seconds.count(), 1UL);
   EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
   {
-    // In-process rounds take milliseconds. Recorded in seconds they land in
-    // the lowest bucket; a milliseconds unit bug would put them in +Inf.
+    // Both round histograms hold exactly the round just driven, so each sum
+    // is that one sample. Bound it by the wall clock measured around the two
+    // commits rather than by a fixed bucket: a round takes milliseconds here
+    // but seconds under a sanitizer on a loaded host, and neither can outlast
+    // the test. A milliseconds-for-seconds unit bug records ~1000x the
+    // elapsed time and fails this.
+    const double elapsed_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      rounds_started_at)
+            .count();
+    EXPECT_GT(metrics.block_period_seconds.sum(), 0.0);
+    EXPECT_LE(metrics.block_period_seconds.sum(), elapsed_seconds);
+    EXPECT_GT(metrics.commit_interval_seconds.sum(), 0.0);
+    EXPECT_LE(metrics.commit_interval_seconds.sum(), elapsed_seconds);
+
+    // Which bucket the round lands in is a property of the host, but the
+    // sample must still be scraped out as a bucket series.
     const std::string dump = Metrics::instance().dump_to_prometheus_string();
-    EXPECT_NE(dump.find("mempool_block_period_seconds_bucket{le=\"0.25\"} 1\n"),
+    EXPECT_NE(dump.find("mempool_block_period_seconds_bucket{le=\"+Inf\"} 1\n"),
               std::string::npos);
     EXPECT_NE(dump.find(
-                  "mempool_commit_interval_seconds_bucket{le=\"0.25\"} 1\n"),
+                  "mempool_commit_interval_seconds_bucket{le=\"+Inf\"} 1\n"),
               std::string::npos);
   }
 

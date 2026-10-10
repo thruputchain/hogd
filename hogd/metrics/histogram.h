@@ -189,6 +189,8 @@ struct HistogramImpl : Metric {
     return total;
   }
 
+  double sum() const { return sum_.load(std::memory_order_relaxed); }
+
   const char *prometheus_type() const override { return "histogram"; }
 
   std::string dump_sample(const std::string &metric_name) override
@@ -202,8 +204,7 @@ struct HistogramImpl : Metric {
     }
     cumulative += buckets_.back().load(std::memory_order_relaxed);
     os << std::format("{}_bucket{{le=\"+Inf\"}} {}\n", metric_name, cumulative);
-    os << std::format("{}_sum {}\n", metric_name,
-                      sum_.load(std::memory_order_relaxed));
+    os << std::format("{}_sum {}\n", metric_name, sum());
     // Derived from the same bucket loads, so a concurrent record() can never
     // make _count disagree with the +Inf bucket.
     os << std::format("{}_count {}\n", metric_name, cumulative);
@@ -241,6 +242,7 @@ public:
 
   void record(double value) { metric().record(value); }
   uint64_t count() { return metric().count(); }
+  double sum() { return metric().sum(); }
 
 private:
   explicit Histogram(HistogramImpl *metric) : MetricHandle(metric) {}

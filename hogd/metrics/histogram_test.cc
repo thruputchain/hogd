@@ -59,6 +59,23 @@ TEST(HistogramImplTest, BoundsAreInclusiveAndOverflowIsOnlyInInf)
                                           "lat_count 5\n");
 }
 
+TEST(HistogramImplTest, CountAndSumReadBackWhatWasRecorded)
+{
+  // The accessors let callers assert on a distribution without parsing a
+  // scrape; they must agree with the _count and _sum the scrape renders.
+  HistogramImpl histogram("latency", {0.25, 0.5, 1});
+
+  EXPECT_EQ(histogram.count(), 0UL);
+  EXPECT_EQ(histogram.sum(), 0.0);
+
+  histogram.record(0.125);
+  histogram.record(2.5);
+  histogram.record(std::nan(""));
+
+  EXPECT_EQ(histogram.count(), 2UL);
+  EXPECT_EQ(histogram.sum(), 2.625);
+}
+
 TEST(HistogramImplTest, EmptyHistogramExposesEverySeriesAtZero)
 {
   HistogramImpl histogram("latency", {0.5, 2});
