@@ -210,6 +210,8 @@ MempoolCoordinatorRpc::record_nomination_attempt(
 {
   MempoolMetrics::instance().last_nomination_duration_ms.record(
       mempool_duration_ms(telemetry.duration));
+  MempoolMetrics::instance().nomination_duration_seconds.record(
+      telemetry.duration);
   MempoolMetrics::instance().nomination_attempt_count.increment();
   if (telemetry.succeeded) {
     MempoolMetrics::instance().nomination_success_count.increment();
@@ -231,6 +233,7 @@ MempoolCoordinatorRpc::record_validation_attempt(
 {
   MempoolMetrics::instance().last_validation_duration_ms.record(
       mempool_duration_ms(duration));
+  MempoolMetrics::instance().validation_duration_seconds.record(duration);
   MempoolMetrics::instance().validation_attempt_count.increment();
   MempoolMetrics::instance().validation_tx_count.increment(tx_count);
   switch (outcome) {
@@ -271,8 +274,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
+      const double elapsed = timer.elapsed();
       MempoolMetrics::instance().last_submit_unvetted_duration_ms.record(
-          mempool_duration_ms(timer.elapsed()));
+          mempool_duration_ms(elapsed));
+      MempoolMetrics::instance().submit_unvetted_duration_seconds.record(
+          elapsed);
     });
   });
   if (scheduler_->size() >= mempool_tx_size_limit_) {
@@ -293,8 +299,11 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
+      const double elapsed = timer.elapsed();
       MempoolMetrics::instance().last_submit_unvetted_duration_ms.record(
-          mempool_duration_ms(timer.elapsed()));
+          mempool_duration_ms(elapsed));
+      MempoolMetrics::instance().submit_unvetted_duration_seconds.record(
+          elapsed);
     });
   });
   co_return co_await submit_unvetted(std::move(batch),
@@ -642,8 +651,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
+      const double elapsed = timer.elapsed();
       MempoolMetrics::instance().last_submit_vetted_duration_ms.record(
-          mempool_duration_ms(timer.elapsed()));
+          mempool_duration_ms(elapsed));
+      MempoolMetrics::instance().submit_vetted_duration_seconds.record(elapsed);
     });
   });
 
@@ -2851,10 +2862,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   auto emit_commit_stats = [&](CommitMetricsOutcome outcome,
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
+    const double elapsed = timer.elapsed();
     MempoolMetrics::instance().last_commit_duration_ms.record(
-        mempool_duration_ms(timer.elapsed()));
+        mempool_duration_ms(elapsed));
     switch (outcome) {
     case CommitMetricsOutcome::kOk:
+      // Only successful commits: concurrent and not-found attempts return at
+      // once and would pile into the lowest buckets.
+      MempoolMetrics::instance().commit_duration_seconds.record(elapsed);
       MempoolMetrics::instance().commit_success_count.increment();
       break;
     case CommitMetricsOutcome::kBlockNotFound:
@@ -3285,6 +3300,20 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
                           remove_from_scheduler_size);
         info("schedulercoord_commit_block ret");
+        // Skip the first commit after start and the genesis ceremony (height
+        // 1): neither is a round.
+        if (last_commit_started_) {
+          MempoolMetrics::instance().commit_interval_seconds.record(
+              std::chrono::duration<double>(commit_started_at - last_commit_)
+                  .count());
+          MempoolMetrics::instance().block_period_seconds.record(
+              std::chrono::duration<double>(commit_started_at -
+                                            *last_commit_started_)
+                  .count());
+        }
+        if (expected_value.proposal_header.block_height > 1) {
+          last_commit_started_ = commit_started_at;
+        }
         last_commit_ = std::chrono::steady_clock::now();
         commit_outcome = SchedulerCommitOutcome::SchedulerCommitOK;
         fatal_commit_cleanup.disarm();

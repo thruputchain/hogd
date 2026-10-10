@@ -180,7 +180,7 @@ TEST_F(MetricsTest, HistogramFactoryReturnsHandle)
   Metrics::Histogram latency =
       metrics.histogram(Metrics::ComponentName::kMempool,
                         "metrics_test_factory_validation_latency_ms",
-                        "Validation latency in milliseconds", 0, 10, 5);
+                        "Validation latency in milliseconds", {0, 2, 4});
   metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
 
   latency.record(0);
@@ -207,6 +207,8 @@ TEST_F(MetricsTest, HistogramFactoryReturnsHandle)
       "4");
   expect_dump_contains(
       dump, "mempool_metrics_test_factory_validation_latency_ms_count 4");
+  expect_dump_contains(
+      dump, "mempool_metrics_test_factory_validation_latency_ms_sum 15");
 }
 
 TEST_F(MetricsTest, SummaryFactoryReturnsHandle)
@@ -451,7 +453,7 @@ TEST_F(MetricsTest, HistogramDumpsBuckets)
   Metrics::Histogram latency =
       metrics.histogram(Metrics::ComponentName::kMempool,
                         "metrics_test_validation_latency_ms",
-                        "Validation latency in milliseconds", 0, 10, 5);
+                        "Validation latency in milliseconds", {0, 2, 4});
   metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
 
   latency.record(0);
@@ -517,7 +519,7 @@ TEST_F(MetricsTest, MetricsRouteHistogramReturnsExpectedResponse)
   Metrics::Histogram latency =
       metrics.histogram(Metrics::ComponentName::kMempool,
                         "metrics_test_validation_latency_ms",
-                        "Validation latency in milliseconds", 0, 10, 5);
+                        "Validation latency in milliseconds", {0, 2, 4});
   metrics.mark_done_with_init(Metrics::ComponentName::kMempool);
 
   HttpServer server;
@@ -553,6 +555,8 @@ TEST_F(MetricsTest, MetricsRouteHistogramReturnsExpectedResponse)
       "mempool_metrics_test_validation_latency_ms_bucket{le=\"+Inf\"} 4");
   expect_dump_contains(http_response,
                        "mempool_metrics_test_validation_latency_ms_count 4");
+  expect_dump_contains(http_response,
+                       "mempool_metrics_test_validation_latency_ms_sum 15");
 }
 
 } // namespace
