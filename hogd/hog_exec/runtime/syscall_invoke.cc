@@ -163,7 +163,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // Checked here rather than before admission: the copy below is the work
   // worth refusing (#4040), and reentrance and the depth bound keep reporting
   // their own codes for a call this would also reject.
-  if (input_calldata.size() > syscall_handler.config_params().max_calldata_len) {
+  if (input_calldata.size() >
+      syscall_handler.config_params().max_calldata_len) {
     co_return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};
@@ -237,7 +238,8 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   // contract bindings in the SDK for this call has a signature of (&[u8], bool)
   // -> !, which could lead to UB in the contract code if that function then
   // returns an error.
-  if (input_buffer.size() > syscall_handler.config_params().max_return_buffer_len) {
+  if (input_buffer.size() >
+      syscall_handler.config_params().max_return_buffer_len) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
@@ -276,9 +278,8 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                 input_buffer.size());
   }
 
-  syscall_handler.set_return_buffer(
-      std::move(buffer), input_revert_frame,
-      std::move(*returned_auth_tokens).release());
+  syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame,
+                                    std::move(*returned_auth_tokens).release());
 
   return {HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
 }

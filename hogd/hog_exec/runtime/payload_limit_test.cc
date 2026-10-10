@@ -77,10 +77,10 @@ protected:
     fns_caller.emplace(0, std::move(caller));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(
-        0, std::make_unique<NativeContract>(std::move(fns_caller)));
-    contract_map.emplace(
-        1, std::make_unique<NativeContract>(std::move(fns_child)));
+    contract_map.emplace(0, std::make_unique<NativeContract>(
+                                std::move(fns_caller)));
+    contract_map.emplace(1, std::make_unique<NativeContract>(
+                                std::move(fns_child)));
     auto runtime_context =
         std::make_unique<NativeContext>(std::move(contract_map));
 
@@ -123,10 +123,12 @@ private:
   static NetworkConfig genesis_network_config()
   {
     NetworkConfig config = stock_network_config();
-    NetworkConfigParams::set_param(
-        config, ConfigParamID::kConfigParamMaxAuthTokens, kMaxAuthTokens);
-    NetworkConfigParams::set_param(
-        config, ConfigParamID::kConfigParamMaxCalldataLen, kMaxCalldataLen);
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxAuthTokens,
+                                   kMaxAuthTokens);
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxCalldataLen,
+                                   kMaxCalldataLen);
     NetworkConfigParams::set_param(
         config, ConfigParamID::kConfigParamMaxReturnBufferLen,
         kMaxReturnBufferLenCfg);
