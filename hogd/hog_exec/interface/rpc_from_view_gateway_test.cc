@@ -18,6 +18,8 @@
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
+#include "built_contracts/authclaim_test.h"
+#include "built_contracts/default_wallet.h"
 #include "built_contracts/manual_revert_test.h"
 #include "built_contracts/view_gateway_test.h"
 #include "executor_to_db_rpc.hh"
@@ -27,6 +29,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -122,6 +125,7 @@ TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
 {
   ContractAddress caller{};
   TransactionViewQuery query = make_query();
+  const auto claim = query.auth_claim;
   query.parent_address = caller;
   query.forwarded_tokens.push_back(x23::serialize(AuthToken{}));
   query.invoke_flags = std::to_underlying(InvokeFlag::TryInvoke) |
@@ -134,10 +138,17 @@ TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
   EXPECT_EQ(*normalized.parent_address, caller);
   EXPECT_EQ(normalized.forwarded_tokens.size(), 1U);
   EXPECT_EQ(normalized.invoke_flags, std::to_underlying(InvokeFlag::None));
-  ASSERT_EQ(normalized.auth_claim.claim_type(),
-            AuthClaimType::kSourceAddressAuthData);
-  EXPECT_EQ(normalized.auth_claim.source_address_claim().allowed_keys, 0);
-  EXPECT_EQ(normalized.auth_claim.source_address_claim().required_weight, 0);
+  EXPECT_EQ(normalized.auth_claim, claim);
+}
+
+TEST(ViewGatewayRpc, PreservesSourceAddressClaimAndDefault)
+{
+  auto query = make_query();
+  query.auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData);
+  EXPECT_EQ(normalize_public_view_query(query).auth_claim, query.auth_claim);
+  query.auth_claim.source_address_claim() = {.allowed_keys = 5,
+                                             .required_weight = 3};
+  EXPECT_EQ(normalize_public_view_query(query).auth_claim, query.auth_claim);
 }
 
 // View queries are read-only simulations.  Public callers are intentionally
@@ -568,6 +579,94 @@ public:
     return result;
   }
 };
+
+TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
+{
+  const auto address = NativeContractTestFramework::make_contract_address(42);
+  auto contract = ContractTraitMeta<authclaim_test::AuthClaimTest>::load_rv32();
+  framework_.write_contract(contract);
+  framework_.write_deployment(address, contract);
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  EXPECT_EQ(gateway.viewgateway_intro(
+                protocol_from_text("view-auth-claims-v1_")),
+            ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+
+  ContractTraitClient<authclaim_test::AuthClaimTest> ordinary(address);
+  auto default_claim = make_read_query();
+  default_claim.invocation =
+      ordinary.make_invocation<u8"test_get_auth_claim">(10'000'000);
+  auto nonzero = default_claim;
+  nonzero.auth_claim.source_address_claim() = {.allowed_keys = 5,
+                                               .required_weight = 3};
+  // This existing non-wallet fixture accepts only the zero/default claim.
+  EXPECT_EQ(
+      gateway.viewgateway_view(default_claim)().payload().output.status_code(),
+      InvocationFrameStatusCode::Return);
+  EXPECT_EQ(gateway.viewgateway_view(nonzero)().payload().output.status_code(),
+            InvocationFrameStatusCode::Fault);
+
+  auto wallet_query = make_query();
+  wallet_query.auth_claim.pubkey_preimage().pubkey.scheme(
+      CryptographicScheme::Ed25519);
+  wallet_query.auth_claim.pubkey_preimage().pubkey.ed25519().fill(42);
+  const auto owner =
+      pubkey_auth_address(wallet_query.auth_claim.pubkey_preimage()).value();
+  ContractTraitClient<default_wallet::DefaultWallet> wallet(owner);
+  const auto inner = make_read_query().invocation;
+  x23::Vec<default_wallet::WalletCall, 0xffffffff> calls{
+      {.target = inner.invoked_address,
+       .entrypoint = inner.entrypoint,
+       .gas_limit = 1'000'000,
+       .calldata = inner.calldata}};
+  wallet_query.invocation =
+      wallet.make_invocation<u8"execute">(10'000'000, calls);
+  EXPECT_EQ(
+      gateway.viewgateway_view(wallet_query)().payload().output.status_code(),
+      InvocationFrameStatusCode::Return);
+  auto wrong = wallet_query;
+  ++wrong.auth_claim.pubkey_preimage().nonce;
+  EXPECT_EQ(gateway.viewgateway_view(wrong)().payload().output.status_code(),
+            InvocationFrameStatusCode::Abort);
+  // Pubkey claims also reach the ordinary contract, which rejects that variant.
+  auto ordinary_pubkey = default_claim;
+  ordinary_pubkey.auth_claim = wallet_query.auth_claim;
+  EXPECT_EQ(gateway.viewgateway_view(ordinary_pubkey)()
+                .payload()
+                .output.status_code(),
+            InvocationFrameStatusCode::Fault);
+
+  auto nested = wallet_query;
+  calls[0].target = address;
+  calls[0].entrypoint = default_claim.invocation.entrypoint;
+  calls[0].calldata = default_claim.invocation.calldata;
+  nested.invocation = wallet.make_invocation<u8"execute">(10'000'000, calls);
+  const auto nested_result = gateway.viewgateway_view(nested)();
+  ASSERT_EQ(nested_result.payload().output.status_code(),
+            InvocationFrameStatusCode::Abort);
+  // The wallet accepts the claim; its ordinary child rejects the pubkey
+  // variant.
+  EXPECT_NE(nested_result.payload().output,
+            gateway.viewgateway_view(wrong)().payload().output);
+
+  auto query = batch();
+  query.calls = {wallet_query, wrong, default_claim, nonzero};
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  ASSERT_EQ(result.payload().results.size(), 4U);
+  EXPECT_EQ(result.payload().results[0].output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(result.payload().results[1].output.status_code(),
+            InvocationFrameStatusCode::Abort);
+  EXPECT_EQ(result.payload().results[2].output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(result.payload().results[3].output.status_code(),
+            InvocationFrameStatusCode::Fault);
+}
 
 TEST_F(ViewGatewayBatchTest, ReturnsOrderedResultsAtOneHeight)
 {
