@@ -149,6 +149,25 @@ commit_block(MempoolTestInfra &server, BlockID block_id, const DbTip &parent,
       block_id, consensus_value(parent, proposal))();
 }
 
+// The value of the sample line named [sample_name] in a registry dump, e.g.
+// "mempool_block_period_seconds_sum". A dump opens with a "# HELP" line, so
+// every sample line is preceded by a newline.
+std::optional<double>
+prometheus_sample(const std::string &dump, const std::string &sample_name)
+{
+  const std::string line_start = std::format("\n{} ", sample_name);
+  const size_t value_start = dump.find(line_start);
+  if (value_start == std::string::npos) {
+    return std::nullopt;
+  }
+  const size_t value_begin = value_start + line_start.size();
+  const size_t value_end = dump.find('\n', value_begin);
+  if (value_end == std::string::npos) {
+    return std::nullopt;
+  }
+  return std::stod(dump.substr(value_begin, value_end - value_begin));
+}
+
 } // namespace
 
 TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
@@ -1649,6 +1668,8 @@ TEST(Mempool, CommitRecordsLatencyHistograms)
   };
 
   // The first ordinary commit has no previous round to measure against.
+  const std::chrono::steady_clock::time_point rounds_started =
+      std::chrono::steady_clock::now();
   nominate_and_commit();
   EXPECT_EQ(metrics.nomination_duration_seconds.count(), 1UL);
   EXPECT_EQ(metrics.commit_duration_seconds.count(), 2UL);
@@ -1656,18 +1677,28 @@ TEST(Mempool, CommitRecordsLatencyHistograms)
   EXPECT_EQ(metrics.block_period_seconds.count(), 0UL);
 
   nominate_and_commit();
+  const double rounds_elapsed_seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                    rounds_started)
+          .count();
   EXPECT_EQ(metrics.commit_duration_seconds.count(), 3UL);
   EXPECT_EQ(metrics.commit_interval_seconds.count(), 1UL);
   EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
   {
-    // In-process rounds take milliseconds. Recorded in seconds they land in
-    // the lowest bucket; a milliseconds unit bug would put them in +Inf.
+    // Both intervals lie inside the window the test just timed, so bound the
+    // single observation in each histogram by that window rather than by a
+    // fixed bucket: a sanitizer build stretches an in-process round past the
+    // lowest bound, but a milliseconds unit bug would report ~1000x the
+    // window whatever the machine's speed.
     const std::string dump = Metrics::instance().dump_to_prometheus_string();
-    EXPECT_NE(dump.find("mempool_block_period_seconds_bucket{le=\"0.25\"} 1\n"),
-              std::string::npos);
-    EXPECT_NE(dump.find(
-                  "mempool_commit_interval_seconds_bucket{le=\"0.25\"} 1\n"),
-              std::string::npos);
+    for (const char *name :
+         {"block_period_seconds", "commit_interval_seconds"}) {
+      const std::optional<double> recorded =
+          prometheus_sample(dump, std::format("mempool_{}_sum", name));
+      ASSERT_TRUE(recorded.has_value()) << name;
+      EXPECT_GT(*recorded, 0.0) << name;
+      EXPECT_LE(*recorded, rounds_elapsed_seconds) << name;
+    }
   }
 
   // A failed commit returns at once and must not skew the duration quantiles.
