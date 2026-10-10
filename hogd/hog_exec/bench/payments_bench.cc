@@ -9,6 +9,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <sys/resource.h>
 #include <utility>
 #include <vector>
 
@@ -101,6 +102,8 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
     // not the uniquifier). Capture the height they commit against so expiry
     // heights are not yet expired; cleared after the rep.
     const auto base_height = bs.block_height();
+    rusage usage_before{};
+    CHECK_EQ(getrusage(RUSAGE_SELF, &usage_before), 0);
     auto start_time = std::chrono::steady_clock::now();
 
     uint32_t ntx_per_thread = num_txs_per_rep / num_exec_threads;
@@ -163,8 +166,28 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
     for (auto &f : futures) {
       f.wait();
     }
+    auto execution_finished = std::chrono::steady_clock::now();
     events_done.wait(false);
     auto finish_time = std::chrono::steady_clock::now();
+    rusage usage_after{};
+    CHECK_EQ(getrusage(RUSAGE_SELF, &usage_after), 0);
+    auto micros = [](auto duration) {
+      return std::chrono::duration_cast<std::chrono::microseconds>(duration)
+          .count();
+    };
+    auto cpu_micros = [](auto value) {
+      return value.tv_sec * 1'000'000 + value.tv_usec;
+    };
+    std::println("diagnostic: execution_us={} event_wait_us={} user_us={} "
+                 "system_us={} voluntary_switches={} involuntary_switches={}",
+                 micros(execution_finished - start_time),
+                 micros(finish_time - execution_finished),
+                 cpu_micros(usage_after.ru_utime) -
+                     cpu_micros(usage_before.ru_utime),
+                 cpu_micros(usage_after.ru_stime) -
+                     cpu_micros(usage_before.ru_stime),
+                 usage_after.ru_nvcsw - usage_before.ru_nvcsw,
+                 usage_after.ru_nivcsw - usage_before.ru_nivcsw);
     std::println("time taken: {} us for {} txs (accts {}) on {} threads",
                  std::chrono::duration_cast<std::chrono::microseconds>(
                      finish_time - start_time)
@@ -210,6 +233,8 @@ run_bench_rep_coro(BenchmarkState &bs,
         total_work_txs.subspan(nrep * num_txs_per_rep, num_txs_per_rep);
 
     const auto base_height = bs.block_height();
+    rusage usage_before{};
+    CHECK_EQ(getrusage(RUSAGE_SELF, &usage_before), 0);
     auto start_time = std::chrono::steady_clock::now();
 
     std::atomic<uint32_t> next_tx = 0;
@@ -269,8 +294,28 @@ run_bench_rep_coro(BenchmarkState &bs,
     }
 
     all_done.wait(false);
+    auto execution_finished = std::chrono::steady_clock::now();
     events_done.wait(false);
     auto finish_time = std::chrono::steady_clock::now();
+    rusage usage_after{};
+    CHECK_EQ(getrusage(RUSAGE_SELF, &usage_after), 0);
+    auto micros = [](auto duration) {
+      return std::chrono::duration_cast<std::chrono::microseconds>(duration)
+          .count();
+    };
+    auto cpu_micros = [](auto value) {
+      return value.tv_sec * 1'000'000 + value.tv_usec;
+    };
+    std::println("diagnostic: execution_us={} event_wait_us={} user_us={} "
+                 "system_us={} voluntary_switches={} involuntary_switches={}",
+                 micros(execution_finished - start_time),
+                 micros(finish_time - execution_finished),
+                 cpu_micros(usage_after.ru_utime) -
+                     cpu_micros(usage_before.ru_utime),
+                 cpu_micros(usage_after.ru_stime) -
+                     cpu_micros(usage_before.ru_stime),
+                 usage_after.ru_nvcsw - usage_before.ru_nvcsw,
+                 usage_after.ru_nivcsw - usage_before.ru_nivcsw);
     std::println("time taken: {} us for {} txs (accts {}) on {} coros",
                  std::chrono::duration_cast<std::chrono::microseconds>(
                      finish_time - start_time)
