@@ -86,13 +86,12 @@ struct ItemHeader {
   // total_bytes returns the size of the item in bytes including the header.
   size_t total_bytes() const { return sizeof(*this) + kv_bytes(); }
 
-  // key_at/value_at/key_and_value_at/all_at return the trailing key/value
-  // spans. `base` must be this record's first byte from
-  // LogletAllocator::base_of so the span stays within the backing byte array,
-  // not the header object (#4396).
 private:
   friend class LogletAllocator;
 
+  // key_at/value_at/key_and_value_at/all_at take this record's first byte from
+  // LogletAllocator::base_of so spans stay inside the backing byte array
+  // (#4396).
   std::span<std::byte> key_at(std::byte *base) const
   {
     return {base + sizeof(*this), key_len};
