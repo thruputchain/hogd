@@ -2,8 +2,6 @@ name: Item lock A/B (temporary)
 
 on:
     workflow_dispatch:
-    push:
-        branches: ["codex/cache-item-lock-handles-1817"]
 env:
     CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
     # Published crates and pinned submodules retain the legacy registry identity.
