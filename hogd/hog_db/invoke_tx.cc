@@ -25,6 +25,7 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
+#include "hogd/hog_db/item_lock.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/common/limits.h"
@@ -139,7 +140,7 @@ InvokeTX::update_balance_lock(Address const &addr)
       return status.error();
     }
 
-    change.emplace_back(std::move(new_item), tx_depth_);
+    change.emplace_back(std::move(new_item), tx_depth_, status->lock);
     return {};
   }
 
@@ -161,7 +162,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     return {};
   }
 
-  auto status = block_.get().modify_lock(key, last.change, new_item,
+  auto status = block_.get().modify_lock(*last.lock, key, last.change, new_item,
                                          &last_conflict_reason_);
   if (!status) {
     if constexpr (is_debug_build()) {
@@ -179,7 +180,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     return status.error();
   }
   assert(last.tx_depth < tx_depth_);
-  change.emplace_back(std::move(new_item), tx_depth_);
+  change.emplace_back(std::move(new_item), tx_depth_, last.lock);
   return {};
 }
 
@@ -225,7 +226,8 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && key.is_address_balance()) {
       auto cost_change =
-          block_.get().commit_change(key, std::move(vec.back().change));
+          block_.get().commit_change(*vec.back().lock, key,
+                                     std::move(vec.back().change));
       if (!cost_change.has_value()) {
         commit_error = cost_change.error();
         failed = true;
@@ -242,7 +244,8 @@ InvokeTX::commit()
     for (auto &[key, vec] : changes_) {
       if (!vec.empty() && !key.is_address_balance()) {
         auto cost_change =
-            block_.get().commit_change(key, std::move(vec.back().change));
+            block_.get().commit_change(*vec.back().lock, key,
+                                       std::move(vec.back().change));
         if (!cost_change.has_value()) {
           commit_error = cost_change.error();
           failed = true;
@@ -278,7 +281,7 @@ InvokeTX::abort()
 
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
-      block_.get().unlock(key, vec.back().change);
+      block_.get().unlock(*vec.back().lock, key, vec.back().change);
     }
   }
   changes_.clear();
@@ -305,13 +308,14 @@ InvokeTX::rollback_to_savepoint(int depth)
     }
 
     // revert and erase the history of changes made after savepoint.
+    ItemLock *lock = vec.back().lock;
     ItemChange tmp{std::move(vec.back().change)};
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
                                        &ItemVersion::tx_depth),
               vec.end());
     if (!vec.empty()) {
       HogDbStatus<int128_t> ret =
-          block_.get().modify_lock(key, tmp, vec.back().change);
+          block_.get().modify_lock(*lock, key, tmp, vec.back().change);
       if (!ret) [[unlikely]] {
         // modify_lock only fails here when a committed sibling block pruned
         // DAO state this restored change depends on (e.g. an RCQ consume's
@@ -333,7 +337,7 @@ InvokeTX::rollback_to_savepoint(int depth)
       ++it;
       continue;
     }
-    block_.get().unlock(key, tmp);
+    block_.get().unlock(*lock, key, tmp);
     it = changes_.erase(it);
   }
 
@@ -359,7 +363,7 @@ InvokeTX::release_savepoint(int depth)
       continue;
 
     // retain latest change but erase any history after savepoint.
-    ItemVersion tmp(std::move(vec.back().change), tx_depth_);
+    ItemVersion tmp(std::move(vec.back().change), tx_depth_, vec.back().lock);
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
                                        &ItemVersion::tx_depth),
               vec.end());
@@ -410,8 +414,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
-    HogDbStatus<int128_t> ret =
-        block_.get().lock(key, change, &last_conflict_reason_);
+    auto ret = block_.get().lock(key, change, &last_conflict_reason_);
     if (!ret) {
       // A failed first-time admission must not leave a retained empty entry
       // behind: rollback_to_savepoint() skips empty vectors and would never
@@ -421,10 +424,10 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
       return ret.error();
     }
 
-    assert(*ret >= 0 || change.is_permanent_exclusive());
-    int128_t marginal_storage = *ret;
+    assert(ret->storage_cost >= 0 || change.is_permanent_exclusive());
+    int128_t marginal_storage = ret->storage_cost;
 
-    v.emplace_back(std::move(change), tx_depth_);
+    v.emplace_back(std::move(change), tx_depth_, ret->lock);
     // now lock the storage
     if (marginal_storage != 0) {
       lock_storage(key.get_address(), marginal_storage);
@@ -438,8 +441,9 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   ItemVersion &item = v.back();
   if (auto r = change.narrow(item.change); !r)
     return r.error();
-  HogDbStatus<int128_t> ret = block_.get().modify_lock(key, item.change, change,
-                                                       &last_conflict_reason_);
+  HogDbStatus<int128_t> ret =
+      block_.get().modify_lock(*item.lock, key, item.change, change,
+                               &last_conflict_reason_);
   if (!ret) {
     return ret.error();
   }
@@ -454,7 +458,8 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   }
   else {
     assert(item.tx_depth < tx_depth_);
-    v.emplace_back(std::move(change), tx_depth_, previous_locked_storage);
+    v.emplace_back(std::move(change), tx_depth_, item.lock,
+                   previous_locked_storage);
   }
 
   // It's ok if marginal storage is negative;
