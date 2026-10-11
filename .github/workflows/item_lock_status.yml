@@ -12,7 +12,7 @@ jobs:
         permissions:
             contents: read
         steps:
-            - name: Read benchmark progress
+            - name: Enable timestamps in the active diagnostic profiler and read progress
               shell: bash
               run: |
                   for host in hog10 hog11 hog8; do
@@ -23,6 +23,13 @@ jobs:
                   from pathlib import Path
                   work = Path("/tmp/hogjob-hogci")
                   head = subprocess.check_output(["git", "-C", str(work), "rev-parse", "HEAD"], text=True).strip()
+                  if head == "803ecf7e2c7afb6666e998ee2e8f51d314a5b2a7":
+                      profiler = work / "scripts/ci/item_lock_profile.sh"
+                      code = profiler.read_text()
+                      code = code.replace("perf record --per-thread", "perf record --timestamp --per-thread")
+                      if "set -o pipefail" not in code:
+                          code = code.replace("set +e\\n", "set +e\\nset -o pipefail\\n")
+                      profiler.write_text(code)
                   root = work / "metrics_history/metrics/item-lock-profile/codex/cache-item-lock-handles-1817" / head
                   import collections
                   import socket

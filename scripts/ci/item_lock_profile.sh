@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -u
 set +e
+set -o pipefail
 pid=$1
 output=$2
 trial_log=${3:-}
@@ -12,7 +13,7 @@ fi
 # Each existing thread gets one event, rather than one event per CPU.
 # The 2048-worker pool is already alive and remains alive through these trials.
 date -u +%FT%TZ >"$output/start.txt"
-perf record --per-thread --no-inherit -m 4 -e cpu-clock -F 99 \
+perf record --timestamp --per-thread --no-inherit -m 4 -e cpu-clock -F 99 \
   --call-graph dwarf,2048 --clockid mono -p "$pid" -o "$output/perf.data" \
   -- sleep 12 >"$output/record.out" 2>"$output/record.txt"
 record_status=$?
