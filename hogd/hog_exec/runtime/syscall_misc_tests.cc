@@ -616,10 +616,8 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// The Return length gate is strict (> the limit in force): a child returning
-// exactly that many bytes finishes with frame status Return, and the parent
-// retrieves all of them intact. Pins the accept side of the boundary whose
-// reject side is TestReturnBufferTooLong.
+// Accept side of the Return length gate, which is strict: exactly the limit
+// in force succeeds. Reject side is TestReturnBufferTooLong.
 TEST_F(SyscallMiscTests, TestReturnBufferExactMax)
 {
   deploy_target();
