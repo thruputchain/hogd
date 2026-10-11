@@ -740,7 +740,7 @@ TEST(Scheduler, WriteDirtyHogAgesWritesOnlyChangedAccounts)
   EXPECT_EQ(scheduler->num_dirty_hog_ages(), 0UL);
 
   HogDbStatus<HogAge> changed_row =
-      server.get_db().read_address_average_hog_age(changed);
+      server.read_address_average_hog_age(changed);
   ASSERT_TRUE(changed_row.has_value());
   {
     const auto [cached, lock] = scheduler->get_cached_hog_age(changed);
@@ -751,7 +751,7 @@ TEST(Scheduler, WriteDirtyHogAgesWritesOnlyChangedAccounts)
   EXPECT_EQ(changed_row->average_ages[kHogAgeGroupReceived], kBlock);
 
   HogDbStatus<HogAge> unchanged_row =
-      server.get_db().read_address_average_hog_age(unchanged);
+      server.read_address_average_hog_age(unchanged);
   ASSERT_TRUE(unchanged_row.has_value());
   EXPECT_EQ(from_xdr(unchanged_row->num_hogs[kHogAgeGroupReceived]),
             static_cast<uint128_t>(7));
@@ -775,8 +775,7 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesMarksAccountDirty)
   EXPECT_EQ(scheduler->num_dirty_hog_ages(), 1UL);
 
   scheduler->write_dirty_hog_ages_to_db()();
-  HogDbStatus<HogAge> row =
-      server.get_db().read_address_average_hog_age(account);
+  HogDbStatus<HogAge> row = server.read_address_average_hog_age(account);
   ASSERT_TRUE(row.has_value());
   const auto [cached, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(*row, *cached);
@@ -812,8 +811,7 @@ TEST(Scheduler, HogAgeWritesAreRateLimitedByBlock)
 
   scheduler->maybe_write_dirty_hog_ages_to_db(base + kInterval)();
   EXPECT_EQ(scheduler->num_dirty_hog_ages(), 0UL);
-  HogDbStatus<HogAge> row =
-      server.get_db().read_address_average_hog_age(account);
+  HogDbStatus<HogAge> row = server.read_address_average_hog_age(account);
   ASSERT_TRUE(row.has_value());
   {
     const auto [cached, lock] = scheduler->get_cached_hog_age(account);
