@@ -18,7 +18,6 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
-#include "auth_token.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
@@ -33,6 +32,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -264,18 +264,26 @@ SystemCallHandler::perform_initial_validation()
   // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
       contracts_to_deploy_.size() > permitted) {
-    error("Transaction attaches {} contracts; chain permits {}",
-          contracts_to_deploy_.size(), permitted);
+    warn("tx {}: attaches {} contracts; chain permits {}",
+         show_byte_array(get_source_tx_hash()), contracts_to_deploy_.size(),
+         permitted);
+    report_contract_rejection(ContractRejectDiagnostic{
+        .contract_index = permitted,
+        .code = ContractRejectCode::ContractRejectTooMany});
     return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
   }
 
   // The blob bound is the chain's (#2569): a configuration may raise it past
   // the default, and hog_db stores whatever a loadable genesis admits.
-  for (auto const &contract : contracts_to_deploy_) {
+  for (size_t i = 0; i < contracts_to_deploy_.size(); ++i) {
     if (const uint32_t permitted = config_params().max_contract_size_bytes;
-        contract_blob_size(contract) > permitted) {
-      error("Transaction attaches a {}-byte contract; chain permits {}",
-            contract_blob_size(contract), permitted);
+        contract_blob_size(contracts_to_deploy_[i]) > permitted) {
+      warn("tx {}: attached contract {} is {} bytes; chain permits {}",
+           show_byte_array(get_source_tx_hash()), i,
+           contract_blob_size(contracts_to_deploy_[i]), permitted);
+      report_contract_rejection(ContractRejectDiagnostic{
+          .contract_index = static_cast<uint32_t>(i),
+          .code = ContractRejectCode::ContractRejectBlobTooLarge});
       return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
     }
   }
@@ -288,10 +296,17 @@ SystemCallHandler::perform_initial_validation()
   // handler itself cannot rethrow -- and keep anything else terminating,
   // since it is a genuine bug.
   try {
+    std::optional<ContractRejectDiagnostic> rejection;
     auto [res, gas_consumed] =
         NewContractSet::make(contracts_to_deploy_, runtime_context_,
-                             config_params());
+                             config_params(), rejection);
     if (!res.has_value()) {
+      if (rejection.has_value()) {
+        warn("tx {}: refusing attached contract {}: {}",
+             show_byte_array(get_source_tx_hash()), rejection->contract_index,
+             x23::show(rejection->code));
+        report_contract_rejection(*rejection);
+      }
       return {res.error(), gas_consumed};
     }
     newly_created_contracts_ = std::move(*res);
@@ -800,7 +815,7 @@ SystemCallHandler::validate_new_invocation(
   }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(
-          owned_auth_tokens.set())) {
+          owned_auth_tokens.ids())) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   return {};
@@ -1229,15 +1244,29 @@ SystemCallHandler::report_db_conflict_diagnostic() const
     first = conflict.conflicts().data();
   }
 
-  // Fire-and-forget: drive the async send in a detached coroutine so execution
-  // never waits on it (the same detached-await shape as the event server's own
-  // detached sends). report_tx_failure copies the client, so the send is
-  // self-contained and safe to outlive us.
-  const BlockHeight height = get_block_height();
-  [](x23::Async<void> send)
-      -> x23::Detached { co_await send; }(event_server_proxy_.report_tx_failure(
-          get_source_tx_hash(),
-          TxFailureDiagnostic{.attempt_height = height, .conflict = *first}));
+  TxFailureCause cause(TxFailureKind::TxFailureDbConflict);
+  cause.conflict() = *first;
+  report_tx_failure(std::move(cause));
+}
+
+void
+SystemCallHandler::report_contract_rejection(
+    ContractRejectDiagnostic const &rejection) const
+{
+  if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
+    TxFailureCause cause(TxFailureKind::TxFailureContractRejected);
+    cause.contract() = rejection;
+    report_tx_failure(std::move(cause));
+  }
+}
+
+void
+SystemCallHandler::report_tx_failure(TxFailureCause cause) const
+{
+  event_server_proxy_.report_tx_failure(
+      get_source_tx_hash(),
+      TxFailureDiagnostic{.attempt_height = get_block_height(),
+                          .cause = std::move(cause)});
 }
 
 void
@@ -1278,19 +1307,11 @@ SystemCallHandler::check_auth_tokens_owned(
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }
 
-bool
-SystemCallHandler::check_auth_tokens_owned(
-    AuthTokenIdSet const &token_ids) const
-{
-  return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
-}
-
-std::span<const uint32_t>
-SystemCallHandler::get_returned_auth_token_ids() const
+AuthTokenIdRange
+SystemCallHandler::get_returned_auth_tokens() const
 {
   assert(!invocation_frame_stack_.empty());
-  return invocation_frame_stack_
-      .get_active_frame_child_returned_auth_token_ids();
+  return invocation_frame_stack_.get_active_frame_child_returned_auth_tokens();
 }
 
 void
@@ -1417,11 +1438,11 @@ SystemCallHandler::get_calldata() const
   return invocation_frame_stack_.get_active_frame_calldata();
 }
 
-std::span<const uint32_t>
-SystemCallHandler::get_parent_supplied_auth_tokens() const
+uint32_t
+SystemCallHandler::get_parent_supplied_auth_token_count() const
 {
   return invocation_frame_stack_
-      .get_current_frame_parent_supplied_auth_tokens();
+      .get_current_frame_parent_supplied_auth_token_count();
 }
 
 NondeterministicProposalData const &
@@ -1613,10 +1634,10 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   co_return deploy_addr;
 }
 
-x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
+x23::Async<SystemStatus<StorageRead<std::span<const uint8_t>>>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
-  using Read = StorageRead<const Bytestring *>;
+  using Read = StorageRead<std::span<const uint8_t>>;
 
   const FrameItemKey item_key =
       invocation_frame_stack_.frame_item_key(storage_key);
@@ -1626,7 +1647,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   // Everything up to the load below answers out of the frame stack, so it
   // reaches no database and costs no load gas.
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
-    co_return Read{&bytestring_item->bytestring_, 0};
+    co_return Read{bytestring_item->bytes(), 0};
   }
 
   if (item_view->get<DeletedItem>()) {
@@ -1658,7 +1679,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
           SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
           load_gas};
     }
-    co_return Read{&base_item.bytestring(), load_gas};
+    co_return Read{base_item.bytestring(), load_gas};
   }
 
   co_return Read{SyscallError{
@@ -1668,16 +1689,9 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
-                                  std::span<const std::byte> input_bytestring,
-                                  StorageDeltaFlagSet input_flags)
+                                  std::span<const std::byte> input_bytestring)
 {
   CHECK(!is_read_only());
-
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
-          input_flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
 
   if (input_bytestring.size() > config_params().max_bytestring_len) {
     co_return SyscallError{
@@ -1687,17 +1701,9 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
-  Bytestring new_string;
-  new_string.resize_uninitialized(input_bytestring.size());
-  if (!input_bytestring.empty()) {
-    assert(new_string.data() != nullptr);
-    assert(input_bytestring.data() != nullptr);
-    std::memcpy(new_string.data(),
-                reinterpret_cast<const uint8_t *>(input_bytestring.data()),
-                input_bytestring.size());
-  }
-
-  co_return item_view->set(BytestringItem(std::move(new_string)), input_flags);
+  co_return item_view->set(BytestringItem(
+      {reinterpret_cast<const uint8_t *>(input_bytestring.data()),
+       input_bytestring.size()}));
 }
 
 GasAmount
@@ -1813,16 +1819,9 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
-                             const int128_t &add_value,
-                             StorageDeltaFlagSet input_flags)
+                             const int128_t &add_value)
 {
   CHECK(!is_read_only());
-
-  if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
-          input_flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
@@ -1831,30 +1830,57 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  co_return item_view->set(NNIntItem{.base_value_ =
-                                         set_value.has_value()
-                                             ? std::optional<int128_xdr>(
-                                                   to_xdr(*set_value))
-                                             : std::nullopt,
-                                     .add_value_ = to_xdr(add_value)},
-                           input_flags);
+  co_return item_view->set(
+      NNIntItem{.base_value_ =
+                    set_value.has_value()
+                        ? std::optional<int128_xdr>(to_xdr(*set_value))
+                        : std::nullopt,
+                .add_value_ = to_xdr(add_value)});
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
-SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
-                                 StorageDeltaFlagSet flags)
+SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
+{
+  CHECK(!is_read_only());
+
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  co_return item_view->set(DeletedItem{});
+}
+
+SyscallStatus<void>
+SystemCallHandler::set_storage_flags(StorageKeyContractData const &storage_key,
+                                     StorageDeltaFlagSet flags)
 {
   CHECK(!is_read_only());
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           flags)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  co_return item_view->set(DeletedItem{}, flags);
+  return item_view->set_flags(flags);
+}
+
+StorageDeltaFlagSet
+SystemCallHandler::get_storage_flags(StorageKeyContractData const &storage_key)
+{
+  auto const *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  return item_view->flags();
+}
+
+void
+SystemCallHandler::clear_storage_flags(
+    StorageKeyContractData const &storage_key)
+{
+  CHECK(!is_read_only());
+
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+  item_view->clear_flags();
 }
 
 namespace {
@@ -2152,6 +2178,35 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
 
 // == Native token syscalls ==
 
+GasAmount
+SystemCallHandler::peek_native_token_balance_load_gas(
+    ContractAddress const &contract_address)
+{
+  AddressAndKey addrkey{.address = contract_address,
+                        .key =
+                            StorageKey(StorageKeyType::FreeNativeTokenBalance)};
+  const FrameItemKey item_key = FrameItemKey::from(addrkey);
+
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
+  assert(item_view);
+
+  // Mirrors get_native_token_balance()'s pricing but must not record the load:
+  // free unless this is a cold first touch, which pays kDBRPCCost.
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (unmodified_item->is_loaded()) {
+      return 0;
+    }
+  }
+  else {
+    auto const *balance_item = item_view->get<NativeTokenBalanceItem>();
+    assert(balance_item);
+    if (balance_item->base_value_.has_value()) {
+      return 0;
+    }
+  }
+  return loaded_keys_.contains(item_key) ? 0 : kDBRPCCost;
+}
+
 x23::Async<SystemStatus<StorageRead<int128_t>>>
 SystemCallHandler::get_native_token_balance(
     ContractAddress const &contract_address)
@@ -2399,9 +2454,9 @@ SystemCallHandler::get_block_timepoint() const
 // == Auth token syscalls ==
 
 SyscallStatus<uint32_t>
-SystemCallHandler::mint_auth_token(AuthToken const &auth_token)
+SystemCallHandler::mint_auth_token(RegisteredAuthToken token)
 {
-  return invocation_frame_stack_.mint_auth_token(auth_token);
+  return invocation_frame_stack_.mint_auth_token(std::move(token));
 }
 
 SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>

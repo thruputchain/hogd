@@ -20,9 +20,8 @@
 #include "hogd/hog_exec/runtime/rv32/test_support.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
-// This is an in-tree spec-model cross-check, not an external differential
-// oracle. It is designed to catch local VM regressions quickly while
-// Spike/sail-riscv or another independent oracle remains an open M5 gate.
+// Cross-check both interpreters against the in-tree spec model. External
+// decoder coverage is in rv32_spike_oracle_test.cc.
 
 // NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name)
 

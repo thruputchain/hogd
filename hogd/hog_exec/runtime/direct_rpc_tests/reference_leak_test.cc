@@ -52,19 +52,22 @@ public:
     return d;
   }
 
+  // Each slot gets its own key: hog_db refuses one key in two slots of an
+  // address (DuplicateSigner), and these tests are about overlapping slot
+  // ids, not duplicate keys.
   static auto make_auth_data_delta(std::vector<uint32_t> const &key_ids)
   {
-    auto [pk, _] = ed25519_keygen();
-    auto empty_config =
-        PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519},
-                        .max_weight = Weight{1}};
-    empty_config.key.ed25519() = pk;
     StorageDelta delta(StorageDeltaType::kDeltaTypeAuthDataChange);
     for (auto key_id : key_ids) {
+      auto [pk, _] = ed25519_keygen();
+      auto config =
+          PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519},
+                          .max_weight = Weight{1}};
+      config.key.ed25519() = pk;
       delta.auth_data_change().auth_data_change_signers.push_back(
           AuthDataChangeSigner{.public_key_id = key_id,
                                .public_key = x23::Ptr<PublicKeyConfig>(
-                                   new PublicKeyConfig(empty_config))});
+                                   new PublicKeyConfig(config))});
     }
     return delta;
   }

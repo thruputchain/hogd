@@ -16,7 +16,7 @@ namespace hogd {
  *
  * The costs are measured by the RV32 Gas Calibration workflow, which times the
  * production syscall_entry path and converts nanoseconds to gas via the opcode
- * calibration's baseline instruction. See docs/rv32/rv32-gas-calibration.md.
+ * calibration's baseline instruction. See rv32/gas_calibration/MEASUREMENTS.md.
  *
  * Every constant the cost functions read must be an entry in
  * kSyscallGasCostSchedule, since that is what the digest hashes; a number that
@@ -45,25 +45,11 @@ constexpr static uint64_t kSyscallBaseCost = 50;
 // call, which is inside the fit's own residual.
 constexpr static uint64_t kSHA256HashBlockCost = 22;
 
-// What touching a hash stream costs on top of the blocks it compresses, paid by
-// SHA256Update and SHA256Copy. Both reach the frame's stream table, and both
-// create an entry in it when the destination slot does not exist yet -- an
-// allocation with no compression attached, so no block term bills it. A
-// zero-byte reset update creates a stream and hashes nothing at all.
-//
-// Charged on every such call, not only the ones that allocate. The alternative
-// makes the price depend on whether the slot happened to exist, which is a
-// thing about the frame's state rather than about the call; the flat charge
-// keeps every cost in this table a function of its arguments. It overbills a
-// repeat touch, which measures near the crossing alone, by well under 2x --
-// the direction the opcode schedule already rounds, and far inside the spread
-// this schedule replaced.
-//
-// The stream table's size limit is max_sha256_buffers, which is network config
-// rather than a protocol constant, so this cannot lean on the limit being
-// small. It does not need to: the cost per creation is flat in occupancy
-// (measured to 32768), so an unordered_map insert stays amortized O(1) however
-// large a chain sets it.
+// Per-call stream-table cost for SHA256Update and SHA256Copy, in addition to
+// compression blocks. Charge every call, including repeat touches, to cover
+// stream creation without making this component depend on slot occupancy.
+// Creation cost was flat over the measured occupancies through 32768 streams;
+// max_sha256_buffers is configurable, so larger tables remain unmeasured.
 constexpr static uint64_t kSHA256StreamCost = 26;
 
 // ed25519, which this schedule prices for the first time. The curve arithmetic
@@ -72,53 +58,18 @@ constexpr static uint64_t kSHA256StreamCost = 26;
 constexpr static uint64_t kVerifySignatureBaseCost = 17750;
 constexpr static uint64_t kVerifySignatureBlockCost = 131;
 
-// What an NNInt storage syscall costs on top of the crossing. Charged by
-// NonnegativeIntGet and NonnegativeIntSetAdd alike, on every call.
+// Per-call NNInt access cost, in addition to crossing and database-load costs.
+// The flat charge covers map access, first-touch view creation, and child-frame
+// merge. At 4096 keys the measured components were ~47-55 gas for access,
+// ~93 for a first read or ~34 for a first write, and ~32 per merged item.
+// The allowance prepays child-frame merge because finish_frame has no meter.
+// Failed frames pay this allowance even though their items are discarded.
 //
-// This covers three measured costs at once, and deliberately charges all of
-// them every time:
-//
-//   the access itself   reaching the frame's item map, hashing the key,
-//                       reading or staging the value.  ~47-55 gas.
-//   the first touch     a key this transaction has not seen before misses the
-//                       active frame, walks its parents and creates a view,
-//                       loading from the snapshot cache on a read.  ~93 gas
-//                       for a read and ~34 for a write, at four thousand keys
-//                       in the frame.
-//   the commit          a successful child frame merges each staged item into
-//                       its parent, in frame completion rather than in any
-//                       syscall.  ~32 gas per item.
-//
-// Charging the first touch on every access, not only the first, is the same
-// trade kSHA256StreamCost makes above and for the same reason: the alternative
-// makes the price depend on whether the frame happened to hold the key
-// already, which is a thing about the frame's state rather than about the
-// call. The flat charge keeps every cost in this table a function of its
-// arguments, and it keeps a contract's bill independent of its own execution
-// history, which is what makes gas estimable before running it.
-//
-// It overbills a repeat touch by 1.6-2x at the key counts anything realistic
-// reaches -- measured 1.64x at one key in the frame, 1.60x at 256, 1.96x at
-// 4096 -- which is the direction this schedule already rounds and well inside
-// the spread it replaced.
-//
-// Prepaying the commit on every write is what lets it be charged at all: the
-// merge happens in InvocationFrameStack::finish_frame, which has no gas meter
-// and no syscall running. Charging it at the write overbills a frame that
-// later fails and never merges, which is the safe direction -- the staging
-// work happened either way.
-//
-// 150 covers the dearest sum of the three (a read: 47 + 93) with room, and
-// lands the total at a round 200 with the base. Writes come to 121 by the same
-// arithmetic, close enough that one constant serves both; two would be false
-// precision in a digest, and would give a contract a reason to prefer one call
-// over another for pricing rather than for what it needs.
-//
-// What this still does not cover is a frame holding far more than a few
-// thousand keys: the first touch rises to ~234 gas at 65536 and ~529 at
-// 262144 as the frame's map outgrows cache. What bounds that is the gas a
-// transaction must burn to reach those key counts. See
-// docs/rv32/rv32-gas-calibration.md.
+// Repeat accesses pay the same component, about 1.6-2x their measured cost at
+// 1-4096 keys. Total billing still depends on transaction-local database loads.
+// First-touch cost rose to ~234 gas at 65536 keys and ~529 at 262144, beyond
+// this allowance. See rv32/gas_calibration/MEASUREMENTS.md for measurement
+// limits; reachability of these occupancies is not established.
 constexpr static uint64_t kStorageAccessCost = 150;
 
 // One read from hog_db, charged wherever an item view loads.
@@ -152,7 +103,7 @@ constexpr static uint64_t kDBRPCCost = 37300;
 // sized to the dearest band its sweep measured, the per-byte cost not being
 // constant across it.
 //
-// See docs/rv32/rv32-gas-calibration.md, "Bytestrings: the length axis".
+// See rv32/gas_calibration/MEASUREMENTS.md, the bytestring measurements.
 constexpr static uint64_t kBytestringBlockBytes = 512;
 constexpr static uint64_t kBytestringWriteBlockCost = 13;
 constexpr static uint64_t kBytestringReadBlockCost = 7;

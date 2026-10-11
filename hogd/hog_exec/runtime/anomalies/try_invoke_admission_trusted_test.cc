@@ -76,11 +76,9 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -113,9 +111,9 @@ protected:
   static constexpr Runtime::MethodID kChildWrite = 0;
   static constexpr Runtime::MethodID kChildDelete = 1;
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
-    return std::make_tuple(static_cast<uint64_t>(amount >> 64),
+    return std::make_tuple(static_cast<int64_t>(amount >> 64),
                            static_cast<uint64_t>(amount &
                                                  0xffffffffffffffffULL));
   }
@@ -184,9 +182,8 @@ protected:
     return [p = std::string(payload)](
                NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
-      auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-          ctx.handler(), key, std::as_bytes(std::span(std::string_view(p))),
-          std::to_underlying(StorageDeltaFlags::None));
+      auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+          key, std::as_bytes(std::span(std::string_view(p))));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -202,7 +199,7 @@ protected:
   {
     return [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
-      auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+      auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
       if (!del.has_value() ||
           del.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -232,8 +229,7 @@ TEST_F(TryInvokeAdmissionTrustedTest,
   int128_t transfer_amount = cost_model->get_bytestring_cost(kPayload.size()) +
                              cost_model->get_balance_cost();
   ASSERT_GT(transfer_amount, 0);
-  auto transfer_amount_xdr =
-      make_amount(static_cast<uint128_t>(transfer_amount));
+  auto transfer_amount_xdr = make_amount(transfer_amount);
 
   auto child = make_contract(make_child_write(kPayload));
   auto parent = make_contract([transfer_amount_xdr](NativeSyscallContext &ctx)
@@ -425,10 +421,8 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
         std::string_view marker = child_committed ? "success" : "fallback";
 
         auto key = make_storage_key("root-branch");
-        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), key,
-            std::as_bytes(std::span(std::string_view(marker))),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(std::string_view(marker))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

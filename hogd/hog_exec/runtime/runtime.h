@@ -3,8 +3,10 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <optional>
 
 #include "contract.hh"
+#include "db_conflict.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
@@ -53,21 +55,25 @@ public:
   //
   // For RV32, verification *is* translation: Rv32Contract::create parses the
   // artifact and builds the threaded pre-instantiation, and nothing cheaper
-  // proves translatability (make_new_runtime treats a non-translatable
-  // deployed contract as Unrecoverable). Handing that image back lets the
-  // caller reuse it instead of lowering the same bytes again (#3536).
+  // proves translatability (a stored contract that does not translate fails
+  // its snapshot-cache lookup as Unrecoverable). Handing that image back lets
+  // the caller reuse it instead of lowering the same bytes again (#3536).
   // Runtimes with nothing to prepare leave `out` untouched.
   //
   // `out` is built in place: the caller supplies storage at whatever scope it
   // wants the preparation to live, and the context memoizes nothing. It is
   // written only on success; on rejection it is left as the caller had it.
-  virtual InvokeErrorCode verify_contract(Contract const &contract,
-                                          NetworkConfigParams const &params,
-                                          PreparedContract &out) const = 0;
+  // An invalid contract returns Deterministic and names why in `rejection`
+  // (ContractRejectNotDeployable for a type it can't run).
+  virtual InvokeErrorCode
+  verify_contract(Contract const &contract, NetworkConfigParams const &params,
+                  PreparedContract &out,
+                  std::optional<ContractRejectCode> &rejection) const = 0;
 
   // Convenience for callers that only want the verdict and would discard the
-  // preparation. Defined out-of-line so PreparedContract is complete where the
-  // discarded instance is constructed and destroyed.
+  // preparation and the reason.
+  // Defined out-of-line so PreparedContract is complete where the discarded
+  // instance is constructed and destroyed.
   //
   // Overriders hide this overload; a class whose callers use it through the
   // derived type needs `using RuntimeContext::verify_contract;`.

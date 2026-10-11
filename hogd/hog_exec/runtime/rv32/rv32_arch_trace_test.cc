@@ -199,9 +199,7 @@ TEST(Rv32ArchTrace, traceObserverChainsStatesIntoExecTrace)
   EXPECT_EQ(trace.final_result, StepResult::kHalted);
 }
 
-// Test-only adapter: drives the canonical Machine through the observer
-// protocol, mimicking how a run-to-completion experimental machine would emit a
-// trace.
+// Drive the canonical Machine through TraceObserver to check trace equivalence.
 inline ExecTrace
 traced_run(Machine &machine, Host &host, size_t max_steps = 4096)
 {

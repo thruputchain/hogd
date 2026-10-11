@@ -147,7 +147,8 @@ struct GenRs {
   void show_server_dispatch(VersDef const &vers, std::string const &prog_name,
                             std::string const &prog_id);
 
-  void show_decl(const Declaration &d, string const &name_prefix)
+  void show_decl(const Declaration &d, string const &name_prefix,
+                 bool derives_schema)
   {
     if (d.qual == Declaration::kVoid) {
       return;
@@ -155,14 +156,22 @@ struct GenRs {
 
     show_comment(d.comment, false);
 
-    if (!d.attrs.empty()) {
-      prtop("{}\n", d.attrs);
-    }
-
-    if (get_opaque_array_size(d).has_value()) {
+    if (optional<string> size = get_opaque_array_size(d)) {
       // type is a byte array
       prtop("{}", feature_attr("serde", "serde(with = "
-                                        "\"serde_arrays::hex\")"));
+                                        "\"xdr_common::serde_hex\")"));
+      // schemars takes serde(with) to name a type to borrow the schema from,
+      // so describe the hex string itself, as the newtype impl does.
+      if (derives_schema) {
+        prtop("{}",
+              feature_attr(
+                  "schema",
+                  std::format(R"(schemars(with = "String", )"
+                              R"(length(equal = 2 * ({} as usize)), )"
+                              R"(extend("contentEncoding" = "hex", )"
+                              R"("contentMediaType" = "application/binary")))",
+                              *size)));
+      }
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -346,8 +355,6 @@ struct GenRs {
 
   static constexpr string_view kRustBoxPtr = R"(#[rust(box_ptr)])";
   static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
-  static constexpr string_view kSerdeArrays =
-      R"(#[serde(with = "serde_arrays::hex")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
   static constexpr string_view kConstWriteXDR = R"(#[rust(ConstWriteXDR)])";
@@ -374,7 +381,6 @@ GenRs::convert_to_newtype(const Definition &d)
 {
   struct NewtypeVisitor {
     string comment;
-    string attrs;
 
     // Convert a typedef to a struct with a single field
     Definition operator()(const Typedef &d)
@@ -384,7 +390,6 @@ GenRs::convert_to_newtype(const Definition &d)
           .id = "inner", // or can leave nameless for a tuple-struct
           .qual = d.qual,
           .bound = d.bound,
-          .attrs = attrs,
           .is_private = true,
       };
 
@@ -405,18 +410,7 @@ GenRs::convert_to_newtype(const Definition &d)
   };
 
   if (optional<string> remainder = substring_removed(d.comment, kRustNewtype)) {
-    string comment = *remainder;
-    string attrs;
-
-    if (optional<string> remainder = substring_removed(comment, kSerdeArrays)) {
-      comment = *remainder;
-      if (!attrs.empty()) {
-        attrs += "\n";
-      }
-      attrs += kSerdeArrays;
-    }
-
-    auto visitor = NewtypeVisitor{.comment = comment, .attrs = attrs};
+    auto visitor = NewtypeVisitor{.comment = *remainder};
     return visit(visitor, d);
   }
 
@@ -544,25 +538,24 @@ impl {0}_{1}_Client {{
     }}
 )",
         prog_name, vers.id, prog_id, vers.val);
-  auto is_ref_type = [](const string &type) -> string {
-    const static std::set<string_view> nonref_types = {"hyper",
+  // Scalars go by value; anything else is borrowed as any type that encodes
+  // like it.  ?Sized admits slices, e.g. of Arcs where the wire type is a Vec.
+  auto arg_type = [](const string &type) -> string {
+    const static std::set<string_view> scalar_types = {"hyper",
                                                        "unsigned hyper", "bool",
                                                        "int", "unsigned int"};
-    if (nonref_types.contains(type)) {
-      return "";
+    if (scalar_types.contains(type)) {
+      return map_type(type);
     }
-    return "&";
+    return std::format("&(impl xdrs::EncodesAs<{}> + ?Sized)", map_type(type));
   };
 
   for (auto const &proc : vers.procs) {
     std::vector<string> args = {"&self"};
     std::vector<string> call_args;
     for (size_t i = 0; i < proc.arg_types.size(); i++) {
-      args.push_back(std::format("arg{} : {}{}", i,
-                                 is_ref_type(proc.arg_types[i]),
-                                 map_type(proc.arg_types[i])));
-      call_args.push_back(
-          std::format("{}arg{}", is_ref_type(proc.arg_types[i]), i));
+      args.push_back(std::format("arg{} : {}", i, arg_type(proc.arg_types[i])));
+      call_args.push_back(std::format("arg{}", i));
     }
     prtop("    pub async fn {}({}) -> Result<{}, ::rpc_api::RpcError> {{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
@@ -670,7 +663,7 @@ GenRs::show_type(const StructBody &s, string const &tname, RustMarkers markers)
       scopes_.push_back(tname);
 
       for (const auto &d : s) {
-        show_decl(d, tname);
+        show_decl(d, tname, !array_size);
       }
     }
 
@@ -1359,9 +1352,8 @@ use core::ops::{{Deref, DerefMut}};
 
   preamble +=
       std::format(R"(
-{0}{1})",
-                  gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"),
-                  gs.cfg("serde", "use ::serde_arrays;"));
+{0})",
+                  gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"));
 
   return preamble + gs.top_ + R"(
 //

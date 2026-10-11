@@ -13,6 +13,7 @@
 #include "types.hh"
 
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -150,6 +151,32 @@ HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
     return DbGatewayIntroOutcome::DbGatewayIntroMismatchedProtocol;
   }
   return DbGatewayIntroOutcome::DbGatewayIntroSuccess;
+}
+
+x23::Async<DbGatewayConfigResult>
+HogDbGatewayRpc::dbgateway_get_config()
+{
+  co_await ctx_.co_wait_for_no_commit_publishing();
+  DbTip tip = ctx_.get_tip();
+  if (tip.value.proposal_header.block_height < 0) {
+    co_return DbGatewayConfigResult(RPCError::kRPCNotFound);
+  }
+  // Prices are immutable after genesis; limits come from the captured tip.
+  // A later commit does not invalidate this configuration reading.
+  auto cost_model = ctx_.get_db().read_cost_model();
+  if (!cost_model) {
+    co_return DbGatewayConfigResult(RPCError::kRPCUnrecoverable);
+  }
+  if (tip.network_config.v() != 0 ||
+      !NetworkConfigParams::is_canonical(tip.network_config.v0())) {
+    co_return DbGatewayConfigResult(RPCError::kRPCUnrecoverable);
+  }
+  DbGatewayConfigResult result(RPCError::kRPCNone);
+  result.config().effective_config =
+      NetworkConfigParams(tip.network_config.v0()).to_network_config();
+  result.config().storage_cost_model = cost_model->to_xdr();
+  result.config().tip = std::move(tip);
+  co_return result;
 }
 
 x23::Async<DbGatewayResult>

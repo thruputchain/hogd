@@ -28,8 +28,11 @@ to_bytes(std::span<uint32_t const> ids)
 
 } // namespace
 
-TEST(ValidatedAuthTokensTest, ParseKeepsContractOrderAndBuildsSet)
+TEST(ValidatedAuthTokensTest, ParseKeepsContractOrder)
 {
+  // Unsorted on purpose: the duplicate scan sorts a scratch copy, so a parse
+  // that returned the sorted order instead would fail here. The order is
+  // consensus-visible, read back through GetCalldata and GetReturnedBuffer.
   std::vector<uint32_t> const ids{7, 3, 9, 12};
 
   auto parsed = ValidatedAuthTokens::parse(to_bytes(ids));
@@ -37,10 +40,6 @@ TEST(ValidatedAuthTokensTest, ParseKeepsContractOrderAndBuildsSet)
   ASSERT_TRUE(parsed.has_value());
   EXPECT_TRUE(std::ranges::equal(parsed->ids(), ids));
   EXPECT_EQ(parsed->size(), ids.size());
-  EXPECT_EQ(parsed->set().size(), ids.size());
-  for (uint32_t id : ids) {
-    EXPECT_TRUE(parsed->set().contains(id));
-  }
 }
 
 TEST(ValidatedAuthTokensTest, ParseRejectsPartialId)
@@ -85,22 +84,18 @@ TEST(ValidatedAuthTokensTest, EmptySpanParsesToEmptyList)
 
   ASSERT_TRUE(parsed.has_value());
   EXPECT_TRUE(parsed->empty());
-  EXPECT_TRUE(parsed->set().empty());
+  EXPECT_EQ(parsed->size(), 0U);
 }
 
-TEST(ValidatedAuthTokensTest, ReleaseHandsOutBothForms)
+TEST(ValidatedAuthTokensTest, ReleaseHandsOutTheOrderedList)
 {
   std::vector<uint32_t> const ids{4, 8, 15};
   auto parsed = ValidatedAuthTokens::parse(to_bytes(ids));
   ASSERT_TRUE(parsed.has_value());
 
-  auto [released_ids, released_set] = std::move(*parsed).release();
+  auto released_ids = std::move(*parsed).release();
 
   EXPECT_EQ(released_ids, ids);
-  EXPECT_EQ(released_set.size(), ids.size());
-  for (uint32_t id : ids) {
-    EXPECT_TRUE(released_set.contains(id));
-  }
 }
 
 } // namespace hogd

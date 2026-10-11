@@ -2,27 +2,83 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <sys/socket.h>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
+#include "hogd/base/chunk_items.h"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
+#include "hogd/base/types.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/format.h"
 #include "x23/refcnt.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
+namespace {
+// A KeyChangeChunk whose changes are still in the per-thread batches they
+// were produced in. It serializes identically to the wire struct, so the
+// client sends it as one without copying a change.
+struct KeyChangeChunkView {
+  BlockHeight height;
+  std::uint32_t chunk_index;
+  std::uint32_t chunk_count;
+  ChunkItems<KeyChange> changes;
+};
+
+size_t
+xdr_size(const KeyChangeChunkView &view)
+{
+  return x23::xdr_size(view.height) + x23::xdr_size(view.chunk_index) +
+         x23::xdr_size(view.chunk_count) + xdr_size(view.changes);
+}
+
+void
+xdr_serialize(auto &serializer, const KeyChangeChunkView &view)
+{
+  serializer(view.height);
+  serializer(view.chunk_index);
+  serializer(view.chunk_count);
+  serializer(view.changes);
+}
+} // namespace
+} // namespace hogd
+
+template<>
+struct x23::serialize_equiv<hogd::KeyChangeChunk, hogd::KeyChangeChunkView>
+  : std::true_type {};
+
+namespace hogd {
+
+x23::Async<void>
+AuthChangeSubscriptionManager::ForwardKeyChangeChunk::operator()(
+    ChunkPosition position, ChunkItems<KeyChange> changes)
+{
+  // The record is serialized from [changes] in place, before the call first
+  // suspends.
+  const KeyChangeChunkView view{.height = height,
+                                .chunk_index = position.index,
+                                .chunk_count = position.count,
+                                .changes = changes};
+  co_await client.authdb_forward_key_changes_chunk(view);
+}
 
 x23::Detached
 AuthChangeSubscriptionManager::detached_publish_auth_changes(
@@ -38,17 +94,19 @@ x23::Async<void>
 AuthChangeSubscriptionManager::publish_auth_changes(
     BlockHeight height, PerThread<KeyChangeBatch> key_changes)
 {
-  KeyChangeBatch combined_batch;
+  // Each thread's batch is a part of the run as it is; the chunks are
+  // serialized straight from these, so they live until every run is done.
+  std::vector<KeyChangeBatch> parts;
   {
     auto ul = key_changes.lock_threads();
-    key_changes.for_each(ul, [&](const KeyChangeBatch &batch) {
-      combined_batch.append_range(batch);
+    key_changes.for_each(ul, [&parts](KeyChangeBatch &batch) {
+      parts.push_back(std::move(batch));
     });
   }
 
-  auto pending = co_await start_forward_key_changes(height, combined_batch);
+  auto pending = co_await start_forward_key_changes(height, parts);
 
-  for (auto &[card, client_ref, future] : pending) {
+  for (auto &[card, client_ref, sender, future] : pending) {
     bool failed = false;
     try {
       co_await future;
@@ -74,11 +132,11 @@ x23::Async<std::optional<AuthChangeSubscriptionManager::auth_db_client_t>>
 AuthChangeSubscriptionManager::create_client(const sockaddr_storage &address,
                                              const AuthCard &card)
 {
-  // Match the auth service's inbound cap (auth.cc sets its AuthDBRpc server's
-  // max_message_size_ to a large value). A committed block can produce a
-  // KeyChangeBatch larger than the default 16 MiB cap; without this the
-  // outbound send throws locally and the subscriber is erased, stalling auth
-  // delivery for later heights (issue #3146).
+  // Match the auth service's inbound cap (hog_auth.cc sets its AuthDBRpc
+  // server's max_message_size_ to a large value). Key changes go out as
+  // KeyChangeChunk records sized under the default 16 MiB cap, so this is
+  // headroom rather than a requirement; the whole-batch forward it was added
+  // for (issue #3146) is gone.
   auto client =
       co_await make_rpc_client<AuthDB1>(address, false, kBulkRpcMaxMessageSize);
   if (!client) {
@@ -122,7 +180,7 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
 
 x23::Async<std::vector<AuthChangeSubscriptionManager::PendingPublish>>
 AuthChangeSubscriptionManager::start_forward_key_changes(
-    BlockHeight height, const KeyChangeBatch &batch)
+    BlockHeight height, const std::vector<KeyChangeBatch> &parts)
 {
   std::vector<PendingPublish> pending;
 
@@ -136,22 +194,19 @@ AuthChangeSubscriptionManager::start_forward_key_changes(
   // Detached publishes can run out of order, so take the max, not the last.
   last_published_height_ = std::max(last_published_height_, height);
 
+  // A run's chunks are serialized and sent on the pool, so a failure, such as
+  // a record over the cap, reaches the caller through the future rather than
+  // here.
   pending.reserve(auth_db_clients_.size());
-  for (auto it = auth_db_clients_.begin(); it != auth_db_clients_.end();) {
-    auto &client = it->second;
-    try {
-      pending.push_back(
-          PendingPublish{.card = it->first,
-                         .client_ref = client.__send_call,
-                         .future =
-                             client.authdb_forward_key_changes(height, batch)});
-      ++it;
-    } catch (x23::XdrException &e) {
-      error("AuthChangeSubscriptionManager: Failed to forward key changes to "
-            "auth server {}: {}.  Closing connection.",
-            x23::show(it->first), e.what());
-      it = auth_db_clients_.erase(it);
-    }
+  for (auto &[card, client] : auth_db_clients_) {
+    auto sender = std::make_unique<KeyChangeRunSender>(
+        parts, max_key_changes_per_chunk_,
+        ForwardKeyChangeChunk{.client = client, .height = height});
+    x23::Async<void> future = sender->send();
+    pending.push_back(PendingPublish{.card = card,
+                                     .client_ref = client.__send_call,
+                                     .sender = std::move(sender),
+                                     .future = std::move(future)});
   }
   co_return pending;
 }

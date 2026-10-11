@@ -43,15 +43,9 @@ mix(uint64_t &hash, std::string_view text)
   }
 }
 
-// One canonical encoding per opcode the harness can place, every register field
-// pointed at the same register so that same-register fusion conditions can
-// actually be satisfied. Using the calibration kernels' operands here would be
-// a mistake in a way that is easy to miss: those are chosen specifically so
-// nothing fuses, so a corpus built from them probes a lowering in which no
-// fusion rule can fire, and the fingerprint would not move when one changed.
-//
-// The corpus is fixed, so it is stable across hosts and moves only when the
-// opcode set does.
+// Use uniform register fields so same-register fusion rules can match.
+// The measurement kernels deliberately avoid many of these dependencies and
+// would not provide a useful fusion probe corpus.
 std::vector<uint32_t>
 fingerprint_corpus()
 {

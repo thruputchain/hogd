@@ -1,3 +1,5 @@
+add_subdirectory(test_support)
+
 # create base module library
 add_library(
   base_objects OBJECT
@@ -26,6 +28,10 @@ add_library(base_test_objects OBJECT
   base_test.cc
   bits_test.cc
   block_id_test.cc
+  chunk_items_test.cc
+  chunk_run_assembler_test.cc
+  chunk_run_sender_test.cc
+  chunked_vector_test.cc
   cli_test.cc
   cpputil_test.cc
   io_test.cc
@@ -33,8 +39,11 @@ add_library(base_test_objects OBJECT
   network_config_params_test.cc
   perthread_arc_test.cc
   perthread_test.cc
+  rc_bytes_test.cc
+  rc_test.cc
   status_test.cc
   string_test.cc
+  time_test.cc
   unique_function_test.cc
   wide_integral_test.cc
   worker_pool_test.cc

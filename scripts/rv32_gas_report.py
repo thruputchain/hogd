@@ -220,6 +220,62 @@ def op_width(names):
     return max(8, max((len(str(name)) for name in names), default=0) + 2)
 
 
+def is_jump_sequence(cell):
+    # Recognize existing benchmark JSON too: no new timing run is needed.
+    return (cell.get("jump_kernel") and cell.get("op") == "JALR"
+            and cell.get("context", "").startswith("target_chase/"))
+
+
+JUMP_SEQUENCE_OPS = {"LW": 2, "JALR": 1, "JAL": 1}
+
+
+def jump_sequence_rows(data, gas_for_op=None, unit=None):
+    """Compare the whole timed sequence with its core instructions' gas.
+
+    Timing also includes sentinel/loop/setup overhead. Omitting their gas
+    makes this check conservative; no guessed timing is subtracted.
+    """
+    if unit is None:
+        unit = baseline_ns(data)
+    if gas_for_op is None:
+        gas_for_op = {c["op"]: c["scheduled_gas"] for c in usable_cells(data)}
+    rows = []
+    for cell in data.get("opcodes", []):
+        if not is_jump_sequence(cell):
+            continue
+        name = context_label(cell)
+        missing = set(JUMP_SEQUENCE_OPS) - gas_for_op.keys()
+        ns = cell.get("ns_upper_bound", 0.0)
+        error = None
+        if not cell.get("usable") or not math.isfinite(ns) or ns <= 0:
+            error = "invalid sequence measurement"
+        elif missing:
+            error = "unmeasured sequence opcodes: " + ", ".join(sorted(missing))
+        elif not math.isfinite(unit) or unit <= 0:
+            error = "invalid gas unit"
+        gas = sum(gas_for_op.get(op, 0) * count
+                  for op, count in JUMP_SEQUENCE_OPS.items())
+        budget = gas * unit
+        if not error and ns > budget * (1 + BOUND_VIOLATION_MARGIN):
+            error = f"sequence exceeds gas budget ({ns:.4f} > {budget:.4f} ns)"
+        rows.append(dict(name=name, ns=ns, gas=gas, budget=budget, error=error))
+    return rows
+
+
+def print_jump_sequences(data, gas_for_op=None, unit=None):
+    rows = jump_sequence_rows(data, gas_for_op, unit)
+    if rows:
+        schedule_name = "current" if gas_for_op is None else "proposed"
+        print(f"\nChanging-target sequences ({schedule_name} gas): 2 LW + JALR + JAL per dispatch")
+        print("Timing includes loop/setup overhead; budget counts core instructions only.")
+        print("Excluded from individual opcode prices. Budget check allows 5% scatter.")
+        print(f"{'context':<55} {'ns/sequence':>12} {'gas/sequence':>13} {'budget ns':>10}  result")
+        for row in rows:
+            print(f"{row['name']:<55} {row['ns']:12.4f} {row['gas']:13} "
+                  f"{row['budget']:10.4f}  {row['error'] or 'PASS'}")
+    return [f"{r['name']}: {r['error']}" for r in rows if r['error']]
+
+
 def usable_cells(data):
     """Per-opcode cells only.
 
@@ -228,7 +284,8 @@ def usable_cells(data):
     separately, against the bound their two opcodes imply.
     """
     return [cell for cell in data["opcodes"]
-            if cell["usable"] and not cell.get("pair")]
+            if cell["usable"] and not cell.get("pair")
+            and not is_jump_sequence(cell)]
 
 
 def pair_cells(data):
@@ -322,6 +379,11 @@ def resolved(cell):
     out "exceeding" it -- reported as a failure of the method rather than of
     the number feeding it.
     """
+    if cell.get("jump_kernel") and cell.get("ns_upper_bound", 0.0) > 0.0:
+        # Dedicated control-flow kernels measure an absolute per-jump bound,
+        # including setup/target generation. They do not fit a contrast and
+        # must not be silently replaced by the baseline for lacking a slope.
+        return True
     if cell.get("ns_saturated", 0.0) > 0.0:
         return True
     stderr = cell.get("slope_stderr_ns", 0.0)
@@ -336,52 +398,15 @@ def sigmas(cell):
 
 
 def merge_runs(runs):
-    """Combine several calibration runs into one set of cells.
+    """Merge costs by opcode and context.
 
-    Per (opcode, context), the cost is the median across runs and the cell
-    counts as resolved only if *every* run resolved it. The two halves do
-    different jobs: the median estimates how much the opcode costs, unanimity
-    decides whether it costs more than the baseline at all.
+    Use the median of repeated samples on each host, then the maximum across
+    hosts. Unresolved samples contribute their run's baseline. The merged
+    resolved flag requires coverage and resolution in every run; it is report
+    metadata and does not gate build_schedule's pricing.
 
-    Median *within* a host and max *across* hosts, because the two axes are
-    different questions. Repeated runs on one host measure one quantity, so
-    their max is not a conservative estimate of it -- it is a statistic that
-    grows with N, pricing the unluckiest sample and climbing as nights
-    accumulate: over three hog10 runs a plain max rose 241 -> 245 -> 246 gas
-    with nothing about the machine changing. It also priced noise into
-    individual opcodes, splitting identical single-dispatch instructions across
-    a rounding boundary on sub-tenth-of-a-percent differences. The median
-    converges instead.
-
-    Different hosts are not repeats of one measurement, though. Mixing them is
-    a deliberate workflow (see check_comparable) precisely because a schedule
-    has to hold on the slowest supported machine, so a host that finds an
-    opcode expensive must not be averaged away by two that do not. Hence the
-    max there.
-
-    The conservatism on the third axis is untouched: worst_by_op still takes
-    the max across *contexts*, which is the choice a guest author gets to make.
-
-    The cross-host max is over raw nanoseconds, which is what it has always
-    been. That is conservative but blunt: a host uniformly slower at everything
-    wins every opcode, and build_schedule then divides by the *fastest* host's
-    baseline, so the whole schedule inflates rather than just the opcodes that
-    host is relatively worse at. Comparing each host's cost against its own
-    baseline first would price the relative worst case instead. Left alone here
-    -- only hog10 has ever been merged, so nothing exercises it, and choosing
-    what a multi-host schedule means is a decision for whoever needs one.
-
-    Requiring unanimity is what makes a schedule reproducible: a cell's
-    within-run standard error captures scatter between that run's kernels, but
-    not drift between runs on a shared or thermally variable machine, and on
-    such a host the near-baseline cells move by tens of percent between runs
-    while the genuinely expensive ones move by one or two. Demanding that every
-    run agree an opcode is more expensive than the baseline is what separates
-    those two populations.
-
-    With a single run this reduces to that run's own cells, which is why one
-    run is enough to find the large effects and not enough to price the small
-    ones.
+    Cross-host maxima use raw nanoseconds. build_schedule divides by the
+    smallest run baseline, so a uniformly slower host can inflate all prices.
     """
     merged = {}
     total_runs = len(runs)
@@ -460,6 +485,8 @@ def print_table(data):
     print(header)
     print("-" * len(header))
     for cell in data["opcodes"]:
+        if is_jump_sequence(cell):
+            continue
         if not cell["usable"]:
             print(f"{cell['op']:<{ow}}{context_label(cell):<26}{'--':>10}"
                   f"{'--':>9}{'--':>9}{'--':>8}{'--':>7}"
@@ -488,13 +515,15 @@ def print_table(data):
             f"{cell['scheduled_gas']:>5}  {verdict}"
         )
 
+    print_jump_sequences(data)
+
 
 def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
-    """Integer gas costs from the measured per-instruction times.
+    """Propose integer gas costs from the worst measured context per opcode.
 
-    One gas is 1/resolution of a baseline instruction, and every cost rounds up.
-    The unit comes from the *smallest* baseline across the runs, which makes
-    every ratio -- and so every cost -- the conservative one.
+    One gas is 1/resolution of the smallest run baseline. Costs within
+    VERDICT_MARGIN of that baseline are priced at baseline; higher costs round
+    up to the next gas unit.
     """
     worst = worst_by_op(runs)
     if not worst:
@@ -506,35 +535,13 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
     unit = gas_unit_ns(baseline, resolution)
     schedule = {}
     for op, cell in sorted(worst.items()):
-        # Floor every opcode at the baseline. Some opcodes measure *below* it:
-        # the substitution estimator attributes the whole difference between
-        # target and filler to the target, so an opcode that touches fewer
-        # registers than the filler (LUI writes an immediate and reads nothing)
-        # can come out with a slope steep enough to imply a per-instruction cost
-        # well under one dispatch. That is not a cheaper dispatch -- every
-        # instruction pays one, and the baseline sweep is what one costs -- it
-        # is the model straining where target and filler differ too much for
-        # the difference to belong to the target alone. Pricing there would
-        # undercharge, so the floor holds.
+        # Keep the minimum price at one baseline instruction. Saturated cells
+        # can measure below the median normalizer; old contrast estimates can
+        # also fall below it when substituting a cheaper target for the filler.
         ns = max(cost_ns(cell), baseline)
 
-        # An opcode the table calls "same as ADD" is priced as ADD. Without
-        # this, whether a single-dispatch opcode lands a hair under the
-        # baseline or a hair over it decides its price: the floor above pins
-        # the former to exactly one unit while the latter rounds up to the next
-        # one. At resolution 1 that put ANDI at 1 gas and AND at 2, and SLTIU
-        # at 1 against SLTI at 2, on differences invisible at two decimal
-        # places. Charging one price for opcodes the report already calls
-        # indistinguishable is what makes the schedule legible, and it keeps
-        # the table and the schedule telling the reader the same story.
-        #
-        # VERDICT_MARGIN rather than a new constant: it is already this file's
-        # answer to "how far from the baseline is far enough to mean
-        # something". It is wider than the noise -- three hog10 runs reproduced
-        # to 0.9% at p90 -- so this can undercharge an opcode genuinely a few
-        # percent dearer than a dispatch, against rounding that otherwise
-        # overcharges by a whole unit, which is 100% of a dispatch at
-        # resolution 1.
+        # Snap near-baseline costs to the floor before rounding. Otherwise a
+        # small timing difference can add a whole gas unit at resolution 1.
         same_as_baseline = ns <= baseline * (1.0 + VERDICT_MARGIN)
         if same_as_baseline:
             ns = baseline
@@ -620,12 +627,16 @@ def print_schedule(runs, resolution=DEFAULT_RESOLUTION):
             print_repricing(run, schedule)
             break
     print()
+    sequence_failures = []
+    for run in runs:
+        sequence_failures.extend(print_jump_sequences(
+            run, {op: entry["proposed_gas"] for op, entry in schedule.items()}, unit))
     print("This is a proposal, not a patch. Changing any cost in")
     print("program.h's kInstructionGasSchedule is a coordinated gas-schedule")
     print("update: it moves rv32::kGasScheduleDigest, so the pinned digest in")
     print("artifact.h and every committed RV32 artifact must be regenerated in")
     print("the same change.")
-    return 0
+    return 1 if sequence_failures else 0
 
 
 def price_workload(workload, gas_for_op):
@@ -720,18 +731,9 @@ def cost_model(data, worst_case=False):
         cost = cost_ns(cell) if resolved(cell) else baseline
         op = cell["op"]
         if worst_case:
-            # Floored at the baseline, exactly as build_schedule floors it and
-            # for the same reason: an opcode measuring under one dispatch has
-            # not found a cheaper dispatch, it is the estimator straining. The
-            # floor has to be applied in both places or this vector is not the
-            # one the schedule prices at, and the bound check is checking a
-            # schedule nobody proposed. On hog10 sixteen opcodes measure at
-            # 0.83x a dispatch, which put four workloads' bounds below what the
-            # schedule would actually charge them.
-            #
-            # Only the worst-case vector. The workload-matched vector below is
-            # testing whether the decomposition predicts real time, and
-            # flooring that one would bias the very quantity under test.
+            # Apply the same baseline floor as build_schedule. Saturated costs
+            # below the median normalizer are expected. Leave workload-matched
+            # costs unfloored so the prediction can be compared with real time.
             floored = max(cost, baseline)
             if op not in best or floored > best[op]:
                 best[op] = floored
@@ -843,7 +845,8 @@ REQUIRED_WORKLOADS = frozenset({
 
 
 def workload_failures(data):
-    failures = []
+    failures = [f"{r['name']}: {r['error']}"
+                for r in jump_sequence_rows(data) if r["error"]]
     workloads = data.get("workloads") or []
     names = [w.get("name") for w in workloads]
     missing = REQUIRED_WORKLOADS - set(names)
@@ -894,28 +897,15 @@ def workload_failures(data):
 
 
 def print_prediction(data):
-    """Does the sum of separately measured opcode costs equal a real program?
+    """Compare summed opcode costs with measured mixed workloads.
 
-    This is the check that the per-opcode decomposition means anything. Each
-    cost was measured in isolation, by substituting one opcode into an otherwise
-    fixed body; nothing so far has verified that those costs *add up* over a
-    program that mixes them. Here they are summed over each validation
-    workload's opcode histogram and compared against that workload's measured
-    time.
-
-    Two effects are expected, and separating them is the point:
-
-    - A workload the lowering fuses retires the same instructions in fewer
-      dispatches, so it should come in *under* the prediction. The `fused`
-      column is how many body slots that applies to.
-    - A workload whose operands chain (multiply_mix and divide_mix feed each
-      result straight into the next add) should come in *over* a prediction
-      built from independent-context costs, because that is the cheap end of
-      those opcodes' range.
-
-    So the honest additivity test is the unfused, independent workload:
-    alu_mix. If the model is sound anywhere, it is sound there.
+    cost_ns selects saturated measurements, absolute estimates, or substitution
+    estimates according to the available data. Sum those costs over each
+    workload's opcode histogram. Fusion can reduce dispatch cost; dependent
+    operands can cost more than independent-context estimates. alu_mix supplies
+    an unfused workload with independent operands.
     """
+    print_jump_sequences(data)
     failures = workload_failures(data)
     if failures:
         for failure in failures:
@@ -1237,13 +1227,10 @@ def print_syscalls(data):
 
 
 def relative_cost(cell, baseline):
-    """Cost as a multiple of the baseline instruction.
+    """Normalize common speed variation within a hardware class.
 
-    Ratios rather than nanoseconds is what makes a reference file portable. An
-    absolute cost is a fact about one machine and expires the moment the
-    nightly job lands on a different runner; "a dependent load costs 5.9 times
-    what a plain ALU op costs on the same machine" is a fact about the engine,
-    and holds across hosts well enough to gate on.
+    Opcode ratios can differ across microarchitectures; a reference remains
+    specific to the hardware class on which it was measured.
     """
     return cost_ns(cell) / baseline if baseline > 0 else 0.0
 
@@ -1306,6 +1293,8 @@ def emit_reference(data):
             continue
         print(f"guard {cell['op']} {context_label(cell)} {ratio:.3f} "
               f"{cell['scheduled_gas']}")
+    for row in jump_sequence_rows(data):
+        print(f"guard_sequence {row['name']}")
     syscalls = syscall_rows(data)
     if syscalls:
         print()
@@ -1333,7 +1322,7 @@ def emit_reference(data):
 
 
 def load_reference(path):
-    reference = {"guards": {}, "syscall_guards": {}, "fingerprint": None,
+    reference = {"guards": {}, "sequences": set(), "syscall_guards": {}, "fingerprint": None,
                  "source_digest": None, "spread": None,
                  "tolerance": GUARD_TOLERANCE}
     with open(path) as handle:
@@ -1355,6 +1344,8 @@ def load_reference(path):
                     "ratio": float(fields[3]),
                     "gas": int(fields[4]),
                 }
+            elif fields[0] == "guard_sequence" and len(fields) == 2:
+                reference["sequences"].add(fields[1])
             elif fields[0] == "guard_syscall" and len(fields) == 3:
                 reference["syscall_guards"][fields[1]] = float(fields[2])
     return reference
@@ -1386,6 +1377,10 @@ def check_against_reference(data, reference_path):
     # when relative opcode guards and workload spread have not changed.
     workload_errors = workload_failures(data)
     failures.extend(workload_errors)
+    measured_sequences = {r["name"] for r in jump_sequence_rows(data)}
+    for name in sorted(reference["sequences"] - measured_sequences):
+        failures.append(f"{name}: sequence not measured in this run")
+    print_jump_sequences(data)
 
     fingerprint = prov.get("engine_fingerprint")
     if reference["fingerprint"] and fingerprint != reference["fingerprint"]:

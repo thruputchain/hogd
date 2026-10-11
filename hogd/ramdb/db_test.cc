@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <future>
 #include <limits>
@@ -21,13 +22,16 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/random_bytes.h"
+#include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
@@ -95,6 +99,42 @@ make_value(uint64_t seed, size_t len)
   for (size_t i = 0; i < len; ++i)
     v[i] = static_cast<char>(((seed * 1103515245U) + (i * 12345U)) & 0xFFU);
   return v;
+}
+
+// Rewrites the LSN in a snapshot's trailing commit record to new_lsn and
+// recomputes the same unkeyed CRC32C recovery verifies, so only the LSN is out
+// of range.
+void
+tamper_snapshot_commit_lsn(Directory &dir, std::string_view path,
+                           uint64_t new_lsn)
+{
+  ErrnoStatus<struct stat> st = dir.stat(path);
+  ASSERT_TRUE(st);
+  ErrnoStatus<File> f = dir.openat(path, O_RDWR);
+  ASSERT_TRUE(f);
+  std::vector<std::byte> bytes(static_cast<size_t>(st->st_size));
+  ASSERT_TRUE(read_full(*f, bytes));
+
+  // The commit record is the trailing ItemHeader plus its CRC32C.
+  const size_t commit_offset =
+      bytes.size() - sizeof(ItemHeader) - sizeof(uint32_t);
+  ItemHeader commit;
+  std::memcpy(&commit, bytes.data() + commit_offset, sizeof(commit));
+  ASSERT_EQ(commit.storage, ItemStorage::kCommit);
+  commit.lsn = new_lsn;
+  commit.clear_next();
+  std::memcpy(bytes.data() + commit_offset, &commit, sizeof(commit));
+
+  uint32_t crc =
+      crc32c_append(0, std::span<const std::byte>(bytes).first(commit_offset));
+  crc = crc32c_append(crc, byte_view(commit));
+  crc = cpu_to_le(crc);
+  std::memcpy(bytes.data() + commit_offset + sizeof(commit), &crc, sizeof(crc));
+
+  ASSERT_TRUE(
+      static_cast<bool>(f->lseek(0, SEEK_SET))); // NOLINT(misc-include-cleaner)
+  ASSERT_TRUE(write_full(*f, bytes));
+  ASSERT_TRUE(f->sync());
 }
 
 } // namespace
@@ -278,7 +318,16 @@ void
 DatabaseTest::wait_for_deletion(std::string_view path)
 {
   ElapsedTimer timer{};
-  constexpr double kTimeout = 2.0;
+  // Cleanup runs on the database's background worker, which polls once a
+  // second, so a healthy run returns from here within about a second and
+  // never approaches this ceiling. The ceiling is far above that on purpose:
+  // it is a wall-clock budget, and CI runners stall. A 10-second machine-wide
+  // freeze on a Namespace runner (C++ CI run 8068) blew through a 2-second
+  // deadline here while three unrelated tests stalled in the same window, so
+  // the budget is twice that stall. Only a genuine cleanup failure pays the
+  // full wait, and DiskCleanup's two calls at 20s stay well inside the
+  // tightest ctest --timeout the schedules use (100s).
+  constexpr double kTimeout = 20.0;
 
   while (timer.elapsed() < kTimeout) {
     ErrnoStatus<File> f = dir_.openat(path, O_RDONLY);
@@ -487,6 +536,95 @@ TEST_F(DatabaseTest, CheckLeavesUncommittedTailInPlace)
   ASSERT_TRUE(static_cast<bool>(open_db()));
   check_integrity();
   EXPECT_EQ(file_size(), committed_size);
+}
+
+// Recovery must reject a WAL whose final commit marker's LSN was tampered below
+// cur_lsn to skip (and silently drop) its buffered durable batch (#4320).
+TEST_F(DatabaseTest, RecoveryRejectsSkippedWalCommitMarker)
+{
+  const std::string key = "rollback-key";
+  const std::string snapshot_value = "snapshot-value";
+  const std::string wal_value = "later-wal-value";
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(snapshot_value))));
+
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  const uint64_t snapshot_lsn = snapshot->first;
+  ASSERT_EQ(snapshot_lsn, 1);
+  ASSERT_TRUE(snapshot->second.get());
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(wal_value))));
+  DBStatus<uint64_t> synced_lsn = db_->sync();
+  ASSERT_TRUE(synced_lsn);
+  ASSERT_EQ(*synced_lsn, snapshot_lsn + 1);
+  db_.reset();
+
+  // Rewrite only the final WAL commit marker's LSN to one the snapshot already
+  // covers, leaving its stored CRC untouched; the skip path never validated it.
+  {
+    ErrnoStatus<File> wal = dir_.openat("0.log", O_RDWR);
+    ASSERT_TRUE(wal);
+    ErrnoStatus<off_t> end =
+        wal->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
+    ASSERT_TRUE(end);
+    const off_t commit_offset = // NOLINT(misc-include-cleaner)
+        *end - static_cast<off_t>(sizeof(ItemHeader) + sizeof(uint32_t));
+    ASSERT_TRUE(wal->lseek(commit_offset, SEEK_SET));
+
+    ItemHeader commit;
+    ASSERT_TRUE(read_full(*wal, writable_byte_view(commit)));
+    ASSERT_EQ(commit.storage, ItemStorage::kCommit);
+    ASSERT_EQ(commit.lsn, snapshot_lsn);
+
+    commit.lsn = snapshot_lsn - 1;
+    ASSERT_TRUE(wal->lseek(commit_offset, SEEK_SET));
+    ASSERT_TRUE(write_full(*wal, byte_view(commit)));
+    ASSERT_TRUE(wal->sync());
+  }
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+}
+
+// Restoring to an LSN inside a snapshot's range is legitimate (the snapshot's
+// commit is skipped as >= target_lsn); the #4320 guard must not reject it.
+TEST_F(DatabaseTest, RestoreToLsnInsideSnapshotRange)
+{
+  const std::string key_a = "key-a";
+  const std::string key_b = "key-b";
+  const std::string value_a = "value-a";
+  const std::string value_b = "value-b";
+
+  // LSN 0: key_a. LSN 1: key_b. The snapshot below spans both (0-2.snap, commit
+  // at LSN 1), while 0.log keeps a separate commit per LSN.
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key_a)), 0,
+                       std::as_bytes(std::span(value_a))));
+  DBStatus<uint64_t> lsn0 = db_->sync();
+  ASSERT_TRUE(lsn0);
+  ASSERT_EQ(*lsn0, 1);
+
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key_b)), 0,
+                       std::as_bytes(std::span(value_b))));
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_EQ(snapshot->first, 2);
+  ASSERT_TRUE(snapshot->second.get());
+  check_file_exists("0-2.snap");
+  db_.reset();
+
+  // Restore through LSN 0 only. Recovery must succeed with key_a present at its
+  // LSN-0 value and key_b (LSN 1) absent.
+  ASSERT_TRUE(static_cast<bool>(open_db(1)));
+  DBStatus<DBItem> got_a = db_->get(std::as_bytes(std::span(key_a)));
+  ASSERT_TRUE(got_a);
+  EXPECT_EQ(to_string(got_a->value), value_a);
+  EXPECT_FALSE(static_cast<bool>(db_->get(std::as_bytes(std::span(key_b)))));
 }
 
 TEST_F(DatabaseTest, Compact)
@@ -1420,6 +1558,65 @@ TEST(Loglet, CloneZeroesNextSlot)
   EXPECT_TRUE(std::ranges::all_of(next_slot, [](std::byte b) {
     return b == std::byte{0};
   }));
+}
+
+// Recovery must reject a snapshot commit LSN outside the filename range
+// (#4229).
+TEST_F(DatabaseTest, RecoveryRejectsSnapshotCommitLsnWrap)
+{
+  const std::string key = "existing-key";
+  const std::string value = "existing-value";
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(value))));
+
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  auto &[end_lsn, snapshot_future] = *snapshot;
+  ASSERT_EQ(end_lsn, 1);
+  ASSERT_TRUE(snapshot_future.get());
+  db_.reset();
+
+  // Drop the WAL so only the snapshot drives recovery, then set its commit LSN
+  // to UINT64_MAX so the successor wraps to zero.
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+  ASSERT_NO_FATAL_FAILURE(
+      tamper_snapshot_commit_lsn(dir_, "0-1.snap",
+                                 std::numeric_limits<uint64_t>::max()));
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+}
+
+// A canonical "0-0.snap" wraps its cursor to zero, so recovery must reject it
+// (#4229).
+TEST_F(DatabaseTest, RecoveryRejectsZeroEndedSnapshot)
+{
+  const std::string key = "existing-key";
+  const std::string value = "existing-value";
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(value))));
+
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_TRUE(std::get<1>(*snapshot).get());
+  db_.reset();
+
+  // Rename the real snapshot to "0-0.snap" and give it the commit LSN the
+  // wrapped end_lsn (0 - 1) would carry.
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+  ASSERT_TRUE(static_cast<bool>(dir_.rename("0-1.snap", "0-0.snap")));
+  ASSERT_NO_FATAL_FAILURE(
+      tamper_snapshot_commit_lsn(dir_, "0-0.snap",
+                                 std::numeric_limits<uint64_t>::max()));
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
 }
 
 } // namespace hogd

@@ -12,7 +12,7 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.18.0"
+EXPECTED_VERSION="groundhog 0.26.0"
 ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
 ACTUAL_RELEASE_VERSION="${ACTUAL_VERSION%% (*}"
 if [ "${ACTUAL_RELEASE_VERSION}" != "${EXPECTED_VERSION}" ]; then
@@ -49,6 +49,18 @@ TARGET_DIR="$(CDPATH= cd -- "${TARGET_DIR}" && pwd)"
 
 # Keep cargo/groundhog intermediates in the build tree instead of the source tree.
 INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
+# CI sets HOGD_RV32_TARGET_DIR to a directory on its cache volume, so that a
+# fresh build tree doesn't recompile the contracts' dependencies and
+# build-std's core/alloc from scratch on every run. Each output directory gets
+# its own subdirectory: ninja builds the contracts and the RV32 smoke artifact
+# in parallel, and they would otherwise wait on each other's cargo lock.
+if [ -n "${HOGD_RV32_TARGET_DIR:-}" ]; then
+    INTERNAL_TARGET_DIR="${HOGD_RV32_TARGET_DIR}/$(basename "${TARGET_DIR}")"
+    # A fresh checkout gives every source file a new mtime, so cargo's default
+    # mtime-based freshness would still rebuild every contract. Compare file
+    # contents instead; this is nightly-only, as is the contract toolchain.
+    export CARGO_UNSTABLE_CHECKSUM_FRESHNESS=true
+fi
 
 # Build with groundhog-cli (built-in RV32 lowerer). groundhog must run inside
 # the groundhog project, so run from this script's directory regardless of the

@@ -221,39 +221,13 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
       exec_res == ExecResult::ExecResultTxRootFrameReverted) {
-    // Assemble the full transaction body forwarded to the event server: the
-    // SignedTransaction we executed plus the nondeterministic data this
-    // proposal produced (already captured into [out] above). Move signed_tx
-    // in — it is not used again — so the event coroutine, which owns the body
-    // by value, never has to deep-copy the attacker-influenced signed_tx; only
-    // proposal_data is copied, and it is bounded and also needed in [out].
-    // Building this before the pending-counter increment keeps any allocation
-    // failure here from leaving the counter unbalanced.
+    // Move signed_tx (unused after this) so the attacker-influenced tx is not
+    // deep-copied into the event coroutine's body.
     ProposedTransaction proposed_tx{
         .signed_tx = std::move(signed_tx),
         .nondeterministic_proposal_data = out.proposal_data(),
     };
-    // Use release ordering to ensure the event RPC spawn is visible to
-    // other threads before they see the incremented counter.
-    pending_event_calls_.fetch_add(1, std::memory_order_release);
-    // The release of the PerThreaadARC for this happens after the above
-    // fetch_add; hence, when finish_block() is called, the above change is
-    // visible.
-    //
-    // Furthermore, it is not possible that the acquire_reference() for this
-    // transaction could succeed if the PerThreadARC is in shutdown mode. (If
-    // someone sends a bunch of propose_transaction() calls and then immediately
-    // calls finish_block() without waiting for those, and uses different tcp
-    // connections so the calls aren't ordered, then some of those propose calls
-    // might still fail by failing to acquire a reference).
-    //
-    // Hence, once shutdown has started, the final cleanup owner can drain
-    // pending_event_calls_ before this ExecutorContext is destroyed.
-    syscall_handler->emit_events(exec_res, std::move(proposed_tx))(
-        [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res);
-          co_return;
-        });
+    spawn_event_emission(*syscall_handler, exec_res, std::move(proposed_tx));
   }
 
   co_return out;
@@ -308,18 +282,9 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
       exec_res == ExecResult::ExecResultTxRootFrameReverted) {
-    // Use release ordering to ensure the event RPC spawn is visible to
-    // other threads before they see the incremented counter.
-    pending_event_calls_.fetch_add(1, std::memory_order_release);
-    // In validation mode the full body was given to us; move it into the event
-    // coroutine (which owns it by value) rather than copying — [tx] is not
-    // used again, so the attacker-influenced proposal body is never deep-copied
-    // on this post-commit path.
-    syscall_handler->emit_events(exec_res, std::move(tx))(
-        [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res);
-          co_return void();
-        });
+    // [tx] is unused after this; move it so the attacker-influenced proposal
+    // body is never deep-copied into the event coroutine.
+    spawn_event_emission(*syscall_handler, exec_res, std::move(tx));
   }
   co_return exec_res;
 }
@@ -336,13 +301,61 @@ ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
       query, *context, {});
 }
 
+x23::Detached
+ExecutorContext::emit_and_release(SystemCallHandler &handler,
+                                  ExecResult exec_res,
+                                  ProposedTransaction proposed_tx)
+{
+  // co_await keeps the event coroutine owned here, so a later allocation can't
+  // destroy it mid-flight. The emit_events and event-proxy ramps allocate their
+  // frames inside this detached body, where an escaping bad_alloc would
+  // terminate the executor; contain it so the failure is recorded as a block
+  // event error instead. A caught bad_alloc only ever fires before the RPC
+  // starts or after it has completed, never while one is in flight.
+  // log_event_return releases the ledger on every path.
+  try {
+    log_event_return(
+        co_await handler.emit_events(exec_res, std::move(proposed_tx)));
+  } catch (std::bad_alloc const &) {
+    log_event_return(
+        SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}});
+  }
+}
+
+void
+ExecutorContext::spawn_event_emission(SystemCallHandler &handler,
+                                      ExecResult exec_res,
+                                      ProposedTransaction proposed_tx)
+{
+  // Release: the bump must be visible before other threads see it; finish_block
+  // drains the ledger at shutdown once acquire_reference() starts failing.
+  pending_event_calls_.fetch_add(1, std::memory_order_release);
+  // emit_and_release's own ramp frame allocates here, before its body runs; on
+  // bad_alloc record a block event error and release the ledger. Allocations
+  // inside the body are contained there, so no path strands the ledger.
+  try {
+    emit_and_release(handler, exec_res, std::move(proposed_tx));
+  } catch (std::bad_alloc const &) {
+    log_event_return(
+        SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}});
+  }
+}
+
 void
 ExecutorContext::log_event_return(SystemStatus<void> err)
 {
   if (!err.has_value()) {
     std::unique_lock lock(event_accumulate_mutex_);
     event_error_ = err.error().code();
-    error("event error: {}", std::to_underlying(event_error_.value()));
+    // This runs in an x23::Detached callback, where an escaping exception is
+    // fatal, and formatting the diagnostic can throw under memory pressure.
+    // Guard it and fall back to the no-allocation reporter, same as the
+    // SystemCallHandler ctor paths above; the decrement below still runs.
+    try {
+      error("event error: {}", std::to_underlying(event_error_.value()));
+    } catch (...) {
+      report_dropped_log("event error diagnostic");
+    }
   }
   // Use release ordering to ensure all event RPC operations (including
   // server-side add_event/write_event) are visible before the decrement.

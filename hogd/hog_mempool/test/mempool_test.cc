@@ -1,8 +1,10 @@
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <format>
 #include <future>
 #include <gtest/gtest.h>
 #include <initializer_list>
@@ -96,8 +98,8 @@ make_test_nonce(uint64_t value)
   return sha256(value);
 }
 
-std::tuple<uint64_t, uint64_t>
-make_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
@@ -815,9 +817,10 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
 
   constexpr size_t kNumBlocks = 5;
   for (size_t i = 0; i < kNumBlocks; i++) {
-    // We submit each duplicate tx at a different block height so that hog_db is
-    // forced to reject duplicate uniquifiers rather than the mempool scheduler
-    // identifying duplicate txs.
+    // Change the hash while reusing the uniquifier so that hog_db rejects the
+    // replay and the previous successful commit does not override the failure
+    // outcome of this new (duplicate) tx.
+    txs[0].tx.invocation.gas_limit--;
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
     EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
@@ -873,6 +876,13 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
     auto res_commit =
         commit_block(server, db_tip, res_nominate.proposed_block());
     ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+    const SchedulerTransactionOutcome outcome =
+        server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+            {sha256(txs[0].tx)})()[0];
+    EXPECT_EQ(outcome.status,
+              i == 0 ? SchedulerTransactionStatus::SchedulerTransactionSucceeded
+                     : SchedulerTransactionStatus::SchedulerTransactionRetry);
+    EXPECT_EQ(outcome.height, proposal.header.block_height);
   }
 
   SchedulerGetTipResult get_tip =
@@ -1448,6 +1458,85 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   // [ready_accounts_].
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, db_tip.value.proposal_header.block_height + 1);
+}
+
+// [CommitOfExcludedAccountTxSucceeds] through the validated-block commit path,
+// which removes committed txs before abandoning the pending nomination.
+TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  txs[0].tx.uniquifier.block_expiry_height = 10; // affordable, scheduled first
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  // Over budget: 20x the default tx gas is 2x the account's funded balance.
+  txs[1].tx.invocation.gas_limit = txs[0].tx.invocation.gas_limit * 20;
+  txs[2].tx.uniquifier.block_expiry_height = 12; // submitted after commit
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // txs[1] excludes the account from the nomination below.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[1]})())();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const Proposal proposal = res_nominate.proposed_block().proposal;
+
+  // The resubmit lands on the excluded account's runqueue.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  // Commit the validated block, not the nominated one.
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
+  ASSERT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  ASSERT_NE(res_validate.block().block_id,
+            res_nominate.proposed_block().block_id);
+  auto res_commit =
+      commit_block(server, res_validate.block().block_id, db_tip, proposal);
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, db_tip.value.proposal_header.block_height + 1);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+
+  // The account is schedulable again once the nomination is abandoned.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[2]})())();
+  EXPECT_EQ(scheduler->size(), 1UL);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
+  res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  TransactionHashBatch nominated_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(
+      res_nominate.proposed_block().proposal.transactions.hash,
+      nominated_hashes, kNoBatchSizeLimit)());
+  ASSERT_EQ(nominated_hashes.size(), 1UL);
+  EXPECT_EQ(nominated_hashes[0], sha256(txs[2].tx));
 }
 
 TEST(Mempool, BlockHeightsIncrement)
@@ -1518,6 +1607,94 @@ TEST(Mempool, NominateCommit)
   auto res_commit =
       commit_block(server, get_tip.db_tip(), res_nominate.proposed_block());
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+TEST(Mempool, CommitRecordsLatencyHistograms)
+{
+  // The fixture clears the metrics registry, then commits the genesis
+  // ceremony through the ordinary commit path. Counts are absolute from there.
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+  MempoolMetrics &metrics = MempoolMetrics::instance();
+
+  // Every series exists before traffic, so rate() and alerts see 0, not
+  // absence. These names are what dashboards and alert rules query.
+  {
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    for (const char *name :
+         {"submit_unvetted_duration_seconds", "submit_vetted_duration_seconds",
+          "nomination_duration_seconds", "validation_duration_seconds",
+          "commit_interval_seconds", "block_period_seconds"}) {
+      EXPECT_NE(dump.find(std::format("mempool_{}_count 0\n", name)),
+                std::string::npos)
+          << name;
+    }
+    // The ceremony is a commit, but not a round.
+    EXPECT_NE(dump.find("mempool_commit_duration_seconds_count 1\n"),
+              std::string::npos);
+    // Its scheduler removal pass has already run, so only check presence.
+    EXPECT_NE(dump.find("mempool_scheduler_remove_duration_seconds_count "),
+              std::string::npos);
+  }
+
+  auto nominate_and_commit = [&] {
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), nomination.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+  };
+
+  // The first ordinary commit has no previous round to measure against.
+  const std::chrono::steady_clock::time_point rounds_started_at =
+      std::chrono::steady_clock::now();
+  nominate_and_commit();
+  EXPECT_EQ(metrics.nomination_duration_seconds.count(), 1UL);
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 2UL);
+  EXPECT_EQ(metrics.commit_interval_seconds.count(), 0UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 0UL);
+
+  nominate_and_commit();
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 3UL);
+  EXPECT_EQ(metrics.commit_interval_seconds.count(), 1UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
+  {
+    // Both round histograms hold exactly the round just driven, so each sum
+    // is that one sample. Bound it by the wall clock measured around the two
+    // commits rather than by a fixed bucket: a round takes milliseconds here
+    // but seconds under a sanitizer on a loaded host, and neither can outlast
+    // the test. A milliseconds-for-seconds unit bug records ~1000x the
+    // elapsed time and fails this.
+    const double elapsed_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      rounds_started_at)
+            .count();
+    EXPECT_GT(metrics.block_period_seconds.sum(), 0.0);
+    EXPECT_LE(metrics.block_period_seconds.sum(), elapsed_seconds);
+    EXPECT_GT(metrics.commit_interval_seconds.sum(), 0.0);
+    EXPECT_LE(metrics.commit_interval_seconds.sum(), elapsed_seconds);
+
+    // Which bucket the round lands in is a property of the host, but the
+    // sample must still be scraped out as a bucket series.
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    EXPECT_NE(dump.find("mempool_block_period_seconds_bucket{le=\"+Inf\"} 1\n"),
+              std::string::npos);
+    EXPECT_NE(dump.find(
+                  "mempool_commit_interval_seconds_bucket{le=\"+Inf\"} 1\n"),
+              std::string::npos);
+  }
+
+  // A failed commit returns at once and must not skew the duration quantiles.
+  ConsensusValue value{};
+  value.proposal_header.block_height = 100;
+  EXPECT_EQ(rpc.schedulercoord_commit_block(/*block_id=*/99,
+                                            std::move(value))(),
+            SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 3UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
 }
 
 TEST(Mempool, NewlyDeployedContractHogCount)
@@ -2637,6 +2814,275 @@ TEST(Mempool, GetTip)
             x23::serialize(db_tip.value));
 }
 
+class MempoolSubmissionAuthTest : public testing::TestWithParam<bool> {
+protected:
+  static bool is_submit_vetted() { return GetParam(); }
+
+  static SchedGatewaySubmitOutcomeBatch
+  submit(MempoolTestInfra &server, const SignedTransactionBatch &txs)
+  {
+    ParallelSignedTransactionBatch batch = t_to_parallel_batch(txs)();
+    if (is_submit_vetted()) {
+      server.mempool_coord_rpc().schedulercoord_submit_vetted(ValidatorID{},
+                                                              std::move(
+                                                                  batch))();
+      return {};
+    }
+    return server.mempool_coord_rpc().submit_unvetted_with_outcomes(
+        std::move(batch))();
+  }
+
+  static x23::Async<void> commit_empty_block(MempoolTestInfra &server)
+  {
+    MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+    SchedulerGetTipResult tip = co_await coord.schedcoord_get_tip();
+    EXPECT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+    SchedulerProposalResult proposed =
+        co_await coord.schedulercoord_propose_block(tip.db_tip().id, {});
+    EXPECT_EQ(proposed.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+
+    SchedulerCommitOutcome committed =
+        co_await coord.schedulercoord_commit_block(
+            proposed.proposed_block().block_id,
+            consensus_value(tip.db_tip(), proposed.proposed_block().proposal));
+    EXPECT_EQ(committed, SchedulerCommitOutcome::SchedulerCommitOK);
+
+    co_await coord.wait_for_block_commit(
+        tip.db_tip().value.proposal_header.block_height + 1);
+  }
+};
+
+// A block is committed before the tx starts being verified, so the block height
+// advances while the previous block height is what the tx is authenticated
+// against. The authentication returns a stale height error, so we check that
+// the tx is verified again against the new block height.
+TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+
+  fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(client, 1);
+  std::vector<BlockHeight> heights;
+
+  coord.set_submission_auth_test_hook([&](BlockHeight height,
+                                          const SignedTransactionBatch &batch,
+                                          bool after_auth) -> x23::Async<void> {
+    EXPECT_EQ(batch.size(), 1UL);
+    EXPECT_EQ(batch[0], txs[0]);
+
+    if (after_auth) {
+      co_return;
+    }
+
+    heights.push_back(height);
+    EXPECT_EQ(coord.scheduler()->size(), 0);
+    if (heights.size() == 1) {
+      co_await commit_empty_block(server);
+    }
+  });
+
+  SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
+  coord.set_submission_auth_test_hook({});
+
+  EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 2}));
+  EXPECT_TRUE(coord.scheduler()->is_pending(txs[0], sha256(txs[0].tx)));
+  if (!is_submit_vetted()) {
+    ASSERT_EQ(outcomes.size(), 1UL);
+    EXPECT_EQ(outcomes[0],
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  }
+}
+
+// When a block is committed immediately after a tx is authenticated but before
+// that tx is added to the scheduler runqueue, the tx must be added to the
+// scheduler runqueue without authenticating it again *as long as the tx
+// wallet's auth data does not change in the newly committed block*.
+TEST_P(MempoolSubmissionAuthTest, CommitKeepsVerifiedUnchangedAccounts)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+
+  fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(client, 1);
+  size_t calls = 0;
+
+  coord.set_submission_auth_test_hook([&](BlockHeight height,
+                                          const SignedTransactionBatch &batch,
+                                          bool after_auth) -> x23::Async<void> {
+    EXPECT_EQ(batch.size(), 1UL);
+    EXPECT_EQ(batch[0], txs[0]);
+
+    if (!after_auth) {
+      co_return;
+    }
+
+    ++calls;
+    EXPECT_EQ(calls, 1UL);
+    EXPECT_EQ(height, 1);
+    EXPECT_EQ(coord.scheduler()->size(), 0);
+
+    // We enforce above that [calls == 1], so we do not need to worry about
+    // calling [commit_empty_block()] multiple times.
+    co_await commit_empty_block(server);
+  });
+
+  SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
+  coord.set_submission_auth_test_hook({});
+
+  EXPECT_EQ(calls, 1UL);
+  EXPECT_EQ(coord.scheduler()->current_block(), 2);
+  EXPECT_TRUE(coord.scheduler()->is_pending(txs[0], sha256(txs[0].tx)));
+  if (!is_submit_vetted()) {
+    ASSERT_EQ(outcomes.size(), 1UL);
+    EXPECT_EQ(outcomes[0],
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  }
+}
+
+// Auth updates across multiple heights must retry only affected accounts,
+// coalesce repeated changes, and retain changes received during a retry.
+// Both submission paths must apply the latest results, including a rejection
+// becoming valid, while preserving the original transaction/result ordering.
+TEST_P(MempoolSubmissionAuthTest,
+       RetriesOnlyAccountsChangedAcrossMultipleHeights)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+
+  const std::array<ContractAddress, 4> &addresses =
+      MempoolTestInfra::kAccountAddresses;
+  fib_client_t client_a(addresses[0]);
+  fib_client_t client_b(addresses[1]);
+  fib_client_t client_c(addresses[2]);
+  SignedTransactionBatch a = generate_unsigned_txs(client_a, 2);
+  SignedTransactionBatch b = generate_unsigned_txs(client_b, 1);
+  SignedTransactionBatch c = generate_unsigned_txs(client_c, 1);
+
+  AddressAuthData auth_a = get_default_account();
+  AddressAuthData auth_b = get_default_account();
+  auto sign = [&](SignedTransactionBatch &batch, AddressAuthData &auth,
+                  Weight required_weight) {
+    SecretKey key(CryptographicScheme::Ed25519);
+    key.ed25519() = create_key_pair(auth, /*idx=*/0, /*weight=*/1);
+    auth.required_weight = required_weight;
+    auth.last_written_height = 1;
+
+    server.set_address_auth_data(batch[0].tx.invocation.invoked_address, auth);
+    for (SignedTransaction &tx : batch) {
+      tx.tx.auth_claim = make_sign_claim(0);
+      tx.signatures.push_back(make_signature(key, tx.tx, /*public_key_id=*/0,
+                                             MempoolTestInfra::kNetworkHash));
+    }
+  };
+  sign(a, auth_a, /*required_weight=*/1);
+  sign(b, auth_b, /*required_weight=*/2);
+
+  // Interleave accounts to check that retried results retain their indices.
+  SignedTransactionBatch txs{a[0], b[0], c[0], a[1]};
+  auto change = [&](BlockHeight height, size_t account_idx,
+                    AddressAuthData &auth,
+                    Weight required_weight) -> x23::Async<void> {
+    auth.required_weight = required_weight;
+    auth.last_written_height = height;
+    server.set_address_auth_data(addresses[account_idx], auth);
+    // Inject the commit's height and auth callback to isolate retry behavior.
+    coord.scheduler()->set_current_block(height);
+    co_await server.register_auth_data_updates(
+        height, KeyChangeBatch{{.address = addresses[account_idx],
+                                .auth_data = x23::Ptr<AddressAuthData>(auth)}});
+  };
+  std::vector<BlockHeight> heights;
+  std::vector<std::multiset<ContractAddress>> accounts;
+  coord.set_submission_auth_test_hook([&](BlockHeight height,
+                                          const SignedTransactionBatch &batch,
+                                          bool after_auth) -> x23::Async<void> {
+    if (!after_auth) {
+      co_return;
+    }
+
+    heights.push_back(height);
+    accounts.emplace_back();
+    for (const SignedTransaction &tx : batch) {
+      accounts.back().insert(tx.tx.invocation.invoked_address);
+    }
+    EXPECT_EQ(coord.scheduler()->size(), 0);
+
+    if (heights.size() == 1) {
+      EXPECT_EQ(heights, (std::vector<BlockHeight>{1}));
+
+      // Account A goes from valid to invalid.
+      co_await change(/*height=*/2, /*account_idx=*/0, auth_a,
+                      /*required_weight=*/2);
+      co_await change(/*height=*/3, /*account_idx=*/0, auth_a,
+                      /*required_weight=*/3);
+      // Account B goes from invalid to valid.
+      co_await change(/*height=*/4, /*account_idx=*/1, auth_b,
+                      /*required_weight=*/1);
+      // Account C stays unchanged.
+    }
+    else if (heights.size() == 2) {
+      EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 4}));
+
+      // Change the auth data for account A again while we are already retrying
+      // the authentication for its txs. Account A now goes from invalid to
+      // still invalid, though we still need to re-authenticate A's txs against
+      // the new auth data.
+      co_await change(/*height=*/5, /*account_idx=*/0, auth_a,
+                      /*required_weight=*/4);
+    }
+  });
+
+  SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
+  coord.set_submission_auth_test_hook({});
+
+  EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 4, 5}));
+  ASSERT_EQ(accounts.size(), 3UL);
+  // Txs for all three accounts are authenticated.
+  EXPECT_EQ(accounts[0],
+            (std::multiset<ContractAddress>{addresses[0], addresses[0],
+                                            addresses[1], addresses[2]}));
+  // Txs just for accounts A and B are re-authenticated.
+  EXPECT_EQ(accounts[1],
+            (std::multiset<ContractAddress>{addresses[0], addresses[0],
+                                            addresses[1]}));
+  // Txs just for account A are re-authenticated.
+  EXPECT_EQ(accounts[2],
+            (std::multiset<ContractAddress>{addresses[0], addresses[0]}));
+  EXPECT_EQ(coord.scheduler()->size(), 2);
+  for (size_t i = 0; i < txs.size(); i++) {
+    // Only B's tx (txs[1]) and C's tx (txs[2]) are admitted. A's txs are
+    // rejected (txs[0] and txs[3]).
+    //
+    // C's tx is authenticated successfully--despite no [sign()] call above for
+    // C--because C's auth data is default-initialized to have a required weight
+    // of 0. Therefore, any tx submitted for C is authenticated successfully,
+    // even if the tx is unsigned (as in this case).
+    const bool admitted = i == 1 || i == 2;
+
+    EXPECT_EQ(coord.scheduler()->is_pending(txs[i], sha256(txs[i].tx)),
+              admitted);
+    if (!is_submit_vetted()) {
+      ASSERT_EQ(outcomes.size(), txs.size());
+      EXPECT_EQ(outcomes[i],
+                admitted ? SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted
+                         : SchedGatewaySubmitOutcome::
+                               SchedGatewaySubmitAuthenticationRejected);
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(SubmissionPaths, MempoolSubmissionAuthTest,
+                         testing::Bool(),
+                         [](const testing::TestParamInfo<bool> &info) {
+                           return info.param ? "Vetted" : "Unvetted";
+                         });
+
 TEST(Mempool, AuthChangedEvictsInvalidTxs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -2972,6 +3418,29 @@ unregistered_signer()
 }
 
 } // namespace
+
+TEST(Mempool, AuthenticationFailureIsNotRecorded)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  register_single_signer(server, txs[0].tx);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      server.mempool_coord_rpc().submit_unvetted_with_outcomes(
+          t_to_parallel_batch(txs)())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(
+      outcomes[0],
+      SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected);
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .scheduler()
+                ->lookup_transaction_outcome(tx_hash)()
+                .status,
+            SchedulerTransactionStatus::SchedulerTransactionNotFound);
+}
 
 // The property the whole design rests on: [TransactionHash] covers
 // [Transaction] and nothing else, so no manipulation of the signatures can
@@ -3677,6 +4146,17 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
                                uint32_t{1}),
                            allocation);
 
+  auto [raw_public_key, raw_secret_key] = ed25519_keygen();
+  PublicKey public_key(CryptographicScheme::Ed25519);
+  public_key.ed25519() = raw_public_key;
+  const auto native_account = pubkey_auth_address(
+      PubkeyAccountPreimage{.pubkey = public_key, .nonce = 0});
+  if (!native_account.has_value()) {
+    ADD_FAILURE() << "native account address derivation failed";
+    return;
+  }
+  builder.add_account_allocation(*native_account, allocation);
+
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis =
       builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract,
@@ -3743,6 +4223,33 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   EXPECT_EQ(pending_unauthorized.get().outcome(),
             GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
 
+  // Direct credits and deployed fixtures share one atomic ceremony: a failed
+  // initializer must leave neither the account balance nor minted supply.
+  GenesisConfigurationBuilder failing_builder;
+  failing_builder.add_account_allocation(*native_account, allocation);
+  ContractEntrypointID missing_initializer{};
+  missing_initializer.fill(0xff);
+  failing_builder.add_distribution(fibonacci_contract, deployment_nonce,
+                                   missing_initializer, {}, allocation);
+  SignedTransactionBatch failing_txs;
+  failing_txs.append_range(
+      failing_builder.make_genesis_ceremony_transactions(cost_model));
+  const auto failed_ceremony =
+      coordinator_client.schedulercoord_commit_genesis_ceremony(
+          GenesisCeremonyRequest{
+              .expected_parent_height = 0,
+              .expected_parent_value_hash = sha256(parent.db_tip().value),
+              .context = ProposalContext{.protocol = 0},
+              .transactions = t_to_parallel_batch(failing_txs)(),
+          })();
+  EXPECT_EQ(failed_ceremony.outcome(),
+            GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+  EXPECT_FALSE(server.read_address_balance(*native_account).has_value());
+  EXPECT_FALSE(server
+                   .read_nnint128(ItemKey(kNativeTokenContractAddress,
+                                          kNativeTokenTotalSupplyKey))
+                   .has_value());
+
   ParallelSignedTransactionBatch parallel = t_to_parallel_batch(ceremony_txs)();
   GenesisCeremonyRequest request{
       .expected_parent_height = 0,
@@ -3776,6 +4283,19 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   ASSERT_TRUE(
       server.read_address_balance(kGenesisRootContractAddress).has_value());
   EXPECT_EQ(*server.read_address_balance(kGenesisRootContractAddress), 0);
+
+  auto native_balance = server.read_address_balance(*native_account);
+  ASSERT_TRUE(native_balance.has_value());
+  EXPECT_EQ(*native_balance, allocation - cost_model.get_balance_cost());
+  EXPECT_FALSE(server.read_address_metadata(*native_account).has_value());
+  EXPECT_FALSE(server.read_address_auth_data(*native_account).has_value());
+  const auto minted_supply = server.read_nnint128(
+      ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
+  ASSERT_TRUE(minted_supply.has_value());
+  const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
+                                    cost_model.get_replay_cache_cost(1) +
+                                    cost_model.get_nnint_cost();
+  EXPECT_EQ(*minted_supply, (3 * allocation) + ceremony_funding);
 
   GenesisCeremonyResult retry =
       coordinator_client.schedulercoord_commit_genesis_ceremony(

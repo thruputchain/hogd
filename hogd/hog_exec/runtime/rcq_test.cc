@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -50,24 +51,25 @@ protected:
   {
     // Setup native contract
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0, // Insert
-                [](NativeSyscallContext &ctx)
-                    -> x23::Async<InvokeStatus<void>> {
-                  auto const &calldata = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
+    fns.emplace(
+        0, // Insert
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
 
-                  for (uint8_t val : calldata) {
-                    auto res = co_await ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&val, 1)));
-                    if (!res.has_value()) {
-                      co_return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      co_return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                  }
-                  co_return InvokeStatus<void>{};
-                });
+          for (uint8_t val : calldata) {
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                key, std::as_bytes(std::span(&val, 1)));
+            if (!res.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
+            }
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
     fns.emplace(
         1, // Consume
         [this](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -77,20 +79,25 @@ protected:
 
           last_consumed_values_.clear();
           for (uint8_t i = 0; i < consume_count; i++) {
+            uint8_t entry = 0;
+            RuntimeMemoryLength entry_len = 0;
             auto res =
-                co_await ctx.handler().retrocausal_queue_consume(key, false);
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    key, false, std::as_writable_bytes(std::span(&entry, 1)),
+                    entry_len);
             if (!res.has_value()) {
-              co_return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
             }
-            if (!res.value().has_value()) { // No entry found, break out
+            // No entry found, break out
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               co_return InvokeStatus<void>{};
             }
-            auto const &entry = res.value().value();
 
-            if (entry.size() != 1) {
+            if (entry_len != 1) {
               co_return InvokeError{InvokeErrorCode::Deterministic};
             }
-            last_consumed_values_.push_back(entry[0]);
+            last_consumed_values_.push_back(entry);
           }
 
           if (ctx.handler().get_calldata().size() > 1) {
@@ -118,12 +125,13 @@ protected:
 
           // Insert all values (bytes after the first)
           for (size_t i = 1; i < calldata.size(); i++) {
-            auto res = co_await ctx.handler().retrocausal_queue_insert(
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
                 key, std::as_bytes(std::span(&calldata[i], 1)));
             if (!res.has_value()) {
-              co_return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
             }
-            if (!res.value().has_value()) {
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               co_return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
@@ -131,19 +139,23 @@ protected:
           // Then consume
           last_consumed_values_.clear();
           for (uint8_t i = 0; i < consume_count; i++) {
+            uint8_t entry = 0;
+            RuntimeMemoryLength entry_len = 0;
             auto res =
-                co_await ctx.handler().retrocausal_queue_consume(key, false);
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    key, false, std::as_writable_bytes(std::span(&entry, 1)),
+                    entry_len);
             if (!res.has_value()) {
-              co_return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
             }
-            if (!res.value().has_value()) {
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               co_return InvokeStatus<void>{};
             }
-            auto const &entry = res.value().value();
-            if (entry.size() != 1) {
+            if (entry_len != 1) {
               co_return InvokeError{InvokeErrorCode::Deterministic};
             }
-            last_consumed_values_.push_back(entry[0]);
+            last_consumed_values_.push_back(entry);
           }
           co_return InvokeStatus<void>{};
         });
@@ -153,40 +165,44 @@ protected:
           auto const &value = ctx.handler().get_calldata().at(0);
           auto key = make_storage_key("nnint0");
 
-          auto r = co_await ctx.handler().set_nnint(key, {value}, 0, {});
+          const int128_t set_value = value;
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              key, &set_value, int128_t{0});
           if (!r.has_value()) {
-            co_return r.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                r.error());
           }
 
           co_return InvokeStatus<void>{};
         });
-    fns.emplace(4, // Insert entire calldata as a single RCQ entry
-                [](NativeSyscallContext &ctx)
-                    -> x23::Async<InvokeStatus<void>> {
-                  auto const &calldata = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
-                  auto res = co_await ctx.handler().retrocausal_queue_insert(
-                      key, std::as_bytes(std::span(calldata)));
-                  if (!res.has_value()) {
-                    co_return res.error().to_invoke_error();
-                  }
-                  if (!res.value().has_value()) {
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  co_return InvokeStatus<void>{};
-                });
+    fns.emplace(
+        4, // Insert entire calldata as a single RCQ entry
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+              key, std::as_bytes(std::span(calldata)));
+          if (!res.has_value()) {
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
+          }
+          if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
     fns.emplace(5, // Set bytestring on rcq0 key (for type-change testing)
                 [](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto const &calldata = ctx.handler().get_calldata();
                   auto key = make_storage_key("rcq0");
-                  auto res = co_await ctx.handler().set_bytestring(
-                      key, std::as_bytes(std::span(calldata)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      key, std::as_bytes(std::span(calldata)));
                   if (!res.has_value()) {
-                    co_return res.error().to_invoke_error();
+                    co_return NativeContractBuilder::host_fn_error_conversion(
+                        res.error());
                   }
-                  if (!res.value().has_value()) {
+                  if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
                   co_return InvokeStatus<void>{};
@@ -195,8 +211,7 @@ protected:
                 [](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-                      make_storage_key("rcq0"),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      make_storage_key("rcq0"));
                   if (!r.has_value() ||
                       r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -207,8 +222,7 @@ protected:
         7, // Delete rcq0 key, then consume (expect no entry)
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              make_storage_key("rcq0"),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -227,8 +241,7 @@ protected:
         8, // Delete rcq0 key, consume (expect no entry), set bytestring
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
-              make_storage_key("rcq0"),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"));
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -243,8 +256,7 @@ protected:
           }
           auto const &calldata = ctx.handler().get_calldata();
           auto r3 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -292,8 +304,7 @@ protected:
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
           if (!set_status.has_value() ||
               set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -336,8 +347,7 @@ protected:
         [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::None));
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
           if (!set_status.has_value() ||
               set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -355,23 +365,24 @@ protected:
           }
           co_return InvokeStatus<void>{};
         });
-    fns.emplace(11, // Insert calldata bytes as entries into the nnint0 key
-                [](NativeSyscallContext &ctx)
-                    -> x23::Async<InvokeStatus<void>> {
-                  auto const &calldata = ctx.handler().get_calldata();
-                  auto key = make_storage_key("nnint0");
-                  for (uint8_t val : calldata) {
-                    auto res = co_await ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&val, 1)));
-                    if (!res.has_value()) {
-                      co_return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      co_return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                  }
-                  co_return InvokeStatus<void>{};
-                });
+    fns.emplace(
+        11, // Insert calldata bytes as entries into the nnint0 key
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("nnint0");
+          for (uint8_t val : calldata) {
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                key, std::as_bytes(std::span(&val, 1)));
+            if (!res.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
+            }
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));

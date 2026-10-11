@@ -60,7 +60,7 @@ protected:
     write_deployment(kNativeTokenContractAddress, token_contract);
   }
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
@@ -105,7 +105,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
 
         auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferAmount)));
+            make_amount(static_cast<int128_t>(kTransferAmount)));
 
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
@@ -197,7 +197,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
         auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
+            make_amount(static_cast<int128_t>(kFirstTransferAmount)));
 
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().value().is_ok()) {
@@ -213,7 +213,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
 
         auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
+            make_amount(static_cast<int128_t>(kSecondTransferAmount)));
 
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().value().is_ok()) {
@@ -340,7 +340,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
         // should fail because insufficient to cover balance cost
         auto calldata1 = erc20_meta::make_calldata<u8"transfer">(
             kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
+            make_amount(static_cast<int128_t>(kFirstTransferAmount)));
         CopyableInvokeOutputs r1_outputs{};
         auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
@@ -393,7 +393,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
         // frame - should succeed
         auto calldata2 = erc20_meta::make_calldata<u8"transfer">(
             kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
+            make_amount(static_cast<int128_t>(kSecondTransferAmount)));
         auto r3 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
@@ -699,8 +699,7 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
-            kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferAmount)));
+            kReceiverAddr, make_amount(kTransferAmount));
         CopyableInvokeOutputs transfer_outputs{};
         auto r_transfer =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -819,8 +818,7 @@ TEST_F(BalanceCostTrackingTest,
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto first = co_await client.invoke_opt<u8"transfer">(
-            ctx, kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kFirstTransfer)));
+            ctx, kReceiverAddr, make_amount(kFirstTransfer));
         if (!first.has_value() || !first.value().has_value() ||
             !first.value().value().has_value() ||
             !first.value().value().value().is_ok()) {
@@ -829,8 +827,7 @@ TEST_F(BalanceCostTrackingTest,
         }
 
         auto second = co_await client.invoke_opt<u8"transfer">(
-            ctx, kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kSecondTransfer)));
+            ctx, kReceiverAddr, make_amount(kSecondTransfer));
         if (!second.has_value() || !second.value().has_value() ||
             !second.value().value().has_value() ||
             second.value().value().value().is_ok()) {
@@ -848,7 +845,8 @@ TEST_F(BalanceCostTrackingTest,
         }
         auto amount = balance.value().value().value().ok();
         uint128_t observed =
-            (uint128_t{std::get<0>(amount)} << 64) | std::get<1>(amount);
+            (static_cast<uint128_t>(std::get<0>(amount)) << 64) |
+            std::get<1>(amount);
         auto const expected = static_cast<uint128_t>(kInTxRemainder);
         if (observed != expected) {
           ADD_FAILURE() << "failed second transfer changed the in-tx balance";
@@ -937,7 +935,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
 
         auto calldata_back =
             erc20_meta::make_calldata<u8"transfer">(kSenderAddr,
-                                                    make_amount(uint128_t{50}));
+                                                    make_amount(int128_t{50}));
         CopyableInvokeOutputs back_outputs{};
         auto r_back =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -972,8 +970,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
 
         // (a) Transfer to fresh receiver; the amount covers its balance-cost.
         auto calldata_fwd = erc20_meta::make_calldata<u8"transfer">(
-            kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferToReceiver)));
+            kReceiverAddr, make_amount(kTransferToReceiver));
         CopyableInvokeOutputs fwd_outputs{};
         auto r_fwd =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -1087,8 +1084,7 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
-            kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferAmount)));
+            kReceiverAddr, make_amount(kTransferAmount));
         auto r_transfer =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
@@ -1197,8 +1193,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
-            ctx, kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferAmount)));
+            ctx, kReceiverAddr, make_amount(kTransferAmount));
 
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
@@ -1220,7 +1215,8 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
 
         auto ok = r_balance.value().value().value().ok();
         observed_receiver_balance =
-            (uint128_t{std::get<0>(ok)} << 64) | uint128_t{std::get<1>(ok)};
+            (static_cast<uint128_t>(std::get<0>(ok)) << 64) |
+            uint128_t{std::get<1>(ok)};
         co_return InvokeStatus<void>{};
       });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
@@ -1301,8 +1297,7 @@ TEST_F(BalanceCostTrackingTest,
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
-            ctx, kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferAmount)));
+            ctx, kReceiverAddr, make_amount(kTransferAmount));
 
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
@@ -1324,7 +1319,8 @@ TEST_F(BalanceCostTrackingTest,
 
         auto ok = r_balance.value().value().value().ok();
         observed_receiver_balance =
-            (uint128_t{std::get<0>(ok)} << 64) | uint128_t{std::get<1>(ok)};
+            (static_cast<uint128_t>(std::get<0>(ok)) << 64) |
+            uint128_t{std::get<1>(ok)};
         co_return InvokeStatus<void>{};
       });
   auto sender_contract = std::make_unique<NativeContract>(std::move(fns));
@@ -1405,7 +1401,7 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
 
         auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferAmount)));
+            make_amount(static_cast<int128_t>(kTransferAmount)));
 
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
@@ -1500,7 +1496,7 @@ TEST_F(BalanceCostTrackingTest,
         auto client =
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-        auto const expected_total_supply = make_amount(uint128_t{0});
+        auto const expected_total_supply = make_amount(int128_t{0});
 
         // No supply record exists in this direct-storage test setup.
         auto ts_before = co_await client.invoke_opt<u8"total_supply">(ctx);
@@ -1514,8 +1510,7 @@ TEST_F(BalanceCostTrackingTest,
 
         // Transfer to the all-zero address. This is accepted, not rejected.
         auto r_transfer = co_await client.invoke_opt<u8"transfer">(
-            ctx, kZeroAddr,
-            make_amount(static_cast<uint128_t>(kTransferAmount)));
+            ctx, kZeroAddr, make_amount(kTransferAmount));
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
             !r_transfer.value().value().value().is_ok()) {
@@ -1628,8 +1623,7 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         auto calldata = erc20_meta::make_calldata<u8"transfer">(
-            kReceiverAddr,
-            make_amount(static_cast<uint128_t>(kTransferAmount)));
+            kReceiverAddr, make_amount(static_cast<int128_t>(kTransferAmount)));
 
         std::array<GasAmount, kTransferCount> gas_per_transfer{};
         for (uint32_t i = 0; i < kTransferCount; ++i) {
@@ -1700,6 +1694,287 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
+}
+
+// Regression for #4210: an underfunded read must fault before loading; a later
+// funded read of the same address still pays the cold price (it would run warm
+// if the starved read had loaded it for free).
+TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
+{
+  constexpr static ContractAddress kCallerAddr = make_contract_address(214);
+  constexpr static ContractAddress kFreshAddr = make_contract_address(215);
+  constexpr static GasAmount kTwoGas = 2;
+  constexpr static GasAmount kCappedCharge = kSyscallBaseCost + kTwoGas;
+  // The two reads of kFreshAddr, in order: starved then funded.
+  constexpr static std::array<GasAmount, 2> kGasLimits{kTwoGas, UINT64_MAX};
+
+  std::array<GasAmount, kGasLimits.size()> charges{};
+  std::array<InvocationFrameStatusCode, kGasLimits.size()> statuses{};
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kFreshAddr);
+        for (size_t i = 0; i < kGasLimits.size(); ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+              .gas_limit = kGasLimits[i],
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto const before = ctx.total_gas_consumed();
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          charges[i] = ctx.total_gas_consumed() - before;
+
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "get_balance_of invoke " << i
+                          << " was rejected before its child frame ran";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          statuses[i] = outputs.frame_status;
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kCallerNativeId = 19;
+  contract_map.emplace(kCallerNativeId,
+                       std::make_unique<NativeContract>(std::move(fns)));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddr, caller_xdr);
+
+  auto tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, *runtime_context);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  // The starved read faulted, paying only the capped child allowance.
+  EXPECT_EQ(statuses[0], InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(charges[0], kCappedCharge);
+  EXPECT_LT(charges[0], kDBRPCCost);
+
+  // The funded read of the same address still pays the cold-load price, proving
+  // the starved read did not load the key for free.
+  EXPECT_EQ(statuses[1], InvocationFrameStatusCode::Return);
+  EXPECT_GE(charges[1], kDBRPCCost);
+}
+
+// Regression for #4374: a transfer that exhausts gas at the first balance
+// debit must refuse the write rather than stage deltas and fault later.
+TEST_F(BalanceCostTrackingTest,
+       NativeTokenTransferRefusesBalanceWriteAfterGasExhaustion)
+{
+  constexpr static ContractAddress kSenderAddr = make_contract_address(216);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(217);
+  constexpr static int128_t kSpendableBalance = 1'000'000;
+  constexpr static int128_t kTransferAmount = 1;
+  // transfer_impl(1) + GetMsgSender(kSyscallBaseCost) + the warm balance read
+  // (kStorageAccessCost, no cold load_gas) leave exactly zero gas for the first
+  // balance mutation, so its flat charge cannot be afforded.
+  constexpr static GasAmount kChildGas =
+      1 + kSyscallBaseCost + kStorageAccessCost;
+
+  setup_grant_storage_token(kSenderAddr,
+                            kSpendableBalance + replay_cache_cost_charged(1));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        // Warm the sender's balance view so the attack transfer's read owes
+        // only kStorageAccessCost, landing the child budget right at the debit.
+        auto warm_calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kSenderAddr);
+        CopyableInvokeInputs warm_inputs{
+            .entrypoint_id =
+                sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+            .gas_limit = UINT64_MAX,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
+        CopyableInvokeOutputs warm_outputs{};
+        auto warm = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kNativeTokenContractAddress,
+            std::as_bytes(
+                std::span(warm_calldata.data(), warm_calldata.size())),
+            std::span<const std::byte>{}, warm_inputs, warm_outputs);
+        if (!warm.has_value() ||
+            warm.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            warm_outputs.frame_status != InvocationFrameStatusCode::Return) {
+          ADD_FAILURE() << "warming balance read failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto calldata = erc20_meta::make_calldata<u8"transfer">(
+            kReceiverAddr,
+            make_amount(static_cast<uint128_t>(kTransferAmount)));
+        CopyableInvokeInputs inputs{
+            .entrypoint_id =
+                sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
+            .gas_limit = kChildGas,
+            .flags = std::to_underlying(InvokeFlag::TryInvoke),
+        };
+        CopyableInvokeOutputs outputs{};
+        auto result = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kNativeTokenContractAddress,
+            std::as_bytes(std::span(calldata.data(), calldata.size())),
+            std::span<const std::byte>{}, inputs, outputs);
+        if (!result.has_value() ||
+            result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "attack transfer invoke was rejected";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 20;
+  contract_map.emplace(kSenderNativeId,
+                       std::make_unique<NativeContract>(std::move(fns)));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_xdr);
+  write_deployment(kSenderAddr, sender_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+  handler.enable_tracing();
+
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  auto const *root_trace = handler.get_trace();
+  ASSERT_NE(root_trace, nullptr);
+  // system_calls[0] warms the view; system_calls[1] is the attack transfer.
+  ASSERT_EQ(root_trace->system_calls.size(), 2U);
+  auto const &attack_invoke = root_trace->system_calls[1].body.invoke();
+  ASSERT_NE(attack_invoke.outputs, nullptr);
+  ASSERT_NE(attack_invoke.outputs->child_trace, nullptr);
+  auto const &child_trace = *attack_invoke.outputs->child_trace;
+
+  // Must fault at the unaffordable debit and stage no balance write.
+  ASSERT_EQ(child_trace.status.status_code(), InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(child_trace.storage_writes.size(), 0U);
+}
+
+// Regression for #4270: warm native-token balance reads skipped the flat
+// kStorageAccessCost once the view was loaded and load_gas dropped to zero.
+TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
+{
+  constexpr static ContractAddress kCallerAddr = make_contract_address(183);
+
+  setup_grant_storage_token(kCallerAddr,
+                            1'000'000 + replay_cache_cost_charged(1));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kCallerAddr);
+
+        // The first read loads the view; reads 2 and 3 are warm (no load_gas)
+        // but still owe the flat access cost.
+        std::array<GasAmount, 3> read_costs{};
+        for (size_t i = 0; i < read_costs.size(); ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto before = ctx.total_gas_consumed();
+          auto status = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          read_costs[i] = ctx.total_gas_consumed() - before;
+
+          if (!status.has_value() ||
+              status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "balance read " << i
+                          << " did not return successfully";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        // A warm read pays exactly the Invoke crossing, the method's one gas
+        // unit, and a single flat access charge (no load_gas once warm).
+        static constexpr GasAmount kWarmReadCost =
+            kSyscallBaseCost + 1 + kStorageAccessCost;
+        EXPECT_EQ(read_costs[1], kWarmReadCost)
+            << "warm balance read is not priced at crossing + method + access";
+        EXPECT_EQ(read_costs[2], kWarmReadCost);
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kCallerNativeId = 18;
+  contract_map.emplace(kCallerNativeId, std::move(caller_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddr, caller_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

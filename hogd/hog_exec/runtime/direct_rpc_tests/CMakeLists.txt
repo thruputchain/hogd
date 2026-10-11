@@ -16,6 +16,7 @@ target_link_libraries(
   direct_rpc_test_objects
   GTest::gtest
   hogd_interface
+  components_library_exception
 )
 
 target_include_directories(

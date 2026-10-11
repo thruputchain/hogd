@@ -18,6 +18,7 @@
 #include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -34,6 +35,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
@@ -95,6 +97,43 @@ TEST(RecoveryTests, RPCContextRejectsNonNotFoundDbTipError)
   ASSERT_FALSE(tip.has_value());
   ASSERT_EQ(tip.error().code(), HogDbCode::kTypeMismatch);
   EXPECT_THROW((void)RPCContext(std::move(dao), nullptr), std::system_error);
+}
+
+// #4176: a corrupt <DBTIP> can carry a noncanonical network config. Recovery
+// must fail loudly with a clear error rather than trip NetworkConfigParams'
+// opaque canonical-form CHECK.
+TEST(RecoveryTests, RPCContextRejectsRecoveredNonCanonicalNetworkConfig)
+{
+  // The child starts a thread (RPCContext's BackgroundCommitWorker) after the
+  // fork-only style forks an already multi-threaded parent, which TSAN kills
+  // before the panic is printed (#4184). "threadsafe" re-execs instead.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+
+  constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kHeapSize, 0);
+    ASSERT_TRUE(db.has_value());
+    HogDbDAO dao(RAMDB(std::move(*db)));
+
+    DbTip tip{};
+    tip.storage_long_hash = dao.compute_full_db_hash();
+    tip.network_config.v(0);
+    tip.network_config.v0().params.push_back(NetworkConfigParams::make_param(
+        ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
+    ASSERT_FALSE(NetworkConfigParams::is_canonical(tip.network_config.v0()));
+    ASSERT_TRUE(dao.write_dbtip(tip).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kHeapSize, 0);
+  ASSERT_TRUE(db.has_value());
+  X23_EXPECT_DEATH((void)RPCContext(HogDbDAO(RAMDB(std::move(*db))), nullptr),
+                   "network config is not canonical");
 }
 
 TEST(RecoveryTests, SnapshotStalenessTracksScalarCommittedTip)

@@ -12,7 +12,7 @@
 namespace hogd {
 
 // Wire names, spelled out so a rename has to be made here too.
-constexpr std::array<std::pair<ConfigParamID, std::string_view>, 10> kNames{{
+constexpr std::array<std::pair<ConfigParamID, std::string_view>, 13> kNames{{
     {ConfigParamID::kConfigParamMaxSHA256Buffers, "max_sha256_buffers"},
     {ConfigParamID::kConfigParamMaxCrossInvokeDepth, "max_cross_invoke_depth"},
     {ConfigParamID::kConfigParamMaxNewContractsPerTx,
@@ -26,6 +26,9 @@ constexpr std::array<std::pair<ConfigParamID, std::string_view>, 10> kNames{{
     {ConfigParamID::kConfigParamMaxAuthTokenDepth, "max_auth_token_depth"},
     {ConfigParamID::kConfigParamMaxRv32CodeBytes, "max_rv32_code_bytes"},
     {ConfigParamID::kConfigParamMaxRv32MemoryBytes, "max_rv32_memory_bytes"},
+    {ConfigParamID::kConfigParamMaxAuthTokens, "max_auth_tokens"},
+    {ConfigParamID::kConfigParamMaxCalldataLen, "max_calldata_len"},
+    {ConfigParamID::kConfigParamMaxReturnBufferLen, "max_return_buffer_len"},
 }};
 
 TEST(ConfigParamNameTest, EveryParameterCarriesItsWireName)
@@ -72,6 +75,15 @@ TEST(ConfigParamValueTest, ReadsTheArmTheParameterNames)
     EXPECT_EQ(param.param(), id) << name;
     EXPECT_EQ(config_param_value(param), value) << name;
   }
+}
+
+TEST(NetworkConfigParamsTest, StatedDefaultsStatesEveryParameterAtItsDefault)
+{
+  const NetworkConfig config = NetworkConfigParams::stated_defaults();
+
+  EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
+  EXPECT_EQ(config.v0().params.size(), kNames.size());
+  EXPECT_EQ(NetworkConfigParams(config.v0()), NetworkConfigParams{});
 }
 
 } // namespace hogd

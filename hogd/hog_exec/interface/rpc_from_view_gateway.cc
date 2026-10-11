@@ -1,10 +1,12 @@
 #include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -13,10 +15,10 @@
 #include <thread>
 #include <utility>
 
-#include "auth_claim.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -34,6 +36,7 @@
 #include "view_gateway.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -45,15 +48,6 @@ ViewGatewayResult
 make_view_gateway_result(ViewGatewayOutcome outcome)
 {
   return ViewGatewayResult(outcome);
-}
-
-AuthClaim
-make_public_view_auth_claim()
-{
-  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
-  claim.source_address_claim().allowed_keys = 0;
-  claim.source_address_claim().required_weight = 0;
-  return claim;
 }
 
 DatabaseIdentifier
@@ -107,6 +101,134 @@ ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
   co_await default_threadpool().bg();
   query = normalize_public_view_query(std::move(query));
   co_return co_await run_view_with_retries(query);
+}
+
+x23::Async<ViewGatewayBatchResult>
+ViewGatewayRpc::viewgateway_view_batch(ViewGatewayBatchQuery query)
+{
+  const auto received = std::chrono::steady_clock::now();
+  co_await default_threadpool().bg();
+  if (query.calls.empty() || query.budget_millis == 0 ||
+      query.max_response_bytes == 0 ||
+      (query.min_height && *query.min_height < 0)) {
+    co_return ViewGatewayBatchResult(
+        ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+  }
+  for (auto &call : query.calls) {
+    if (call.invocation.gas_limit == 0) {
+      co_return ViewGatewayBatchResult(
+          ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+    }
+    call = normalize_public_view_query(std::move(call));
+  }
+  co_return co_await run_batch_with_retries(
+      query, received + std::chrono::milliseconds(query.budget_millis));
+}
+
+x23::Async<ViewGatewayBatchResult>
+ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
+                                  ViewState &state, ViewDeadline deadline)
+{
+  using Outcome = ViewGatewayBatchOutcome;
+  ViewGatewayBatchResult batch(Outcome::ViewGatewayBatchOk);
+  batch.payload().height = state.tip.value.proposal_header.block_height;
+  const auto response_limit =
+      std::min<std::size_t>(query.max_response_bytes, kBulkRpcMaxMessageSize);
+  auto response_bytes = x23::xdr_size(batch);
+  if (response_bytes > response_limit) {
+    co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchResponseTooLarge);
+  }
+  for (auto const &call : query.calls) {
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      co_return ViewGatewayBatchResult(
+          Outcome::ViewGatewayBatchDeadlineExceeded);
+    }
+    auto result = co_await run_view_attempt(call, state.tip, state);
+    switch (result.outcome()) {
+    case ViewGatewayOutcome::ViewGatewayAbandoned:
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchAbandoned);
+    case ViewGatewayOutcome::ViewGatewayInternalError:
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    case ViewGatewayOutcome::ViewGatewayInvalidInput:
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInvalidRequest);
+    case ViewGatewayOutcome::ViewGatewayOk:
+      break;
+    }
+    auto &payload = result.payload();
+    TransactionViewResult call_result{.output = std::move(payload.output),
+                                      .gas_consumed = payload.gas_consumed,
+                                      .events = std::move(payload.events)};
+    const auto call_bytes = x23::xdr_size(call_result);
+    if (call_bytes > response_limit - response_bytes) {
+      co_return ViewGatewayBatchResult(
+          Outcome::ViewGatewayBatchResponseTooLarge);
+    }
+    response_bytes += call_bytes;
+    batch.payload().results.push_back(std::move(call_result));
+  }
+  if (std::chrono::steady_clock::now() >= deadline) {
+    co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchDeadlineExceeded);
+  }
+  co_return batch;
+}
+
+x23::Async<ViewGatewayBatchResult>
+ViewGatewayRpc::run_batch_with_retries(ViewGatewayBatchQuery const &query,
+                                       ViewDeadline deadline)
+{
+  using Outcome = ViewGatewayBatchOutcome;
+  for (std::uint32_t attempt = 0; attempt < kMaxViewAttempts; ++attempt) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      co_return ViewGatewayBatchResult(
+          Outcome::ViewGatewayBatchDeadlineExceeded);
+    }
+    if (shutdown_flag_.load(std::memory_order_relaxed)) {
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    }
+    auto *state = co_await get_current_view_state();
+    if (!state) {
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInternalError);
+    }
+    const auto id = state->get().block_id;
+    const auto height = state->get().tip.value.proposal_header.block_height;
+    ViewGatewayBatchResult result(Outcome::ViewGatewayBatchInternalError);
+    try {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        result.outcome(Outcome::ViewGatewayBatchDeadlineExceeded);
+      }
+      else if (query.min_height && height < *query.min_height) {
+        result.outcome(Outcome::ViewGatewayBatchHeightUnavailable);
+        result.height_unavailable() = {.requested = *query.min_height,
+                                       .observed = height};
+      }
+      else {
+        result = co_await run_batch_attempt(query, state->get(), deadline);
+      }
+      if (result.outcome() == Outcome::ViewGatewayBatchAbandoned &&
+          attempt + 1 < kMaxViewAttempts &&
+          std::chrono::steady_clock::now() < deadline) {
+        if (!co_await rotate_view_state(id)) {
+          result.outcome(Outcome::ViewGatewayBatchInternalError);
+        }
+      }
+    } catch (std::exception const &error) {
+      result.outcome(Outcome::ViewGatewayBatchInternalError);
+      warn("viewgateway: batch failed: {}", error.what());
+    }
+    if (state->release_reference()) {
+      co_await gc_view_state(id);
+    }
+    if (result.outcome() != Outcome::ViewGatewayBatchAbandoned) {
+      co_return result;
+    }
+  }
+  co_return ViewGatewayBatchResult(
+      std::chrono::steady_clock::now() >= deadline
+          ? Outcome::ViewGatewayBatchDeadlineExceeded
+          : Outcome::ViewGatewayBatchAbandoned);
 }
 
 void
@@ -440,27 +562,23 @@ ViewGatewayResult
 view_gateway_result_from_raw_view_result(BlockHeight height,
                                          ExpectedViewResult raw)
 {
-  // TODO(view-gateway): add a caller-error ViewGatewayOutcome. InvalidInput
-  // and bad user-supplied ndet are request problems, but v1 can only express
-  // Ok, Abandoned, or InternalError.
   switch (raw.status()) {
   case TransactionViewStatus::Ok:
   {
     ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayOk);
     result.payload().height = height;
     result.payload().output = std::move(raw.result().output);
+    result.payload().gas_consumed = raw.result().gas_consumed;
     result.payload().events = std::move(raw.result().events);
     return result;
   }
   case TransactionViewStatus::InvalidInput:
   {
-    warn("viewgateway: collapsing invalid view input to Fault: {}",
-         std::to_underlying(raw.error_code()));
-    ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayOk);
-    result.payload().height = height;
-    result.payload().output =
-        InvocationFrameOutput(InvocationFrameStatusCode::Fault);
-    result.payload().events = {};
+    // The request was rejected before any frame ran, so there is no frame
+    // output to report. Hand the caller the executor's error code instead of
+    // dressing the rejection up as a contract Fault.
+    ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayInvalidInput);
+    result.error_code() = raw.error_code();
     return result;
   }
   case TransactionViewStatus::Abandoned:
@@ -474,17 +592,11 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
   return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
-// Normalize a caller-supplied view query for unauthenticated public use.
-// We strip auth_claim (no real signer) and invoke_flags (no TryInvoke /
-// DelegateCall), but intentionally preserve parent_address and
-// forwarded_tokens.  View queries are read-only (no state commits), so
-// letting the caller choose a parent_address — which the invoked contract
-// sees via GetMsgSender — is safe and gives off-chain tooling the ability
-// to simulate calls from any context.
+// Views assume auth without signature checks and never commit writes.
+// Preserve caller context and forwarded tokens, but clear invoke flags.
 TransactionViewQuery
 normalize_public_view_query(TransactionViewQuery query)
 {
-  query.auth_claim = make_public_view_auth_claim();
   query.invoke_flags = std::to_underlying(InvokeFlag::None);
   return query;
 }

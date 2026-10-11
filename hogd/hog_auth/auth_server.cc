@@ -12,6 +12,7 @@
 #include "auth_rpc.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -40,29 +41,31 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
       co_await current_height_futex_.wait(current_height);
       continue;
     }
-    if (current_height > height) {
-      co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
-    }
     if (current_height < height) {
       co_await current_height_futex_.wait(current_height);
       continue;
     }
     break;
   }
-  CHECK_EQ(current_height, height);
+  CHECK_GE(current_height, height);
   CHECK_NE(current_height, kUninitializedHeight);
   CHECK_NE(current_height, kInitializing);
 
   auto auth_data = auth_data_cache_.get(address);
   if (auth_data != nullptr) {
-    // Auth data cache has processed all updates from some initial height up to
-    // and including current_height. That means that if the data is present
-    // there, and it's not from a block in the future, then it must be valid for
-    // current_height.
-    if (auth_data->first <= current_height) {
+    // Updates replace an account's cache entry before [current_height_futex_]
+    // advances. An entry no newer than the requested height is therefore still
+    // valid even when the auth server has since processed newer blocks.
+    if (auth_data->first <= height) {
       co_return auth_data;
     }
   }
+
+  if (current_height > height) {
+    // [height] is too old for us to look up this particular wallet's auth data.
+    co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
+  }
+  CHECK_EQ(current_height, height);
 
   auto db_auth_data = co_await dbauth_client_.lookup_auth_data(height, address);
   if (!db_auth_data.has_value()) {
@@ -79,8 +82,8 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 }
 
 x23::Async<void>
-AuthServer::register_auth_data_updates(BlockHeight height,
-                                       KeyChangeBatch key_changes)
+AuthServer::register_auth_data_updates(
+    BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes)
 {
   // TODO(geoff): this logic will break if there's a sharded db, and i.e.
   // multiple batches of updates from the same block height. Probably the
@@ -140,8 +143,13 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   co_await Health::instance().set_current_block_height(height);
 
   if (mempool_client_) {
-    co_await mempool_client_->mempoolauth_auth_data_changed(height,
-                                                            key_changes);
+    // The mempool's proc still takes the height as one batch.
+    KeyChangeBatch batch;
+    batch.reserve(key_changes.size());
+    for (const KeyChange &key_change : key_changes) {
+      batch.push_back(key_change);
+    }
+    co_await mempool_client_->mempoolauth_auth_data_changed(height, batch);
   }
 }
 

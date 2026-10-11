@@ -46,8 +46,9 @@ namespace hogd {
 //     metrics.counter(Metrics::ComponentName::kExecutor, "tx_count",
 //                     "Transactions processed.");
 // Metrics::Histogram latency =
-//     metrics.histogram(Metrics::ComponentName::kExecutor, "latency_ms",
-//                       "Execution latency in milliseconds.", 0, 100, 10);
+//     metrics.histogram(Metrics::ComponentName::kExecutor, "latency_seconds",
+//                       "Execution latency in seconds.", {0.001, 0.01, 0.1,
+//                       1});
 // Metrics::Summary latency_summary =
 //     metrics.summary(Metrics::ComponentName::kExecutor, "latency_summary_ms",
 //                     "Execution latency summary in milliseconds.", 0, 100, 10,
@@ -56,7 +57,7 @@ namespace hogd {
 //
 // queue_depth.record(17);
 // tx_count.increment();
-// latency.record(42);
+// latency.record(0.042);
 // latency_summary.record(42);
 //
 // std::string prometheus = metrics.dump_to_prometheus_string();
@@ -115,13 +116,14 @@ public:
                                     CounterStorage::kPerThread));
   }
 
+  // `upper_bounds` must be finite and strictly increasing; `+Inf` is implied.
   Histogram histogram(ComponentName component_name,
                       const std::string &metric_name,
-                      const std::string &description, size_t min, size_t max,
-                      size_t num_buckets)
+                      const std::string &description,
+                      std::vector<double> upper_bounds)
   {
     return Histogram(register_histogram(component_name, metric_name,
-                                        description, min, max, num_buckets));
+                                        description, std::move(upper_bounds)));
   }
 
   Summary summary(ComponentName component_name, const std::string &metric_name,
@@ -208,15 +210,15 @@ private:
 
   HistogramImpl *register_histogram(ComponentName component_name,
                                     const std::string &metric_name,
-                                    const std::string &description, size_t min,
-                                    size_t max, size_t num_buckets)
+                                    const std::string &description,
+                                    std::vector<double> upper_bounds)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
     CHECK(!done_with_init(component_name));
 
     Component &component = components_[static_cast<size_t>(component_name)];
     auto metric =
-        std::make_unique<HistogramImpl>(description, min, max, num_buckets);
+        std::make_unique<HistogramImpl>(description, std::move(upper_bounds));
     HistogramImpl *metric_ptr = metric.get();
     auto [_, inserted] =
         component.metrics.try_emplace(metric_name, std::move(metric));

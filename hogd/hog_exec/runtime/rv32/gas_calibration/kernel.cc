@@ -197,15 +197,8 @@ struct BranchOperands {
   int32_t offset = 0;
 };
 
-// A body-slot branch must not change how many instructions the iteration
-// retires, or the sweep's fixed-work invariant breaks.
-//
-// not-taken: the condition is false against (large, small) operands, so the
-// branch falls through.
-// taken: the condition is true and the target is the *next* instruction
-// (offset +4), so control lands exactly where a fall-through would. That
-// isolates the cost of the taken path (target resolution plus a fresh
-// enter_run at the target) with the retired-instruction count held fixed.
+// Taken branches target the next instruction (+4), preserving the retired
+// instruction sequence while exercising target resolution and run entry.
 BranchOperands
 branch_operands(Op op, bool taken)
 {
@@ -246,17 +239,9 @@ branch_operands(Op op, bool taken)
   }
 }
 
-// Address base for memory slot `index`, and the offset that reaches the byte
-// this slot touches.
-//
-// kL1Region: one base at 2048, offsets sweeping [-2048, 2047] -- exactly the
-// low 4 KiB, 64 cache lines, comfortably L1d-resident.
-// kFullRange: eight bases 8 KiB apart, each covering [base-2048, base+2047] --
-// 32 KiB in eight disjoint chunks spread across the whole 64 KiB guest space,
-// which is L1d-sized and so guarantees L1 pressure while staying inside L2.
-// Guest memory is capped at kDefaultMaxMemoryBytes (64 KiB), so those two
-// contexts bracket the entire cache behaviour a guest can reach; there is no
-// DRAM-resident case to price.
+// kL1Region sweeps the low 4 KiB. kFullRange visits eight disjoint 4 KiB
+// regions, spread over the default 64 KiB memory. Cache residency depends on
+// the host; these shapes do not cover all configured guest memory sizes.
 struct MemoryOperand {
   uint8_t base_reg = 0;
   int32_t offset = 0;
@@ -289,16 +274,9 @@ memory_operand(WorkingSet working_set, uint32_t index, uint32_t width)
   return {.base_reg = base_reg, .offset = offset};
 }
 
-// The address range a pointer chase can cover with `width`-byte loads, and the
-// node stride inside it.
-//
-// A chase node has to hold the address of the next node, so a narrow load can
-// only chase as far as its loaded value reaches -- and for the sign-extending
-// loads (LB, LH) only half of that, since a negative value is not an address.
-// LW reaches all of guest memory; LHU reaches all of it too; LH half; LBU and
-// LB only the first 256 and 128 bytes. The narrow ones therefore measure
-// load-use *latency* without cache pressure, which is still the thing a
-// single-opcode throughput sweep cannot see.
+// Each chase node stores its successor address. Load width and sign extension
+// limit the reachable range: negative loaded values are not valid addresses.
+// Narrow byte-load cycles expose dependency latency with little cache pressure.
 struct ChaseGeometry {
   uint32_t range = 0;  // addresses live in [0, range)
   uint32_t stride = 0; // bytes between nodes
@@ -409,20 +387,23 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
               : static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
     return test_program::u_type(encoding.opcode, rd, 0x0002F000U);
   }
+  if (spec.target == Op::kJal) {
+    // Like the JALR sweep, land on the next instruction so every body slot
+    // executes. JAL is PC-relative: +4 works at every slot without patching.
+    uint8_t rd = 0;
+    if (spec.context != OperandContext::kNoLink) {
+      rd = static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
+      if (chain) {
+        rd = kChainReg;
+      }
+    }
+    return test_program::j_type(rd, kInstructionBytes);
+  }
   if (spec.target == Op::kJalr) {
-    // A JALR that lands on the instruction after itself: a real indirect
-    // control transfer that leaves the retired instruction sequence unchanged,
-    // which is what lets it sit in a body slot at all. Same idea as the
-    // taken-branch form.
-    //
-    // The target is rs1 + imm with the low bit cleared. rs1 holds a fixed base
-    // (the body's midpoint, staged by the prologue), so the immediate carries
-    // the whole per-slot offset: imm = (this slot's pc + 4) - base. A 12-bit
-    // signed immediate reaches +/-2048 bytes, and anchoring at the midpoint
-    // puts every slot of a 512-instruction body inside that -- which is why
-    // the base is the midpoint and not the start.
-    //
-    // rd rotates over the data bank so the link writes do not serialize.
+    // Jump to PC+4 so this slot preserves the retired instruction sequence.
+    // The fixed base is the body midpoint to maximize 12-bit immediate reach;
+    // rotating link destinations avoid a dependency between link writes.
+    // This encoding is for kernel tests; timing uses dedicated jump graphs.
     const uint8_t rd =
         chain ? kChainReg
               : static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
@@ -447,36 +428,11 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
   const uint8_t rs1 = chain ? kChainReg : kSrcLargeReg;
 
   if (chain && is_divide_target(spec.target)) {
-    // Chain through the dividend: `op x13, x13, one`. Every slot waits on the
-    // previous result, which is the arrangement that forces divider latency
-    // rather than throughput, and so the one gas has to price.
-    //
-    // The operands degenerate, and that is worth stating plainly because it
-    // looks like a bug. DIV keeps its dividend (x / 1 == x), but REM and REMU
-    // go to zero on their first instruction and every later one computes
-    // 0 % 1. A reviewer flagged that as understating the worst remainder
-    // input, which is the natural reading. It is not what happens.
-    //
-    // Measured, both ways, on the same host: this shape puts chained REM at
-    // 9.8x the baseline instruction -- about 14 cycles, a plausible divider
-    // latency. Chaining the divisor instead (`op x13, x28, x13`, which does
-    // keep a full-width dividend) drops it to 2.4x, about 3 cycles, which is
-    // too fast to be a division at all: `large % large` has quotient 1 and
-    // `large % 0` returns the dividend by definition, so that arrangement
-    // early-outs and breaks the very dependency it was built to expose.
-    //
-    // So the degenerate operands cost nothing here: the divider pays its
-    // latency regardless, and this is the more conservative of the two
-    // measurable shapes. Worst-case pricing wants that. What no single
-    // remainder instruction can do is feed itself hard operands indefinitely --
-    // `a % x` contracts -- so a sustained hard-operand dependent remainder
-    // needs a second instruction to refresh the divisor, making it a pair
-    // rather than a substitution. The independent context (`large % 3`, a
-    // genuine full-width remainder every time) is measured alongside this one
-    // and the schedule prices whichever is worse.
-    //
-    // Nothing here can trap: RISC-V defines division by zero as -1, remainder
-    // by zero as the dividend, and signed overflow as INT_MIN.
+    // Chain the dividend through division by one. DIV preserves its operand;
+    // REM converges to zero after the first instruction. This measures that
+    // sustained dependency, not a sequence of full-width remainder operands.
+    // The independent large-dividend context is measured separately.
+    // RISC-V defines zero-divisor and signed-overflow results without traps.
     return test_program::op(kChainReg, kChainReg, kOneReg, encoding.funct3,
                             encoding.funct7);
   }
@@ -503,18 +459,9 @@ target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
                           encoding.funct7);
 }
 
-// The two words of one pair substitution.
-//
-// Both kinds chain through kChainReg -- pair k+1's store consumes pair k's
-// load -- so the register dependence is identical and the only difference is
-// whether the load's address is the one the store just wrote. That is what
-// makes the difference between them attributable to store-to-load forwarding
-// and to nothing else.
-//
-// Addresses: the base register holds kL1RegionBase (2048) and a 12-bit signed
-// offset reaches [0, 4095]. Forwarding uses one address for both halves;
-// distinct sends stores to the upper 2 KiB and loads to the lower, which never
-// overlap, so no load can read a line a store recently touched.
+// Store/load pairs share a register chain. Forwarding uses the same address;
+// the control stores in the upper 2 KiB and loads from the lower 2 KiB.
+// This holds the instruction mix and register dependency constant.
 std::array<uint32_t, 2>
 pair_words(const KernelSpec &spec, uint32_t index)
 {
@@ -565,14 +512,8 @@ max_target_slots(uint32_t body_slots, const KernelSpec &spec)
   // that interior, so the head can sit one slot lower than a single target's.
   const uint32_t placeable = (body_slots - 2) - (per_target - 1);
   if (spec.saturated) {
-    // Every interior slot a substitution can start at without landing on the
-    // previous one. Adjacency is the point, so unlike the sweep below there is
-    // no filler gap to keep -- but a pair still occupies two slots, and a head
-    // at every slot would make each pair's first instruction overwrite the
-    // previous pair's second. The body would come out as a run of stores with
-    // one trailing load, audit clean (sw;sw is not a fusion rule), and be
-    // reported as the cost of a pair. Dividing by per_target tiles them
-    // instead: sw lw sw lw, which is what "a program made of this pair" means.
+    // Tile by substitution width. Advancing one slot for a pair would
+    // overwrite the preceding tail and measure the wrong instruction mix.
     return placeable / per_target;
   }
   // One filler between substitutions, so the period is per_target + 1. Deriving
@@ -613,7 +554,9 @@ pair_name(PairKind pair)
 std::expected<uint32_t, KernelError>
 canonical_instruction_word(Op op, uint8_t reg)
 {
-  if (!is_measurable_target(op)) {
+  // Keep the fingerprint's canonical fusion corpus unchanged when adding a
+  // timing kernel. Direct jumps are measured separately from that corpus.
+  if (!is_measurable_target(op) || op == Op::kJal) {
     return std::unexpected(KernelError::kUnsupportedTarget);
   }
   const Encoding encoding = encoding_for(op);
@@ -751,10 +694,8 @@ bool
 is_measurable_target(Op op)
 {
   switch (op) {
-  // Excluded by construction: JAL's target is encoded in the instruction and
-  // would have to be rewritten per slot, ECALL/EBREAK/UNIMP end the run, and
-  // FENCE is not a body-shaped op. JALR is measurable -- see target_word.
-  case Op::kJal:
+  // ECALL/EBREAK/UNIMP end the run, and FENCE is not a body-shaped op.
+  // JAL and JALR land on the next slot -- see target_word.
   case Op::kFence:
   case Op::kEcall:
   case Op::kEbreak:
@@ -814,6 +755,12 @@ op_name(Op op)
 std::string
 context_name(OperandContext context)
 {
+  if (context == OperandContext::kTargetChase) {
+    return "target_chase";
+  }
+  if (context == OperandContext::kNoLink) {
+    return "no_link";
+  }
   return context == OperandContext::kChain ? "chain" : "independent";
 }
 
@@ -955,14 +902,9 @@ build_kernel(const KernelSpec &spec)
         test_program::addi(kJalrBaseReg, kJalrBaseReg, lo);
   }
   words.insert(words.end(), body.begin(), body.end());
-  // Loop control: decrement, then a forward branch that skips a JAL back to
-  // the body head.
-  //
-  // Not a backwards branch: a B-type immediate is 13 bits signed, reaching
-  // only 1024 instructions, and the encoder truncates rather than refuses --
-  // the kernel jumps into the middle of itself and still halts cleanly. JAL's
-  // 21 bits cover anything kDefaultMaxCodeBytes allows, and the branch skipping
-  // it only ever jumps two instructions.
+  // Use a short forward branch over JAL for loop control. A backwards
+  // B-type branch cannot reach across the largest supported kernel body;
+  // JAL's 21-bit immediate covers the default code limit.
   words.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
   // beq counter, x0, +8 -- when the counter hits zero, skip the JAL and fall
   // into the ecall.
@@ -1035,6 +977,216 @@ build_kernel(const KernelSpec &spec)
       ((uint64_t{spec.trip_count} - 1) * scheduled_gas_for(Op::kJal)) +
       scheduled_gas_for(Op::kEcall);
   return kernel;
+}
+
+std::string
+jump_context_name(const JumpSpec &spec)
+{
+  const char *layout = "shuffled";
+  if (spec.layout == JumpLayout::kSequential) {
+    layout = "sequential";
+  }
+  else if (spec.layout == JumpLayout::kReverse) {
+    layout = "reverse";
+  }
+  std::string mode = context_name(spec.context);
+  if (spec.context == OperandContext::kChain) {
+    mode = "link_chain";
+  }
+  else if (spec.target == Op::kJalr &&
+           spec.context != OperandContext::kTargetChase) {
+    mode = "fixed_base_" + mode;
+  }
+  return mode + "/" + layout + "/n" + std::to_string(spec.nodes) + "/stride" +
+         std::to_string(spec.stride_words) + "/seed" +
+         std::to_string(spec.seed);
+}
+
+std::expected<JumpKernel, KernelError>
+build_jump_kernel(const JumpSpec &spec)
+{
+  if (spec.target != Op::kJal && spec.target != Op::kJalr) {
+    return std::unexpected(KernelError::kUnsupportedTarget);
+  }
+  const bool chase = spec.context == OperandContext::kTargetChase;
+  if ((chase || spec.context == OperandContext::kChain) &&
+      spec.target != Op::kJalr) {
+    return std::unexpected(KernelError::kUnsupportedTarget);
+  }
+  if (spec.nodes < 2 || spec.stride_words == 0) {
+    return std::unexpected(KernelError::kBodyTooSmall);
+  }
+  if (spec.trip_count == 0) {
+    return std::unexpected(KernelError::kZeroTripCount);
+  }
+  // Leave space for the prologue, dispatcher and loop tail. Check before any
+  // multiplication/allocation; the encoder also checks each immediate below.
+  const uint64_t body_words = uint64_t{spec.nodes} * spec.stride_words;
+  if (body_words + 16 > kDefaultMaxCodeBytes / kInstructionBytes ||
+      (chase && (uint64_t{spec.nodes} + 1) * 8 > kDefaultMaxMemoryBytes)) {
+    return std::unexpected(KernelError::kCodeTooLarge);
+  }
+  auto permutation = [&](uint32_t seed) {
+    std::vector<uint32_t> order(spec.nodes);
+    for (uint32_t i = 0; i < spec.nodes; ++i) {
+      order[i] = i;
+    }
+    if (spec.layout == JumpLayout::kReverse) {
+      std::reverse(order.begin() + 1, order.end());
+    }
+    else if (spec.layout == JumpLayout::kShuffled) {
+      uint64_t state = seed;
+      for (uint32_t i = spec.nodes - 1; i > 1; --i) {
+        state = (state * 6364136223846793005ULL) + 1442695040888963407ULL;
+        const auto j = 1 + static_cast<uint32_t>((state >> 32) % i);
+        std::swap(order[i], order[j]);
+      }
+    }
+    return order;
+  };
+  const auto order = permutation(spec.seed);
+  std::vector<uint32_t> words;
+  emit_load_immediate(words, kLoopCounterReg,
+                      static_cast<int32_t>(spec.trip_count));
+  JumpKernel out;
+  Kernel &kernel = out.kernel;
+  out.loop_pc = static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  const auto setup = static_cast<uint32_t>(words.size());
+  // Fixed-size register initialization, executed once per traversal. This
+  // resets a link chain or linked-table cursor, not after every target jump.
+  words.resize(words.size() + 2);
+  const uint32_t hub_pc =
+      static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  if (chase) {
+    words.push_back(test_program::load(kChainReg, 2, kChainReg, 0));
+    words.push_back(test_program::load(kDataBankBase, 2, kChainReg, 4));
+    words.push_back(test_program::jalr(0, kDataBankBase, 0));
+  }
+  const uint32_t body_pc =
+      static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  kernel.body_start_pc = body_pc;
+  words.resize(words.size() + static_cast<size_t>(body_words), 0x00100073U);
+  const uint32_t tail_pc =
+      static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  uint32_t base = body_pc + (static_cast<uint32_t>(body_words) * 2);
+  if (chase) {
+    base = spec.nodes * 8;
+  }
+  const uint8_t base_reg = chase || spec.context == OperandContext::kChain
+                               ? kChainReg
+                               : kJalrBaseReg;
+  const int32_t lo = static_cast<int32_t>(base << 20) >> 20;
+  words[setup] =
+      test_program::u_type(0x37U, base_reg, base - static_cast<uint32_t>(lo));
+  words[setup + 1] = test_program::addi(base_reg, base_reg, lo);
+  out.iteration_pcs = {out.loop_pc, out.loop_pc + kInstructionBytes};
+  const auto pc_for = [&](uint32_t node) {
+    return body_pc + (node * spec.stride_words * kInstructionBytes);
+  };
+  uint32_t previous_link = base;
+  for (uint32_t i = 0; i < spec.nodes; ++i) {
+    const uint32_t pc = pc_for(order[i]);
+    const uint32_t next = i + 1 == spec.nodes ? tail_pc : pc_for(order[i + 1]);
+    uint32_t word = 0;
+    if (chase) {
+      word = test_program::j_type(0, static_cast<int32_t>(hub_pc) -
+                                         static_cast<int32_t>(pc));
+      out.iteration_pcs.insert(out.iteration_pcs.end(),
+                               {hub_pc, hub_pc + 4, hub_pc + 8});
+      kernel.target_slot_pcs.push_back(hub_pc + 8);
+    }
+    else if (spec.target == Op::kJal) {
+      const uint8_t rd =
+          spec.context == OperandContext::kNoLink
+              ? 0
+              : static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+      word = test_program::j_type(rd, static_cast<int32_t>(next) -
+                                          static_cast<int32_t>(pc));
+    }
+    else {
+      // In link_chain, rs1 is exactly the register the preceding JALR wrote.
+      // The immediate compensates for that preceding PC+4, not a fixed base.
+      const uint32_t input =
+          spec.context == OperandContext::kChain ? previous_link : base;
+      const int64_t offset = int64_t{next} - input;
+      if (offset < -2048 || offset > 2047) {
+        return std::unexpected(KernelError::kTargetImmediateOutOfRange);
+      }
+      uint8_t rd = 0;
+      if (spec.context == OperandContext::kChain) {
+        rd = kChainReg;
+      }
+      else if (spec.context != OperandContext::kNoLink) {
+        rd = static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+      }
+      word = test_program::jalr(rd, base_reg, static_cast<int32_t>(offset));
+      previous_link = pc + kInstructionBytes;
+    }
+    words[pc / kInstructionBytes] = word;
+    out.iteration_pcs.push_back(pc);
+    if (!chase) {
+      kernel.target_slot_pcs.push_back(pc);
+    }
+  }
+  if (chase) {
+    // Each visit to the SAME jalr PC loads a different target. Table links and
+    // landing pads have independent permutations. Include the terminal visit.
+    const auto table_order = permutation(spec.seed ^ 0xA511E9B3U);
+    kernel.initial_memory.resize((spec.nodes + 1) * 8);
+    const auto put = [&](uint32_t address, uint32_t value) {
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        kernel.initial_memory[address + byte] =
+            static_cast<uint8_t>(value >> (8 * byte));
+      }
+    };
+    put(spec.nodes * 8, table_order.front() * 8);
+    put((spec.nodes * 8) + 4, tail_pc);
+    for (uint32_t i = 0; i < spec.nodes; ++i) {
+      put(table_order[i] * 8,
+          i + 1 == spec.nodes ? spec.nodes * 8 : table_order[i + 1] * 8);
+      put((table_order[i] * 8) + 4, pc_for(order[i]));
+    }
+    out.iteration_pcs.insert(out.iteration_pcs.end(),
+                             {hub_pc, hub_pc + 4, hub_pc + 8});
+    kernel.target_slot_pcs.push_back(hub_pc + 8);
+  }
+  words.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
+  words.push_back(test_program::branch(0, kLoopCounterReg, 0, 8));
+  words.push_back(
+      test_program::j_type(0, static_cast<int32_t>(out.loop_pc) -
+                                  static_cast<int32_t>(tail_pc + 8)));
+  out.iteration_pcs.insert(out.iteration_pcs.end(),
+                           {tail_pc, tail_pc + 4, tail_pc + 8});
+  out.exit_pc = static_cast<uint32_t>(words.size()) * kInstructionBytes;
+  words.push_back(0x00000073U);
+  for (const uint32_t word : words) {
+    append_u32(kernel.code, word);
+  }
+  uint64_t prefix_gas = 0;
+  uint64_t iteration_gas = 0;
+  const auto gas_at = [&](uint32_t pc) {
+    return decode_instruction(words[pc / kInstructionBytes])
+        .instruction.gas_cost;
+  };
+  for (uint32_t pc = 0; pc < out.loop_pc; pc += kInstructionBytes) {
+    prefix_gas += gas_at(pc);
+  }
+  for (uint32_t pc : out.iteration_pcs) {
+    iteration_gas += gas_at(pc);
+  }
+  kernel.target_units = static_cast<uint32_t>(kernel.target_slot_pcs.size());
+  kernel.memory_bytes =
+      std::max<uint32_t>(64,
+                         static_cast<uint32_t>(kernel.initial_memory.size()));
+  kernel.instructions_per_iteration = out.iteration_pcs.size();
+  // Last traversal skips its back edge and executes the terminal ecall.
+  kernel.dynamic_instructions =
+      (out.loop_pc / kInstructionBytes) +
+      (uint64_t{spec.trip_count} * out.iteration_pcs.size());
+  kernel.scheduled_gas = prefix_gas +
+                         (uint64_t{spec.trip_count} * iteration_gas) -
+                         gas_at(tail_pc + 8) + gas_at(out.exit_pc);
+  return out;
 }
 
 } // namespace hogd::rv32::gas_calibration

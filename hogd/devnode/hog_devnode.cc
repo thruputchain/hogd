@@ -3,6 +3,8 @@
 #include <netinet/in.h>
 #include <sys/file.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -30,10 +32,8 @@
 #include "hogd/base/log.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
-#include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
@@ -225,14 +225,36 @@ public:
     }
 
     const std::filesystem::path lock_path = *data_dir / ".hog-devnode.lock";
-    const int fd =
-        ::open(lock_path.c_str(),
-               O_RDWR | O_CREAT | O_CLOEXEC, // NOLINT(misc-include-cleaner)
-               0600);
+    const int fd = ::open(lock_path.c_str(),
+                          O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW |
+                              O_NONBLOCK, // NOLINT(misc-include-cleaner)
+                          0600);
     if (fd < 0) {
       throw std::runtime_error(
           std::format("failed to open hog-devnode data-dir lock '{}': {}",
                       lock_path.string(), std::strerror(errno)));
+    }
+    // Inherit the supervisor's lock held while preparing private state.
+    if (const char *inherited = std::getenv("HOG_DEVNODE_DATA_DIR_LOCK_FD")) {
+      const auto descriptor = hogd::try_parse_integer<int>(inherited);
+      struct stat expected{};
+      struct stat actual{};
+      if (!descriptor || *descriptor < 3 || ::fstat(fd, &expected) != 0 ||
+          ::fstat(*descriptor, &actual) != 0 || !S_ISREG(actual.st_mode) ||
+          expected.st_dev != actual.st_dev ||
+          expected.st_ino != actual.st_ino) {
+        ::close(fd);
+        throw std::runtime_error(
+            "inherited data-dir lock does not identify this chain's lock file");
+      }
+      ::close(fd);
+      // The supervisor holds the same open file description through exec.
+      // Rechecking the lock also rejects a descriptor without exclusive access.
+      lock_file_.emplace(*descriptor);
+      if (::flock(*descriptor, LOCK_EX | LOCK_NB) != 0) {
+        throw std::runtime_error("could not retain inherited data-dir lock");
+      }
+      return;
     }
     lock_file_.emplace(fd);
     if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
@@ -250,14 +272,6 @@ public:
 
 private:
   std::optional<hogd::File> lock_file_;
-};
-
-struct OptionSources {
-  bool bootstrap_manifest = false;
-  bool dev_accounts = false;
-  bool dev_account_seed = false;
-  bool dev_account_tokens = false;
-  bool dev_wallet_profile = false;
 };
 
 void
@@ -284,30 +298,18 @@ Options:
   --data-dir <dir>               Persist node state under this directory.
                                  Reusing a populated directory recovers the
                                  committed chain and requires the same
-                                 bootstrap flags. Omit for an ephemeral node.
+                                 public bootstrap allocations. Omit for an
+                                 ephemeral node.
   --readiness stdout             Emit one readiness JSON line on stdout
                                  [default: stdout]
   --contract-artifacts-dir <dir> Search this directory before default contract
                                  artifact locations. May be repeated.
-  --dev-wallet-profile <name>    Built-in dev wallet profile
-                                 [default: hog-devnode-default]
-  --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
-                                 dev-account and wallet shorthand flags
-                                 conflict.
+  --bootstrap-manifest <path>    Required schema-4 public bootstrap intent.
+                                 Include the faucet and explicit allocations.
   --network-config <name=value>  Override a genesis execution parameter.
                                  Repeat for multiple parameters. Values are
                                  decimal uint32. Existing data directories
                                  require the same overrides on restart.
-  --dev-accounts <count>         Deterministic user accounts, excluding dev-0
-                                 [default: 0]. groundhog node passes its own
-                                 count; pass at least 1 when running directly
-                                 so a non-faucet account exists.
-  --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
-                                 [default: groundhog-dev-accounts]
-  --dev-account-tokens <tokens>  Initial storage-token balance per user account
-                                 [default: 1000000000]
-                                 dev-0 is always the fixed 10000000000000-raw
-                                 local faucet.
   --log-level <level>            Log verbosity: critical, error, warn, info,
                                  debug, or trace [default: build-dependent]
   --ramdb-bytes <bytes>          RAM database capacity to reserve at startup.
@@ -343,17 +345,6 @@ parse_port(std::string_view value, char *argv[])
     hogd::arg_error(std::format("Invalid port: {}", value), argv, usage);
   }
   return *port;
-}
-
-std::uint32_t
-parse_u32(std::string_view value, std::string_view name, char *argv[])
-{
-  std::optional<std::uint32_t> parsed =
-      hogd::try_parse_integer<std::uint32_t>(value);
-  if (!parsed) {
-    hogd::arg_error(std::format("Invalid {}: {}", name, value), argv, usage);
-  }
-  return *parsed;
 }
 
 std::string_view
@@ -410,44 +401,12 @@ parse_log_level(std::string_view value, char *argv[])
   return level;
 }
 
-std::uint32_t
-parse_bootstrap_account_count(std::string_view value, char *argv[])
-{
-  std::uint32_t count = parse_u32(value, "dev account count", argv);
-  if (count > hogd::kMaxBootstrapAccounts) {
-    hogd::arg_error(
-        std::format("Invalid dev account count: {} exceeds maximum {}", value,
-                    hogd::kMaxBootstrapAccounts),
-        argv, usage);
-  }
-  return count;
-}
-
-void
-reject_manifest_shorthand_conflicts(OptionSources const &sources, char *argv[])
-{
-  if (!sources.bootstrap_manifest) {
-    return;
-  }
-  if (sources.dev_accounts || sources.dev_account_seed ||
-      sources.dev_account_tokens || sources.dev_wallet_profile) {
-    hogd::arg_error("--bootstrap-manifest conflicts with dev-account and "
-                    "wallet shorthand flags",
-                    argv, usage);
-  }
-}
-
 HogDevnodeOptions
 parse_args(int argc, char *argv[])
 {
   HogDevnodeOptions options;
-  OptionSources sources;
   hogd::LocalNetworkConfigOverrides network_config_overrides;
   std::optional<std::filesystem::path> bootstrap_manifest_path;
-  std::optional<std::string> dev_accounts_value;
-  std::optional<std::string> dev_account_seed_value;
-  std::optional<std::string> dev_account_tokens_value;
-  std::optional<std::string> dev_wallet_profile_value;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "-h" || arg == "--help") {
@@ -498,26 +457,16 @@ parse_args(int argc, char *argv[])
       options.contract_artifact_directories.push_back(std::move(dir));
       continue;
     }
-    if (arg == "--dev-wallet-profile" && i + 1 < argc) {
-      if (sources.dev_wallet_profile) {
-        hogd::arg_error("--dev-wallet-profile specified more than once", argv,
-                        usage);
-      }
-      sources.dev_wallet_profile = true;
-      dev_wallet_profile_value = argv[++i];
-      continue;
-    }
     if (arg == "--network-config" && i + 1 < argc) {
       hogd::add_local_network_config_override(network_config_overrides,
                                               argv[++i]);
       continue;
     }
     if (arg == "--bootstrap-manifest" && i + 1 < argc) {
-      if (sources.bootstrap_manifest) {
+      if (bootstrap_manifest_path.has_value()) {
         hogd::arg_error("--bootstrap-manifest specified more than once", argv,
                         usage);
       }
-      sources.bootstrap_manifest = true;
       bootstrap_manifest_path = std::filesystem::path(argv[++i]);
       continue;
     }
@@ -525,20 +474,12 @@ parse_args(int argc, char *argv[])
       options.log_level = parse_log_level(argv[++i], argv);
       continue;
     }
-    if (arg == "--dev-accounts" && i + 1 < argc) {
-      sources.dev_accounts = true;
-      dev_accounts_value = argv[++i];
-      continue;
-    }
-    if (arg == "--dev-account-seed" && i + 1 < argc) {
-      sources.dev_account_seed = true;
-      dev_account_seed_value = argv[++i];
-      continue;
-    }
-    if (arg == "--dev-account-tokens" && i + 1 < argc) {
-      sources.dev_account_tokens = true;
-      dev_account_tokens_value = argv[++i];
-      continue;
+    if (arg == "--dev-accounts" || arg == "--dev-account-seed" ||
+        arg == "--dev-account-tokens") {
+      hogd::arg_error(
+          "dev-account shorthand was removed; supply explicit public "
+          "allocations through --bootstrap-manifest",
+          argv, usage);
     }
     if (arg == "--ramdb-bytes" && i + 1 < argc) {
       options.ramdb_bytes =
@@ -551,36 +492,10 @@ parse_args(int argc, char *argv[])
     }
     usage(argv);
   }
-  reject_manifest_shorthand_conflicts(sources, argv);
-  if (dev_accounts_value.has_value()) {
-    options.bootstrap_config.user_account_count =
-        parse_bootstrap_account_count(*dev_accounts_value, argv);
-  }
-  if (dev_account_seed_value.has_value()) {
-    if (dev_account_seed_value->empty()) {
-      hogd::arg_error("Invalid dev account seed: seed must not be empty", argv,
-                      usage);
-    }
-    options.bootstrap_config.seed = std::move(*dev_account_seed_value);
-  }
-  if (dev_account_tokens_value.has_value()) {
-    std::optional<std::uint64_t> tokens =
-        hogd::try_parse_u64(*dev_account_tokens_value);
-    if (!tokens) {
-      hogd::arg_error(std::format("Invalid dev account tokens: {}",
-                                  *dev_account_tokens_value),
-                      argv, usage);
-    }
-    options.bootstrap_config.user_storage_tokens = *tokens;
-  }
-  if (dev_wallet_profile_value.has_value()) {
-    if (dev_wallet_profile_value->empty()) {
-      hogd::arg_error("Invalid dev wallet profile: profile must not be empty",
-                      argv, usage);
-    }
-    hogd::resolve_dev_wallet_profile(*dev_wallet_profile_value);
-    options.bootstrap_config.dev_wallet_profile =
-        std::move(*dev_wallet_profile_value);
+  if (!bootstrap_manifest_path.has_value()) {
+    hogd::arg_error("--bootstrap-manifest is required; use groundhog node for "
+                    "supervised local development",
+                    argv, usage);
   }
   hogd::set_contract_artifact_directories(
       options.contract_artifact_directories);

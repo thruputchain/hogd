@@ -43,6 +43,7 @@ members = [
     "local_test_contracts/drip_faucet",
     "local_test_contracts/faucet_caller",
     "local_test_contracts/invoke_malformed_tokens_test",
+    "local_test_contracts/itc_erc20_permit",
     "local_test_contracts/tx_context_test",
 ]
 
@@ -58,30 +59,28 @@ categories = ["blockchain"]
 edition = "2024"
 
 [workspace.dependencies]
-# groundhog dependencies
-sdk = { registry = "groundhog", version = "0.36.1" }
-groundhog-rv32-runtime = { registry = "groundhog", version = "0.36.1" }
+sdk = { registry = "groundhog", version = "0.50.0" }
+groundhog-rv32-runtime = { registry = "groundhog", version = "0.50.0" }
 # default features include std, which cannot build for the on-chain targets
-groundhog-domain-separator = { registry = "groundhog", version = "0.36.1", default-features = false }
-groundhog-xdr = { registry = "groundhog", version = "0.38.0", features = ["xdrs", "syscalls"] }
-groundhog-syscall = { registry = "groundhog", version = "0.38.0" }
-xdrs = { registry = "groundhog", version = "0.10.1", features = ["int128", "heapless"] }
+groundhog-domain-separator = { registry = "groundhog", version = "0.50.0", default-features = false }
+groundhog-xdr = { registry = "groundhog", version = "0.52.0", features = ["xdrs", "syscalls"] }
+groundhog-syscall = { registry = "groundhog", version = "0.52.0" }
+xdrs = { registry = "groundhog", version = "0.10.3", features = ["int128", "heapless"] }
 sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
 hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
-# Standard interface crates. Their own version line in sdk_rs.
-# ERC20 0.1.24 is the first release where mint and burn are their own events
-# rather than transfers from or to the zero address.
-groundhog-erc20-if = { registry = "groundhog", version = "0.1.34" }
+# Standard interface crates.
+groundhog-erc20-if = { registry = "groundhog", version = "0.1.53" }
+groundhog-erc20-permit-if = { registry = "groundhog", version = "0.1.53" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless.
-bottle-test-if = { registry = "groundhog", version = "0.36.1" }
-erc20-test = { registry = "groundhog", version = "0.36.1" }
-erc20-bottle-test = { registry = "groundhog", version = "0.36.1" }
-erc20-native-test = { registry = "groundhog", version = "0.36.1" }
+bottle-test-if = { registry = "groundhog", version = "0.50.0" }
+erc20-test = { registry = "groundhog", version = "0.50.0" }
+erc20-bottle-test = { registry = "groundhog", version = "0.50.0" }
+erc20-native-test = { registry = "groundhog", version = "0.50.0" }
 
 [profile.release]
 trim-paths = "all" # unstable

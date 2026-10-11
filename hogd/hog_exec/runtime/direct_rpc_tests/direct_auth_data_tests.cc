@@ -5,6 +5,8 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "db_conflict.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -687,6 +689,78 @@ TEST_P(DirectAuthDataTest, AcquireInExclusiveMode)
   advance_block();
   check_balance(contract_addr,
                 kInitialBalance - (cost_model_->get_auth_data_cost(1)));
+}
+
+// A change that puts one key in two slots is refused when it is reserved in
+// exclusive mode, as it is without the flag. The refusal has to come at
+// reservation: a conflict first seen when the change commits lands after the
+// transaction's balance changes are committed and poisons the whole block.
+TEST_P(DirectAuthDataTest, ExclusiveModeRefusesDuplicateSignerAtReservation)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  auto key = make_address_auth_data_addrkey(contract_addr);
+
+  auto duplicate = make_pk_config(Weight{1});
+  AuthDataChangeArgs duplicate_args{};
+  duplicate_args.auth_data_change_signers.push_back({0, duplicate});
+  duplicate_args.auth_data_change_signers.push_back({1, duplicate});
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_auth_data_delta(duplicate_args),
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+  auto r1 = tx1.try_push_current_subtransaction()();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_FALSE(r1.value()) << "a duplicate signer must be refused when the "
+                              "change is reserved, not when it commits";
+  // The fixture runs Proposal mode: hog_db selects All in debug builds,
+  // First in release builds.
+  auto const &conflict = tx1.last_push_conflict();
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
+    ASSERT_EQ(conflict.conflicts().size(), 1U);
+    EXPECT_EQ(conflict.conflicts()[0].addrkey, key);
+    EXPECT_EQ(conflict.conflicts()[0].code, DbConflictCode::DuplicateSigner);
+  }
+  else {
+    ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(conflict.first().addrkey, key);
+    EXPECT_EQ(conflict.first().code, DbConflictCode::DuplicateSigner);
+  }
+  ASSERT_TRUE(tx1.abort_transaction()().has_value());
+
+  // The block and the address stay usable: a change with distinct keys
+  // reserves in exclusive mode and commits in the same block.
+  AuthDataChangeArgs distinct_args{};
+  distinct_args.auth_data_change_signers.push_back(
+      {0, make_pk_config(Weight{1})});
+  distinct_args.auth_data_change_signers.push_back(
+      {1, make_pk_config(Weight{2})});
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_auth_data_delta(distinct_args),
+                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+  auto r2 = tx2.try_push_current_subtransaction()();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+
+  advance_block();
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(item.has_value());
+  auto db_auth_data = item->auth_data();
+  ASSERT_TRUE(db_auth_data.public_keys[0]);
+  ASSERT_TRUE(db_auth_data.public_keys[1]);
+  EXPECT_EQ(db_auth_data.public_keys[0]->key,
+            distinct_args.auth_data_change_signers[0].public_key->key);
+  EXPECT_EQ(db_auth_data.public_keys[1]->key,
+            distinct_args.auth_data_change_signers[1].public_key->key);
+  check_balance(contract_addr,
+                kInitialBalance - (cost_model_->get_auth_data_cost(2)));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

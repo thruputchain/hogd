@@ -24,6 +24,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/flat_key_set.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -324,7 +325,8 @@ public:
   // Get the auth tokens supplied by the parent frame.
   // Incorrect to call method when no invocation is running.
   // Span invalidated when call frame changes.
-  std::span<const uint32_t> get_parent_supplied_auth_tokens() const;
+  // The active frame's forwarded tokens are its ids 0..N-1.
+  uint32_t get_parent_supplied_auth_token_count() const;
 
   AuthClaim const &get_auth_claim() const;
 
@@ -332,9 +334,9 @@ public:
   // Error if most recent child did call set_return_buffer.
   [[nodiscard]] SystemStatus<SyscallStatus<const ReturnBuffer *>>
   get_return_buffer() const;
-  std::span<const uint32_t> get_returned_auth_token_ids() const;
+  // The ids the most recent child's returned tokens took in this frame.
+  AuthTokenIdRange get_returned_auth_tokens() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
-  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.
@@ -371,12 +373,11 @@ public:
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
-  [[nodiscard]] x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<std::span<const uint8_t>>>>
   get_bytestring(StorageKeyContractData const &storage_key);
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_bytestring(StorageKeyContractData const &storage_key,
-                 std::span<const std::byte> input_bytestring,
-                 StorageDeltaFlagSet input_flags);
+                 std::span<const std::byte> input_bytestring);
 
   // === Nonnegative Integer syscalls ===
   // get_nnint returns the base value and the add value.
@@ -389,13 +390,24 @@ public:
 
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   set_nnint(StorageKeyContractData const &storage_key,
-            std::optional<int128_t> set_value, const int128_t &add_value,
-            StorageDeltaFlagSet input_flags);
+            std::optional<int128_t> set_value, const int128_t &add_value);
 
   // === Delete syscall ===
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
-  delete_object(StorageKeyContractData const &storage_key,
-                StorageDeltaFlagSet flags);
+  delete_object(StorageKeyContractData const &storage_key);
+
+  // === Storage flags syscalls ===
+  // A key's flags belong to the transaction's pending write to it, not to any
+  // single write: writes leave them alone, and every delta pushed for the key
+  // carries them. set_storage_flags ORs flags in and fails if no write to the
+  // key is pending in the active frame's view; clear_storage_flags removes
+  // them all.
+  [[nodiscard]] SyscallStatus<void>
+  set_storage_flags(StorageKeyContractData const &storage_key,
+                    StorageDeltaFlagSet flags);
+  [[nodiscard]] StorageDeltaFlagSet
+  get_storage_flags(StorageKeyContractData const &storage_key);
+  void clear_storage_flags(StorageKeyContractData const &storage_key);
 
   // === Retrocausal Queue syscalls ===
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -405,6 +417,10 @@ public:
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
+  // The load cost get_native_token_balance() would charge now, without loading.
+  // The two must agree on what counts as a cold touch.
+  [[nodiscard]] GasAmount
+  peek_native_token_balance_load_gas(ContractAddress const &contract_address);
   [[nodiscard]] x23::Async<SystemStatus<StorageRead<int128_t>>>
   get_native_token_balance(ContractAddress const &contract_address);
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -421,7 +437,7 @@ public:
 
   // Auth token syscalls
   [[nodiscard]] SyscallStatus<uint32_t>
-  mint_auth_token(AuthToken const &auth_token);
+  mint_auth_token(RegisteredAuthToken token);
   [[nodiscard]] SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
@@ -610,6 +626,15 @@ private:
   // fails and never suspends: the attempt height is a plain read off the
   // pinned tip, and the send runs in its own detached coroutine.
   void report_db_conflict_diagnostic() const;
+
+  // Proposal mode only: fire-and-forgets `rejection` as this transaction's
+  // TxFailureDiagnostic. In validation nobody is waiting on the hash.
+  void
+  report_contract_rejection(ContractRejectDiagnostic const &rejection) const;
+
+  // Sends `cause` for this transaction at the executing block height. Never
+  // fails and never suspends.
+  void report_tx_failure(TxFailureCause cause) const;
 
   BlockExecutionMode get_block_execution_mode() const
   {

@@ -10,8 +10,6 @@
 
 #include <openssl/sha.h>
 
-// log.h for CHECK; types.h because log.h's `using std::uint8_t` et al. inside
-// namespace hogd is what unqualified uint8_t/size_t now resolve to here.
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/rv32/encoding.h"
@@ -156,36 +154,17 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
 ArtifactDigest
 artifact_digest(std::span<const uint8_t> bytes)
 {
-  // SHA256_Init/Update/Final, NOT the one-shot SHA256(). Two reasons, both
-  // consensus-critical:
-  //
-  //  - These are the same primitives hogd::SHA256Hasher (crypto/crypto.h)
-  //    uses, so the artifact section digest is bit-identical to every other
-  //    consensus SHA-256 in the node, without pulling the whole crypto library
-  //    (blake3, x23 serialization, protocol, the Rust bindings) in here.
-  //  - In OpenSSL 3, one-shot SHA256() dispatches through EVP_Q_digest and can
-  //    return null while leaving the output buffer untouched -- e.g. under
-  //    `default_properties = fips=yes` with no FIPS provider loaded. The old
-  //    code ignored that return and handed back an all-zero digest, so such a
-  //    node would admit an artifact whose stored section digests are all zero
-  //    while every other validator rejects it. See hogd issue #2696.
-  //
-  // These three are the legacy in-tree implementations -- no provider fetch,
-  // no allocation, each unconditionally returns 1 -- so the CHECK below cannot
-  // fire today. It exists so that a future swap to a fallible digest API stops
-  // the node instead of silently repeating #2696.
-  //
-  // CHECK, not an error return: a digest that cannot be computed is a broken
-  // local crypto stack, not a property of the artifact. Reporting it as a
-  // digest mismatch would make this node reject artifacts its peers accept --
-  // the same consensus split as #2696, just fail-closed instead of fail-open.
-  // A node that cannot hash cannot vote correctly on anything, so it stops.
+  // Use the same SHA-256 primitives as SHA256Hasher, without its dependencies.
+  // OpenSSL 3's one-shot API can fail during provider lookup and leave the
+  // output untouched (hogd #2696). These primitives avoid provider lookup.
+  // Failure is a local crypto failure, not an invalid artifact: stop the node
+  // rather than admit or reject artifacts using an uncomputed digest.
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   ArtifactDigest digest = {};
   SHA256_CTX ctx;
-  // OpenSSL ignores the input pointer when len is zero, but a null pointer is
-  // still not worth handing it; skip the update entirely for empty sections.
+  // Avoid passing a null data pointer for an empty section.
   const bool ok =
       SHA256_Init(&ctx) == 1 &&
       (bytes.empty() || SHA256_Update(&ctx, bytes.data(), bytes.size()) == 1) &&

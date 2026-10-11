@@ -33,7 +33,7 @@ pub struct DripFaucetContract;
 
 #[contract]
 impl DripFaucet for DripFaucetContract {
-    fn claim(amount: u128) {
+    fn claim(amount: i128) {
         let mut capacity = window_capacity();
 
         let height = current_block_height();
@@ -49,13 +49,10 @@ impl DripFaucet for DripFaucetContract {
         // in-transaction consumption); an overdraw only visible across
         // concurrent transactions is left to the block-packing bound.
         let remaining = capacity.get_remaining_capacity();
-        let Ok(signed_amount) = i128::try_from(amount) else {
-            throw(DripError::ExceedsWindowBudget);
-        };
-        if remaining < signed_amount {
+        if remaining < amount {
             throw(DripError::ExceedsWindowBudget);
         }
-        capacity.consume_capacity(signed_amount);
+        capacity.consume_capacity(amount);
 
         let receiver = get_caller();
         let token =

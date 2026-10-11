@@ -61,7 +61,6 @@ struct Declaration {
   Qual qual = kScalar;
   string bound;
   string comment;
-  string attrs;
   bool is_private = false;
 };
 

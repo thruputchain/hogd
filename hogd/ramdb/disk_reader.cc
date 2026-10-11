@@ -382,10 +382,17 @@ load_log_file(
 
     if (skip) {
       if (hdr.storage == ItemStorage::kCommit) {
-        // if we see a commit record that we plan to skip, dump the buffered
-        // records immediately.  It might be a good idea to check the crc on
-        // the commit record just in case one comes into existence via
-        // corruption.
+        // A commit below cur_lsn belongs to an already-recovered batch, so its
+        // records were skipped too and the buffer must be empty; a non-empty
+        // buffer means its LSN was tampered to drop durable rows without
+        // validation (#4320). (A commit >= target_lsn is a legitimate
+        // point-in-time truncation and still drops the buffer below.)
+        if (hdr.lsn < cur_lsn && buf.size() != 0) {
+          error("skipped commit marker in {} precedes cur_lsn {} with {} "
+                "buffered bytes; treating as corruption",
+                file.path_, cur_lsn, buf.size());
+          return DBError(DBCode::kCorruption);
+        }
         buf.take_buffer();
         uncommitted_records = false;
         uncommitted_off = r.offset();
@@ -467,10 +474,21 @@ load_log_file(
       uncommitted_records = false;
       uncommitted_off = r.offset();
 
-      if (!file.snapshot_file_ && cur_lsn != hdr.lsn) {
-        error("replaying log file {}, saw commit for lsn {} while expecting "
-              "lsn {}",
-              file.path_, hdr.lsn, cur_lsn);
+      if (!file.snapshot_file_) {
+        if (cur_lsn != hdr.lsn) {
+          error("replaying log file {}, saw commit for lsn {} while expecting "
+                "lsn {}",
+                file.path_, hdr.lsn, cur_lsn);
+          return DBError{DBCode::kCorruption};
+        }
+      }
+      // A snapshot commits at end_lsn - 1; reject anything else, including a
+      // zero end_lsn whose successor would wrap to zero (#4229).
+      else if (file.end_lsn_exclusive_ == 0 ||
+               hdr.lsn != file.end_lsn_exclusive_ - 1) {
+        error("snapshot {} has commit for lsn {} but its filename range ends "
+              "at lsn {}",
+              file.path_, hdr.lsn, file.end_lsn_exclusive_);
         return DBError{DBCode::kCorruption};
       }
 

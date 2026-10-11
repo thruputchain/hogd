@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <tuple>
@@ -20,6 +21,8 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -65,6 +68,49 @@ struct NativeContractArgs<x23::Async<InvokeStatus<R>> (*)(Args...)> {
     return std::tuple{};
   }
 };
+
+// SignedToken arguments are supported at the top level of a method's argument
+// list only: the SDK assigns handles to `Signed` fields in declaration order
+// through every nested type, and nothing here walks nested types.
+template<typename Arg>
+constexpr bool kArgNestsSignedToken = [] {
+  if constexpr (std::is_same_v<Arg, SignedToken>) {
+    return false;
+  }
+  else {
+    return x23::detail::xdr_contains<Arg, SignedToken>();
+  }
+}();
+
+// Assign the parent-supplied auth-token handles, the frame's ids 0..N-1, to
+// `args`' SignedToken arguments in declaration order; false when the counts
+// differ.
+template<typename... Args>
+bool
+assign_auth_handles(std::tuple<Args...> &args, uint32_t handle_count)
+{
+  static_assert(!(kArgNestsSignedToken<Args> || ...),
+                "SignedToken nested inside an argument type is unsupported");
+  constexpr size_t kSignedCount =
+      (size_t{std::is_same_v<Args, SignedToken>} + ... + 0);
+  if (handle_count != kSignedCount) {
+    return false;
+  }
+  uint32_t next = 0;
+  std::apply(
+      [&](auto &...arg) {
+        (
+            [&](auto &a) {
+              if constexpr (std::is_same_v<std::remove_cvref_t<decltype(a)>,
+                                           SignedToken>) {
+                a.handle = next++;
+              }
+            }(arg),
+            ...);
+      },
+      args);
+  return true;
+}
 
 template<is_contract_trait ContractTrait, StringLiteral Name, GasAmount Gas>
 struct AlwaysErrorMethod {
@@ -162,8 +208,8 @@ public:
             NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       try {
         // Mirror the sdk entrypoint glue: an args-decode failure (parse
-        // error, trailing bytes) or unconsumed forwarded auth handles
-        // (builder contracts take no Signer args) aborts the frame with
+        // error, trailing bytes) or a forwarded auth-handle count that does
+        // not match the method's SignedToken arguments aborts the frame with
         // LibraryExn::Handling(DecodingArgs), byte-identical to an RV32
         // contract's wrapper — not a plain frame fault. See
         // default_wallet_parity_test.cc's malformed-calldata cases.
@@ -187,7 +233,8 @@ public:
         if (!args.has_value()) {
           co_return decoding_args_abort();
         }
-        if (!ctx.handler().get_parent_supplied_auth_tokens().empty()) {
+        if (!detail::assign_auth_handles(
+                *args, ctx.handler().get_parent_supplied_auth_token_count())) {
           co_return decoding_args_abort();
         }
 
@@ -320,6 +367,20 @@ public:
         "unrecoverable: host_fn_error_conversion: unknown HostFnErrorCode: {}",
         err.code());
     return InvokeError{InvokeErrorCode::Unrecoverable};
+  }
+
+  // The LibraryExn::Syscall abort the SDK throws when `call` reports `error`
+  // (`or_syscall_throw`), so a native contract rejects a failed syscall
+  // byte-identically to an RV32 one.
+  static LibraryException syscall_exception(SyscallNo call,
+                                            SyscallErrorCode error)
+  {
+    LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
+    exn.syscall_exn() = SyscallExn{
+        .call_number = static_cast<uint32_t>(std::to_underlying(call)),
+        .err_number = static_cast<SysErr>(error),
+    };
+    return LibraryException{std::move(exn)};
   }
 
 private:

@@ -4,6 +4,7 @@
 #include <optional>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
@@ -12,6 +13,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/rpc_context.h"
@@ -261,6 +263,75 @@ TEST_F(GenesisConfigValidationTest, AcceptsDefaultWalletTheCeremonyDeploys)
   ceremony_deployed.hash.fill(0xE7);
   EXPECT_EQ(load_with_default_wallet(ceremony_deployed),
             DbSchedResult::DbSchedResultOK);
+}
+
+TEST(GenesisCeremonyBuilder, DirectAllocationsRejectNegativeAndExcessSupply)
+{
+  const auto cost_model = StorageCostModel::default_cost_model();
+  const ContractAddress account = sha256(uint64_t{123});
+  GenesisConfigurationBuilder negative;
+  negative.add_account_allocation(account, -1);
+  auto negative_result =
+      negative.try_make_genesis_ceremony_transactions(cost_model);
+  ASSERT_FALSE(negative_result.has_value());
+  EXPECT_EQ(negative_result.error(),
+            GenesisCeremonyError::kNegativeDistribution);
+
+  const int128_t supply =
+      int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+  const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
+                                    cost_model.get_replay_cache_cost(1) +
+                                    cost_model.get_nnint_cost();
+  GenesisConfigurationBuilder excessive;
+  excessive.add_account_allocation(account, supply - ceremony_funding + 1);
+  auto excessive_result =
+      excessive.try_make_genesis_ceremony_transactions(cost_model);
+  ASSERT_FALSE(excessive_result.has_value());
+  EXPECT_EQ(excessive_result.error(), GenesisCeremonyError::kSupplyExceeded);
+
+  GenesisConfigurationBuilder exact;
+  exact.add_account_allocation(account, supply - ceremony_funding);
+  auto exact_result = exact.try_make_genesis_ceremony_transactions(cost_model);
+  ASSERT_TRUE(exact_result.has_value());
+  ASSERT_EQ(exact_result->size(), 1);
+  EXPECT_TRUE(exact_result->front().tx.contracts_to_deploy.empty());
+}
+
+TEST(GenesisCeremonyBuilder,
+     MixedAllocationsShareBatchLimitAndFundingAccounting)
+{
+  const auto cost_model = StorageCostModel::default_cost_model();
+  const int128_t supply =
+      int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+  const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
+                                    cost_model.get_replay_cache_cost(1) +
+                                    cost_model.get_nnint_cost();
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
+  contract->rv32_contract() = load_contract_blob("fibonacci.rv32a");
+  GenesisConfigurationBuilder builder;
+  builder.add_account_allocation(sha256(uint64_t{0}),
+                                 supply - (2 * ceremony_funding));
+  for (uint64_t index = 1; index < 15; ++index) {
+    builder.add_account_allocation(sha256(index), 0);
+  }
+  builder.add_distribution(contract, sha256(uint64_t{100}), {}, {}, 0);
+  builder.add_distribution(contract, sha256(uint64_t{101}), {}, {}, 0);
+  auto result = builder.try_make_genesis_ceremony_transactions(cost_model);
+  ASSERT_TRUE(result.has_value());
+  ASSERT_EQ(result->size(), 2);
+  EXPECT_EQ((*result)[0].tx.contracts_to_deploy.size(), 1);
+  EXPECT_EQ((*result)[1].tx.contracts_to_deploy.size(), 1);
+  EXPECT_EQ((*result)[0].tx.uniquifier.nonce, 0);
+  EXPECT_EQ((*result)[1].tx.uniquifier.nonce, 1);
+
+  // A third transaction needs its own root/token funding even for zero
+  // allocations.
+  for (uint64_t index = 17; index < 33; ++index) {
+    builder.add_account_allocation(sha256(index), 0);
+  }
+  auto excessive = builder.try_make_genesis_ceremony_transactions(cost_model);
+  ASSERT_FALSE(excessive.has_value());
+  EXPECT_EQ(excessive.error(), GenesisCeremonyError::kSupplyExceeded);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

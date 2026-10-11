@@ -8,10 +8,11 @@ endif()
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/xdr/syscall.x
-    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/hog_exec_syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND ${HOGD_PYTHON} ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py
     --output_dir=${CMAKE_BINARY_DIR}/hogd/xdr/ 
     --syscall_yaml=${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
+    --hog_exec_yaml=${CMAKE_CURRENT_SOURCE_DIR}/hog_exec_syscalls.yaml
     --syscall_x
 )
 
@@ -23,10 +24,11 @@ add_custom_target(
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/hog_exec/runtime/syscall_inner.h
-    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/hog_exec_syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND ${HOGD_PYTHON} ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py
     --output_dir=${CMAKE_BINARY_DIR}/hogd/hog_exec/runtime/
     --syscall_yaml=${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
+    --hog_exec_yaml=${CMAKE_CURRENT_SOURCE_DIR}/hog_exec_syscalls.yaml
     --syscall_inner_h
 )
 
@@ -38,10 +40,11 @@ add_custom_target(
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/hog_exec/runtime/syscall_meta.h
-    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/hog_exec_syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND ${HOGD_PYTHON} ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py
     --output_dir=${CMAKE_BINARY_DIR}/hogd/hog_exec/runtime/
     --syscall_yaml=${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
+    --hog_exec_yaml=${CMAKE_CURRENT_SOURCE_DIR}/hog_exec_syscalls.yaml
     --syscall_meta_h
 )
 

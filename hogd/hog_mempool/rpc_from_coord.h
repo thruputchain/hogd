@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -339,6 +340,30 @@ public:
     co_return ret;
   }
 
+  x23::Async<SchedulerTransactionOutcomeBatch>
+  schedcoord_lookup_transaction_outcomes(const TransactionHashBatch &tx_hashes)
+  {
+    SchedulerTransactionOutcomeBatch ret;
+    ret.reserve(tx_hashes.size());
+    if (!ready()) {
+      ret.resize(
+          tx_hashes.size(),
+          SchedulerTransactionOutcome{
+              .status =
+                  SchedulerTransactionStatus::SchedulerTransactionNotFound,
+              .error_source = SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorNone,
+              .error_code = 0,
+              .height = 0,
+          });
+      co_return ret;
+    }
+    for (const TransactionHash &tx_hash : tx_hashes) {
+      ret.push_back(co_await scheduler_->lookup_transaction_outcome(tx_hash));
+    }
+    co_return ret;
+  }
+
   // Hashes a txset this node built itself. Fatal if [hashes] repeats a
   // transaction hash.
   static SHA256Hash get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
@@ -403,12 +428,33 @@ public:
     propose_batch_result_test_hook_ = std::move(hook);
   }
 
+  // Runs immediately before/after the submission auth RPC, with commit
+  // unlocked.
+  void set_submission_auth_test_hook(
+      std::function<x23::Async<void>(BlockHeight,
+                                     const SignedTransactionBatch &, bool)>
+          hook)
+  {
+    submission_auth_test_hook_ = std::move(hook);
+  }
+
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
   }
 
 private:
+  struct SubmissionAuth {
+    std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
+        accounts;
+    std::unordered_set<ContractAddress, SipHash24Hasher> dirty;
+  };
+
+  // Returns with [commit_guard] held, so results stay valid through admission.
+  x23::Async<AuthErrorCodeBatch>
+  verify_submission(const SignedTransactionBatch &txs,
+                    x23::CoroGuard &commit_guard);
+
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   submit_unvetted(ParallelSignedTransactionBatch batch,
                   bool malformed_is_protocol_error);
@@ -430,10 +476,12 @@ private:
     x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
     SchedulerProposalResult proposal_result;
 
-    x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
+    x23::Vec<ExecResult> statuses =
+        x23::Vec<ExecResult>(kMaxBlockSize, ExecResult::ExecResultSystemError);
     x23::Vec<x23::XdrVec<NondeterministicProposalData>>
         transaction_nomination_chunks;
     x23::XdrVec<TransactionHash> failed_tx_hashes;
+    x23::XdrVec<ExecResult> failed_tx_results;
   };
   struct JointCommitResult {
     DbBlockResult db;
@@ -562,17 +610,17 @@ private:
   x23::Async<void> propose_batch(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-      x23::span<bool> ret_chunk, size_t executor_idx);
+      x23::span<ExecResult> ret_chunk, size_t executor_idx);
 
   x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
-      x23::span<bool> ret);
+      x23::span<ExecResult> ret);
 
   x23::Async<void> propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-      x23::span<bool> ret);
+      x23::span<ExecResult> ret);
 
   x23::Async<ExecResult>
   open_proposal_block(BlockID block_id, BlockExecutionContext block_execution,
@@ -743,6 +791,9 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
+  std::function<x23::Async<void>(BlockHeight, const SignedTransactionBatch &,
+                                 bool)>
+      submission_auth_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
@@ -753,11 +804,11 @@ private:
   // validated concurrently, [validated_block_cache_] could be accessed in
   // parallel without this lock.
   x23::CoroLock validated_block_cache_lock_;
-  // Ensures that a commit does not occur while txs are being verified. Txs
-  // are verified against a certain block height, so if they race with a block
-  // commit, we could add txs to the scheduler that are no longer verified as
-  // of the last committed block.
+  // Serializes commits, auth-data updates, and final submission admission.
   x23::CoroLock commit_lock_;
+  // Protected by [commit_lock_]. Weak pointers also handle failed or canceled
+  // authentication without requiring asynchronous cleanup.
+  std::vector<std::weak_ptr<SubmissionAuth>> submission_auth_;
   // [num_validations_in_progress_] is a gate: values > 0 are active
   // validations, 0 means validation is open, and -1 means commit has closed
   // validation admission.
@@ -777,6 +828,8 @@ private:
 
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();
+  // Start of the last successful commit; empty until the first one.
+  std::optional<std::chrono::steady_clock::time_point> last_commit_started_;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 

@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_token.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci_call.h"
 #include "built_contracts/no_syscall_test.h"
@@ -27,7 +28,6 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
@@ -39,6 +39,7 @@
 #include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -485,12 +486,19 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
-          auto [res, _gas] = co_await syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span(calldata)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto flags_res = co_await ctx.syscall<SyscallNo::kSetStorageFlags>(
+              key, StorageDeltaFlagSet{
+                       std::to_underlying(StorageDeltaFlags::ExclusiveLock)});
+          if (!flags_res.has_value() ||
+              flags_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to set storage flags";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
@@ -695,10 +703,11 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
         EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         RuntimeMemoryLength return_written_len = 0;
-        RuntimeMemoryLength ids_written_len = 0;
+        uint32_t returned_auth_token_start = 0;
+        uint32_t returned_auth_token_count = 0;
         auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
-            std::span<std::byte>{}, return_written_len, std::span<std::byte>{},
-            ids_written_len);
+            std::span<std::byte>{}, return_written_len,
+            returned_auth_token_start, returned_auth_token_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         // Full length reported even though the contract's buffer was empty.
@@ -759,6 +768,144 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   // output buffer was empty (old behavior recorded an empty buffer here).
   ASSERT_EQ(traced_buffer.size(), 9U);
   EXPECT_EQ(std::memcmp(traced_buffer.data(), "RETURNED!", 9), 0);
+}
+
+// The trace records the auth token ranges GetCalldata and GetReturnedBuffer
+// report, not just their buffers. The caller mints ids 0..2, keeps 0 and
+// forwards 1 and 2, so the child sees a count of 2; the child returns both,
+// and they join the caller under its next ids, 3..4.
+TEST_F(TracingTest, AuthTokenRangesAreTraced)
+{
+  constexpr ContractAddress kCallerAddress = make_contract_address(0);
+  constexpr ContractAddress kChildAddress = make_contract_address(1);
+
+  // Child: read the forwarded token count, then return both tokens.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        std::array<std::byte, 1> calldata_buf{};
+        RuntimeMemoryLength written_len = 0;
+        uint32_t auth_token_count = 0;
+        auto get_res = co_await ctx.syscall<SyscallNo::kGetCalldata>(
+            std::span<std::byte>{calldata_buf}, written_len, auth_token_count);
+        EXPECT_TRUE(get_res.has_value());
+        EXPECT_EQ(auth_token_count, 2U);
+
+        std::array<uint32_t, 2> returned_ids{0, 1};
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
+            std::span<const std::byte>{}, false,
+            std::as_bytes(std::span<const uint32_t>{returned_ids}));
+        EXPECT_FALSE(ret.has_value()); // Return yields a non-recoverable status
+        co_return InvokeStatus<void>{};
+      });
+  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
+
+  // Caller: mint three tokens, forward the last two, read the returned range.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0,
+      [kChildAddress](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        AuthTokenNode node{.consumer_address = kChildAddress,
+                           .payload = x23::serialize(42U),
+                           .child_nodes = {}};
+        auto serialized = x23::serialize(node);
+        for (uint32_t expected_id = 0; expected_id < 3; ++expected_id) {
+          uint32_t token_id = 0;
+          auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+              BlockHeight{1000},
+              std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                             serialized.data()),
+                                         serialized.size()},
+              token_id);
+          EXPECT_TRUE(mint_res.has_value());
+          EXPECT_EQ(token_id, expected_id);
+        }
+
+        std::array<uint32_t, 2> forwarded{1, 2};
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        CopyableInvokeOutputs outputs{};
+        auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kChildAddress, std::span<const std::byte>{},
+            std::span<uint32_t const>{forwarded}, inputs, outputs);
+        EXPECT_TRUE(invoke_res.has_value());
+        EXPECT_EQ(outputs.returned_auth_token_count, 2U);
+
+        RuntimeMemoryLength return_written_len = 0;
+        uint32_t returned_auth_token_start = 0;
+        uint32_t returned_auth_token_count = 0;
+        auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
+            std::span<std::byte>{}, return_written_len,
+            returned_auth_token_start, returned_auth_token_count);
+        EXPECT_TRUE(get_res.has_value());
+        EXPECT_EQ(returned_auth_token_start, 3U);
+        EXPECT_EQ(returned_auth_token_count, 2U);
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(child_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(0);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
+  auto child_xdr = make_native_contract(1);
+  write_contract(child_xdr);
+  write_deployment(kChildAddress, child_xdr);
+  setup_grant_storage_token(kCallerAddress, replay_cache_cost_charged(1));
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kCallerAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
+      *runtime_context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+
+  const SyscallTrace *invoke = nullptr;
+  const SyscallTrace *grb = nullptr;
+  for (auto const &sc : trace->system_calls) {
+    if (sc.body.syscall_number() == SyscallNo::kInvoke) {
+      invoke = &sc;
+    }
+    else if (sc.body.syscall_number() == SyscallNo::kGetReturnedBuffer) {
+      grb = &sc;
+    }
+  }
+  ASSERT_NE(invoke, nullptr);
+  ASSERT_NE(grb, nullptr);
+
+  // The child's GetCalldata records the forwarded count.
+  auto const &invoke_trace = invoke->body.invoke();
+  ASSERT_NE(invoke_trace.outputs, nullptr);
+  ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
+  auto const &child_calls = invoke_trace.outputs->child_trace->system_calls;
+  ASSERT_FALSE(child_calls.empty());
+  ASSERT_EQ(child_calls[0].body.syscall_number(), SyscallNo::kGetCalldata);
+  auto const &get_calldata_trace = child_calls[0].body.get_calldata();
+  ASSERT_NE(get_calldata_trace.outputs, nullptr);
+  EXPECT_EQ(get_calldata_trace.outputs->auth_token_count, 2U);
+
+  // The caller's GetReturnedBuffer records the range the returns took.
+  auto const &grb_trace = grb->body.get_returned_buffer();
+  ASSERT_NE(grb_trace.outputs, nullptr);
+  EXPECT_EQ(grb_trace.outputs->returned_auth_token_start, 3U);
+  EXPECT_EQ(grb_trace.outputs->returned_auth_token_count, 2U);
 }
 
 namespace {

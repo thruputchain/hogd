@@ -126,6 +126,19 @@ tx_failed(const ExecResult &r)
   return !tx_succeeded(r);
 }
 
+SchedulerTransactionStatus
+transaction_status_for_exec(const ExecResult result)
+{
+  switch (result) {
+  case ExecResult::ExecResultMalformedTransaction:
+  case ExecResult::ExecResultTxValidationFailure:
+  case ExecResult::ExecResultFailedGasSponsorship:
+    return SchedulerTransactionStatus::SchedulerTransactionDropped;
+  default:
+    return SchedulerTransactionStatus::SchedulerTransactionRetry;
+  }
+}
+
 template<typename T>
 x23::DagDeps
 dag_deps_from_nodes(const x23::Vec<x23::DagNode<T>> &nodes)
@@ -197,6 +210,8 @@ MempoolCoordinatorRpc::record_nomination_attempt(
 {
   MempoolMetrics::instance().last_nomination_duration_ms.record(
       mempool_duration_ms(telemetry.duration));
+  MempoolMetrics::instance().nomination_duration_seconds.record(
+      telemetry.duration);
   MempoolMetrics::instance().nomination_attempt_count.increment();
   if (telemetry.succeeded) {
     MempoolMetrics::instance().nomination_success_count.increment();
@@ -218,6 +233,7 @@ MempoolCoordinatorRpc::record_validation_attempt(
 {
   MempoolMetrics::instance().last_validation_duration_ms.record(
       mempool_duration_ms(duration));
+  MempoolMetrics::instance().validation_duration_seconds.record(duration);
   MempoolMetrics::instance().validation_attempt_count.increment();
   MempoolMetrics::instance().validation_tx_count.increment(tx_count);
   switch (outcome) {
@@ -258,8 +274,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
+      const double elapsed = timer.elapsed();
       MempoolMetrics::instance().last_submit_unvetted_duration_ms.record(
-          mempool_duration_ms(timer.elapsed()));
+          mempool_duration_ms(elapsed));
+      MempoolMetrics::instance().submit_unvetted_duration_seconds.record(
+          elapsed);
     });
   });
   if (scheduler_->size() >= mempool_tx_size_limit_) {
@@ -280,12 +299,93 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
+      const double elapsed = timer.elapsed();
       MempoolMetrics::instance().last_submit_unvetted_duration_ms.record(
-          mempool_duration_ms(timer.elapsed()));
+          mempool_duration_ms(elapsed));
+      MempoolMetrics::instance().submit_unvetted_duration_seconds.record(
+          elapsed);
     });
   });
   co_return co_await submit_unvetted(std::move(batch),
                                      /*malformed_is_protocol_error=*/true);
+}
+
+x23::Async<AuthErrorCodeBatch>
+MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
+                                         x23::CoroGuard &commit_guard)
+{
+  auto pending = std::make_shared<SubmissionAuth>();
+  for (size_t i = 0; i < txs.size(); i++) {
+    const ContractAddress &account = txs[i].tx.invocation.invoked_address;
+    pending->accounts[account].push_back(i);
+    pending->dirty.insert(account);
+  }
+
+  AuthErrorCodeBatch results;
+  results.resize(txs.size());
+
+  co_await commit_guard(commit_lock_);
+
+  std::erase_if(submission_auth_,
+                [](const std::weak_ptr<SubmissionAuth> &entry) {
+                  return entry.expired();
+                });
+  submission_auth_.push_back(pending);
+  BlockHeight verify_height = scheduler_->current_block();
+  while (true) {
+    const BlockHeight height = scheduler_->current_block();
+    // Wait for the [auth_data_changed()] callback to complete for [height].
+    if (auth_data_height_.load() < height) {
+      commit_guard.reset();
+      co_await wait_for_block_commit(height);
+      co_await commit_guard(commit_lock_);
+      continue;
+    }
+
+    // The authentication server cannot authenticate txs against an older block
+    // height--it returns [AuthErrorCode::kAuthStaleBlockHeight] in this case.
+    if (verify_height != height) {
+      for (size_t i = 0; i < results.size(); i++) {
+        if (results[i] == AuthErrorCode::kAuthStaleBlockHeight) {
+          pending->dirty.insert(txs[i].tx.invocation.invoked_address);
+        }
+      }
+    }
+    if (pending->dirty.empty()) {
+      co_return results;
+    }
+
+    std::unordered_set<ContractAddress, SipHash24Hasher> dirty =
+        std::exchange(pending->dirty, {});
+    verify_height = height;
+    commit_guard.reset();
+
+    SignedTransactionBatch retry_txs;
+    x23::Vec<size_t> indices;
+    for (const ContractAddress &account : dirty) {
+      for (size_t i : pending->accounts.at(account)) {
+        retry_txs.push_back(txs[i]);
+        indices.push_back(i);
+      }
+    }
+    if (submission_auth_test_hook_) {
+      co_await submission_auth_test_hook_(verify_height, retry_txs,
+                                          /*after_auth=*/false);
+    }
+    const AuthErrorCodeBatch verified =
+        co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                               retry_txs);
+    if (submission_auth_test_hook_) {
+      co_await submission_auth_test_hook_(verify_height, retry_txs,
+                                          /*after_auth=*/true);
+    }
+    CHECK_EQ(verified.size(), indices.size());
+    for (size_t i = 0; i < indices.size(); i++) {
+      results[indices[i]] = verified[i];
+    }
+    // Changes during this RPC remain in [pending->dirty] for the next pass.
+    co_await commit_guard(commit_lock_);
+  }
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
@@ -341,20 +441,10 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                                co_await hash_transactions(*txs, *tx_hashes);
                              });
 
-  auto lock_commit_node =
-      submit_dag.async<void>("lock commit",
-                             submit_dag.after(ready_node, hash_node),
-                             [&, commit_guard]() -> x23::Async<void> {
-                               co_await (*commit_guard)(commit_lock_);
-                               co_return;
-                             });
-
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(lock_commit_node),
+      "verify transactions", submit_dag.after(ready_node, hash_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
-        const BlockHeight verify_height = scheduler_->current_block();
-        co_return co_await auth_client_->authmempool_verify_transactions(
-            verify_height, *txs);
+        co_return co_await verify_submission(*txs, *commit_guard);
       });
 
   auto prune_node = submit_dag.async<void>(
@@ -451,6 +541,18 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           else {
             (*outcomes)[(*original_indices)[i]] =
                 SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
+
+            co_await scheduler_->record_transaction_outcome(
+                tx_hash,
+                /*status=*/
+                SchedulerTransactionStatus::SchedulerTransactionRetry,
+                scheduler_->current_block(),
+                /*error_source=*/
+                SchedulerTransactionErrorSource::
+                    SchedulerTransactionErrorScheduler,
+                /*error_code=*/
+                static_cast<int32_t>(
+                    SchedulerErrorCode::SchedulerErrorCapacity));
             num_discarded++;
           }
         }
@@ -549,8 +651,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
+      const double elapsed = timer.elapsed();
       MempoolMetrics::instance().last_submit_vetted_duration_ms.record(
-          mempool_duration_ms(timer.elapsed()));
+          mempool_duration_ms(elapsed));
+      MempoolMetrics::instance().submit_vetted_duration_seconds.record(elapsed);
     });
   });
 
@@ -596,20 +700,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
                                co_await hash_transactions(*txs, *tx_hashes);
                              });
 
-  auto lock_commit_node =
-      submit_dag.async<void>("lock commit",
-                             submit_dag.after(decode_node, hash_node),
-                             [&, commit_guard]() -> x23::Async<void> {
-                               co_await (*commit_guard)(commit_lock_);
-                               co_return;
-                             });
-
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(lock_commit_node),
+      "verify transactions", submit_dag.after(hash_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
-        const BlockHeight verify_height = scheduler_->current_block();
-        co_return co_await auth_client_->authmempool_verify_transactions(
-            verify_height, *txs);
+        co_return co_await verify_submission(*txs, *commit_guard);
       });
 
   auto prune_node = submit_dag.async<void>(
@@ -841,7 +935,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::propose_batch(
     BlockID block_id, x23::span<const SignedTransaction> txs,
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-    x23::span<bool> ret_chunk, size_t executor_idx)
+    x23::span<ExecResult> ret_chunk, size_t executor_idx)
 {
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
@@ -855,8 +949,8 @@ MempoolCoordinatorRpc::propose_batch(
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
     CHECK(result.result() != ExecResult::ExecResultUnrecoverable);
-    ret_chunk[i] = tx_succeeded(result.result());
-    if (ret_chunk[i]) {
+    ret_chunk[i] = result.result();
+    if (tx_succeeded(ret_chunk[i])) {
       transaction_nominations.push_back(result.proposal_data());
     }
   }
@@ -870,7 +964,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
     BlockID block_id, x23::span<const SignedTransaction> txs,
     x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
-    x23::span<bool> ret)
+    x23::span<ExecResult> ret)
 {
   co_await default_coropoll().pool_.bg();
 
@@ -889,8 +983,8 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
     const ChunkRange &chunk = chunks[i];
     x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                 txs.begin() + chunk.end);
-    x23::span<bool> ret_chunk(ret.begin() + chunk.start,
-                              ret.begin() + chunk.end);
+    x23::span<ExecResult> ret_chunk(ret.begin() + chunk.start,
+                                    ret.begin() + chunk.end);
 
     // We multiplex the small chunks across multiple TCP connections and
     // multiple executors by setting the [executor_idx] to [i %
@@ -920,7 +1014,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::propose_batch_in_chunks(
     BlockID block_id, x23::span<SignedTransaction> txs,
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
-    x23::span<bool> ret)
+    x23::span<ExecResult> ret)
 {
   // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
   // from a different coroutine. Each coroutine then further splits the chunk
@@ -945,10 +1039,9 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     const ChunkRange &chunk = large_chunks[i];
     x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                 txs.begin() + chunk.end);
-    // The outcome of each tx ([true] for success and [false] for failure) is
-    // written into this span.
-    x23::span<bool> status_chunk(ret.begin() + chunk.start,
-                                 ret.begin() + chunk.end);
+    // The executor outcome for each tx is written into this span.
+    x23::span<ExecResult> status_chunk(ret.begin() + chunk.start,
+                                       ret.begin() + chunk.end);
 
     handles.push_back(multiplex_large_chunk_across_executors(
         block_id, tx_chunk, nomination_chunks[i], status_chunk));
@@ -1110,19 +1203,18 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   nodes.txset_insert_chunks.reserve(kNumSchedulerIterations);
   nodes.serialize_chunks.reserve(kNumSchedulerIterations * 3);
 
-  nodes.nomination_cleanup =
-      dag.cleanup("rollback scheduler nomination",
-                  [&, state]() -> x23::Async<void> {
-                    scheduler_->reenqueue_txs(cache.tx_hashes.begin(),
-                                              cache.tx_hashes.end());
-                    {
-                      x23::CoroGuard scheduler_guard;
-                      co_await scheduler_guard(scheduler_->global_lock_);
-                      scheduler_->abandon_pending_nomination(cache.block_id);
-                    }
-                    cache.block_id = 0;
-                    co_return;
-                  });
+  nodes.nomination_cleanup = dag.cleanup(
+      "rollback scheduler nomination", [&, state]() -> x23::Async<void> {
+        scheduler_->reenqueue_txs(cache.tx_hashes.begin(),
+                                  cache.tx_hashes.end());
+        {
+          x23::CoroGuard scheduler_guard;
+          co_await scheduler_guard(scheduler_->global_lock_);
+          co_await scheduler_->abandon_pending_nomination(cache.block_id);
+        }
+        cache.block_id = 0;
+        co_return;
+      });
   const x23::DagCleanup nomination_cleanup = nodes.nomination_cleanup;
 
   nodes.start_nomination =
@@ -1148,9 +1240,9 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
                           {
                             x23::CoroGuard scheduler_guard;
                             co_await scheduler_guard(scheduler_->global_lock_);
-                            scheduler_->schedule(kMaxBlockSize /
-                                                     kNumSchedulerIterations,
-                                                 cache.tx_hashes, cache.txs);
+                            co_await scheduler_->schedule(
+                                kMaxBlockSize / kNumSchedulerIterations,
+                                cache.tx_hashes, cache.txs);
                           }
                           const size_t start = state->num_scheduled;
                           const size_t end = cache.tx_hashes.size();
@@ -1176,8 +1268,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           }
           const size_t start = state->scheduled_chunks[i].start;
           const size_t end = state->scheduled_chunks[i].end;
-          x23::span<bool> ret_span(cache.statuses.begin() + start,
-                                   cache.statuses.begin() + end);
+          x23::span<ExecResult> ret_span(cache.statuses.begin() + start,
+                                         cache.statuses.begin() + end);
           // [schedule()] appends transactions to the end of [txs]. We reserve
           // [txs] up front in [schedulercoord_propose_block()], so spans into
           // it do not become invalid when later schedule nodes append more txs.
@@ -1203,6 +1295,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
         [&, state, i]() -> x23::Async<void> {
           if (i == 0) {
             cache.failed_tx_hashes.clear();
+            cache.failed_tx_results.clear();
             CHECK(cache.result_tx_nominations.empty());
           }
 
@@ -1219,7 +1312,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
             // successful txs to in [cache.txs].
             for (size_t tx_idx = state->num_tx_outcomes_processed;
                  tx_idx < state->handle_end_indices[i]; tx_idx++) {
-              if (cache.statuses[tx_idx]) {
+              if (tx_succeeded(cache.statuses[tx_idx])) {
                 const TransactionHash &tx_hash = cache.tx_hashes[tx_idx];
                 cache.result_tx_hashes.push_back(tx_hash);
                 state->txset_hash_chunks[i].push_back(tx_hash);
@@ -1230,6 +1323,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
               }
               else {
                 cache.failed_tx_hashes.push_back(cache.tx_hashes[tx_idx]);
+                cache.failed_tx_results.push_back(cache.statuses[tx_idx]);
               }
             }
             state->num_tx_outcomes_processed = state->handle_end_indices[i];
@@ -1841,7 +1935,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
       {
         x23::CoroGuard scheduler_guard;
         co_await scheduler_guard(scheduler_->global_lock_);
-        scheduler_->abandon_pending_nomination(block_id);
+        co_await scheduler_->abandon_pending_nomination(block_id);
       }
       nominated_block_cache_.block_id = 0;
       co_return;
@@ -1886,12 +1980,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     }
     cache.result_tx_hashes = cache.tx_hashes;
     cache.result_tx_nominations.clear();
-    x23::span<bool> ceremony_statuses(cache.statuses.begin(), cache.txs.size());
-    std::ranges::fill(ceremony_statuses, false);
+    cache.failed_tx_hashes.clear();
+    cache.failed_tx_results.clear();
+    x23::span<ExecResult> ceremony_statuses(cache.statuses.begin(),
+                                            cache.txs.size());
+    std::ranges::fill(ceremony_statuses, ExecResult::ExecResultSystemError);
     co_await propose_batch_in_chunks(block_id, cache.txs,
                                      cache.result_tx_nominations,
                                      ceremony_statuses);
-    if (std::ranges::contains(ceremony_statuses, false) ||
+    if (std::ranges::any_of(ceremony_statuses, tx_failed) ||
         cache.result_tx_nominations.size() != cache.txs.size()) {
       co_await cleanup();
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
@@ -2765,10 +2862,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   auto emit_commit_stats = [&](CommitMetricsOutcome outcome,
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
+    const double elapsed = timer.elapsed();
     MempoolMetrics::instance().last_commit_duration_ms.record(
-        mempool_duration_ms(timer.elapsed()));
+        mempool_duration_ms(elapsed));
     switch (outcome) {
     case CommitMetricsOutcome::kOk:
+      // Only successful commits: concurrent and not-found attempts return at
+      // once and would pile into the lowest buckets.
+      MempoolMetrics::instance().commit_duration_seconds.record(elapsed);
       MempoolMetrics::instance().commit_success_count.increment();
       break;
     case CommitMetricsOutcome::kBlockNotFound:
@@ -3080,18 +3181,62 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         reenqueue_size = return_to_runqueue.size();
         CHECK_PTR(remove_from_scheduler);
         remove_from_scheduler_size = remove_from_scheduler->size();
+        if (commit_plan.committed_nominated) {
+          // We committed the block we nominated.
+          for (const TransactionHash &hash :
+               nominated_block_cache_.result_tx_hashes) {
+            co_await scheduler_->record_transaction_outcome(
+                hash,
+                /*status=*/
+                SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                /*height=*/
+                expected_value.proposal_header.block_height,
+                /*error_source=*/
+                SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+                /*error_code=*/0);
+          }
+          CHECK_EQ(nominated_block_cache_.failed_tx_hashes.size(),
+                   nominated_block_cache_.failed_tx_results.size());
+          for (size_t i = 0; i < nominated_block_cache_.failed_tx_hashes.size();
+               i++) {
+            const ExecResult result =
+                nominated_block_cache_.failed_tx_results[i];
+            co_await scheduler_->record_transaction_outcome(
+                /*tx_hash=*/nominated_block_cache_.failed_tx_hashes[i],
+                /*status=*/transaction_status_for_exec(result),
+                /*height=*/expected_value.proposal_header.block_height,
+                /*error_source=*/
+                SchedulerTransactionErrorSource::
+                    SchedulerTransactionErrorExecutor,
+                /*error_code=*/static_cast<int32_t>(result));
+          }
+        }
+        else {
+          // We committed a block we validated.
+          for (const TransactionHash &hash : *remove_from_scheduler) {
+            co_await scheduler_->record_transaction_outcome(
+                hash,
+                /*status=*/
+                SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+                /*height=*/
+                expected_value.proposal_header.block_height,
+                /*error_source=*/
+                SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+                /*error_code=*/0);
+          }
+        }
         co_await scheduler_->remove_from_scheduler(
             x23::span<const TransactionHash>(*remove_from_scheduler));
         if (commit_plan.committed_nominated) {
           x23::CoroGuard cg;
           co_await cg(scheduler_->global_lock_);
-          scheduler_->commit_pending_nomination(block_id);
+          co_await scheduler_->commit_pending_nomination(block_id);
         }
         else {
           if (nominated_block_cache_.block_id) {
             x23::CoroGuard cg;
             co_await cg(scheduler_->global_lock_);
-            scheduler_->abandon_pending_nomination(
+            co_await scheduler_->abandon_pending_nomination(
                 nominated_block_cache_.block_id);
           }
           // [apply_committed_block_hog_ages] acquires
@@ -3140,7 +3285,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         nominated_block_cache_.block_id = 0;
         validated_block_cache_.clear();
 
-        scheduler_->increment_current_block();
+        co_await scheduler_->increment_current_block();
         co_await Health::instance().set_current_block_height(
             last_committed_block_.value.proposal_header.block_height);
         MempoolMetrics::instance().current_block_height.record(
@@ -3155,6 +3300,20 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
                           remove_from_scheduler_size);
         info("schedulercoord_commit_block ret");
+        // Skip the first commit after start and the genesis ceremony (height
+        // 1): neither is a round.
+        if (last_commit_started_) {
+          MempoolMetrics::instance().commit_interval_seconds.record(
+              std::chrono::duration<double>(commit_started_at - last_commit_)
+                  .count());
+          MempoolMetrics::instance().block_period_seconds.record(
+              std::chrono::duration<double>(commit_started_at -
+                                            *last_commit_started_)
+                  .count());
+        }
+        if (expected_value.proposal_header.block_height > 1) {
+          last_commit_started_ = commit_started_at;
+        }
         last_commit_ = std::chrono::steady_clock::now();
         commit_outcome = SchedulerCommitOutcome::SchedulerCommitOK;
         fatal_commit_cleanup.disarm();
@@ -3224,6 +3383,20 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
+
+  std::erase_if(submission_auth_,
+                [](const std::weak_ptr<SubmissionAuth> &entry) {
+                  return entry.expired();
+                });
+  for (const std::weak_ptr<SubmissionAuth> &entry : submission_auth_) {
+    if (std::shared_ptr<SubmissionAuth> pending = entry.lock()) {
+      for (const KeyChange &change : key_changes) {
+        if (pending->accounts.contains(change.address)) {
+          pending->dirty.insert(change.address);
+        }
+      }
+    }
+  }
 
   static TransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;

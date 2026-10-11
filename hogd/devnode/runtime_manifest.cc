@@ -14,7 +14,6 @@
 #include <string_view>
 #include <utility>
 
-#include "built_contracts/dev_wallet.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
@@ -23,10 +22,8 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_hex.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
@@ -124,18 +121,12 @@ std::string
 build_runtime_manifest_json(HogDevnodeNode const &node,
                             NetworkHash const &network_hash)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-
-  DevWalletProfile wallet_profile =
-      resolve_dev_wallet_profile(node.bootstrap_config().dev_wallet_profile);
-  auto wallet_contract = load_dev_wallet_contract(wallet_profile);
-  const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
       node.genesis_configuration().storage_cost_model);
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{2});
+    w.field("schemaVersion", std::int64_t{4});
     w.field("kind", "hogd-dev-runtime");
     w.field("chainState",
             node.recovered_existing_chain() ? "recovered" : "fresh");
@@ -163,15 +154,10 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
               format_advertised_address(node.bind_host(),
                                         node.view_gateway_port()));
     });
-    w.object_field("bootstrapAccountDerivation", [&](json::Writer &w) {
-      w.field("scheme", "groundhog-bootstrap-account-v1");
-      w.field("seed", node.bootstrap_config().seed);
-    });
     w.array_field("bootstrapAccounts", [&](json::Writer &w) {
       for (BootstrapAccountMetadata const &account :
            node.bootstrap_accounts()) {
         w.object([&](json::Writer &w) {
-          w.field("index", static_cast<std::int64_t>(account.index));
           w.field("role", account.role == BootstrapAccountRole::kFaucet
                               ? "faucet"
                               : "local_user");
@@ -183,17 +169,6 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
       }
     });
     w.object_field("bootstrap", [&](json::Writer &w) {
-      w.object_field("devWallet", [&](json::Writer &w) {
-        w.field("contentHash", hex_string(dev_wallet_hash));
-        w.field("deployedCodeHash", hex_string(dev_wallet_hash));
-        w.field("artifactHint", wallet_profile.artifact_hint);
-        w.field("deployEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
-        w.field("doActionEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
-        w.field("createWalletEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
-      });
       w.object_field("storageCostModel", [&](json::Writer &w) {
         write_storage_cost_model(w, storage_cost_model);
       });
@@ -276,7 +251,7 @@ build_readiness_payload(std::filesystem::path const &manifest_path,
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{2});
+    w.field("schemaVersion", std::int64_t{3});
     w.field("status", "ready");
     w.field("manifestPath", manifest_path.string());
     w.field("manifestHash", hex_string(manifest_hash));

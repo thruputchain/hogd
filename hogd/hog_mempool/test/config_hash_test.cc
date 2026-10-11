@@ -27,9 +27,9 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   // Moves whenever the stock configuration changes, which is the point: it
   // pins the preimage so a change to it is deliberate.
   const ConfigHash expected{
-      0x3c, 0x80, 0xfa, 0xfe, 0x78, 0x3c, 0x2a, 0x6b, 0x2a, 0xfc, 0xa3,
-      0xc1, 0x61, 0xae, 0x26, 0x0c, 0xad, 0xba, 0x9b, 0xf5, 0xde, 0x78,
-      0xa0, 0x3c, 0xf1, 0x89, 0x0e, 0xad, 0xca, 0x0b, 0xe9, 0xa6,
+      0x5d, 0x37, 0x3f, 0x8d, 0x68, 0x38, 0x63, 0x6c, 0x1b, 0xbd, 0x05,
+      0xab, 0x7c, 0xfc, 0x0f, 0x3b, 0xa6, 0xbe, 0x4a, 0x13, 0xe1, 0x30,
+      0x92, 0x7c, 0xb4, 0x7f, 0x52, 0x6d, 0x9c, 0x94, 0x6d, 0xa3,
   };
   EXPECT_EQ(compute_config_hash(
                 make_config_hash_preimage(model, network_config, wallet)),
@@ -149,7 +149,7 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
                                  4);
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 10U);
+  EXPECT_EQ(config.v0().params.size(), 13U);
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);
@@ -210,9 +210,7 @@ TEST(ConfigHashTest, ShortListYieldsBytestringDefault)
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_bytestring_len, 4096U);
 }
 
-// Likewise for the contract size parameter: a list stopping at the bytestring
-// limit reads as the 256 KiB every chain ran under before the size was
-// configurable.
+// A list stopping at the bytestring limit uses the contract-size default.
 TEST(ConfigHashTest, ShortListYieldsContractSizeDefault)
 {
   NetworkConfig config;
@@ -223,7 +221,7 @@ TEST(ConfigHashTest, ShortListYieldsContractSizeDefault)
   ASSERT_EQ(config.v0().params.size(), 4U);
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes,
             static_cast<uint32_t>(kDefaultMaxContractSizeBytes));
-  EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes, 256_KiB);
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_contract_size_bytes, 512_KiB);
 
   // Stating it extends the prefix by one and takes effect, above the default
   // as well as below it.
@@ -236,9 +234,8 @@ TEST(ConfigHashTest, ShortListYieldsContractSizeDefault)
 }
 
 // And for the execution limits added after it: a list stopping at the
-// contract size reads as the constants every chain ran under before they were
-// configurable, and stating one extends the prefix, default-filling the slots
-// on the way.
+// contract size reads as the protocol defaults, and stating one extends the
+// prefix, default-filling the slots on the way.
 TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
 {
   NetworkConfig config;
@@ -256,6 +253,7 @@ TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
             static_cast<uint32_t>(kAuthTokenMaxDepth));
   EXPECT_EQ(defaults.max_rv32_code_bytes,
             static_cast<uint32_t>(kDefaultMaxRv32CodeBytes));
+  EXPECT_EQ(defaults.max_rv32_code_bytes, 256_KiB);
   EXPECT_EQ(defaults.max_rv32_memory_bytes,
             static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
 

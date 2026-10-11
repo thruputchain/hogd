@@ -17,13 +17,12 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -86,8 +85,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Contract A writes its own state
         auto r0 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-            contract_a_key, std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+            contract_a_key, std::as_bytes(std::span(contract_a_data)));
         if (!r0.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -143,29 +141,27 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
   // Contract B: Writes state and then reverts with return data
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
-  fns_b.emplace(0,
-                [contract_b_data, contract_b_return_data,
-                 contract_b_key](NativeSyscallContext &ctx)
-                    -> x23::Async<InvokeStatus<void>> {
-                  // Contract B writes state that should be reverted
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), contract_b_key,
-                      std::as_bytes(std::span(contract_b_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE() << "Failed to set bytestring";
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+  fns_b.emplace(
+      0,
+      [contract_b_data, contract_b_return_data, contract_b_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        // Contract B writes state that should be reverted
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            contract_b_key, std::as_bytes(std::span(contract_b_data)));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to set bytestring";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  // Contract B manually reverts with co_return data
-                  ReturnBuffer buffer;
-                  buffer.resize_uninitialized(contract_b_return_data.size());
-                  std::memcpy(buffer.data(), contract_b_return_data.data(),
-                              contract_b_return_data.size());
-                  ctx.handler().set_return_buffer(std::move(buffer), true, {});
-                  co_return InvokeStatus<void>{};
-                });
+        // Contract B manually reverts with co_return data
+        ReturnBuffer buffer;
+        buffer.resize_uninitialized(contract_b_return_data.size());
+        std::memcpy(buffer.data(), contract_b_return_data.data(),
+                    contract_b_return_data.size());
+        ctx.handler().set_return_buffer(std::move(buffer), true, {});
+        co_return InvokeStatus<void>{};
+      });
   auto contract_b = std::make_unique<NativeContract>(std::move(fns_b));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -251,10 +247,8 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
       [contract_a_data, contract_a_key, contract_b_addr](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Contract A writes its own state
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), contract_a_key,
-            std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            contract_a_key, std::as_bytes(std::span(contract_a_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring";
@@ -316,10 +310,8 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
        contract_c_addr](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Contract B writes state that should be reverted
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), contract_b_key,
-            std::as_bytes(std::span(contract_b_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            contract_b_key, std::as_bytes(std::span(contract_b_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring";
@@ -379,29 +371,27 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
   // Contract C: Writes state and reverts with return data
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_c;
-  fns_c.emplace(0,
-                [contract_c_data, contract_c_return_data,
-                 contract_c_key](NativeSyscallContext &ctx)
-                    -> x23::Async<InvokeStatus<void>> {
-                  // Contract C writes state that should be reverted
-                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
-                      ctx.handler(), contract_c_key,
-                      std::as_bytes(std::span(contract_c_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE() << "Failed to set bytestring";
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+  fns_c.emplace(
+      0,
+      [contract_c_data, contract_c_return_data, contract_c_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        // Contract C writes state that should be reverted
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            contract_c_key, std::as_bytes(std::span(contract_c_data)));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to set bytestring";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  // Contract C manually reverts with co_return data
-                  ReturnBuffer buffer;
-                  buffer.resize_uninitialized(contract_c_return_data.size());
-                  std::memcpy(buffer.data(), contract_c_return_data.data(),
-                              contract_c_return_data.size());
-                  ctx.handler().set_return_buffer(std::move(buffer), true, {});
-                  co_return InvokeStatus<void>{};
-                });
+        // Contract C manually reverts with co_return data
+        ReturnBuffer buffer;
+        buffer.resize_uninitialized(contract_c_return_data.size());
+        std::memcpy(buffer.data(), contract_c_return_data.data(),
+                    contract_c_return_data.size());
+        ctx.handler().set_return_buffer(std::move(buffer), true, {});
+        co_return InvokeStatus<void>{};
+      });
   auto contract_c = std::make_unique<NativeContract>(std::move(fns_c));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -487,10 +477,8 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
       [contract_a_data, contract_a_key, contract_b_addr](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Contract A writes its own state
-        auto [res, _gas] = co_await syscall_BytestringSet_inner(
-            ctx.handler(), contract_a_key,
-            std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            contract_a_key, std::as_bytes(std::span(contract_a_data)));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "Failed to set bytestring";

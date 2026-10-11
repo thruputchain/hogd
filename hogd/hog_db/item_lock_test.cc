@@ -4,7 +4,6 @@
 #include <atomic>
 #include <barrier>
 #include <cstddef>
-#include <cstdlib>
 #include <limits>
 #include <new>
 #include <optional>
@@ -21,6 +20,7 @@
 #include "contract.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/test_support/alloc_fault.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
@@ -38,82 +38,6 @@
 #include "x23/cleanup.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
-
-// Thread-local allocation fault injection: while a ScopedAllocationFailure is
-// alive, the Nth allocation on this thread throws std::bad_alloc once (#3000).
-namespace {
-
-thread_local int t_allocation_failure_countdown = -1;
-
-bool
-should_fail_allocation() noexcept
-{
-  if (t_allocation_failure_countdown < 0) {
-    return false;
-  }
-  if (t_allocation_failure_countdown == 0) {
-    t_allocation_failure_countdown = -1;
-    return true;
-  }
-  t_allocation_failure_countdown--;
-  return false;
-}
-
-class ScopedAllocationFailure {
-public:
-  explicit ScopedAllocationFailure(int allocations_before_failure)
-  {
-    t_allocation_failure_countdown = allocations_before_failure;
-  }
-  ~ScopedAllocationFailure() { t_allocation_failure_countdown = -1; }
-
-  ScopedAllocationFailure(const ScopedAllocationFailure &) = delete;
-  ScopedAllocationFailure &operator=(const ScopedAllocationFailure &) = delete;
-};
-
-} // namespace
-
-void *
-operator new(std::size_t size)
-{
-  if (should_fail_allocation()) {
-    throw std::bad_alloc();
-  }
-  if (void *ptr = std::malloc(size == 0 ? 1 : size)) {
-    return ptr;
-  }
-  throw std::bad_alloc();
-}
-
-void *
-operator new[](std::size_t size)
-{
-  return ::operator new(size);
-}
-
-void
-operator delete(void *ptr) noexcept
-{
-  std::free(ptr);
-}
-
-void
-operator delete(void *ptr, std::size_t /*size*/) noexcept
-{
-  std::free(ptr);
-}
-
-void
-operator delete[](void *ptr) noexcept
-{
-  std::free(ptr);
-}
-
-void
-operator delete[](void *ptr, std::size_t /*size*/) noexcept
-{
-  std::free(ptr);
-}
 
 namespace hogd {
 
@@ -1560,6 +1484,8 @@ TEST(ItemLockTest, ExclusiveDeployContractReportsRefundAgainstSnapshotCost)
   EXPECT_EQ(committed.value(), -5000);
 }
 
+#if !HOGD_SANITIZER_OWNS_OPERATOR_NEW
+
 namespace {
 
 // Faults the Nth allocation of a first admission for every N until admission
@@ -1578,7 +1504,7 @@ sweep_first_admission_allocation_faults(MakeChange make_change,
 
     bool threw = false;
     try {
-      ScopedAllocationFailure fail_nth_allocation(nth);
+      test::ScopedAllocationFailure fail_nth_allocation(nth);
       HogDbStatus<int128_t> res =
           lock.try_atomic_change_lock(nullptr, &change, ctx);
       if (res.has_value()) {
@@ -1610,9 +1536,15 @@ sweep_first_admission_allocation_faults(MakeChange make_change,
 
 } // namespace
 
+#endif // !HOGD_SANITIZER_OWNS_OPERATOR_NEW
+
 // Regression test for issue #3000.
 TEST(ItemLockTest, FirstAdmissionAllocationFailureLeavesLockReusable)
 {
+#if HOGD_SANITIZER_OWNS_OPERATOR_NEW
+  GTEST_SKIP() << "faulting an allocation means replacing the global operator "
+                  "new, which the sanitizer runtime already defines";
+#else
   // Expect at least two fault points: the PointerLock itself and one inside
   // the installed sub-lock.
   EXPECT_GE(sweep_first_admission_allocation_faults(
@@ -1622,6 +1554,7 @@ TEST(ItemLockTest, FirstAdmissionAllocationFailureLeavesLockReusable)
                 [] { return ItemChange(ReplayCacheIt(Uniquifier(1, 101))); },
                 make_replay_cache_context),
             2);
+#endif
 }
 
 } // namespace hogd

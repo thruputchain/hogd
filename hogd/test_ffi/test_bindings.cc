@@ -123,6 +123,19 @@ best_effort_log(Fn &&fn) noexcept
   }
 }
 
+// The refusal an entry point reports when it goes to borrow the DB and finds a
+// lifecycle transition (advance_new_block(), free_db()) in flight. The caller
+// retries once that returns; see the threading contract in test_bindings.h.
+void
+log_lifecycle_transition_refusal(char const *entry_point) noexcept
+{
+  best_effort_log([entry_point] {
+    error("{} called while a DB lifecycle operation (advance_new_block or "
+          "free_db) is in flight on this DB; retry once it returns",
+          entry_point);
+  });
+}
+
 // First-use initialization for the test_ffi entry points: runs hogd_init(),
 // allocates the ThreadsafeLogger, and swaps it in as the process logger. Every
 // exported entry point calls this on first use.
@@ -600,6 +613,14 @@ open_syscall_handler(void *db, void *rc,
     return kNullptrError;
   }
   try {
+    // Borrow before deserializing: the deserialize is caller-sized, and until
+    // the handler's guard registers nothing would hold the DB (issue #2667).
+    DBContext::Borrow entry_borrow(*db_context);
+    if (!entry_borrow.held()) {
+      log_lifecycle_transition_refusal("open_syscall_handler");
+      return make_ffi_result_type<OpenSyscallHandlerResult>(
+          kTestFFIErrorCodeUnrecoverableError);
+    }
     hogd::SignedTransaction stx;
     x23::deserialize(&stx, x23::BufView{signed_tx.data, signed_tx.len});
     auto *out = static_cast<void *>(
@@ -641,6 +662,13 @@ open_mocked_syscall_handler(void *db, void *rc,
     return kNullptrError;
   }
   try {
+    // Borrow before deserializing; see open_syscall_handler() (issue #2667).
+    DBContext::Borrow entry_borrow(*db_context);
+    if (!entry_borrow.held()) {
+      log_lifecycle_transition_refusal("open_mocked_syscall_handler");
+      return make_ffi_result_type<OpenSyscallHandlerResult>(
+          kTestFFIErrorCodeUnrecoverableError);
+    }
     hogd::AuthClaim auth_claim_xdr;
     x23::deserialize(&auth_claim_xdr,
                      x23::BufView{auth_claim_data.data, auth_claim_data.len});
@@ -812,7 +840,7 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
 OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           int32_t invoke_flags) noexcept
+                           uint32_t invoke_flags) noexcept
 {
   if (!syscall_handler) {
     best_effort_log(
@@ -912,6 +940,35 @@ pop_context()
   return kTestFFIErrorCodeNone;
 }
 
+// Publish a committed transaction's TxEventLog to the test event aggregator;
+// returns whether it was published. This runs past the commit point, so a
+// failure here is a harness failure, which the caller reports on the FFI
+// channel with result_code still carrying the commit decision (issue #2823).
+// One caveat: an allocation failure for emit_events()'s own coroutine frame
+// leaves the events in the frame, and a debug build's destructor then panics
+// on the close that follows.
+[[nodiscard]] bool
+emit_committed_events(SyscallHandlerContext &context) noexcept
+{
+  try {
+    auto events_res = context.to_handler().emit_events(ExecResult::ExecResultOK,
+                                                       ProposedTransaction{})();
+    if (events_res.has_value()) {
+      return true;
+    }
+    best_effort_log([&] {
+      error("try_commit_transaction: transaction committed, but its events "
+            "were not emitted: {}",
+            events_res.error());
+    });
+  } catch (std::exception const &e) {
+    log_error("try_commit_transaction: transaction committed, but emitting "
+              "its events threw: {}",
+              e);
+  }
+  return false;
+}
+
 ForeignTryCommitResult
 try_commit_transaction(void *syscall_handler) noexcept
 {
@@ -928,7 +985,7 @@ try_commit_transaction(void *syscall_handler) noexcept
 
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
 
-  // Hoisted before try{} so the catch block can free it if emit_events throws.
+  // Hoisted before try{} so the catch block can free it if a later step throws.
   FFIDataBuffer serialized_conflict = kNullBuffer;
 
   try {
@@ -984,17 +1041,14 @@ try_commit_transaction(void *syscall_handler) noexcept
       }
     }
 
-    if (res == ExecResult::ExecResultOK) {
-      auto events_res =
-          context->to_handler().emit_events(ExecResult::ExecResultOK,
-                                            ProposedTransaction{})();
-      if (!events_res.has_value()) {
-        error("failed to emit events: {}", events_res.error());
-        return ForeignTryCommitResult{
-            .result_code = std::to_underlying(
-                SystemCallHandler::to_exec_result(events_res.error().code())),
-            .serialized_conflict = serialized_conflict};
-      }
+    // Past the commit point: an emission failure goes on the FFI channel, not
+    // result_code (issue #2823).
+    if (res == ExecResult::ExecResultOK && !emit_committed_events(*context)) {
+      hogd::free_ffi_data_buffer(serialized_conflict);
+      return ForeignTryCommitResult{.result_code = std::to_underlying(res),
+                                    .serialized_conflict = kNullBuffer,
+                                    .ffi_error_code =
+                                        kTestFFIErrorCodeUnrecoverableError};
     }
     return ForeignTryCommitResult{.result_code = std::to_underlying(res),
                                   .serialized_conflict = serialized_conflict};
@@ -1092,6 +1146,13 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   std::memcpy(addr.data(), contract_addr, addr.size());
 
   try {
+    // A base-DB put() must not overlap the sync() an advance commits with, so
+    // the write holds a borrow (issue #2727); see DBContext::Borrow.
+    DBContext::Borrow borrow(*db_cast);
+    if (!borrow.held()) {
+      log_lifecycle_transition_refusal("setup_grant_contract_storage_tokens");
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
     trace("granting {} storage tokens for address {}", tokens, x23::show(addr));
     db_cast->get_base_db().grant_storage_token(addr, tokens);
   } catch (std::exception const &e) {
@@ -1159,6 +1220,12 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
 
     auto h = sha256(contract);
 
+    // write_contract() is a base-DB put(); see DBContext::Borrow (issue #2727).
+    DBContext::Borrow borrow(*db_cast);
+    if (!borrow.held()) {
+      log_lifecycle_transition_refusal("setup_create_contract");
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
     db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
                                                  std::move(contract)));
   } catch (std::exception const &e) {
@@ -1182,6 +1249,14 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   std::memcpy(h.data(), contract_hash, h.size());
   ContractAddress addr;
   std::memcpy(addr.data(), deployment_addr, addr.size());
+
+  // The deploy reads and writes the base DB, so one borrow covers the whole
+  // access (issue #2727); see DBContext::Borrow.
+  DBContext::Borrow borrow(*db_cast);
+  if (!borrow.held()) {
+    log_lifecycle_transition_refusal("setup_deploy_contract");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
 
   auto &dao = db_cast->get_base_db().get_db();
   Contract contract;
@@ -1666,7 +1741,7 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
 OpenMockInvocationFrameResult
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,
-                           int32_t invoke_flags)
+                           uint32_t invoke_flags)
 {
   hogd::do_ffi_trace(
       "FFI (start): open_mock_invocation_frame(syscall_handler={}, "

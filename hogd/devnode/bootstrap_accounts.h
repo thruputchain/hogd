@@ -9,7 +9,6 @@
 
 #include "genesis.hh"
 #include "hogd/base/types.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "transaction.hh"
@@ -29,7 +28,6 @@ struct BootstrapAccountConfig {
   std::uint32_t count = 0;
   std::string seed = "groundhog-dev-accounts";
   std::uint64_t storage_tokens = kDefaultBootstrapAccountStorageTokens;
-  std::string dev_wallet_profile = std::string(kDefaultDevWalletProfile);
 };
 
 using LocalNetworkConfigOverrides = std::map<std::string, std::uint32_t>;
@@ -43,12 +41,18 @@ void add_local_network_config_override(LocalNetworkConfigOverrides &overrides,
 NetworkConfig
 local_network_config(LocalNetworkConfigOverrides const &overrides);
 
+// Public intent for a nonce-zero native account. Signers belong to callers.
+struct LocalAccountAllocation {
+  Ed25519PublicKey public_key{};
+  std::uint64_t storage_tokens = kDefaultLocalUserStorageTokens;
+  bool operator==(LocalAccountAllocation const &) const = default;
+};
+
 struct LocalBootstrapConfig {
-  std::uint32_t user_account_count = 0;
-  std::string seed = "groundhog-dev-accounts";
-  std::uint64_t user_storage_tokens = kDefaultLocalUserStorageTokens;
-  std::string dev_wallet_profile = std::string(kDefaultDevWalletProfile);
+  Ed25519PublicKey faucet_public_key{};
+  std::vector<LocalAccountAllocation> accounts;
   LocalNetworkConfigOverrides network_config_overrides;
+  bool operator==(LocalBootstrapConfig const &) const = default;
 };
 
 enum class BootstrapAccountRole {
@@ -78,6 +82,10 @@ std::vector<BootstrapAccountMetadata> append_bootstrap_accounts(
 
 std::pair<Ed25519PublicKey, Ed25519SecretKey>
 derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index);
+
+// Native pubkey account address for this signer, with account nonce zero.
+ContractAddress
+derive_bootstrap_account_address(Ed25519PublicKey const &public_key);
 
 BootstrapAccountArtifact
 build_bootstrap_account_artifact(BootstrapAccountConfig const &config,

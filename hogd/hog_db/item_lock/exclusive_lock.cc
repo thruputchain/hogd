@@ -3,6 +3,7 @@
 #include <cassert>
 #include <set>
 
+#include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/item_change.h"
@@ -49,7 +50,18 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     auto const &auth_data = after->to_auth_data();
     x23assert(auth_data.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return ctx.cost_model->get_auth_data_cost(auth_data->count_active_keys());
+    auto const &item = *auth_data;
+    // Refused here, at reservation: the AuthLock admission that commit_change
+    // runs comes after the transaction's balance changes are committed, and
+    // a conflict there poisons the block.
+    if (item.introduces_duplicate_signer()) {
+      return ctx.conflict(DbConflictCode::DuplicateSigner);
+    }
+    // A change that leaves no row reserves nothing, as AuthLock charges it.
+    if (!item.writes_row()) {
+      return 0;
+    }
+    return ctx.cost_model->get_auth_data_cost(item.count_active_keys());
   }
   if (after->is_retrocausal_queue()) {
     // Delegate validation and consume-counting to RetrocausalQueueLock.

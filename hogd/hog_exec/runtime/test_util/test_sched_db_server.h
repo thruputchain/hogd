@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <type_traits>
@@ -20,13 +21,22 @@ public:
   using rpc_service = SchedDb1;
 
   void scheddb_intro_shard(ShardCard const & /*unused*/) {};
-  void scheddb_hogs_transferred(HogsTransferred const &hogs)
+  // Accumulates a block's run and publishes it once every chunk is in, so a
+  // waiter never sees a partially delivered block. Chunks may arrive in any
+  // order.
+  void scheddb_hogs_transferred_chunk(HogsTransferredChunk const &chunk)
   {
-    std::map<ContractAddress, int128_t> hogs_transferred;
-    for (const auto &delta : hogs.deltas) {
-      hogs_transferred[delta.address] = from_xdr(delta.hog_delta);
+    std::unique_lock<std::mutex> lock(mtx_);
+    PendingRun &pending = pending_hogs_transferred_[chunk.block];
+    for (const auto &delta : chunk.deltas) {
+      pending.deltas[delta.address] = from_xdr(delta.hog_delta);
     }
-    register_height(hogs.block, hogs_transferred);
+    if (++pending.received_chunks == chunk.chunk_count) {
+      assert(!hogs_transferred_.contains(chunk.block));
+      hogs_transferred_[chunk.block] = std::move(pending.deltas);
+      pending_hogs_transferred_.erase(chunk.block);
+      cv_.notify_all();
+    }
   };
 
   // access methods
@@ -41,16 +51,12 @@ private:
   std::mutex mtx_;
   std::condition_variable cv_;
   std::map<BlockHeight, std::map<ContractAddress, int128_t>> hogs_transferred_;
+  struct PendingRun {
+    std::map<ContractAddress, int128_t> deltas;
+    uint32_t received_chunks = 0;
+  };
+  std::map<BlockHeight, PendingRun> pending_hogs_transferred_;
   std::map<BlockHeight, ContractAddressBatch> changed_accounts_;
-
-  void register_height(BlockHeight height,
-                       std::map<ContractAddress, int128_t> hogs_transferred)
-  {
-    std::unique_lock<std::mutex> lock(mtx_);
-    assert(!hogs_transferred_.contains(height));
-    hogs_transferred_[height] = std::move(hogs_transferred);
-    cv_.notify_all();
-  }
 };
 
 static_assert(is_SchedDb1<TestSchedDBServer *, std::type_identity_t>);

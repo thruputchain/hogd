@@ -158,6 +158,23 @@ cleanup_child(pid_t pid)
 int
 main() // NOLINT(bugprone-exception-escape)
 {
+  // The launcher owns this fixture. The runtime receives only public intent.
+  char bootstrap_path[] = "/tmp/hog-devnode-fresh-bootstrap-XXXXXX";
+  const int bootstrap_fd = mkstemp(bootstrap_path);
+  if (bootstrap_fd < 0) {
+    fail_with_errno("mkstemp bootstrap");
+  }
+  struct BootstrapCleanup {
+    char const *path;
+    ~BootstrapCleanup() { unlink(path); }
+  } bootstrap_cleanup{bootstrap_path};
+  constexpr std::string_view kBootstrap =
+      R"({"schemaVersion":4,"kind":"groundhog-bootstrap","networkHash":"0000000000000000000000000000000000000000000000000000000000000000","profile":"local-dev","bootstrapFaucet":{"publicKey":"0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","initialStorageTokens":"10000000000000"},"bootstrapAccounts":[],"storageCostModel":{"profile":"hogd-default"}})";
+  if (write(bootstrap_fd, kBootstrap.data(), kBootstrap.size()) !=
+      static_cast<ssize_t>(kBootstrap.size())) {
+    fail_with_errno("write bootstrap");
+  }
+  close(bootstrap_fd);
   int stdout_pipe[2];
   int stderr_pipe[2];
   if (pipe(stdout_pipe) != 0) {
@@ -187,6 +204,8 @@ main() // NOLINT(bugprone-exception-escape)
 
     char *argv[] = {
         const_cast<char *>(HOG_DEVNODE_BINARY),
+        const_cast<char *>("--bootstrap-manifest"),
+        bootstrap_path,
         const_cast<char *>("--listen-host"),
         const_cast<char *>("127.0.0.1"),
         const_cast<char *>("--scheduler-port"),

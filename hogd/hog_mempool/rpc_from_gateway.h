@@ -75,6 +75,14 @@ public:
     co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);
   }
 
+  x23::Async<SchedulerTransactionOutcomeBatch>
+  schedgateway_lookup_transaction_outcomes(
+      const TransactionHashBatch &tx_hashes)
+  {
+    co_return co_await coord_->schedcoord_lookup_transaction_outcomes(
+        tx_hashes);
+  }
+
   x23::Async<PendingTxCount> schedgateway_pending_tx_count()
   {
     // size() is the mempool runqueue + stranded count — the full

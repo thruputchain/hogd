@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -26,6 +27,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -34,6 +36,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -72,10 +75,11 @@ public:
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
-            auto res = co_await ctx.handler().retrocausal_queue_insert(
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
                 key, std::as_bytes(std::span(&val, 1)));
             if (!res.has_value()) {
-              co_return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
             }
           }
           co_return InvokeStatus<void>{};
@@ -84,11 +88,12 @@ public:
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq0");
           // Peek records an observation of a concurrent entry...
-          auto peek =
-              co_await ctx.handler().retrocausal_queue_consume(key,
-                                                               /*peek=*/true);
+          RuntimeMemoryLength entry_len = 0;
+          auto peek = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              key, /*peek=*/true, std::span<std::byte>{}, entry_len);
           if (!peek.has_value()) {
-            co_return peek.error().to_invoke_error();
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                peek.error());
           }
           // ...and then the transaction deterministically faults.
           co_return InvokeError{InvokeErrorCode::Deterministic};

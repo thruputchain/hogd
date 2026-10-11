@@ -22,6 +22,9 @@ env:
   CARGO_REGISTRIES_GROUNDHOG_INDEX: sparse+https://crates.thruput.network/api/v1/crates/
   CARGO_REGISTRIES_GROUNDHOG_SOURCE: sparse+https://crates.thruput.network/api/v1/crates/
   CARGO_BUILD_JOBS: "6"
+  # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
+  # is cached by `cache: rust`); see built_contracts/build_risc.sh.
+  HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
 
 jobs:
   # Clang Debug build + tests
@@ -68,6 +71,7 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
             ~/.cache/cargo-install
+            ~/.cache/rustup
 
       - name: Configure Build Caches
         run: |
@@ -75,7 +79,9 @@ jobs:
           # the cache volume, so every run started cold (933 of 1010 compiles
           # missed). Point it at the cached path, as the Linux workflows do.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+          # 10G was full and evicting on every run (a recent PR run: 57% hits,
+          # 56 cleanups). The profile's cache volume is ~53G.
+          echo "CCACHE_MAXSIZE=20G" >> "$GITHUB_ENV"
 
           # cargo install writes to ~/.cargo/bin, which the cache volume does not
           # cover, so groundhog-cli and groundhog-rv32-lower were compiled from
@@ -86,6 +92,9 @@ jobs:
           mkdir -p "$HOME/.cache/cargo-install/bin"
           echo "Cached cargo-install binaries:"
           ls -l "$HOME/.cache/cargo-install/bin"
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -186,6 +195,7 @@ jobs:
           fi
           ccache -p | grep -E 'cache_dir|max_size|base_dir' || true
           ccache -s
+          python3 scripts/ci/ninja_build_profile.py build/clang
 
       - name: Print Log Download Instructions
         if: always()

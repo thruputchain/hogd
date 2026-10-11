@@ -257,6 +257,18 @@ max_inline_contract_code_size()
   return size;
 }
 
+// Registers an Ed25519 key filled with key_fill at slot public_key_id.
+AuthDataChangeSigner
+make_key_registration(uint32_t public_key_id, uint8_t key_fill)
+{
+  PublicKey key;
+  key.ed25519().fill(key_fill);
+  return AuthDataChangeSigner{.public_key_id = public_key_id,
+                              .public_key = x23::Ptr<PublicKeyConfig>(
+                                  new PublicKeyConfig{.key = key,
+                                                      .max_weight = 100})};
+}
+
 } // namespace
 
 TEST_F(HogDbTest, ContractCodeChunkedRoundtrip)
@@ -1334,6 +1346,116 @@ TEST_F(HogDbTest, DbHashDeltaAuthLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_auth_data(
         addr, args, std::to_underlying(StorageDeltaFlags::None)));
   });
+}
+
+// A written threshold, zero included, replaces the new-row default (#3069).
+TEST_F(HogDbTest, NewAuthRowTakesDefaultRequiredWeightUnlessWritten)
+{
+  Address defaulted = make_address(kAddress + 16);
+  Address explicit_zero = make_address(kAddress + 17);
+  ASSERT_TRUE(db_.write_address_balance(defaulted, 10'000'000));
+  ASSERT_TRUE(db_.write_address_balance(explicit_zero, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs key_only{};
+    key_only.auth_data_change_signers.push_back(make_key_registration(0, 0x11));
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        defaulted, key_only, std::to_underlying(StorageDeltaFlags::None)));
+
+    AuthDataChangeArgs key_and_zero{};
+    key_and_zero.auth_data_change_signers.push_back(
+        make_key_registration(0, 0x12));
+    key_and_zero.new_required_weight = Weight{0};
+    ASSERT_TRUE(invoke_tx.request_auth_data(explicit_zero, key_and_zero,
+                                            std::to_underlying(
+                                                StorageDeltaFlags::None)));
+  });
+
+  auto defaulted_row = db_.read_address_auth_data(defaulted);
+  ASSERT_TRUE(defaulted_row.has_value());
+  EXPECT_TRUE(defaulted_row->public_keys[0]);
+  EXPECT_EQ(defaulted_row->required_weight,
+            Weight{kDefaultNewAddressRequiredWeight});
+
+  auto zero_row = db_.read_address_auth_data(explicit_zero);
+  ASSERT_TRUE(zero_row.has_value());
+  EXPECT_TRUE(zero_row->public_keys[0]);
+  EXPECT_EQ(zero_row->required_weight, Weight{0});
+}
+
+// Removing a key from an address with no auth row has nothing to write: no row
+// is created and no storage is charged (issue #3069).
+TEST_F(HogDbTest, KeyRemovalOnMissingAuthRowWritesNothing)
+{
+  Address addr = make_address(kAddress + 18);
+  constexpr int128_t kBalance = 10'000'000;
+  ASSERT_TRUE(db_.write_address_balance(addr, kBalance));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
+
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance.has_value());
+  EXPECT_EQ(*balance, kBalance);
+}
+
+// A removal that replaces this transaction's own registration on an address
+// with no auth row leaves nothing to write: no row and no storage charge.
+TEST_F(HogDbTest, KeyRegistrationThenRemovalOnMissingAuthRowWritesNothing)
+{
+  Address addr = make_address(kAddress + 19);
+  constexpr int128_t kBalance = 10'000'000;
+  ASSERT_TRUE(db_.write_address_balance(addr, kBalance));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs registration{};
+    registration.auth_data_change_signers.push_back(
+        make_key_registration(0, 0x13));
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, registration, std::to_underlying(StorageDeltaFlags::None)));
+
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
+
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance.has_value());
+  EXPECT_EQ(*balance, kBalance);
+}
+
+// The ExclusiveLock flag prices a removal on a missing row the same way: it
+// reserves nothing, so an address with no balance can still commit it.
+TEST_F(HogDbTest, ExclusiveKeyRemovalOnMissingAuthRowReservesNothing)
+{
+  Address addr = make_address(kAddress + 25);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    AuthDataChangeArgs removal{};
+    removal.auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = 0, .public_key = {}});
+    ASSERT_TRUE(invoke_tx.request_auth_data(
+        addr, removal, std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  });
+
+  auto row = db_.read_address_auth_data(addr);
+  ASSERT_FALSE(row.has_value());
+  EXPECT_EQ(row.error(), HogDbCode::kNotFound);
 }
 
 TEST_F(HogDbTest, DbHashDeltaBalanceLockMatchesFullStateHash)
@@ -3005,6 +3127,75 @@ TEST_F(HogDbTest, TwoInvokeTXsSameNNInt128Key)
     StorageLongHash full_hash = db_.compute_full_db_hash();
     EXPECT_EQ(incremental_hash, full_hash)
         << "Two InvokeTXs modifying same NNInt128 should produce matching hash";
+  }
+}
+
+TEST_F(HogDbTest, CachedItemLocksSurviveSavepointsAndReuse)
+{
+  Address addr = make_address(kAddress);
+  ItemKey key = make_item_key(addr, 0);
+  setup_contract_address(addr);
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr unsigned int kDepth = 8;
+  StorageLongHash base_hash = db_.compute_full_db_hash();
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX tx(block_tx);
+    ASSERT_TRUE(tx.request_nnint128(key, 0, 10, kNoFlags));
+    ASSERT_TRUE(tx.sync_balance_locks());
+
+    // Grow both item and balance version vectors, carrying their handles
+    // through reallocations. Each child also introduces a new item lock.
+    for (unsigned int depth = 1; depth <= kDepth; ++depth) {
+      tx.create_savepoint();
+      ASSERT_TRUE(tx.request_nnint128(key, 0, 10 + depth, kNoFlags));
+      ASSERT_TRUE(
+          tx.request_nnint128(make_item_key(addr, depth), 0, depth, kNoFlags));
+      ASSERT_TRUE(tx.sync_balance_locks());
+    }
+
+    // Restore the root item's reservation and completely release each child
+    // item, including when rollback erases the version holding its handle.
+    tx.rollback_to_savepoint(0);
+    auto value = tx.read_nnint128(key);
+    ASSERT_TRUE(value.has_value());
+    EXPECT_EQ(*value, 10);
+    EXPECT_EQ(tx.change_entry_count_for_testing(), 2U); // item and balance
+    for (unsigned int depth = 1; depth <= kDepth; ++depth) {
+      auto missing = tx.read_nnint128(make_item_key(addr, depth));
+      ASSERT_FALSE(missing.has_value());
+      EXPECT_EQ(missing.error().code(), HogDbCode::kNotFound);
+    }
+
+    // Modify at the same depth, then abort using the retained handles.
+    ASSERT_TRUE(tx.request_nnint128(key, 0, 20, kNoFlags));
+    ASSERT_TRUE(tx.sync_balance_locks());
+    tx.abort();
+    EXPECT_EQ(tx.change_entry_count_for_testing(), 0U);
+
+    // Reacquire the same map entries after abort reset their lock contents,
+    // and commit through the newly retained handles.
+    ASSERT_TRUE(tx.request_nnint128(key, 0, 30, kNoFlags));
+    ASSERT_TRUE(tx.sync_balance_locks());
+    ASSERT_TRUE(tx.commit());
+  }
+
+  auto hash = block_tx.get().close(base_hash);
+  ASSERT_TRUE(hash.has_value());
+  ASSERT_TRUE(block_tx.get().commit());
+  EXPECT_EQ(*hash, db_.compute_full_db_hash());
+  auto value = db_.read_nnint128(key);
+  ASSERT_TRUE(value.has_value());
+  EXPECT_EQ(*value, 30);
+  for (unsigned int depth = 1; depth <= kDepth; ++depth) {
+    auto missing = db_.read_nnint128(make_item_key(addr, depth));
+    ASSERT_FALSE(missing.has_value());
+    EXPECT_EQ(missing.error().code(), HogDbCode::kNotFound);
   }
 }
 

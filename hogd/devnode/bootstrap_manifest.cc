@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -13,20 +14,17 @@
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <initializer_list>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
 
-#include "built_contracts/dev_wallet.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
 #include "types.hh"
@@ -35,12 +33,8 @@ namespace hogd {
 
 namespace {
 
-constexpr std::size_t kMaxBootstrapManifestBytes = 64 * 1024;
+constexpr std::size_t kMaxBootstrapManifestBytes = 256 * 1024;
 constexpr std::string_view kBootstrapManifestKind = "groundhog-bootstrap";
-// v2 supports only the hog-devnode-default contract profile and the
-// hogd-default cost-model profile. When benchmark profiles arrive (spec: Phase
-// 5), this equality check generalizes into a lookup, and the per-profile rule
-// that benchmark profiles must pin `protocol` becomes mandatory.
 constexpr std::string_view kBootstrapProfile = "local-dev";
 constexpr std::string_view kStorageCostModelProfile = "hogd-default";
 
@@ -195,81 +189,108 @@ require_string_value(std::string_view actual, std::string_view expected,
   return {};
 }
 
-// hog-devnode only: this asserts that the manifest matches the dev-wallet
-// artifact the binary already has. In a non-dev backend the relationship
-// reverses: the manifest names the artifact bytes to deploy and the backend
-// verifies its deployed sha256 against the manifest's contentHash.
-std::expected<DevWalletProfile, std::string>
-validate_dev_wallet_assertions(const json::Value &dev_wallet)
+std::expected<void, std::string>
+validate_fields(json::Value const &value,
+                std::initializer_list<std::string_view> allowed,
+                std::string_view context)
 {
-  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-
-  std::expected<std::string_view, std::string> profile_name =
-      require_string_field(dev_wallet, "profile", "devWallet");
-  if (!profile_name) {
-    return std::unexpected(std::move(profile_name.error()));
+  if (value.type() != json::Value::Type::kObject) {
+    return std::unexpected(std::format("{} must be an object", context));
   }
-  if (std::expected<void, std::string> valid =
-          require_string_value(*profile_name, kDefaultDevWalletProfile,
-                               "devWallet.profile");
+  std::set<std::string_view> seen;
+  for (auto const &[name, unused] : value.as_object()) {
+    if (std::ranges::find(allowed, name) == allowed.end()) {
+      return std::unexpected(
+          std::format("unknown {} field '{}'", context, name));
+    }
+    if (!seen.insert(name).second) {
+      return std::unexpected(
+          std::format("duplicate {} field '{}'", context, name));
+    }
+  }
+  return {};
+}
+
+std::expected<LocalAccountAllocation, std::string>
+parse_allocation(json::Value const &value, std::string_view context)
+{
+  if (auto valid = validate_fields(value, {"publicKey", "initialStorageTokens"},
+                                   context);
       !valid) {
-    return std::unexpected(std::move(valid.error()));
+    return std::unexpected(valid.error());
   }
-  DevWalletProfile profile = resolve_dev_wallet_profile(*profile_name);
-
-  std::expected<std::optional<std::string_view>, std::string> content_hash =
-      optional_string_field(dev_wallet, "contentHash", "devWallet");
-  if (!content_hash) {
-    return std::unexpected(std::move(content_hash.error()));
+  auto key = require_string_field(value, "publicKey", context);
+  if (!key) {
+    return std::unexpected(key.error());
   }
-  if (content_hash->has_value()) {
-    auto wallet_contract = load_dev_wallet_contract(profile);
-    const std::string wallet_hash = hex_string(sha256(*wallet_contract));
-    if (std::expected<void, std::string> valid =
-            require_string_value(**content_hash, wallet_hash,
-                                 "devWallet.contentHash");
-        !valid) {
-      return std::unexpected(std::move(valid.error()));
-    }
+  if (key->size() != 66 || !key->starts_with("0x") ||
+      !std::ranges::all_of(key->substr(2), [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+      })) {
+    return std::unexpected(
+        std::format("{}.publicKey must be 0x-prefixed lowercase 32-byte hex",
+                    context));
   }
-
-  std::expected<std::optional<std::string_view>, std::string>
-      deploy_entrypoint =
-          optional_string_field(dev_wallet, "deployEntrypoint", "devWallet");
-  if (!deploy_entrypoint) {
-    return std::unexpected(std::move(deploy_entrypoint.error()));
+  LocalAccountAllocation allocation;
+  auto nibble = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
+  for (std::size_t i = 0; i < allocation.public_key.size(); ++i) {
+    allocation.public_key[i] = static_cast<std::uint8_t>(
+        (nibble((*key)[2 + (2 * i)]) << 4) | nibble((*key)[3 + (2 * i)]));
   }
-  if (deploy_entrypoint->has_value()) {
-    if (std::expected<void, std::string> valid =
-            require_string_value(**deploy_entrypoint,
-                                 entrypoint_hex(
-                                     wallet_meta::entrypoint<u8"deploy">()),
-                                 "devWallet.deployEntrypoint");
-        !valid) {
-      return std::unexpected(std::move(valid.error()));
-    }
+  auto raw = require_string_field(value, "initialStorageTokens", context);
+  if (!raw) {
+    return std::unexpected(raw.error());
   }
-
-  std::expected<std::optional<std::string_view>, std::string>
-      do_action_entrypoint =
-          optional_string_field(dev_wallet, "doActionEntrypoint", "devWallet");
-  if (!do_action_entrypoint) {
-    return std::unexpected(std::move(do_action_entrypoint.error()));
+  auto amount = try_parse_u64(*raw);
+  if (!amount || *amount == 0 || std::to_string(*amount) != *raw) {
+    return std::unexpected(std::format(
+        "{}.initialStorageTokens must be a positive canonical decimal amount",
+        context));
   }
-  if (do_action_entrypoint->has_value()) {
-    if (std::expected<void, std::string> valid =
-            require_string_value(**do_action_entrypoint,
-                                 entrypoint_hex(
-                                     wallet_meta::entrypoint<u8"do_action">()),
-                                 "devWallet.doActionEntrypoint");
-        !valid) {
-      return std::unexpected(std::move(valid.error()));
-    }
-  }
-  return profile;
+  allocation.storage_tokens = *amount;
+  return allocation;
 }
 
 } // namespace
+
+std::expected<LocalBootstrapConfig, std::string>
+parse_local_bootstrap_accounts(json::Value const &value)
+{
+  auto faucet = require_object_field(value, "bootstrapFaucet", "root");
+  if (!faucet) {
+    return std::unexpected(faucet.error());
+  }
+  auto allocation = parse_allocation(**faucet, "bootstrapFaucet");
+  if (!allocation) {
+    return std::unexpected(allocation.error());
+  }
+  if (allocation->storage_tokens != kLocalFaucetStorageTokens) {
+    return std::unexpected(
+        std::format("bootstrapFaucet.initialStorageTokens must be {}",
+                    kLocalFaucetStorageTokens));
+  }
+  auto const *accounts = value.find("bootstrapAccounts");
+  if (accounts == nullptr || accounts->type() != json::Value::Type::kArray) {
+    return std::unexpected("bootstrapAccounts must be an array");
+  }
+  if (accounts->as_array().size() > kMaxBootstrapAccounts) {
+    return std::unexpected("bootstrapAccounts exceeds maximum account count");
+  }
+  LocalBootstrapConfig config{.faucet_public_key = allocation->public_key};
+  std::set<Ed25519PublicKey> keys{config.faucet_public_key};
+  for (auto const &account : accounts->as_array()) {
+    auto parsed = parse_allocation(account, "bootstrapAccounts entry");
+    if (!parsed) {
+      return std::unexpected(parsed.error());
+    }
+    if (!keys.insert(parsed->public_key).second) {
+      return std::unexpected(
+          "duplicate bootstrap public key (including faucet)");
+    }
+    config.accounts.push_back(*parsed);
+  }
+  return config;
+}
 
 std::expected<BootstrapManifestConfig, std::string>
 load_bootstrap_manifest(std::filesystem::path const &path)
@@ -294,15 +315,20 @@ load_bootstrap_manifest(std::filesystem::path const &path)
   if (!schema_version) {
     return std::unexpected(std::move(schema_version.error()));
   }
-  if (*schema_version != 2) {
-    if (*schema_version == 1) {
-      return std::unexpected(
-          "bootstrap manifest schemaVersion 1 uses the legacy account layout; "
-          "upgrade groundhog node to generate schemaVersion 2");
-    }
+  if (*schema_version != 4) {
     return std::unexpected(std::format(
-        "unsupported bootstrap manifest schemaVersion {}, expected 2",
+        "unsupported bootstrap manifest schemaVersion {}, expected 4; "
+        "use the original runtime for legacy manifests or generate a new "
+        "manifest",
         *schema_version));
+  }
+  if (auto valid = validate_fields(*parsed,
+                                   {"schemaVersion", "kind", "networkHash",
+                                    "profile", "protocol", "bootstrapFaucet",
+                                    "bootstrapAccounts", "storageCostModel"},
+                                   "root");
+      !valid) {
+    return std::unexpected(valid.error());
   }
 
   std::expected<std::string_view, std::string> kind =
@@ -323,9 +349,10 @@ load_bootstrap_manifest(std::filesystem::path const &path)
   }
   std::optional<NetworkHash> network_hash =
       parse_network_hash(*network_hash_field);
-  if (!network_hash) {
+  if (!network_hash ||
+      format_network_hash(*network_hash) != *network_hash_field) {
     return std::unexpected("bootstrap manifest networkHash must be exactly 64 "
-                           "hexadecimal characters");
+                           "lowercase hexadecimal characters");
   }
 
   std::expected<std::string_view, std::string> profile =
@@ -352,17 +379,6 @@ load_bootstrap_manifest(std::filesystem::path const &path)
     }
   }
 
-  std::expected<const json::Value *, std::string> dev_wallet_field =
-      require_object_field(*parsed, "devWallet", "root");
-  if (!dev_wallet_field) {
-    return std::unexpected(std::move(dev_wallet_field.error()));
-  }
-  std::expected<DevWalletProfile, std::string> dev_wallet_profile =
-      validate_dev_wallet_assertions(**dev_wallet_field);
-  if (!dev_wallet_profile) {
-    return std::unexpected(std::move(dev_wallet_profile.error()));
-  }
-
   std::expected<const json::Value *, std::string> storage_cost_model =
       require_object_field(*parsed, "storageCostModel", "root");
   if (!storage_cost_model) {
@@ -380,98 +396,18 @@ load_bootstrap_manifest(std::filesystem::path const &path)
     return std::unexpected(std::move(valid.error()));
   }
 
-  std::expected<const json::Value *, std::string> faucet =
-      require_object_field(*parsed, "bootstrapFaucet", "root");
-  if (!faucet) {
-    return std::unexpected(std::move(faucet.error()));
+  if (auto valid = validate_fields(**storage_cost_model, {"profile"},
+                                   "storageCostModel");
+      !valid) {
+    return std::unexpected(valid.error());
   }
-  std::expected<std::int64_t, std::string> faucet_index =
-      require_integer_field(**faucet, "index", "bootstrapFaucet");
-  if (!faucet_index) {
-    return std::unexpected(std::move(faucet_index.error()));
+  auto config = parse_local_bootstrap_accounts(*parsed);
+  if (!config) {
+    return std::unexpected(config.error());
   }
-  if (*faucet_index != 0) {
-    return std::unexpected(std::format(
-        "bootstrap manifest bootstrapFaucet.index must be 0, got {}",
-        *faucet_index));
-  }
-  std::expected<std::string_view, std::string> faucet_tokens_field =
-      require_string_field(**faucet, "initialStorageTokens", "bootstrapFaucet");
-  if (!faucet_tokens_field) {
-    return std::unexpected(std::move(faucet_tokens_field.error()));
-  }
-  const std::optional<std::uint64_t> faucet_tokens =
-      try_parse_u64(*faucet_tokens_field);
-  if (!faucet_tokens) {
-    return std::unexpected(std::format(
-        "Invalid bootstrap manifest bootstrapFaucet.initialStorageTokens: {}",
-        *faucet_tokens_field));
-  }
-  if (*faucet_tokens != kLocalFaucetStorageTokens) {
-    return std::unexpected(std::format(
-        "bootstrap manifest bootstrapFaucet.initialStorageTokens must be {}, "
-        "got {}",
-        kLocalFaucetStorageTokens, *faucet_tokens));
-  }
-
-  std::expected<const json::Value *, std::string> accounts =
-      require_object_field(*parsed, "bootstrapAccounts", "root");
-  if (!accounts) {
-    return std::unexpected(std::move(accounts.error()));
-  }
-  std::expected<std::int64_t, std::string> count =
-      require_integer_field(**accounts, "count", "bootstrapAccounts");
-  if (!count) {
-    return std::unexpected(std::move(count.error()));
-  }
-  if (*count < 0 || std::cmp_greater(*count, kMaxBootstrapAccounts)) {
-    return std::unexpected(
-        std::format("bootstrap manifest bootstrapAccounts.count {} exceeds "
-                    "maximum {}",
-                    *count, kMaxBootstrapAccounts));
-  }
-  std::expected<std::int64_t, std::string> first_index =
-      require_integer_field(**accounts, "firstIndex", "bootstrapAccounts");
-  if (!first_index) {
-    return std::unexpected(std::move(first_index.error()));
-  }
-  if (*first_index != 1) {
-    return std::unexpected(std::format(
-        "bootstrap manifest bootstrapAccounts.firstIndex must be 1, got {}",
-        *first_index));
-  }
-  std::expected<std::string_view, std::string> seed_field =
-      require_string_field(**accounts, "seed", "bootstrapAccounts");
-  if (!seed_field) {
-    return std::unexpected(std::move(seed_field.error()));
-  }
-  std::string seed(*seed_field);
-  if (seed.empty()) {
-    return std::unexpected(
-        "bootstrap manifest bootstrapAccounts.seed must not be empty");
-  }
-  std::expected<std::string_view, std::string> initial_storage_tokens =
-      require_string_field(**accounts, "initialStorageTokens",
-                           "bootstrapAccounts");
-  if (!initial_storage_tokens) {
-    return std::unexpected(std::move(initial_storage_tokens.error()));
-  }
-  const std::optional<std::uint64_t> user_storage_tokens =
-      try_parse_u64(*initial_storage_tokens);
-  if (!user_storage_tokens) {
-    return std::unexpected(
-        std::format("Invalid bootstrap manifest initialStorageTokens: {}",
-                    *initial_storage_tokens));
-  }
-  LocalBootstrapConfig config{
-      .user_account_count = static_cast<std::uint32_t>(*count),
-      .seed = std::move(seed),
-      .user_storage_tokens = *user_storage_tokens,
-      .dev_wallet_profile = std::string(dev_wallet_profile->name),
-  };
   return BootstrapManifestConfig{
       .network_hash = *network_hash,
-      .bootstrap_config = std::move(config),
+      .bootstrap_config = std::move(*config),
   };
 }
 
