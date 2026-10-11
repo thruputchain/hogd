@@ -35,5 +35,15 @@ jobs:
                       profile = root / (label + "-profile")
                       reports = {str(p.relative_to(profile)): p.read_text() for p in profile.rglob("*") if p.name in {"status.txt", "record.txt", "report.txt", "samples.json", "script.log"}}
                       result[label] = {"rows": rows, "storage": storage, "profiles": reports}
+                  import subprocess
+                  details = {}
+                  for path in Path("/tmp/hogjob-hogci/ab_profiles").glob("*-client/perf.data"):
+                      if not (path.parent / "status.txt").exists():
+                          continue
+                      details[path.parent.name] = {}
+                      for name, args in {"header": ["report", "--header-only"], "events": ["evlist", "-v"], "samples": ["script", "-F", "time,ip,sym,dso"]}.items():
+                          p = subprocess.run(["perf", *args, "-i", str(path)], capture_output=True, text=True, timeout=20)
+                          details[path.parent.name][name] = (p.stdout + p.stderr)[:16000]
+                  result["_perf"] = details
                   print("LOCKSTATE " + json.dumps(result))
                   PY
