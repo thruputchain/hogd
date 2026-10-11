@@ -5,12 +5,12 @@ FFI versions are independent of full hogd releases and packaged bundles. Update
 in `hogd/test_ffi/test_bindings.h`, land the change, and push the matching
 `test-ffi-vX.Y.Z` tag through the normal release process.
 
-To push the tag from CI, dispatch `Tag test_ffi Release` on main. It reads the
-version from the header, fails if the tag already exists, and pushes an
-annotated tag on the dispatched commit:
+To push the tag from CI, dispatch `Tag test_ffi Release` on the branch to
+release from. It reads the version from that branch's header, fails if the tag
+already exists, and pushes an annotated tag on the dispatched commit:
 
 ```bash
-gh workflow run tag_test_ffi_release.yml --repo groundhogchain/hogd --ref main
+gh workflow run tag_test_ffi_release.yml --repo groundhogchain/hogd --ref <branch>
 ```
 
 The push uses a `PROTOCOL_SYNCHRONIZER` app token because tags pushed with

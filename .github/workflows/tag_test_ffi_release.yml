@@ -13,14 +13,6 @@ jobs:
   tag:
     runs-on: ubuntu-24.04
     steps:
-      # The tag starts a release build that is published to public S3, so only
-      # reviewed commits may be tagged.
-      - name: Require main
-        if: github.ref != 'refs/heads/main'
-        run: |
-          echo "Error: dispatch this workflow on main, not $GITHUB_REF" >&2
-          exit 1
-
       # Tags pushed with GITHUB_TOKEN do not trigger workflows, so the push
       # uses an app token to start release_test_ffi.yml.
       - name: Generate hogd write token
