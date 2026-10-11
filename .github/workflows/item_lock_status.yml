@@ -15,7 +15,8 @@ jobs:
             - name: Read benchmark progress
               shell: bash
               run: |
-                  ssh -T -o BatchMode=yes -o ConnectTimeout=5 hog10 python3 - <<'PY'
+                  for host in hog10 hog11 hog8; do
+                    ssh -T -o BatchMode=yes -o ConnectTimeout=5 "$host" python3 - <<'PY'
                   import json
                   import re
                   import subprocess
@@ -23,7 +24,14 @@ jobs:
                   work = Path("/tmp/hogjob-hogci")
                   head = subprocess.check_output(["git", "-C", str(work), "rev-parse", "HEAD"], text=True).strip()
                   root = work / "metrics_history/metrics/item-lock-profile/codex/cache-item-lock-handles-1817" / head
-                  result = {"_head": head}
+                  import collections
+                  import socket
+                  import time
+                  result = {"_head": head, "_host": socket.gethostname(), "_now": time.time()}
+                  proc = subprocess.check_output(["ps", "-eo", "comm="], text=True).splitlines()
+                  wanted = {"clang", "clang++", "cc1plus", "rustc", "cmake", "ninja", "g++", "ld", "ld.lld", "payments_bench", "bench_server", "perf"}
+                  result["_process_counts"] = dict(collections.Counter(p.strip() for p in proc if p.strip() in wanted))
+                  result["_build_progress"] = [{"build": p.parent.name, "modified": p.stat().st_mtime, "tail": p.read_text().splitlines()[-3:]} for p in (work / "build/ccache-warm").glob("*/.ninja_log")]
                   if (root / "environment.txt").exists():
                       result["_environment"] = (root / "environment.txt").read_text()
                   for path in sorted(root.glob("*-trials.log")):
@@ -40,3 +48,4 @@ jobs:
                       result[label] = {"rows": rows, "profiles": reports}
                   print("LOCKSTATE " + json.dumps(result))
                   PY
+                  done
