@@ -15,7 +15,7 @@ fi
 date -u +%FT%TZ >"$output/start.txt"
 perf record --timestamp --per-thread --no-inherit -m 4 -e cpu-clock -F 99 \
   --call-graph dwarf,2048 --clockid mono -p "$pid" -o "$output/perf.data" \
-  -- sleep 12 >"$output/record.out" 2>"$output/record.txt"
+  -- sleep 16 >"$output/record.out" 2>"$output/record.txt"
 record_status=$?
 date -u +%FT%TZ >"$output/end.txt"
 echo "record_status=$record_status" >"$output/status.txt"
