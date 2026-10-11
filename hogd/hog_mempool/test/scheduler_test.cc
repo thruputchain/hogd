@@ -668,6 +668,45 @@ TEST(Scheduler, ValidatedCommitAfterUnaffordableHeadTxLeavesAccountReady)
   EXPECT_EQ(scheduler->size(), 0UL);
 }
 
+// A tx resubmitted while it sits in a pending nomination goes back on its
+// runqueue, and a later schedule() pass in the same nomination picks it again.
+// The executors reject the second copy as a replay, but the nominated block's
+// hashes, which remove_from_scheduler() gets on commit, keep both copies.
+TEST(Scheduler, RemoveFromSchedulerSkipsRepeatedHash)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled_hashes.size(), 2UL);
+  EXPECT_EQ(scheduled_hashes[0], tx_hash);
+  EXPECT_EQ(scheduled_hashes[1], tx_hash);
+
+  // Resubmitted again after the last pass, so the commit also has to take the
+  // tx off the runqueue.
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/1)();
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(tx_hash), nullptr);
+}
+
 TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
 {
   constexpr BlockHeight kBlock = 5;
