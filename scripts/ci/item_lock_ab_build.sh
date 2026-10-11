@@ -5,7 +5,6 @@ source ./scripts/ci/prepare_env.sh >prepare_env.log 2>&1 || {
   cat prepare_env.log
   exit 1
 }
-python3 scripts/ci/item_lock_trace.py
 ./scripts/build.sh -d release -t Release -c gcc -x '-DBUILD_BENCHMARKS=ON' -n >build1.log 2>&1 || {
   cat build1.log
   exit 1
@@ -21,7 +20,6 @@ if [[ ${HOG_HOST_KEY} == db ]]; then
   git fetch --depth 1 origin "$base" --no-progress --quiet
   files=(hogd/hog_db/{block_tx,invoke_tx}.{h,cc})
   git restore --source="$base" --worktree -- "${files[@]}"
-  python3 scripts/ci/item_lock_trace.py
   cmake --build release --parallel "$(nproc)" --target bench_server >build-base.log 2>&1 || {
     cat build-base.log
     exit 1

@@ -18,32 +18,25 @@ jobs:
                   ssh -T -o BatchMode=yes -o ConnectTimeout=5 hog10 python3 - <<'PY'
                   import json
                   import re
-                  from pathlib import Path
-                  root = Path("/tmp/hogjob-hogci/metrics_history/metrics/item-lock-state/codex/cache-item-lock-handles-1817/3d007949b3d99a4fb3fa18af061ded62a229840b")
-                  def parse(path, token):
-                      if not path.exists():
-                          return []
-                      return [dict(re.findall(r"(\w+)=(\S+)", line)) for line in path.read_text().splitlines() if token in line]
-                  result = {}
-                  for path in sorted(root.glob("*-recycle-*.log")):
-                      if path.name.endswith("-db.log"):
-                          continue
-                      label = path.stem
-                      rows = parse(path, "LOCKTRIAL")
-                      heights = {r["height"] for r in rows}
-                      storage = [r for r in parse(root / (label + "-db.log"), "LOCKSTORAGE") if r["height"] in heights]
-                      profile = root / (label + "-profile")
-                      reports = {str(p.relative_to(profile)): p.read_text() for p in profile.rglob("*") if p.name in {"status.txt", "record.txt", "report.txt", "samples.json", "script.log"}}
-                      result[label] = {"rows": rows, "storage": storage, "profiles": reports}
                   import subprocess
-                  details = {}
-                  for path in Path("/tmp/hogjob-hogci/ab_profiles").glob("*-client/perf.data"):
-                      if not (path.parent / "status.txt").exists():
-                          continue
-                      details[path.parent.name] = {}
-                      for name, args in {"header": ["report", "--header-only"], "events": ["evlist", "-v"], "samples": ["script", "-F", "time,ip,sym,dso"]}.items():
-                          p = subprocess.run(["perf", *args, "-i", str(path)], capture_output=True, text=True, timeout=20)
-                          details[path.parent.name][name] = (p.stdout + p.stderr)[:16000]
-                  result["_perf"] = details
+                  from pathlib import Path
+                  work = Path("/tmp/hogjob-hogci")
+                  head = subprocess.check_output(["git", "-C", str(work), "rev-parse", "HEAD"], text=True).strip()
+                  root = work / "metrics_history/metrics/item-lock-profile/codex/cache-item-lock-handles-1817" / head
+                  result = {"_head": head}
+                  if (root / "environment.txt").exists():
+                      result["_environment"] = (root / "environment.txt").read_text()
+                  for path in sorted(root.glob("*-trials.log")):
+                      label = path.name.removesuffix("-trials.log")
+                      rows = [dict(re.findall(r"(\w+)=(\S+)", line)) for line in path.read_text().splitlines() if "LOCKTRIAL" in line]
+                      profile = root / (label + "-profile")
+                      reports = {}
+                      for p in profile.rglob("*"):
+                          if p.name in {"status.txt", "record.txt", "report.txt", "samples.json", "script.log", "start.txt", "end.txt"}:
+                              data = p.read_text()
+                              if p.name == "report.txt":
+                                  data = "\n".join(data.splitlines()[:65])
+                              reports[str(p.relative_to(profile))] = data
+                      result[label] = {"rows": rows, "profiles": reports}
                   print("LOCKSTATE " + json.dumps(result))
                   PY

@@ -12,8 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include <sys/resource.h>
-
 #include "exec_result.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -92,27 +90,17 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
   assert((total_work_txs.size() % num_reps) == 0);
   assert(num_txs_per_rep == total_work_txs.size() / num_reps);
 
-  const bool diagnostic = std::getenv("HOG_LOCK_DIAGNOSTIC") != nullptr;
-  const size_t source_reps = num_reps;
-  if (diagnostic && num_exec_threads == 2048) {
-    num_reps = 40;
-  }
   for (size_t nrep = 0U; nrep < num_reps; nrep++) {
     info("bench rep {} for {} txs (accts {}) on {} threads", nrep,
          num_txs_per_rep, bs.num_accounts_, num_exec_threads);
     auto work_txs =
-        total_work_txs.subspan((nrep % source_reps) * num_txs_per_rep,
-                               num_txs_per_rep);
+        total_work_txs.subspan(nrep * num_txs_per_rep, num_txs_per_rep);
 
     // The work txs are reused across reps and scaling configs, so overwrite
     // their uniquifiers each rep (the signature covers only the inner calldata,
     // not the uniquifier). Capture the height they commit against so expiry
     // heights are not yet expired; cleared after the rep.
     const auto base_height = bs.block_height();
-    rusage before{}, after{};
-    if (diagnostic) {
-      getrusage(RUSAGE_SELF, &before);
-    }
     auto start_time = std::chrono::steady_clock::now();
 
     uint32_t ntx_per_thread = num_txs_per_rep / num_exec_threads;
@@ -175,37 +163,8 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
     for (auto &f : futures) {
       f.wait();
     }
-    const auto execution_end = std::chrono::steady_clock::now();
     events_done.wait(false);
     auto finish_time = std::chrono::steady_clock::now();
-    if (diagnostic) {
-      getrusage(RUSAGE_SELF, &after);
-      const auto us = [](auto delta) {
-        return std::chrono::duration_cast<std::chrono::microseconds>(delta)
-            .count();
-      };
-      const auto tv_us = [](timeval t) {
-        return t.tv_sec * 1000000L + t.tv_usec;
-      };
-      std::println(stderr,
-                   "LOCKTRIAL rep={} threads={} height={} extra={} start_ns={} "
-                   "end_ns={} time_us={} execution_us={} event_us={} "
-                   "user_us={} sys_us={} voluntary={} involuntary={}",
-                   nrep, num_exec_threads, base_height,
-                   num_exec_threads == 2048 && (nrep / 10) % 2 == 1,
-                   std::chrono::duration_cast<std::chrono::nanoseconds>(
-                       start_time.time_since_epoch())
-                       .count(),
-                   std::chrono::duration_cast<std::chrono::nanoseconds>(
-                       finish_time.time_since_epoch())
-                       .count(),
-                   us(finish_time - start_time), us(execution_end - start_time),
-                   us(finish_time - execution_end),
-                   tv_us(after.ru_utime) - tv_us(before.ru_utime),
-                   tv_us(after.ru_stime) - tv_us(before.ru_stime),
-                   after.ru_nvcsw - before.ru_nvcsw,
-                   after.ru_nivcsw - before.ru_nivcsw);
-    }
     std::println("time taken: {} us for {} txs (accts {}) on {} threads",
                  std::chrono::duration_cast<std::chrono::microseconds>(
                      finish_time - start_time)
@@ -219,9 +178,6 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
     // Expire this rep's uniquifiers so the reused txs can be re-committed with
     // fresh uniquifiers next rep/config. Outside the timed region.
     bs.clear_uniquifiers(num_txs_per_rep);
-    if (diagnostic && num_exec_threads == 2048 && (nrep / 10) % 2 == 1) {
-      bs.advance_block();
-    }
   }
 }
 
@@ -346,9 +302,6 @@ run_payments_bench(std::vector<std::string> const &server_addrs,
                                                                  100000 *
                                                                      num_reps),
                   nthread, 100000, num_reps);
-  }
-  if (std::getenv("HOG_LOCK_DIAGNOSTIC") != nullptr) {
-    return;
   }
   // weak scaling
   for (auto nthread : {64, 128, 256, 512, 1024, 2048}) {
