@@ -15,7 +15,25 @@ jobs:
             - name: Read benchmark progress
               shell: bash
               run: |
-                  for host in hog10 hog11 hog8; do
-                    echo "Host: $host"
-                    ssh -n -T -o BatchMode=yes -o ConnectTimeout=5 "$host" 'cd /tmp/hogjob-hogci && git rev-parse HEAD && if [ -f ab-active.txt ]; then cat ab-active.txt; fi && for f in metrics_history/metrics/item-lock-state/codex/cache-item-lock-handles-1817/3d007949b3d99a4fb3fa18af061ded62a229840b/*-recycle-*.log; do if [ -f "$f" ]; then echo "$f"; grep LOCKTRIAL "$f" | tail -3; fi; done' || true
-                  done
+                  ssh -T -o BatchMode=yes -o ConnectTimeout=5 hog10 python3 - <<'PY'
+                  import json
+                  import re
+                  from pathlib import Path
+                  root = Path("/tmp/hogjob-hogci/metrics_history/metrics/item-lock-state/codex/cache-item-lock-handles-1817/3d007949b3d99a4fb3fa18af061ded62a229840b")
+                  def parse(path, token):
+                      if not path.exists():
+                          return []
+                      return [dict(re.findall(r"(\w+)=(\S+)", line)) for line in path.read_text().splitlines() if token in line]
+                  result = {}
+                  for path in sorted(root.glob("*-recycle-*.log")):
+                      if path.name.endswith("-db.log"):
+                          continue
+                      label = path.stem
+                      rows = parse(path, "LOCKTRIAL")
+                      heights = {r["height"] for r in rows}
+                      storage = [r for r in parse(root / (label + "-db.log"), "LOCKSTORAGE") if r["height"] in heights]
+                      profile = root / (label + "-profile")
+                      reports = {str(p.relative_to(profile)): p.read_text() for p in profile.rglob("*") if p.name in {"status.txt", "record.txt", "report.txt", "samples.json", "script.log"}}
+                      result[label] = {"rows": rows, "storage": storage, "profiles": reports}
+                  print("LOCKSTATE " + json.dumps(result))
+                  PY
