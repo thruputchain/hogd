@@ -98,11 +98,14 @@ public:
     // [RPCContext::ramdb_write_pass_lock()], and ramdb's [write_record()]
     // CHECKs the invariant (#3397). As a side note, it is okay for
     // [commit_snapshot()] and [abandon_snapshot()] to race. We ensure that
-    // [scheduler_->write_all_average_hog_ages_to_db()] completes before we
+    // [scheduler_->maybe_write_dirty_hog_ages_to_db()] completes before we
     // update [scheduler_->transfer_finished_], so we do not need to worry
     // about these hog age writes updating with the *next* block commit
     // either.
-    co_await scheduler_->write_all_average_hog_ages_to_db();
+    //
+    // Only the accounts whose ages changed are written, and at most once per
+    // [Scheduler::kDefaultHogAgeWriteIntervalBlocks] blocks (#4384).
+    co_await scheduler_->maybe_write_dirty_hog_ages_to_db(transfers.block);
 
     scheduler_->transfer_finished_.store(transfers.block);
     scheduler_->transfer_finished_.broadcast(&default_threadpool());

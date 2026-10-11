@@ -31,12 +31,25 @@ class Scheduler {
 public:
   static constexpr BlockHeight kTransactionOutcomeBlockLifetime = 50;
   static constexpr size_t kMaxTransactionOutcomes = 50'000'000;
+  // How many blocks may pass between hog age writes to hog_db. Each write
+  // carries only the accounts whose cached [HogAge] changed since the last
+  // write, so a longer interval also coalesces repeated updates to busy
+  // accounts into one WAL record. The kHogAge rows are not consensus state and
+  // hog_db reconciles them against balances at startup, so a row that lags the
+  // scheduler's cache by a few blocks is acceptable (#4384).
+  static constexpr BlockHeight kDefaultHogAgeWriteIntervalBlocks = 32;
 
   Scheduler(BlockHeight current_block,
-            std::shared_ptr<db_sched_client_t> db_sched_client)
+            std::shared_ptr<db_sched_client_t> db_sched_client,
+            BlockHeight hog_age_write_interval_blocks =
+                kDefaultHogAgeWriteIntervalBlocks)
     : current_block_(current_block),
-      db_sched_client_(std::move(db_sched_client))
-  {}
+      db_sched_client_(std::move(db_sched_client)),
+      hog_age_write_interval_blocks_(hog_age_write_interval_blocks),
+      last_hog_age_write_block_(current_block)
+  {
+    CHECK_GT(hog_age_write_interval_blocks_, 0);
+  }
 
   ~Scheduler() { wait_for_pending_detached_coroutines(); }
 
@@ -166,7 +179,20 @@ public:
   std::pair<HogAge *, std::unique_lock<std::mutex>>
   get_cached_hog_age(const ContractAddress &address);
 
-  x23::Async<void> write_all_average_hog_ages_to_db();
+  // Writes the hog ages of the accounts marked dirty since the last write and
+  // clears those marks. Sends nothing when no account is dirty.
+  x23::Async<void> write_dirty_hog_ages_to_db();
+
+  // Calls [write_dirty_hog_ages_to_db()] if at least
+  // [hog_age_write_interval_blocks_] blocks have passed since the last write.
+  // [block_height] is the block whose transfers were just processed.
+  x23::Async<void> maybe_write_dirty_hog_ages_to_db(BlockHeight block_height);
+
+  size_t num_dirty_hog_ages()
+  {
+    std::lock_guard<std::mutex> lock(dirty_hog_ages_mutex_);
+    return dirty_hog_ages_.size();
+  }
 
   struct ReadAverageHogAgesResult {
     std::unordered_set<ContractAddress, SipHash24Hasher> found;
@@ -341,6 +367,11 @@ private:
   void erase_ready_account(const ContractAddress &account);
   x23::Async<void> prune_transaction_outcomes();
 
+  // Records that [account]'s cached [HogAge] in [accounts_] changed and must be
+  // written to hog_db. Callers may hold the account's [accounts_] lock; the
+  // lock order is account lock, then [dirty_hog_ages_mutex_].
+  void mark_hog_age_dirty(const ContractAddress &account);
+
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
@@ -377,6 +408,17 @@ private:
   std::shared_ptr<db_sched_client_t> db_sched_client_;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
+
+  // Accounts whose cached [HogAge] changed since the last hog age write.
+  // Writing only these, rather than every cached account, keeps an idle block
+  // from appending a WAL record per account ever seen (#4384).
+  std::mutex dirty_hog_ages_mutex_;
+  std::unordered_set<ContractAddress, SipHash24Hasher> dirty_hog_ages_;
+
+  const BlockHeight hog_age_write_interval_blocks_;
+  // Only touched from [MempoolDbRpc::handle_transfer()], which runs one block
+  // at a time under its scheduler lock.
+  BlockHeight last_hog_age_write_block_;
 };
 
 } // namespace hogd

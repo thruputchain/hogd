@@ -19,7 +19,6 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
-#include "hogd/base/perthread.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -107,30 +106,52 @@ try_move_hogs_to_already_scheduled_group(HogAge &hog_ages, uint128_t num_hogs,
 
 } // namespace
 
-x23::Async<void>
-Scheduler::write_all_average_hog_ages_to_db()
+void
+Scheduler::mark_hog_age_dirty(const ContractAddress &account)
 {
-  co_await default_coropoll().pool_.bg();
+  std::lock_guard<std::mutex> lock(dirty_hog_ages_mutex_);
+  dirty_hog_ages_.insert(account);
+}
 
-  PerThread<HogAgeBatch> ages_by_thread;
-  accounts_.for_each_parallel(
-      [&](const std::pair<ContractAddress, AccountState> &p) {
-        const HogAge &age = p.second.hog_age;
-        CHECK_EQ(p.first, age.address);
-        ages_by_thread->push_back(age);
-      });
-
-  HogAgeBatch ages;
-  ages.reserve(accounts_.size());
+x23::Async<void>
+Scheduler::write_dirty_hog_ages_to_db()
+{
+  std::unordered_set<ContractAddress, SipHash24Hasher> dirty;
   {
-    auto ul = ages_by_thread.lock_threads();
-    ages_by_thread.for_each(ul, [&ages](HogAgeBatch &per_thread_ages) {
-      ages += per_thread_ages;
-    });
+    std::lock_guard<std::mutex> lock(dirty_hog_ages_mutex_);
+    dirty.swap(dirty_hog_ages_);
   }
+  if (dirty.empty()) {
+    co_return;
+  }
+
+  // An account marked dirty again while this write is in flight lands in the
+  // fresh [dirty_hog_ages_] and goes out with the next write. Each age is read
+  // under its account lock after the swap, so the batch never carries a value
+  // older than the mark that put the account in [dirty].
+  HogAgeBatch ages;
+  ages.reserve(dirty.size());
+  for (const ContractAddress &account : dirty) {
+    auto [account_state, lock] = get_account_state(account);
+    CHECK_EQ(account_state->hog_age.address, account);
+    ages.push_back(account_state->hog_age);
+  }
+  // A failed write is fatal, so the marks dropped by the swap above are never
+  // silently lost.
   CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
            DbSchedResult::DbSchedResultOK);
   co_return;
+}
+
+x23::Async<void>
+Scheduler::maybe_write_dirty_hog_ages_to_db(BlockHeight block_height)
+{
+  if (block_height - last_hog_age_write_block_ <
+      hog_age_write_interval_blocks_) {
+    co_return;
+  }
+  co_await write_dirty_hog_ages_to_db();
+  last_hog_age_write_block_ = block_height;
 }
 
 std::pair<HogAge *, std::unique_lock<std::mutex>>
@@ -165,6 +186,7 @@ Scheduler::commit_pending_nomination(BlockID block_id)
   for (const auto &[account, hog_age] : pending_nomination_.hog_ages) {
     auto [account_state, lock] = get_account_state(account);
     account_state->hog_age = hog_age;
+    mark_hog_age_dirty(account);
   }
   co_await refresh_ready_accounts(pending_nomination_.touched_accounts);
   co_await refresh_accounts_excluded_from_block();
@@ -261,6 +283,7 @@ Scheduler::apply_committed_block_hog_ages(
 
     auto [account_state, lock] = get_account_state(account);
     account_state->hog_age = hog_age;
+    mark_hog_age_dirty(account);
     touched_accounts.insert(account);
   }
   co_await refresh_ready_accounts(touched_accounts);
@@ -397,6 +420,9 @@ Scheduler::get_hog_age_from_pending_nomination_create_if_needed(
     AccountState &account_state, const ContractAddress &account)
 {
   if (!pending_nomination_.block_id) {
+    // The caller may change the cached age directly, e.g. by cycling groups in
+    // [add_txs()], so it must be written back to hog_db.
+    mark_hog_age_dirty(account);
     return &account_state.hog_age;
   }
 
@@ -981,6 +1007,14 @@ Scheduler::process_transfers(const BlockTransfers &transfers)
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
+  }
+  // Every delta is nonzero (process_transfers_helper() CHECKs it), so it
+  // changed its account's age; this also covers the accounts seeded above.
+  {
+    std::lock_guard<std::mutex> lock(dirty_hog_ages_mutex_);
+    for (const Delta &delta : transfers.deltas) {
+      dirty_hog_ages_.insert(delta.address);
+    }
   }
 }
 
