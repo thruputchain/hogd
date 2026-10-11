@@ -1348,7 +1348,14 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             {
               const auto [tx_value_ptr, txs_lock] =
                   scheduler.txs_.find(tx_hash);
-              CHECK_PTR(tx_value_ptr);
+              if (tx_value_ptr == nullptr) {
+                // [tx_hashes] can repeat a hash. A tx resubmitted while it sits
+                // in a pending nomination goes back on the runqueue, and a
+                // later [schedule()] pass picks it again. The executors reject
+                // the second copy as a replay, but the nominated block's hashes
+                // keep both, and an earlier copy already removed this one.
+                continue;
+              }
               tx_value = *tx_value_ptr;
             }
 
@@ -1373,11 +1380,13 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               // Keep the account locked until the cache entry is gone, so a
               // concurrent resubmit cannot restore only the runqueue entry.
               //
-              // [txs_.remove()] acquires a lock, so the subtraction from
-              // [tx_cache_size_] happens before the tx is removed from [txs_]
-              // from the perspective of anyone accessing the tx in [txs_].
-              scheduler.tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
-              CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
+              // A repeat of [tx_hash] in another chunk can pass the lookup
+              // above and then find the entry already removed, so only the
+              // copy that removes it adjusts [tx_cache_size_].
+              if (scheduler.txs_.remove(tx_hash) == 1UL) {
+                scheduler.tx_cache_size_.fetch_sub(1,
+                                                   std::memory_order_relaxed);
+              }
             }
           }
 
