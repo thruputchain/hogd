@@ -28,7 +28,7 @@ jobs:
                       code = profiler.read_text()
                       code = code.replace("perf record --per-thread", "perf record --timestamp --per-thread")
                       if "set -o pipefail" not in code:
-                          code = code.replace("set +e\\n", "set +e\\nset -o pipefail\\n")
+                          code = code.replace("set +e\n", "set +e\nset -o pipefail\n")
                       profiler.write_text(code)
                   root = work / "metrics_history/metrics/item-lock-profile/codex/cache-item-lock-handles-1817" / head
                   import collections
@@ -51,8 +51,33 @@ jobs:
                               data = p.read_text()
                               if p.name == "report.txt":
                                   data = "\n".join(data.splitlines()[:65])
+                              if p.name == "samples.json":
+                                  parsed = json.loads(data)
+                                  data = json.dumps({k: {"samples": v["samples"], "symbols": v["symbols"][:10], "stacks": v["stacks"][:3]} for k, v in parsed.items() if k.startswith("threads=2048")})
                               reports[str(p.relative_to(profile))] = data
                       result[label] = {"rows": rows, "profiles": reports}
+                  if head == "803ecf7e2c7afb6666e998ee2e8f51d314a5b2a7" and socket.gethostname() == "hog11":
+                      import tempfile
+                      remote = "import json,time; from pathlib import Path; print(json.dumps([time.monotonic_ns()-time.time_ns(),Path('/tmp/hogjob-hogci/metrics_history/metrics/item-lock-profile/codex/cache-item-lock-handles-1817/803ecf7e2c7afb6666e998ee2e8f51d314a5b2a7/3-pr-recycle-on-trials.log').read_text()]))"
+                      import shlex
+                      client_offset, trials = json.loads(subprocess.check_output(["ssh", "-T", "-o", "BatchMode=yes", "hog10", "python3 -c " + shlex.quote(remote)], text=True))
+                      delta = time.monotonic_ns() - time.time_ns() - client_offset
+                      rows = [dict(re.findall(r"(\w+)=(\S+)", line)) for line in trials.splitlines() if "LOCKTRIAL" in line]
+                      with tempfile.NamedTemporaryFile(mode="w", suffix="-item-lock-trials.log") as f:
+                          for row in rows:
+                              if row["threads"] == "2048" and row["txs"] == "100000":
+                                  for key in ["start_ns", "end_ns"]:
+                                      row[key] = str(int(row[key]) + delta)
+                                  f.write("LOCKTRIAL " + " ".join(k + "=" + v for k,v in row.items()) + "\n")
+                          f.flush()
+                          p = subprocess.Popen(["perf", "script", "-i", str(work / "ab_profiles/3-pr-recycle-on-db/perf.data"), "-F", "time,ip,sym,dso"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                          parsed = subprocess.run(["python3", str(work / "scripts/ci/item_lock_samples.py"), f.name], stdin=p.stdout, stdout=subprocess.PIPE, text=True)
+                          p.stdout.close()
+                          errors = p.stderr.read().decode()
+                          p.wait()
+                          result["_db_map_status"] = {"perf":p.returncode, "parser":parsed.returncode, "stderr":errors, "clock_delta_ns":delta}
+                          all_samples = json.loads(parsed.stdout)
+                          result["_db_trials"] = {k: {"samples": v["samples"], "symbols":v["symbols"][:15], "stacks":v["stacks"][:5]} for k,v in all_samples.items()}
                   print("LOCKSTATE " + json.dumps(result))
                   PY
                   done
