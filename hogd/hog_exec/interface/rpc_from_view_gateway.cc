@@ -25,7 +25,6 @@
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/view/view.h"
 #include "hogd/version.h"
-#include "hogd/xdr/protocol_token.h"
 #include "invoke_flag.hh"
 #include "network.hh"
 #include "rpc_types.hh"
@@ -83,10 +82,7 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
 ViewGatewayIntroOutcome
 ViewGatewayRpc::viewgateway_intro(ProtocolCommit const &protocol)
 {
-  // After normal schema negotiation, gateways can probe claim preservation
-  // without changing the XDR layout. Older runtimes reject this token.
-  if (protocol != version::kHogdProtocol() &&
-      protocol != protocol_from_text("view-auth-claims-v1_")) {
+  if (protocol != version::kHogdProtocol()) {
     return ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol;
   }
   return ViewGatewayIntroOutcome::ViewGatewayIntroSuccess;

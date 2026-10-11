@@ -594,9 +594,6 @@ TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
                                      framework_.get_db_exec_port()),
                          "localhost", framework_.get_event_exec_port());
   x23::Defer cleanup([&] { gateway.shut_down(); });
-  EXPECT_EQ(gateway.viewgateway_intro(
-                protocol_from_text("view-auth-claims-v1_")),
-            ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
 
   ContractTraitClient<authclaim_test::AuthClaimTest> ordinary(address);
   auto default_claim = make_read_query();
