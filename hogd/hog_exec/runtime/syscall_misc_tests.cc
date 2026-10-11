@@ -606,7 +606,8 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_return_buffer_too_long">(
-                          UINT64_MAX, kTargetAddress),
+                          UINT64_MAX, kTargetAddress,
+                          NetworkConfigParams{}.max_return_buffer_len),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -615,11 +616,10 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// The Return length gate is strict (> kMaxReturnBufferLen): a child
-// returning exactly kMaxReturnBufferLen bytes finishes with frame status
-// Return, and the parent retrieves all kMaxReturnBufferLen bytes intact.
-// Pins the accept side of the boundary whose reject side is
-// TestReturnBufferTooLong.
+// The Return length gate is strict (> the limit in force): a child returning
+// exactly that many bytes finishes with frame status Return, and the parent
+// retrieves all of them intact. Pins the accept side of the boundary whose
+// reject side is TestReturnBufferTooLong.
 TEST_F(SyscallMiscTests, TestReturnBufferExactMax)
 {
   deploy_target();
@@ -627,7 +627,8 @@ TEST_F(SyscallMiscTests, TestReturnBufferExactMax)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_return_buffer_exact_max">(
-                          UINT64_MAX, kTargetAddress),
+                          UINT64_MAX, kTargetAddress,
+                          NetworkConfigParams{}.max_return_buffer_len),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
