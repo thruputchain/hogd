@@ -117,12 +117,19 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
                                              const change_type *after,
                                              const LockContext &ctx)
 {
+  auto r = get_meta(&ctx);
+  if (!r.has_value()) {
+    return r.error();
+  }
+  CHECK(*r != nullptr);
+  auto &meta = **r;
+
   if (!after) {
     // Undo the changes from before.
     CHECK(before != nullptr);
     auto const &delta = before->delta();
 
-    if (delta.consume) {
+    if (claims_consumer(delta, meta)) {
       consumed_.store(false, std::memory_order_relaxed);
     }
 
@@ -132,11 +139,6 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
                                       std::memory_order_relaxed);
     }
 
-    auto r = get_meta(&ctx);
-    if (!r.has_value()) {
-      return r.error();
-    }
-    auto &meta = **r;
     return ctx.cost_model->get_retrocausal_queue_cost(meta.live_entries);
   }
 
@@ -147,8 +149,8 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
 
   // Check strict single-consumer constraint
   const bool this_tx_already_consumed =
-      (before != nullptr && before->delta().consume != nullptr);
-  if (delta.consume) {
+      (before != nullptr && claims_consumer(before->delta(), meta));
+  if (claims_consumer(delta, meta)) {
     if (consumed_.load(std::memory_order_relaxed) &&
         !this_tx_already_consumed) {
       // We must abort to maintain MPSC semantics. If this tx has not consumed
@@ -178,13 +180,6 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     // fallible step after this point stays correct automatically.
     undo.push([this] { consumed_.store(true, std::memory_order_relaxed); });
   }
-
-  auto r = get_meta(&ctx);
-  if (!r.has_value()) {
-    return r.error();
-  }
-  CHECK(*r != nullptr);
-  auto &meta = **r;
 
   // Executor should ensure that we never consume from a block that hasn't been
   // inserted to yet.
@@ -253,7 +248,17 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     });
   }
 
-  if (delta.consume) {
+  if (delta.replace) {
+    // The executor replaced the key without reading the committed queue, so
+    // HogDb places the consume: past every committed entry (see
+    // commit_change). Any explicit consume carries only current-block entries.
+    if (delta.consume && delta.consume->past_block_consume !=
+                             RetrocausalQueuePastBlockConsumeDelta{}) {
+      return HogDbError{HogDbCode::kInvalidExecutorBehavior};
+    }
+    after->consumed_past_entries_ = meta.live_entries;
+  }
+  else if (delta.consume) {
     // Now that we know this transaction will commit, we need to do one more
     // thing before we compute storage costs. commit_change() should not
     // consult the DAO, but the number of entries consumed by this delta
@@ -394,6 +399,15 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   auto r = get_meta(nullptr);
   CHECK(r.has_value());
   auto &meta = **r;
+
+  // Spell out the consume a replace delta leaves implicit, so the rest of
+  // this lock sees it as an ordinary consume of the whole committed queue.
+  if (change.delta_.replace && claims_consumer(change.delta_, meta)) {
+    if (!change.delta_.consume) {
+      change.delta_.consume.emplace();
+    }
+    change.delta_.consume->past_block_consume = replaced_past_consume(meta);
+  }
 
   auto calculate_cost = [&]() {
     int64_t live_entries = meta.live_entries + committed_element_count_delta_;

@@ -161,6 +161,26 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
   // peak for reservation accounting in RetrocausalQueueLock.
   max_insert_count_ = std::max(max_insert_count_, earlier.max_insert_count_);
 
+  // Once a transaction replaces the queue it stays replaced: a later delete
+  // and recreate replaces it again.
+  if (earlier.delta_.replace && !delta_.replace) {
+    return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
+  }
+
+  if (delta_.replace) {
+    // A replacement consumes the whole committed queue, which subsumes any
+    // earlier past-block position, and it leaves that consume implicit when
+    // there are no other consumes, so the consume may disappear. Concurrent
+    // entries already consumed are carried over and can only grow.
+    auto current_consumed = [](RetrocausalQueueDelta const &d) -> size_t {
+      return d.consume ? d.consume->current_block_consumed.size() : 0;
+    };
+    if (current_consumed(delta_) < current_consumed(earlier.delta_)) {
+      return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
+    }
+    return true;
+  }
+
   // The cumulative delta's consume can only grow within a transaction:
   // each frame inherits the prior frame's ItemView state (including consume),
   // and the single-consumer constraint means only one tx per block can consume.

@@ -899,6 +899,73 @@ TEST(ItemLockTest, RCQNarrowAcceptsShrinkToEmpty)
   EXPECT_TRUE(result.has_value());
 }
 
+TEST(ItemLockTest, RCQNarrowAcceptsReplaceAfterPastConsume)
+{
+  // Sub1 consumed past entries; sub2 deleted and recreated the queue. The
+  // replacement subsumes the past consume and may carry no consume itself.
+  RetrocausalQueueDelta delta1;
+  delta1.consume.emplace();
+  delta1.consume->past_block_consume.max_fully_consumed_block_number = 3;
+  delta1.consume->past_block_consume.partial_consumed_number = 1;
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  delta2.replace = true;
+  delta2.insert.added_entries.push_back(QueueEntry{0x0A});
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  EXPECT_TRUE(result.has_value());
+}
+
+TEST(ItemLockTest, RCQNarrowAcceptsReplaceDroppingSelfConsume)
+{
+  // A replacement that self-consumed is replaced again: the second has no
+  // consume of its own.
+  RetrocausalQueueDelta delta1;
+  delta1.replace = true;
+  delta1.consume.emplace();
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  delta2.replace = true;
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  EXPECT_TRUE(result.has_value());
+}
+
+TEST(ItemLockTest, RCQNarrowRejectsUndoingReplace)
+{
+  RetrocausalQueueDelta delta1;
+  delta1.replace = true;
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), HogDbCode::kInvalidExecutorBehavior);
+}
+
+TEST(ItemLockTest, RCQNarrowRejectsReplaceDroppingConcurrentConsumes)
+{
+  // Concurrent entries consumed before the replacement carry into it.
+  RetrocausalQueueDelta delta1;
+  delta1.consume.emplace();
+  delta1.consume->current_block_consumed.push_back(QueueEntry{0x0A});
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  delta2.replace = true;
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), HogDbCode::kInvalidExecutorBehavior);
+}
+
 TEST(ItemLockTest, RCQNarrowMaxInsertCountTracksAcrossMultipleNarrows)
 {
   // Sub1: 3 inserts, Sub2: 1 insert (shrink), Sub3: 4 inserts (grow past peak).

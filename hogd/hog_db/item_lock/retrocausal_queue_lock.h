@@ -74,6 +74,28 @@ public:
   HogDbStatus<RetrocausalQueueMetadata *>
   get_meta(const LockContext *ctx) const;
 
+  // Whether [delta] makes its transaction the block's consumer. A replace
+  // delta consumes the committed queue described by [meta], so it is one
+  // whenever that queue still has live entries, with or without an explicit
+  // consume.
+  static bool claims_consumer(const RetrocausalQueueDelta &delta,
+                              const RetrocausalQueueMetadata &meta)
+  {
+    return delta.consume || (delta.replace && meta.live_entries > 0);
+  }
+
+  // The past-block position a replace delta resolves to: past every entry of
+  // the committed queue described by [meta].
+  static RetrocausalQueuePastBlockConsumeDelta
+  replaced_past_consume(const RetrocausalQueueMetadata &meta)
+  {
+    if (meta.live_entries == 0) {
+      return meta.consume_state;
+    }
+    return {.max_fully_consumed_block_number = meta.max_live_block_num,
+            .partial_consumed_number = 0};
+  }
+
   static uint64_t live_block_count(const RetrocausalQueueMetadata &meta)
   {
     return meta.max_live_block_num -

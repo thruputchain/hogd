@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -16,6 +17,41 @@
 #include "types.hh"
 
 namespace hogd {
+
+namespace {
+
+// Resolve a replace RCQ delta against the committed queue, as HogDb's
+// RetrocausalQueueLock does: it consumes every committed entry, which makes
+// the transaction the consumer whenever the committed queue is nonempty.
+void
+resolve_rcq_replace(StorageDelta &delta, StorageItemWrapper const *committed)
+{
+  if (delta.type() != StorageDeltaType::kDeltaTypeRetrocausalQueue ||
+      !delta.retrocausal_queue().replace) {
+    return;
+  }
+  if (!committed ||
+      committed->type() != StorageItemType::kItemTypeRetrocausalQueue) {
+    return;
+  }
+  auto &rq = delta.retrocausal_queue();
+  auto const &queue = committed->queue();
+  if (queue.get_live_entries() == 0) {
+    if (rq.consume) {
+      rq.consume->past_block_consume = queue.get_consume_state();
+    }
+    return;
+  }
+  if (!rq.consume) {
+    rq.consume.emplace();
+  }
+  rq.consume->past_block_consume = {
+      .max_fully_consumed_block_number = queue.get_max_live_block_num(),
+      .partial_consumed_number = 0,
+  };
+}
+
+} // namespace
 
 void
 BlockState::unlink_parent(InMemoryDatabase *base_database)
@@ -48,6 +84,8 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
 {
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
+
+  resolve_rcq_replace(delta, storage_view_.get_snapshot_storage_item(addrkey));
 
   int128_t marginal_cost = 0;
   {

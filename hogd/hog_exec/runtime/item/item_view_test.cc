@@ -733,7 +733,7 @@ TEST_F(ItemViewTest,
   check_eq(delta.retrocausal_queue().insert.added_entries[0], 2);
 }
 
-TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
+TEST_F(ItemViewTest, ReplacementItemPreservesConcurrentConsumeDelta)
 {
   auto item = make_empty_item();
   auto rcq_item = RetrocausalQueueItem(*item);
@@ -753,16 +753,98 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 99);
 
-  auto fully_consumed = RetrocausalQueueItem::make_fully_consumed_item(
-      *item, item->get_retrocausally_consumed_entries(
-                 rcq_item.get_retrocausally_consumed_count())());
-  auto delta = fully_consumed.get_delta();
+  auto replacement = RetrocausalQueueItem::make_replacement_item(
+      item.get(), item->get_retrocausally_consumed_entries(
+                      rcq_item.get_retrocausally_consumed_count())());
+  auto delta = replacement.get_delta();
 
+  EXPECT_TRUE(delta.retrocausal_queue().replace);
   ASSERT_TRUE(delta.retrocausal_queue().consume);
+  // HogDb places the past-block consume for a replacement.
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consume,
+            RetrocausalQueuePastBlockConsumeDelta{});
   EXPECT_EQ(read_entries(
                 delta.retrocausal_queue().consume->current_block_consumed),
             (std::vector<uint32_t>{42, 99}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
+}
+
+// A replaced key's queue is built without its snapshot: inserting and
+// consuming its own entries reads nothing, and the consume of the committed
+// queue is left to HogDb.
+TEST_F(ItemViewTest, ReplacementItemNeedsNoSnapshotForOwnEntries)
+{
+  auto replacement = RetrocausalQueueItem::make_replacement_item(nullptr, {});
+  EXPECT_FALSE(replacement.has_base_item());
+
+  auto delta = replacement.get_delta();
+  EXPECT_TRUE(delta.retrocausal_queue().replace);
+  EXPECT_FALSE(delta.retrocausal_queue().consume);
+
+  ASSERT_TRUE(replacement.insert_entry(make_test_queue_entry(7)).has_value());
+  ASSERT_TRUE(replacement.insert_entry(make_test_queue_entry(8)).has_value());
+
+  ExecutionModeData mode = ProposalModeData();
+  auto res = replacement.get_next_item(mode, true)();
+  ASSERT_TRUE(res.has_value() && res.value() != nullptr);
+  check_eq(*res.value(), 7);
+
+  delta = replacement.get_delta();
+  EXPECT_TRUE(delta.retrocausal_queue().replace);
+  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consume,
+            RetrocausalQueuePastBlockConsumeDelta{});
+  EXPECT_TRUE(
+      delta.retrocausal_queue().consume->current_block_consumed.empty());
+  EXPECT_EQ(read_entries(delta.retrocausal_queue().insert.added_entries),
+            (std::vector<uint32_t>{8}));
+}
+
+// Past-block entries of the snapshot are never read through a replacement,
+// even once the snapshot is attached for concurrent reads.
+TEST_F(ItemViewTest, ReplacementItemSkipsSnapshotBlocks)
+{
+  StorageCostModel model(100, 7, 5, 5, 0);
+  auto stored = make_queue({{make_test_queue_entry(1)}});
+  server_->impl()->setup_create_item(AddressAndKey{},
+                                     StorageItemWrapper(std::move(stored),
+                                                        &model));
+  server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                 make_test_queue_entry(5));
+
+  AddressAndKey addrkey{};
+  WireStorageItem wire(StorageItemType::kItemTypeRetrocausalQueue);
+  wire.metadata().live_entries = 1;
+  wire.metadata().max_live_block_num = 1;
+  auto entry = SnapshotStorageItem::make_variant(std::move(wire), addrkey.key);
+  ASSERT_TRUE(entry.has_value());
+  auto snapshot =
+      std::make_unique<SnapshotStorageItem>(std::move(entry).value(),
+                                            std::move(addrkey), BlockID{1},
+                                            *db_proxy_);
+
+  // Read through an ordinary queue, the snapshot's block entry comes first.
+  RetrocausalQueueItem committed(*snapshot);
+  ExecutionModeData peek_mode = ProposalModeData();
+  auto peeked = committed.get_next_item(peek_mode, false)();
+  ASSERT_TRUE(peeked.has_value() && peeked.value() != nullptr);
+  check_eq(*peeked.value(), 1);
+
+  auto replacement = RetrocausalQueueItem::make_replacement_item(nullptr, {});
+  replacement.set_base_item(*snapshot);
+
+  ExecutionModeData mode = ProposalModeData();
+  auto res = replacement.get_next_item(mode, true)();
+  ASSERT_TRUE(res.has_value() && res.value() != nullptr);
+  check_eq(*res.value(), 5);
+
+  auto delta = replacement.get_delta();
+  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consume,
+            RetrocausalQueuePastBlockConsumeDelta{});
+  EXPECT_EQ(read_entries(
+                delta.retrocausal_queue().consume->current_block_consumed),
+            (std::vector<uint32_t>{5}));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
