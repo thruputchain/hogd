@@ -1,0 +1,91 @@
+name: Tag test_ffi Release
+
+# Pushes the test-ffi-vX.Y.Z tag for the version in hogd/test_ffi/test_bindings.h,
+# which starts release_test_ffi.yml. Release instructions: docs/test-ffi-releases.md.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    steps:
+      # The tag starts a release build that is published to public S3, so only
+      # reviewed commits may be tagged.
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Error: dispatch this workflow on main, not $GITHUB_REF" >&2
+          exit 1
+
+      # Tags pushed with GITHUB_TOKEN do not trigger workflows, so the push
+      # uses an app token to start release_test_ffi.yml.
+      - name: Generate hogd write token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.PROTOCOL_SYNCHRONIZER_APP_ID }}
+          private-key: ${{ secrets.PROTOCOL_SYNCHRONIZER_SECRET_KEY }}
+          owner: groundhogchain
+          repositories: hogd
+          permission-contents: write
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      # Same parsing as the tag check in release_test_ffi.yml.
+      - name: Parse version from header
+        id: parse_version
+        run: |
+          HEADER=hogd/test_ffi/test_bindings.h
+          MAJOR=$(grep '#define TEST_FFI_VERSION_MAJOR' "$HEADER" | awk '{print $3}')
+          MINOR=$(grep '#define TEST_FFI_VERSION_MINOR' "$HEADER" | awk '{print $3}')
+          PATCH=$(grep '#define TEST_FFI_VERSION_PATCH' "$HEADER" | awk '{print $3}')
+          for part in "$MAJOR" "$MINOR" "$PATCH"; do
+            if [[ ! "$part" =~ ^[0-9]+$ ]]; then
+              echo "Error: could not parse TEST_FFI_VERSION_{MAJOR,MINOR,PATCH} from $HEADER" >&2
+              exit 1
+            fi
+          done
+          VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=test-ffi-v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag does not exist
+        env:
+          TAG: ${{ steps.parse_version.outputs.tag }}
+        run: |
+          status=0
+          git ls-remote --exit-code --tags origin "refs/tags/$TAG" || status=$?
+          case "$status" in
+            0)
+              echo "Error: tag $TAG already exists" >&2
+              echo "Bump the version constants in hogd/test_ffi/test_bindings.h first" >&2
+              exit 1
+              ;;
+            2)
+              echo "Tag $TAG does not exist yet"
+              ;;
+            *)
+              echo "Error: git ls-remote failed with status $status" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Push tag
+        env:
+          TAG: ${{ steps.parse_version.outputs.tag }}
+          VERSION: ${{ steps.parse_version.outputs.version }}
+          ACTOR: ${{ github.actor }}
+          ACTOR_ID: ${{ github.actor_id }}
+        run: |
+          git -c user.name="$ACTOR" -c user.email="$ACTOR_ID+$ACTOR@users.noreply.github.com" \
+            tag -a "$TAG" -m "$VERSION" "$GITHUB_SHA"
+          # Not forced: a tag created since the check above rejects the push.
+          git push origin "refs/tags/$TAG"
+          echo "Pushed \`$TAG\` at \`$GITHUB_SHA\`; Release test_ffi Library builds from it." >> "$GITHUB_STEP_SUMMARY"
