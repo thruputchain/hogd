@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <limits>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -705,6 +707,43 @@ TEST(Scheduler, RemoveFromSchedulerSkipsRepeatedHash)
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(tx_hash), nullptr);
+}
+
+// Copies of a hash in different chunks can all find the cache entry before any
+// of them removes it. Holding the account lock while remove_from_scheduler()
+// runs parks the copies after that lookup, so all but one of them then find the
+// entry already gone at remove().
+TEST(Scheduler, RemoveFromSchedulerSkipsHashRepeatedAcrossChunks)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+
+  // Few enough copies that each gets its own chunk.
+  const x23::Vec<TransactionHash> repeated(64, tx_hash);
+  {
+    auto held = scheduler->get_cached_hog_age(account);
+    std::thread remover([&] {
+      scheduler->remove_from_scheduler(
+          x23::span<const TransactionHash>(repeated))();
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    held.second.unlock();
+    remover.join();
+  }
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(tx_hash), nullptr);
+
+  // Now every copy finds the entry gone at the lookup.
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(repeated))();
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 }
 
 TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
