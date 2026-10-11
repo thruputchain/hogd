@@ -15,7 +15,6 @@
 #include <thread>
 #include <utility>
 
-#include "auth_claim.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
@@ -49,15 +48,6 @@ ViewGatewayResult
 make_view_gateway_result(ViewGatewayOutcome outcome)
 {
   return ViewGatewayResult(outcome);
-}
-
-AuthClaim
-make_public_view_auth_claim()
-{
-  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
-  claim.source_address_claim().allowed_keys = 0;
-  claim.source_address_claim().required_weight = 0;
-  return claim;
 }
 
 DatabaseIdentifier
@@ -602,17 +592,11 @@ view_gateway_result_from_raw_view_result(BlockHeight height,
   return make_view_gateway_result(ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
-// Normalize a caller-supplied view query for unauthenticated public use.
-// We strip auth_claim (no real signer) and invoke_flags (no TryInvoke /
-// DelegateCall), but intentionally preserve parent_address and
-// forwarded_tokens.  View queries are read-only (no state commits), so
-// letting the caller choose a parent_address — which the invoked contract
-// sees via GetMsgSender — is safe and gives off-chain tooling the ability
-// to simulate calls from any context.
+// Views assume auth without signature checks and never commit writes.
+// Preserve caller context and forwarded tokens, but clear invoke flags.
 TransactionViewQuery
 normalize_public_view_query(TransactionViewQuery query)
 {
-  query.auth_claim = make_public_view_auth_claim();
   query.invoke_flags = std::to_underlying(InvokeFlag::None);
   return query;
 }
