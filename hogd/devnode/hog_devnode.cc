@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -149,13 +150,23 @@ hog_devnode_init(std::string listen_host,
     return EXIT_FAILURE;
   }
 
-  HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      std::move(*directories), bootstrap_config, data_dir,
-                      runtime_network_hash, ramdb_bytes);
-  emit_readiness(node, readiness_sink, runtime_network_hash);
-  info("hog-devnode initialization complete.");
+  std::chrono::steady_clock::time_point teardown_started;
+  {
+    HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
+                        std::move(*directories), bootstrap_config, data_dir,
+                        runtime_network_hash, ramdb_bytes);
+    emit_readiness(node, readiness_sink, runtime_network_hash);
+    info("hog-devnode initialization complete.");
 
-  wait_for_shutdown(shutdown_signals);
+    wait_for_shutdown(shutdown_signals);
+    teardown_started = std::chrono::steady_clock::now();
+  }
+  // ~HogDevnodeNode is done; only main() returning and the static destructors
+  // remain, so a node silent after this line stalled there.
+  info("hog-devnode node torn down in {:.3f} s; exiting",
+       std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                     teardown_started)
+           .count());
   return EXIT_SUCCESS;
 }
 
