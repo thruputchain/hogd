@@ -28,7 +28,13 @@
 namespace hogd {
 
 class Scheduler {
+  struct AccountState;
+  using AccountMap =
+      SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher>;
+
 public:
+  using AccountLock = std::unique_lock<AccountMap::lock_type>;
+
   static constexpr BlockHeight kTransactionOutcomeBlockLifetime = 50;
   static constexpr size_t kMaxTransactionOutcomes = 50'000'000;
 
@@ -163,7 +169,7 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  std::pair<HogAge *, std::unique_lock<synchronized_map_mutex>>
+  std::pair<HogAge *, AccountLock>
   get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void> write_all_average_hog_ages_to_db();
@@ -312,7 +318,7 @@ private:
                                          uint128_t &hogs_spent_by_this_account,
                                          BlockHeight block_height);
 
-  std::pair<AccountState *, std::unique_lock<synchronized_map_mutex>>
+  std::pair<AccountState *, AccountLock>
   get_account_state(const ContractAddress &address);
 
   void wait_for_pending_detached_coroutines()
@@ -350,7 +356,7 @@ private:
   SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
-  SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher> accounts_;
+  AccountMap accounts_;
 
   // The number of txs on the runqueue. [size_] is signed because it can
   // temporarily go below 0 in the following scenario:

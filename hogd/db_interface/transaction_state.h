@@ -95,11 +95,14 @@ private:
 // Manage the state of all transactions in a block.
 // Lightweight wrapper around a synchronized map of TransactionState objects.
 class TransactionStateManager {
+  using TransactionStateMap = SynchronizedMap<TransactionID, TransactionState>;
+
 public:
   // Get the state associated with one transaction.
   // Returns a pointer to the state and a unique lock on the state.
   // If the state does not exist, it is created.
-  std::pair<TransactionState &, std::unique_lock<synchronized_map_mutex>>
+  std::pair<TransactionState &,
+            std::unique_lock<TransactionStateMap::lock_type>>
   get(TransactionID txid);
 
   // Returns the number of new transactions created.
@@ -127,7 +130,6 @@ public:
   }
 
 private:
-  using TransactionStateMap = SynchronizedMap<TransactionID, TransactionState>;
   TransactionStateMap tx_states_;
   std::atomic<uint64_t> new_transaction_count_{0};
   std::atomic<uint64_t> closed_transaction_count_{0};

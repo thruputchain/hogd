@@ -35,15 +35,17 @@ concept mutex_like = requires(Lock lock) {
 
 static_assert(mutex_like<std::mutex>);
 
-// Default bucket lock. Debug builds check that each bucket lock is unlocked on
-// the thread that locked it, which catches a lock held across a co_await that
-// resumes on another thread.
+// Default bucket lock; use SynchronizedMap::lock_type to name it. Debug builds
+// check that each bucket lock is unlocked on the thread that locked it, which
+// catches a lock held across a co_await that resumes on another thread.
+namespace detail {
 #ifdef NDEBUG
 using synchronized_map_mutex = std::mutex;
 #else
 using synchronized_map_mutex = ThreadCheckedMutex<std::mutex>;
 #endif
 static_assert(mutex_like<synchronized_map_mutex>);
+} // namespace detail
 
 template<typename Lock>
 concept shared_mutex_like = requires(Lock lock) {
@@ -70,7 +72,7 @@ static_assert(shared_mutex_like<std::shared_mutex>);
 template<class Key, class T, class Hash = std::hash<Key>,
          class KeyEqual = std::equal_to<Key>,
          class Allocator = std::allocator<std::pair<const Key, T>>,
-         mutex_like Lock = synchronized_map_mutex>
+         mutex_like Lock = detail::synchronized_map_mutex>
 class SynchronizedMap {
 public:
   // type definitions
