@@ -170,11 +170,6 @@ public:
   std::pair<HogAge *, AccountLock>
   get_cached_hog_age(const ContractAddress &address);
 
-  x23::CoroLock &transaction_outcomes_lock_for_testing()
-  {
-    return transaction_outcomes_lock_;
-  }
-
   x23::Async<void> write_all_average_hog_ages_to_db();
 
   struct ReadAverageHogAgesResult {
