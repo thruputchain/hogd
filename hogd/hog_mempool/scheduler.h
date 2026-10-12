@@ -364,8 +364,7 @@ private:
   // [co_await] that resumes on another thread panics instead of silently
   // unlocking a std::mutex from a thread that does not own it.
   SynchronizedMap<
-      ContractAddress, AccountState, SipHash24Hasher,
-      std::equal_to<ContractAddress>,
+      ContractAddress, AccountState, SipHash24Hasher, std::equal_to<>,
       std::allocator<std::pair<const ContractAddress, AccountState>>,
       ThreadCheckedMutex<std::mutex>>
       accounts_;
