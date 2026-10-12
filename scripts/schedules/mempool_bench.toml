@@ -20,8 +20,13 @@ echo 'configure'
 ./scripts/build.sh -d release -t Release -c clang -f "-fsanitize=address" -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-# Cap concurrent compiler jobs to limit memory pressure in sanitizer builds.
-cmake --build release --parallel 16 > build2.log 2>&1 || (cat build2.log && exit 1)
+# Cap build parallelism at 64, same as the sanitizer and tsan schedules: fanning
+# the asan build out to all 128 hyperthreads OOMs the host (the OOM killer took
+# out the login session's sd-pam, dropping the SSH job about two minutes into
+# the build with exit 255). hog11 fails first, and it also runs hog_lockd, so
+# the same memory pressure can expire this schedule's lease and abandon the
+# other seven hosts mid-build.
+cmake --build release --parallel 64 > build2.log 2>&1 || (cat build2.log && exit 1)
 # These build scripts place the binaries in the current working directory, so we
 # [pushd release] so that the binaries are placed in the [release] directory.
 pushd release >/dev/null
@@ -93,8 +98,18 @@ echo 'configure'
 export CI_MEMPOOL_METRIC_NAME=nightly_integration_mempool_asan
 
 echo 'build'
+<<<<<<< HEAD
 # Cap concurrent compiler jobs to limit memory pressure in sanitizer builds.
 cmake --build release --parallel 16 > build2.log 2>&1 || (cat build2.log && exit 1)
+=======
+# Cap build parallelism at 64, same as the sanitizer and tsan schedules: fanning
+# the asan build out to all 128 hyperthreads OOMs the host (the OOM killer took
+# out the login session's sd-pam, dropping the SSH job about two minutes into
+# the build with exit 255). hog11 fails first, and it also runs hog_lockd, so
+# the same memory pressure can expire this schedule's lease and abandon the
+# other seven hosts mid-build.
+cmake --build release --parallel 64 > build2.log 2>&1 || (cat build2.log && exit 1)
+>>>>>>> 7db8f72fe2586b96b18fe2d169b7f0b2b06a9ab3
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)

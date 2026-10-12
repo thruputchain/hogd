@@ -265,110 +265,6 @@ TEST_F(SyscallAuthTokenTest, InvokeRejectsDuplicateForwardedAuthTokenIds)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-TEST_F(SyscallAuthTokenTest, GetCalldataRejectsPartialAuthTokenOutputSpan)
-{
-  constexpr ContractAddress kCallerAddress = make_contract_address(0);
-  constexpr ContractAddress kChildAddress = make_contract_address(1);
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
-  fns_child.emplace(
-      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        RuntimeMemoryLength calldata_len = 0;
-        uint32_t auth_token_count = 0;
-        auto len_res =
-            co_await ctx.syscall<SyscallNo::kGetCalldataLen>(calldata_len,
-                                                             auth_token_count);
-        EXPECT_TRUE(len_res.has_value());
-        EXPECT_EQ(len_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-        EXPECT_EQ(auth_token_count, 1U);
-
-        for (RuntimeMemoryLength short_len = 1; short_len < sizeof(uint32_t);
-             ++short_len) {
-          std::array<std::byte, sizeof(uint32_t)> calldata_buf{};
-          RuntimeMemoryLength written_len = 0;
-          std::array<std::byte, sizeof(uint32_t)> auth_token_buf{};
-          RuntimeMemoryLength auth_token_written_len = 0;
-
-          auto get_res = co_await ctx.syscall<SyscallNo::kGetCalldata>(
-              std::span<std::byte>{calldata_buf}, written_len,
-              std::span<std::byte>{auth_token_buf.data(), short_len},
-              auth_token_written_len);
-          EXPECT_TRUE(get_res.has_value());
-          EXPECT_EQ(get_res.value(),
-                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-        }
-
-        co_return InvokeStatus<void>{};
-      });
-  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
-  fns_caller.emplace(
-      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        AuthTokenNode root_node{.consumer_address = kChildAddress,
-                                .payload = x23::serialize(7U),
-                                .child_nodes = {}};
-        auto serialized_root = x23::serialize(root_node);
-        uint32_t token_id = 0;
-        auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
-            BlockHeight{1000},
-            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
-                                           serialized_root.data()),
-                                       serialized_root.size()},
-            token_id);
-        EXPECT_TRUE(mint_res.has_value());
-        EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-
-        std::array<uint32_t, 1> forwarded_token_ids{token_id};
-        CopyableInvokeInputs inputs{
-            .entrypoint_id = 0,
-            .gas_limit = UINT64_MAX,
-            .flags = 0,
-        };
-        auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
-            kChildAddress, std::span<const std::byte>{},
-            std::span<uint32_t const>{forwarded_token_ids}, inputs,
-            CopyableInvokeOutputs{});
-        EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-
-        co_return InvokeStatus<void>{};
-      });
-  auto caller_contract =
-      std::make_unique<NativeContract>(std::move(fns_caller));
-
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(caller_contract));
-  contract_map.emplace(1, std::move(child_contract));
-  auto runtime_context =
-      std::make_unique<NativeContext>(std::move(contract_map));
-
-  auto caller_xdr = make_native_contract(0);
-  write_contract(caller_xdr);
-  write_deployment(kCallerAddress, caller_xdr);
-  auto child_xdr = make_native_contract(1);
-  write_contract(child_xdr);
-  write_deployment(kChildAddress, child_xdr);
-
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{
-                          .invoked_address = kCallerAddress,
-                          .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
-                          .calldata = {},
-                      },
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *runtime_context);
-  auto res = handler.root_invoke()();
-  ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
-}
-
 TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
 {
   constexpr ContractAddress kAddr = make_contract_address(0);
@@ -966,26 +862,22 @@ TEST_F(SyscallAuthTokenTest, ReturnAuthTokensToParent)
 
         uint32_t leaf_id = root_id + 1;
 
-        // Issue 3: Invoke should report the returned auth token byte len
-        EXPECT_EQ(outputs.returned_auth_token_len, sizeof(uint32_t));
+        // Invoke reports how many tokens the child returned.
+        EXPECT_EQ(outputs.returned_auth_token_count, 1U);
 
-        // Issue 2: GetReturnedBuffer should write the auth token IDs
+        // GetReturnedBuffer reports the ids they took in this frame.
         std::array<std::byte, 256> return_buf{};
         RuntimeMemoryLength return_written_len = 0;
-        std::array<std::byte, 256> auth_token_buf{};
-        RuntimeMemoryLength auth_token_written_len = 0;
+        uint32_t returned_start = 0;
+        uint32_t returned_count = 0;
         auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
             std::span<std::byte>{return_buf}, return_written_len,
-            std::span<std::byte>{auth_token_buf}, auth_token_written_len);
+            returned_start, returned_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(return_written_len, 4U);
-        EXPECT_EQ(auth_token_written_len, sizeof(uint32_t));
-        if (auth_token_written_len == sizeof(uint32_t)) {
-          uint32_t returned_id = 0;
-          std::memcpy(&returned_id, auth_token_buf.data(), sizeof(uint32_t));
-          EXPECT_EQ(returned_id, leaf_id);
-        }
+        EXPECT_EQ(returned_start, leaf_id);
+        EXPECT_EQ(returned_count, 1U);
 
         // The caller should own the returned token and be able to
         // consume it.
@@ -1097,109 +989,6 @@ TEST_F(SyscallAuthTokenTest, ReturnRejectsDuplicateAuthTokenIds)
         EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(invoke_outputs.frame_status,
                   InvocationFrameStatusCode::Fault);
-        co_return InvokeStatus<void>{};
-      });
-  auto caller_contract =
-      std::make_unique<NativeContract>(std::move(fns_caller));
-
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(caller_contract));
-  contract_map.emplace(1, std::move(child_contract));
-  auto runtime_context =
-      std::make_unique<NativeContext>(std::move(contract_map));
-
-  auto caller_xdr = make_native_contract(0);
-  write_contract(caller_xdr);
-  write_deployment(kCallerAddress, caller_xdr);
-  auto child_xdr = make_native_contract(1);
-  write_contract(child_xdr);
-  write_deployment(kChildAddress, child_xdr);
-
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{
-                          .invoked_address = kCallerAddress,
-                          .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
-                          .calldata = {},
-                      },
-                  .uniquifier = make_new_uniquifier(),
-              }},
-      *runtime_context);
-  auto res = handler.root_invoke()();
-  ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
-}
-
-TEST_F(SyscallAuthTokenTest, GetReturnedBufferRejectsPartialAuthTokenOutputSpan)
-{
-  constexpr ContractAddress kCallerAddress = make_contract_address(0);
-  constexpr ContractAddress kChildAddress = make_contract_address(1);
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
-  fns_child.emplace(
-      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        AuthTokenNode node{.consumer_address = kCallerAddress,
-                           .payload = x23::serialize(99U),
-                           .child_nodes = {}};
-        auto serialized = x23::serialize(node);
-        uint32_t token_id = 0;
-        auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
-            BlockHeight{1000},
-            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
-                                           serialized.data()),
-                                       serialized.size()},
-            token_id);
-        EXPECT_TRUE(mint_res.has_value());
-        EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-
-        std::array<uint32_t, 1> returned_ids{token_id};
-        auto auth_bytes =
-            std::as_bytes(std::span<const uint32_t>{returned_ids});
-        std::array<std::byte, 4> ret_buf{};
-        std::memcpy(ret_buf.data(), "OK!!", 4);
-        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
-            std::span<const std::byte>{ret_buf}, false, auth_bytes);
-        EXPECT_FALSE(ret.has_value());
-
-        co_return InvokeStatus<void>{};
-      });
-  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
-  fns_caller.emplace(
-      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        CopyableInvokeInputs inputs{
-            .entrypoint_id = 0,
-            .gas_limit = UINT64_MAX,
-            .flags = 0,
-        };
-        CopyableInvokeOutputs outputs{};
-        auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
-            kChildAddress, std::span<const std::byte>{},
-            std::span<uint32_t const>{}, inputs, outputs);
-        EXPECT_TRUE(invoke_res.has_value());
-        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-        EXPECT_EQ(outputs.returned_auth_token_len, sizeof(uint32_t));
-
-        for (RuntimeMemoryLength short_len = 1; short_len < sizeof(uint32_t);
-             ++short_len) {
-          std::array<std::byte, 4> return_buf{};
-          RuntimeMemoryLength return_written_len = 0;
-          std::array<std::byte, sizeof(uint32_t)> auth_token_buf{};
-          RuntimeMemoryLength auth_token_written_len = 0;
-          auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
-              std::span<std::byte>{return_buf}, return_written_len,
-              std::span<std::byte>{auth_token_buf.data(), short_len},
-              auth_token_written_len);
-          EXPECT_TRUE(get_res.has_value());
-          EXPECT_EQ(get_res.value(),
-                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-        }
-
         co_return InvokeStatus<void>{};
       });
   auto caller_contract =
@@ -1389,11 +1178,11 @@ TEST_F(SyscallAuthTokenTest, ForwardUnownedAuthTokenAfterChildRevertIsRejected)
         // Read the token ID the minter wrote into its co_return buffer.
         std::array<std::byte, 256> return_buf{};
         RuntimeMemoryLength return_written_len = 0;
-        std::array<std::byte, 256> auth_token_buf{};
-        RuntimeMemoryLength auth_token_written_len = 0;
+        uint32_t returned_start = 0;
+        uint32_t returned_count = 0;
         auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
             std::span<std::byte>{return_buf}, return_written_len,
-            std::span<std::byte>{auth_token_buf}, auth_token_written_len);
+            returned_start, returned_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         if (return_written_len != sizeof(uint32_t)) {
@@ -2341,15 +2130,12 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
   auto consumer_contract =
       std::make_unique<NativeContract>(std::move(fns_consumer));
 
-  // Read-only child: explicitly returns the forwarded token via kReturn.
+  // Read-only child: explicitly returns the forwarded token, its id 0, via
+  // kReturn.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto const &calldata = ctx.handler().get_calldata();
-        uint32_t token_id = 0;
-        std::memcpy(&token_id, calldata.data(), sizeof(token_id));
-
-        std::array<uint32_t, 1> returned_ids{token_id};
+        std::array<uint32_t, 1> returned_ids{0};
         auto auth_bytes =
             std::as_bytes(std::span<const uint32_t>{returned_ids});
         auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
@@ -2359,8 +2145,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
       });
   auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
 
-  // Caller: mints token, forwards to read-only child that returns it,
-  // then forwards it again to consumer (should succeed).
+  // Caller: mints token, forwards to read-only child that returns it under the
+  // caller's next id, then forwards it under that id to consumer (should
+  // succeed).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -2378,10 +2165,6 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
         EXPECT_TRUE(mint_res.has_value());
         EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
-        Calldata calldata;
-        calldata.resize_uninitialized(sizeof(token_id));
-        std::memcpy(calldata.data(), &token_id, sizeof(token_id));
-
         std::array<uint32_t, 1> forwarded{token_id};
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
@@ -2390,28 +2173,27 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
         };
         CopyableInvokeOutputs outputs{};
         auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
-            kChildAddress, calldata, std::span<uint32_t const>{forwarded},
-            inputs, outputs);
+            kChildAddress, std::span<const std::byte>{},
+            std::span<uint32_t const>{forwarded}, inputs, outputs);
         EXPECT_TRUE(invoke_res.has_value());
         EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-        EXPECT_EQ(outputs.returned_auth_token_len, sizeof(uint32_t));
+        EXPECT_EQ(outputs.returned_auth_token_count, 1U);
 
-        // Verify the returned token ID matches what we forwarded.
+        // The returned token takes the caller's next id.
         std::array<std::byte, 256> return_buf{};
         RuntimeMemoryLength return_written_len = 0;
-        std::array<std::byte, 256> auth_token_buf{};
-        RuntimeMemoryLength auth_token_written_len = 0;
+        uint32_t returned_start = 0;
+        uint32_t returned_count = 0;
         auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
             std::span<std::byte>{return_buf}, return_written_len,
-            std::span<std::byte>{auth_token_buf}, auth_token_written_len);
+            returned_start, returned_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-        EXPECT_EQ(auth_token_written_len, sizeof(uint32_t));
-        uint32_t returned_id = 0;
-        std::memcpy(&returned_id, auth_token_buf.data(), sizeof(uint32_t));
-        EXPECT_EQ(returned_id, token_id);
+        EXPECT_EQ(returned_start, token_id + 1);
+        EXPECT_EQ(returned_count, 1U);
+        std::array<uint32_t, 1> returned{returned_start};
 
-        // Token was explicitly returned — caller still owns it.
+        // Token was explicitly returned: caller owns it under the new id.
         CopyableInvokeInputs inputs2{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
@@ -2419,7 +2201,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
         };
         auto reuse_res = co_await ctx.syscall<SyscallNo::kInvoke>(
             kConsumerAddress, std::span<const std::byte>{},
-            std::span<uint32_t const>{forwarded}, inputs2,
+            std::span<uint32_t const>{returned}, inputs2,
             CopyableInvokeOutputs{});
         EXPECT_TRUE(reuse_res.has_value());
         EXPECT_EQ(reuse_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
@@ -3087,22 +2869,9 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// Issue #2543 reported the behavior exercised here as a rollback bug. It is
-// working as intended: the AuthTokenRegistry (id counter + unwrap cache) is
-// transaction-global, owned by the InvocationFrameStack, not by an individual
-// InvocationFrame. A manual child revert reclaims forwarded token *ownership*
-// for the parent but deliberately does not rewind registry id allocation. This
-// test pins the exact, intended id behavior so it cannot regress silently:
-//
-//   * Consuming the same root token a second time (after the first consume's
-//     frame manually reverted) returns the SAME cached child-id range -- unwrap
-//     is idempotent per token for the life of the transaction.
-//   * The reverted consume still advanced the id counter, so a token minted
-//     afterwards lands immediately after the reverted child range, and the
-//     polluted path's later range differs from a control path that never did
-//     the reverted consume.
-TEST_F(SyscallAuthTokenTest,
-       RevertedConsumeAuthTokenIdAllocationsPersistAcrossManualRevert)
+// #2543: auth token ids are frame-local, so a manually reverted child's consume
+// leaves no mark on later id allocation.
+TEST_F(SyscallAuthTokenTest, RevertedConsumeLeavesNoTraceOnAuthTokenIds)
 {
   constexpr ContractAddress kCallerAddress = make_contract_address(0);
   constexpr ContractAddress kChildAddress = make_contract_address(1);
@@ -3127,16 +2896,13 @@ TEST_F(SyscallAuthTokenTest,
   fns_child.emplace(
       0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &calldata = ctx.handler().get_calldata();
-        if (calldata.size() != sizeof(uint32_t) + sizeof(uint8_t)) {
-          ADD_FAILURE() << "Expected token id and revert flag in calldata";
+        if (calldata.size() != sizeof(uint8_t)) {
+          ADD_FAILURE() << "Expected the revert flag in calldata";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-
+        uint8_t revert_flag = calldata[0];
+        // The forwarded token is the child's id 0.
         uint32_t token_id = 0;
-        std::memcpy(&token_id, calldata.data(), sizeof(token_id));
-        uint8_t revert_flag = 0;
-        std::memcpy(&revert_flag, calldata.data() + sizeof(token_id),
-                    sizeof(revert_flag));
 
         std::array<std::byte, 256> payload_buf{};
         RuntimeMemoryLength payload_written_len = 0;
@@ -3184,15 +2950,15 @@ TEST_F(SyscallAuthTokenTest,
           [&](ConsumeRange &range) -> x23::Async<bool> {
         std::array<std::byte, sizeof(uint32_t) * 2> return_buf{};
         RuntimeMemoryLength return_written_len = 0;
-        std::array<std::byte, sizeof(uint32_t)> auth_token_buf{};
-        RuntimeMemoryLength auth_token_written_len = 0;
+        uint32_t returned_start = 0;
+        uint32_t returned_count = 0;
         auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
             std::span<std::byte>{return_buf}, return_written_len,
-            std::span<std::byte>{auth_token_buf}, auth_token_written_len);
+            returned_start, returned_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(static_cast<size_t>(return_written_len), return_buf.size());
-        EXPECT_EQ(static_cast<size_t>(auth_token_written_len), 0U);
+        EXPECT_EQ(returned_count, 0U);
         if (!get_res.has_value() ||
             get_res.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             static_cast<size_t>(return_written_len) != return_buf.size()) {
@@ -3209,11 +2975,7 @@ TEST_F(SyscallAuthTokenTest,
       auto invoke_child = [&](uint32_t token_id, bool revert_frame,
                               ConsumeRange &range) -> x23::Async<bool> {
         Calldata calldata;
-        calldata.resize_uninitialized(sizeof(uint32_t) + sizeof(uint8_t));
-        std::memcpy(calldata.data(), &token_id, sizeof(token_id));
-        uint8_t revert_flag = revert_frame ? 1 : 0;
-        std::memcpy(calldata.data() + sizeof(token_id), &revert_flag,
-                    sizeof(revert_flag));
+        calldata.push_back(revert_frame ? 1 : 0);
 
         std::array<uint32_t, 1> forwarded{token_id};
         CopyableInvokeInputs inputs{
@@ -3232,7 +2994,7 @@ TEST_F(SyscallAuthTokenTest,
                                : InvocationFrameStatusCode::Return);
         EXPECT_EQ(static_cast<size_t>(outputs.return_buffer_len),
                   sizeof(uint32_t) * 2);
-        EXPECT_EQ(static_cast<size_t>(outputs.returned_auth_token_len), 0U);
+        EXPECT_EQ(outputs.returned_auth_token_count, 0U);
         if (!invoke_res.has_value() ||
             invoke_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return false;
@@ -3265,11 +3027,8 @@ TEST_F(SyscallAuthTokenTest,
         co_return InvokeError{InvokeErrorCode::Deterministic};
       }
 
-      if (do_reverted_consume) {
-        EXPECT_EQ(scenario.intervening_token_id,
-                  scenario.reverted_consume.start +
-                      scenario.reverted_consume.count);
-      }
+      // The caller's ids moved on by its own mint alone.
+      EXPECT_EQ(scenario.intervening_token_id, scenario.root_id + 1);
 
       if (!co_await invoke_child(scenario.root_id, false,
                                  scenario.later_consume)) {
@@ -3337,20 +3096,14 @@ TEST_F(SyscallAuthTokenTest,
   EXPECT_EQ(polluted.later_consume.count, 1U);
   EXPECT_EQ(control.later_consume.count, 1U);
 
-  // Intended: the second consume of the same root returns the SAME range as the
-  // reverted first consume (idempotent unwrap cache survives the manual
-  // revert).
-  EXPECT_EQ(polluted.reverted_consume.start, polluted.later_consume.start);
-  // Intended: the reverted consume still advanced the global id counter, so the
-  // polluted later range differs from the control path that never consumed.
-  EXPECT_NE(polluted.later_consume.start, control.later_consume.start);
-  // Intended: a token minted after the reverted consume lands immediately after
-  // the reverted child range -- the allocation was not rolled back.
-  EXPECT_EQ(polluted.intervening_token_id,
-            polluted.reverted_consume.start + polluted.reverted_consume.count);
-  // Control: with no prior consume, the intervening mint precedes the later
-  // consume's freshly allocated child range.
-  EXPECT_LT(control.intervening_token_id, control.later_consume.start);
+  // Each consume numbers the children in its own frame, after the forwarded
+  // token.
+  EXPECT_EQ(polluted.reverted_consume.start, 1U);
+  EXPECT_EQ(polluted.later_consume.start, 1U);
+  EXPECT_EQ(control.later_consume.start, 1U);
+  // The reverted consume left the caller's ids as the control path has them.
+  EXPECT_EQ(polluted.root_id, control.root_id);
+  EXPECT_EQ(polluted.intervening_token_id, control.intervening_token_id);
 }
 
 // A child frame that runs out of gas cannot hand a freshly minted auth token
@@ -3442,7 +3195,7 @@ TEST_F(SyscallAuthTokenTest, OutOfGasChildCannotReturnMintedAuthToken)
         }
 
         // Nothing came back across the frame boundary.
-        EXPECT_EQ(invoke_outputs.returned_auth_token_len, 0U);
+        EXPECT_EQ(invoke_outputs.returned_auth_token_count, 0U);
 
         // And the parent owns no token the child could have minted.
         for (uint32_t candidate : kCandidateTokenIds) {
@@ -3496,8 +3249,8 @@ TEST_F(SyscallAuthTokenTest, OutOfGasChildCannotReturnMintedAuthToken)
   }
 }
 
-// Neither list below is sorted, so serving either from the ownership set
-// instead of the ordered copy fails this test.
+// Ids are frame-local, so list order determines which token is which; distinct
+// payloads catch any reordering.
 TEST_F(SyscallAuthTokenTest,
        ForwardedAndReturnedAuthTokenListsKeepContractOrder)
 {
@@ -3505,32 +3258,37 @@ TEST_F(SyscallAuthTokenTest,
   constexpr ContractAddress kChildAddress = make_contract_address(1);
   constexpr ContractAddress kConsumerAddress = make_contract_address(2);
   constexpr uint32_t kTokenCount = 3;
-  constexpr size_t kListBytes = kTokenCount * sizeof(uint32_t);
 
-  // Consumer: no-op. Being handed all three ids proves the caller owns them
-  // again after the child returned them.
+  // Consumer: consumes its forwarded tokens, ids 0..2, recording payloads.
+  std::vector<AuthTokenPayload> consumed_payloads;
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       fns_consumer;
   fns_consumer.emplace(
-      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        for (uint32_t token_id = 0; token_id < kTokenCount; ++token_id) {
+          std::array<std::byte, 256> payload_buf{};
+          RuntimeMemoryLength payload_written_len = 0;
+          ContractAddress minter{};
+          uint32_t unwrapped_start = 0;
+          uint32_t unwrapped_count = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
+              token_id, std::span<std::byte>{payload_buf}, minter,
+              payload_written_len, unwrapped_start, unwrapped_count);
+          EXPECT_TRUE(res.has_value());
+          EXPECT_EQ(res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+          auto const *bytes =
+              reinterpret_cast<uint8_t const *>(payload_buf.data());
+          consumed_payloads.emplace_back(bytes, bytes + payload_written_len);
+        }
         co_return InvokeStatus<void>{};
       });
   auto consumer_contract =
       std::make_unique<NativeContract>(std::move(fns_consumer));
 
-  // Child: checks the forwarded list against the order the caller also put
-  // in calldata, then returns the same ids rotated by one.
+  // Child: sees its forwarded tokens as 0..2 and returns them rotated by one.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
       0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto const &calldata = ctx.handler().get_calldata();
-        if (calldata.size() != kListBytes) {
-          ADD_FAILURE() << "Expected the forwarded order in calldata";
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        std::array<uint32_t, kTokenCount> expected{};
-        std::memcpy(expected.data(), calldata.data(), kListBytes);
-
         RuntimeMemoryLength calldata_len = 0;
         uint32_t auth_token_count = 0;
         auto len_res =
@@ -3540,22 +3298,17 @@ TEST_F(SyscallAuthTokenTest,
         EXPECT_EQ(len_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(auth_token_count, kTokenCount);
 
-        std::array<std::byte, kListBytes> calldata_buf{};
+        std::array<std::byte, 16> calldata_buf{};
         RuntimeMemoryLength written_len = 0;
-        std::array<std::byte, kListBytes> auth_token_buf{};
-        RuntimeMemoryLength auth_token_written_len = 0;
+        uint32_t calldata_auth_token_count = 0;
         auto get_res = co_await ctx.syscall<SyscallNo::kGetCalldata>(
             std::span<std::byte>{calldata_buf}, written_len,
-            std::span<std::byte>{auth_token_buf}, auth_token_written_len);
+            calldata_auth_token_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-        EXPECT_EQ(auth_token_written_len, kListBytes);
-        std::array<uint32_t, kTokenCount> received{};
-        std::memcpy(received.data(), auth_token_buf.data(), kListBytes);
-        EXPECT_EQ(received, expected);
+        EXPECT_EQ(calldata_auth_token_count, kTokenCount);
 
-        std::array<uint32_t, kTokenCount> returned{received[1], received[2],
-                                                   received[0]};
+        std::array<uint32_t, kTokenCount> returned{1, 2, 0};
         auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
             std::span<const std::byte>{}, false,
             std::as_bytes(std::span<const uint32_t>{returned}));
@@ -3564,32 +3317,29 @@ TEST_F(SyscallAuthTokenTest,
       });
   auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
 
-  // Caller: mints three tokens, forwards them as [t2, t0, t1], checks the
-  // child returned [t0, t1, t2], then forwards all three to the consumer.
+  // Caller mints payloads 0..2, forwards them rotated, and re-forwards the
+  // returned ids to the consumer.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        AuthTokenNode root_node{.consumer_address = kChildAddress,
-                                .payload = x23::serialize(42U),
-                                .child_nodes = {}};
-        auto serialized = x23::serialize(root_node);
         std::array<uint32_t, kTokenCount> minted{};
-        for (auto &token_id : minted) {
+        for (uint32_t i = 0; i < kTokenCount; ++i) {
+          AuthTokenNode root_node{.consumer_address = kConsumerAddress,
+                                  .payload = x23::serialize(i),
+                                  .child_nodes = {}};
+          auto serialized = x23::serialize(root_node);
           auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
               BlockHeight{1000},
               std::span<const std::byte>{reinterpret_cast<const std::byte *>(
                                              serialized.data()),
                                          serialized.size()},
-              token_id);
+              minted[i]);
           EXPECT_TRUE(mint_res.has_value());
           EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         }
+        EXPECT_EQ(minted, (std::array<uint32_t, kTokenCount>{0, 1, 2}));
         std::array<uint32_t, kTokenCount> forwarded{minted[2], minted[0],
                                                     minted[1]};
-
-        Calldata calldata;
-        calldata.resize_uninitialized(kListBytes);
-        std::memcpy(calldata.data(), forwarded.data(), kListBytes);
 
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
@@ -3598,42 +3348,43 @@ TEST_F(SyscallAuthTokenTest,
         };
         CopyableInvokeOutputs outputs{};
         auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
-            kChildAddress, calldata, std::span<uint32_t const>{forwarded},
-            inputs, outputs);
+            kChildAddress, std::span<const std::byte>{},
+            std::span<uint32_t const>{forwarded}, inputs, outputs);
         EXPECT_TRUE(invoke_res.has_value());
         EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Return);
-        EXPECT_EQ(outputs.returned_auth_token_len, kListBytes);
+        EXPECT_EQ(outputs.returned_auth_token_count, kTokenCount);
 
+        // The returned tokens take the caller's next ids, 3..5, in the order
+        // the child returned them.
         std::array<std::byte, 16> return_buf{};
         RuntimeMemoryLength return_written_len = 0;
-        std::array<std::byte, kListBytes> auth_token_buf{};
-        RuntimeMemoryLength auth_token_written_len = 0;
+        uint32_t returned_start = 0;
+        uint32_t returned_count = 0;
         auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
             std::span<std::byte>{return_buf}, return_written_len,
-            std::span<std::byte>{auth_token_buf}, auth_token_written_len);
+            returned_start, returned_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
-        EXPECT_EQ(auth_token_written_len, kListBytes);
-        std::array<uint32_t, kTokenCount> returned{};
-        std::memcpy(returned.data(), auth_token_buf.data(), kListBytes);
-        std::array<uint32_t, kTokenCount> const expected_returned{forwarded[1],
-                                                                  forwarded[2],
-                                                                  forwarded[0]};
-        EXPECT_EQ(returned, expected_returned);
+        EXPECT_EQ(returned_start, 3U);
+        EXPECT_EQ(returned_count, kTokenCount);
+        std::array<uint32_t, kTokenCount> returned{returned_start,
+                                                   returned_start + 1,
+                                                   returned_start + 2};
 
-        // All three came back, so the caller owns them again.
+        std::array<uint32_t, kTokenCount> to_consumer{returned[2], returned[0],
+                                                      returned[1]};
         CopyableInvokeInputs inputs2{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
-        auto reuse_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+        auto consume_res = co_await ctx.syscall<SyscallNo::kInvoke>(
             kConsumerAddress, std::span<const std::byte>{},
-            std::span<uint32_t const>{forwarded}, inputs2,
+            std::span<uint32_t const>{to_consumer}, inputs2,
             CopyableInvokeOutputs{});
-        EXPECT_TRUE(reuse_res.has_value());
-        EXPECT_EQ(reuse_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        EXPECT_TRUE(consume_res.has_value());
+        EXPECT_EQ(consume_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         co_return InvokeStatus<void>{};
       });
@@ -3674,6 +3425,108 @@ TEST_F(SyscallAuthTokenTest,
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+  EXPECT_EQ(consumed_payloads,
+            (std::vector<AuthTokenPayload>{x23::serialize(2U),
+                                           x23::serialize(0U),
+                                           x23::serialize(1U)}));
+}
+
+// GetCalldata reports the calldata and the number of forwarded tokens, which
+// are the frame's ids 0..N-1.
+TEST_F(SyscallAuthTokenTest, GetCalldataReportsTheAuthTokenCount)
+{
+  constexpr ContractAddress kCallerAddress = make_contract_address(0);
+  constexpr ContractAddress kChildAddress = make_contract_address(1);
+  constexpr uint32_t kTokenCount = 3;
+  constexpr std::array<std::byte, 5> kCalldata{std::byte{1}, std::byte{2},
+                                               std::byte{3}, std::byte{4},
+                                               std::byte{5}};
+
+  std::vector<std::byte> received_calldata;
+  uint32_t received_count = 0;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        std::array<std::byte, 16> calldata_buf{};
+        RuntimeMemoryLength written_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kGetCalldata>(
+            std::span<std::byte>{calldata_buf}, written_len, received_count);
+        EXPECT_TRUE(res.has_value());
+        EXPECT_EQ(res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        received_calldata.assign(calldata_buf.begin(),
+                                 calldata_buf.begin() + written_len);
+        co_return InvokeStatus<void>{};
+      });
+  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        AuthTokenNode root_node{.consumer_address = kChildAddress,
+                                .payload = x23::serialize(42U),
+                                .child_nodes = {}};
+        auto serialized = x23::serialize(root_node);
+        std::array<uint32_t, kTokenCount> minted{};
+        for (auto &token_id : minted) {
+          auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+              BlockHeight{1000},
+              std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                             serialized.data()),
+                                         serialized.size()},
+              token_id);
+          EXPECT_TRUE(mint_res.has_value());
+          EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        }
+
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kChildAddress, std::span<const std::byte>{kCalldata},
+            std::span<uint32_t const>{minted}, inputs, CopyableInvokeOutputs{});
+        EXPECT_TRUE(invoke_res.has_value());
+        EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(child_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(0);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
+  auto child_xdr = make_native_contract(1);
+  write_contract(child_xdr);
+  write_deployment(kChildAddress, child_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kCallerAddress,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+
+  EXPECT_EQ(received_calldata,
+            std::vector<std::byte>(kCalldata.begin(), kCalldata.end()));
+  EXPECT_EQ(received_count, kTokenCount);
 }
 
 // Plain-invoke twin of ReadOnlyInvokeDropsUnreturnedForwardedAuthTokens: a
@@ -3733,7 +3586,7 @@ TEST_F(SyscallAuthTokenTest, InvokeDropsUnreturnedForwardedAuthTokens)
         EXPECT_TRUE(invoke_res.has_value());
         EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Return);
-        EXPECT_EQ(outputs.returned_auth_token_len, 0U);
+        EXPECT_EQ(outputs.returned_auth_token_count, 0U);
 
         // The child committed without returning the token: the caller no
         // longer owns it.

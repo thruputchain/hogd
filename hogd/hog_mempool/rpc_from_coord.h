@@ -828,6 +828,8 @@ private:
 
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();
+  // Start of the last successful commit; empty until the first one.
+  std::optional<std::chrono::steady_clock::time_point> last_commit_started_;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 

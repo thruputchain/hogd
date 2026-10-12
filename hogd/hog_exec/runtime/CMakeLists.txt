@@ -101,6 +101,7 @@ add_library(runtime_test_objects OBJECT
   invoke_malformed_tokens_rv32_test.cc
   invoke_tx_leak_test.cc
   manual_revert_comprehensive_test.cc
+  payload_limit_test.cc
   manual_revert_rv32_test.cc
   manual_revert_caller_rv32_test.cc
   return_fault_test_rv32_test.cc

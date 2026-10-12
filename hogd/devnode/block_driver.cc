@@ -1,5 +1,6 @@
 #include "hogd/devnode/block_driver.h"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -15,6 +16,7 @@
 #include "proposal_hash.h"
 #include "sched_coord.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 namespace {
@@ -24,6 +26,20 @@ require(bool condition, const char *message)
   if (!condition)
     throw std::runtime_error(message);
 }
+
+// TimePoint is Unix nanoseconds; system_clock's epoch is the Unix epoch on
+// every platform this builds for. Never behind [parent]: the scheduler refuses
+// a block older than the committed tip, which a wall-clock step back would
+// otherwise produce.
+TimePoint
+next_block_timepoint(TimePoint parent)
+{
+  const auto now = static_cast<TimePoint>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+  return std::max(now, parent);
+}
 } // namespace
 
 std::size_t
@@ -32,8 +48,11 @@ BlockDriver::produce_block()
   auto tip = scheduler_.schedcoord_get_tip()();
   require(tip.outcome() == SchedulerGetTipOutcome::SchedulerGetTipOK,
           "cannot read chain tip");
-  auto proposal = scheduler_.schedulercoord_propose_block(tip.db_tip().id,
-                                                          ProposalContext{})();
+  auto proposal = scheduler_.schedulercoord_propose_block(
+      tip.db_tip().id,
+      ProposalContext{
+          .block_timepoint = next_block_timepoint(
+              tip.db_tip().value.proposal_header.block_timepoint)})();
   require(proposal.outcome() == SchedulerProposalOutcome::SchedulerProposalOK,
           "block proposal failed");
   const auto &block = proposal.proposed_block();

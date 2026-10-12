@@ -815,7 +815,7 @@ SystemCallHandler::validate_new_invocation(
   }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(
-          owned_auth_tokens.set())) {
+          owned_auth_tokens.ids())) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   return {};
@@ -1307,19 +1307,11 @@ SystemCallHandler::check_auth_tokens_owned(
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }
 
-bool
-SystemCallHandler::check_auth_tokens_owned(
-    AuthTokenIdSet const &token_ids) const
-{
-  return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
-}
-
-std::span<const uint32_t>
-SystemCallHandler::get_returned_auth_token_ids() const
+AuthTokenIdRange
+SystemCallHandler::get_returned_auth_tokens() const
 {
   assert(!invocation_frame_stack_.empty());
-  return invocation_frame_stack_
-      .get_active_frame_child_returned_auth_token_ids();
+  return invocation_frame_stack_.get_active_frame_child_returned_auth_tokens();
 }
 
 void
@@ -1446,11 +1438,11 @@ SystemCallHandler::get_calldata() const
   return invocation_frame_stack_.get_active_frame_calldata();
 }
 
-std::span<const uint32_t>
-SystemCallHandler::get_parent_supplied_auth_tokens() const
+uint32_t
+SystemCallHandler::get_parent_supplied_auth_token_count() const
 {
   return invocation_frame_stack_
-      .get_current_frame_parent_supplied_auth_tokens();
+      .get_current_frame_parent_supplied_auth_token_count();
 }
 
 NondeterministicProposalData const &

@@ -8,6 +8,9 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdlib.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -109,7 +112,20 @@ namespace {
 
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
-constexpr auto kShutdownTimeout = std::chrono::seconds(5);
+// Grace [HogDevnodeProcess::terminate] gives SIGTERM before SIGKILL. Generous
+// on purpose: it bounds a node that will never exit, and a ~0.5 s teardown on a
+// starved CI runner must not be mistaken for one (hogd#4422).
+constexpr auto kDefaultShutdownTimeout = std::chrono::seconds(20);
+// After SIGKILL only the kernel is left to reap the child.
+constexpr auto kKillTimeout = std::chrono::seconds(5);
+// Bound on gdb attaching to a node that outlived its grace: symbol loading for
+// a debug build is slow, and the ctest timeout is still ticking.
+constexpr auto kBacktraceTimeout = std::chrono::seconds(20);
+// x23's SIGUSR1 dump opens with this line; [escalate_shutdown] waits for it to
+// reach the node's stderr before gdb stops the node, bounded because the
+// thread that writes it can be starved just like the node.
+constexpr std::string_view kPoolDumpMarker = "ThreadPool ";
+constexpr auto kPoolDumpTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
 // 2 GiB per node instead of the 15 GiB default; this suite boots ~85 nodes.
@@ -141,12 +157,14 @@ load_legacy_dev_wallet_fixture()
   return load_rv32_contract("dev_wallet.rv32a");
 }
 
+// Whole seconds from the environment variable [name], or [fallback] when it is
+// unset or empty. The sanitizer schedules pin these well above the defaults.
 std::chrono::seconds
-startup_timeout()
+timeout_from_env(const char *name, std::chrono::seconds fallback)
 {
-  const char *value = std::getenv("HOG_DEVNODE_STARTUP_TIMEOUT_SECS");
+  const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
-    return kDefaultStartupTimeout;
+    return fallback;
   }
 
   errno = 0;
@@ -154,27 +172,29 @@ startup_timeout()
   std::uint64_t seconds = std::strtoull(value, &end, 10);
   if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
       seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    throw std::runtime_error("invalid HOG_DEVNODE_STARTUP_TIMEOUT_SECS value");
+    throw std::runtime_error(std::format("invalid {} value", name));
   }
   return std::chrono::seconds(static_cast<int>(seconds));
 }
 
 std::chrono::seconds
+startup_timeout()
+{
+  return timeout_from_env("HOG_DEVNODE_STARTUP_TIMEOUT_SECS",
+                          kDefaultStartupTimeout);
+}
+
+std::chrono::seconds
 exit_timeout()
 {
-  const char *value = std::getenv("HOG_DEVNODE_EXIT_TIMEOUT_SECS");
-  if (value == nullptr || *value == '\0') {
-    return kDefaultExitTimeout;
-  }
+  return timeout_from_env("HOG_DEVNODE_EXIT_TIMEOUT_SECS", kDefaultExitTimeout);
+}
 
-  errno = 0;
-  char *end = nullptr;
-  std::uint64_t seconds = std::strtoull(value, &end, 10);
-  if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
-      seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    throw std::runtime_error("invalid HOG_DEVNODE_EXIT_TIMEOUT_SECS value");
-  }
-  return std::chrono::seconds(static_cast<int>(seconds));
+std::chrono::seconds
+shutdown_timeout()
+{
+  return timeout_from_env("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS",
+                          kDefaultShutdownTimeout);
 }
 
 struct Readiness {
@@ -238,6 +258,94 @@ read_to_end(int fd)
     }
     throw std::runtime_error(errno_message("read", errno));
   }
+}
+
+// Runs [args] with its stdout and stderr merged into the returned string,
+// killing it once [timeout] passes. Diagnostics only: every failure is
+// reported in the string rather than thrown.
+std::string
+capture_command_output(std::vector<std::string> args,
+                       std::chrono::seconds timeout)
+{
+  int output_pipe[2];
+  if (pipe(output_pipe) != 0) {
+    return errno_message("pipe", errno) + "\n";
+  }
+  const auto pid = fork();
+  if (pid < 0) {
+    const int saved_errno = errno;
+    close(output_pipe[0]);
+    close(output_pipe[1]);
+    return errno_message("fork", saved_errno) + "\n";
+  }
+  if (pid == 0) {
+    close(output_pipe[0]);
+    if (dup2(output_pipe[1], STDOUT_FILENO) < 0 ||
+        dup2(output_pipe[1], STDERR_FILENO) < 0) {
+      _exit(127);
+    }
+    close(output_pipe[1]);
+    std::vector<char *> argv;
+    argv.reserve(args.size() + 1);
+    for (std::string &arg : args) {
+      argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+    execvp(argv[0], argv.data());
+    _exit(127);
+  }
+  close(output_pipe[1]);
+
+  std::string output;
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  for (;;) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      kill(pid, SIGKILL);
+      output += std::format("({} did not finish within {} s; killed)\n",
+                            args[0], timeout.count());
+      break;
+    }
+    const auto remaining =
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    pollfd poll_fd{.fd = output_pipe[0], .events = POLLIN, .revents = 0};
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    const int ready = poll(&poll_fd, 1, static_cast<int>(remaining.count()));
+    if (ready < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      output += errno_message("poll", errno) + "\n";
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      kill(pid, SIGKILL);
+      break;
+    }
+    if (ready == 0) {
+      continue;
+    }
+    char buffer[4096];
+    const auto count = read(output_pipe[0], buffer, sizeof(buffer));
+    if (count > 0) {
+      output.append(buffer, static_cast<std::size_t>(count));
+      continue;
+    }
+    if (count < 0 && errno == EINTR) {
+      continue;
+    }
+    break;
+  }
+  close(output_pipe[0]);
+
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
+    output +=
+        std::format("({} is not installed or could not be run)\n", args[0]);
+  }
+  return output;
 }
 
 std::string
@@ -752,6 +860,14 @@ public:
       }
       argv.push_back(nullptr);
 
+#if defined(__linux__) && defined(PR_SET_PTRACER)
+      // Yama restricted ptrace: name the harness as tracer so the gdb it
+      // spawns in [escalate_shutdown] may attach. Best effort; the relation
+      // survives execv. The variadic prctl reads its arguments as unsigned
+      // long. NOLINTNEXTLINE(misc-include-cleaner,google-runtime-int)
+      prctl(PR_SET_PTRACER, static_cast<unsigned long>(getppid()), 0, 0, 0);
+#endif
+
       execv(HOG_DEVNODE_BINARY, argv.data());
       _exit(127);
     }
@@ -771,7 +887,8 @@ public:
       stdout_buffer_(std::move(other.stdout_buffer_)),
       stderr_sink_(std::move(other.stderr_sink_)),
       stderr_reader_(std::move(other.stderr_reader_)),
-      fixture_manifest_(std::exchange(other.fixture_manifest_, std::nullopt))
+      fixture_manifest_(std::exchange(other.fixture_manifest_, std::nullopt)),
+      shutdown_diagnostics_(std::move(other.shutdown_diagnostics_))
   {
     other.pid_ = -1;
     other.stdout_fd_ = -1;
@@ -818,15 +935,20 @@ public:
       throw std::runtime_error(errno_message("kill SIGTERM", errno));
     }
 
-    std::optional<int> status = wait_for_exit(kShutdownTimeout);
+    const std::chrono::seconds grace = shutdown_timeout();
+    std::optional<int> status = wait_for_exit(grace);
     if (!status.has_value()) {
-      kill(pid_, SIGKILL);
-      status = wait_for_exit(kShutdownTimeout);
-      if (!status.has_value()) {
-        throw std::runtime_error("hog-devnode did not exit after SIGKILL");
-      }
+      return escalate_shutdown(grace);
     }
     return *status;
+  }
+
+  // Empty unless [terminate] had to escalate to SIGKILL. Then it names the
+  // grace that ran out and carries what gdb saw of the stuck node; the x23
+  // pool dump the escalation also requests is on the node's stderr.
+  const std::string &shutdown_diagnostics() const
+  {
+    return shutdown_diagnostics_;
   }
 
   // Models a crash: the node gets no shutdown path at all, so whatever it
@@ -842,7 +964,7 @@ public:
     if (kill(pid_, SIGKILL) != 0 && errno != ESRCH) {
       throw std::runtime_error(errno_message("kill SIGKILL", errno));
     }
-    std::optional<int> status = wait_for_exit(kShutdownTimeout);
+    std::optional<int> status = wait_for_exit(kKillTimeout);
     if (!status.has_value()) {
       throw std::runtime_error("hog-devnode did not exit after SIGKILL");
     }
@@ -984,6 +1106,58 @@ private:
     }
   }
 
+  bool stderr_contains(std::string_view needle) const
+  {
+    if (!stderr_sink_) {
+      return false;
+    }
+    const std::lock_guard<std::mutex> lock(stderr_sink_->mutex);
+    return stderr_sink_->data.find(needle) != std::string::npos;
+  }
+
+  // The node outlived its SIGTERM grace: collect evidence before SIGKILL.
+  // SIGUSR1 makes x23 dump its pools onto the node's stderr (dying of it means
+  // x23 was already torn down, i.e. static destruction); gdb, if it can
+  // attach, adds every thread's backtrace. Best effort; returns the wait
+  // status.
+  int escalate_shutdown(std::chrono::seconds grace)
+  {
+    shutdown_diagnostics_ = std::format(
+        "hog-devnode (pid {}) did not exit within {} s of SIGTERM; the "
+        "harness sent SIGUSR1 (x23 pool dump, see the node's stderr below), "
+        "captured the backtraces that follow, then sent SIGKILL.\n--- gdb "
+        "---\n",
+        pid_, grace.count());
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    kill(pid_, SIGUSR1);
+    // Wait for the dump to land before gdb freezes the node. A node that was
+    // merely slow may finish here instead, and then its status is the verdict.
+    const auto dump_deadline =
+        std::chrono::steady_clock::now() + kPoolDumpTimeout;
+    std::optional<int> status = wait_for_exit(std::chrono::milliseconds(10));
+    while (!status.has_value() && !stderr_contains(kPoolDumpMarker) &&
+           std::chrono::steady_clock::now() < dump_deadline) {
+      status = wait_for_exit(std::chrono::milliseconds(10));
+    }
+    if (status.has_value()) {
+      shutdown_diagnostics_ +=
+          "(the node exited while the dump settled, before gdb ran)\n";
+      return *status;
+    }
+    // No debuginfod: a symbol server lookup could eat the whole budget.
+    shutdown_diagnostics_ += capture_command_output(
+        {"gdb", "-nx", "-batch", "-iex", "set debuginfod enabled off", "-ex",
+         "set pagination off", "-ex", "thread apply all bt", "-p",
+         std::to_string(pid_)},
+        kBacktraceTimeout);
+    kill(pid_, SIGKILL);
+    status = wait_for_exit(kKillTimeout);
+    if (!status.has_value()) {
+      throw std::runtime_error("hog-devnode did not exit after SIGKILL");
+    }
+    return *status;
+  }
+
   int pid_;
   int stdout_fd_;
   int stderr_fd_;
@@ -991,14 +1165,32 @@ private:
   std::shared_ptr<StderrSink> stderr_sink_;
   std::thread stderr_reader_;
   std::optional<std::filesystem::path> fixture_manifest_;
+  std::string shutdown_diagnostics_;
 };
+
+std::string
+describe_wait_status(int status)
+{
+  if (WIFEXITED(status)) {
+    return std::format("hog-devnode exited with status {}",
+                       WEXITSTATUS(status));
+  }
+  if (WIFSIGNALED(status)) {
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    return std::format("hog-devnode was killed by signal {}", WTERMSIG(status));
+  }
+  return std::format("hog-devnode wait status {:#x}", status);
+}
 
 void
 expect_clean_exit(HogDevnodeProcess &process)
 {
   int status = process.terminate();
   std::string stderr_output = process.read_remaining_stderr();
-  ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
+  ASSERT_TRUE(WIFEXITED(status))
+      << describe_wait_status(status) << "\n"
+      << process.shutdown_diagnostics() << "--- hog-devnode stderr ---\n"
+      << stderr_output;
   EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
   EXPECT_TRUE(process.read_remaining_stdout().empty());
 }

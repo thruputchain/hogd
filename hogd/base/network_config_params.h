@@ -28,6 +28,17 @@ inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 16;
 // contracts without bound, which is #2190.
 inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
 
+// Unbounded before these parameters, so a contract-sized span was parsed or
+// copied before the call could be rejected (#4174, #4040). The calldata
+// default matches guest memory, so it bounds a root invocation's calldata
+// without failing any sub-invoke that runs today.
+inline constexpr uint32_t kDefaultMaxAuthTokens = 64;
+inline constexpr uint32_t kDefaultMaxCalldataLen = 65536;
+
+// The value the wire type fixed before the parameter existed, so a chain that
+// does not state one keeps exactly the limit it already ran under.
+inline constexpr uint32_t kDefaultMaxReturnBufferLen = 1024;
+
 // The parameters in force, flattened from the list that states them.
 // Resolve once where a tip is pinned; the invoke path reads these per frame.
 struct NetworkConfigParams {
@@ -45,6 +56,9 @@ struct NetworkConfigParams {
       static_cast<uint32_t>(kDefaultMaxRv32CodeBytes);
   uint32_t max_rv32_memory_bytes =
       static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes);
+  uint32_t max_auth_tokens = kDefaultMaxAuthTokens;
+  uint32_t max_calldata_len = kDefaultMaxCalldataLen;
+  uint32_t max_return_buffer_len = kDefaultMaxReturnBufferLen;
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -86,7 +100,7 @@ private:
 // The highest parameter id this build knows. A configuration states its ids
 // contiguously from zero, so this bounds a scan across all of them.
 inline constexpr ConfigParamID kHighestConfigParamID =
-    ConfigParamID::kConfigParamMaxRv32MemoryBytes;
+    ConfigParamID::kConfigParamMaxReturnBufferLen;
 
 // Wire name for `id`: --network-config, recorded overrides, genesis JSON.
 inline std::string_view
@@ -113,6 +127,12 @@ config_param_name(ConfigParamID id)
     return "max_rv32_code_bytes";
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     return "max_rv32_memory_bytes";
+  case ConfigParamID::kConfigParamMaxAuthTokens:
+    return "max_auth_tokens";
+  case ConfigParamID::kConfigParamMaxCalldataLen:
+    return "max_calldata_len";
+  case ConfigParamID::kConfigParamMaxReturnBufferLen:
+    return "max_return_buffer_len";
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -157,6 +177,12 @@ config_param_value(ConfigParam const &param)
     return param.max_rv32_code_bytes();
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     return param.max_rv32_memory_bytes();
+  case ConfigParamID::kConfigParamMaxAuthTokens:
+    return param.max_auth_tokens();
+  case ConfigParamID::kConfigParamMaxCalldataLen:
+    return param.max_calldata_len();
+  case ConfigParamID::kConfigParamMaxReturnBufferLen:
+    return param.max_return_buffer_len();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}",
         std::to_underlying(param.param()));
@@ -213,6 +239,15 @@ NetworkConfigParams::make_param(ConfigParamID id, uint32_t value)
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     out.max_rv32_memory_bytes() = value;
     break;
+  case ConfigParamID::kConfigParamMaxAuthTokens:
+    out.max_auth_tokens() = value;
+    break;
+  case ConfigParamID::kConfigParamMaxCalldataLen:
+    out.max_calldata_len() = value;
+    break;
+  case ConfigParamID::kConfigParamMaxReturnBufferLen:
+    out.max_return_buffer_len() = value;
+    break;
   }
   return out;
 }
@@ -241,6 +276,12 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return max_rv32_code_bytes;
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
     return max_rv32_memory_bytes;
+  case ConfigParamID::kConfigParamMaxAuthTokens:
+    return max_auth_tokens;
+  case ConfigParamID::kConfigParamMaxCalldataLen:
+    return max_calldata_len;
+  case ConfigParamID::kConfigParamMaxReturnBufferLen:
+    return max_return_buffer_len;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -288,7 +329,16 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
             .value_or(static_cast<uint32_t>(kDefaultMaxRv32CodeBytes))),
     max_rv32_memory_bytes(
         stated_param(config, ConfigParamID::kConfigParamMaxRv32MemoryBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes)))
+            .value_or(static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes))),
+    max_auth_tokens(
+        stated_param(config, ConfigParamID::kConfigParamMaxAuthTokens)
+            .value_or(kDefaultMaxAuthTokens)),
+    max_calldata_len(
+        stated_param(config, ConfigParamID::kConfigParamMaxCalldataLen)
+            .value_or(kDefaultMaxCalldataLen)),
+    max_return_buffer_len(
+        stated_param(config, ConfigParamID::kConfigParamMaxReturnBufferLen)
+            .value_or(kDefaultMaxReturnBufferLen))
 {}
 
 inline void

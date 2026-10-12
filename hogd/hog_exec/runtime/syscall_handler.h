@@ -325,7 +325,8 @@ public:
   // Get the auth tokens supplied by the parent frame.
   // Incorrect to call method when no invocation is running.
   // Span invalidated when call frame changes.
-  std::span<const uint32_t> get_parent_supplied_auth_tokens() const;
+  // The active frame's forwarded tokens are its ids 0..N-1.
+  uint32_t get_parent_supplied_auth_token_count() const;
 
   AuthClaim const &get_auth_claim() const;
 
@@ -333,9 +334,9 @@ public:
   // Error if most recent child did call set_return_buffer.
   [[nodiscard]] SystemStatus<SyscallStatus<const ReturnBuffer *>>
   get_return_buffer() const;
-  std::span<const uint32_t> get_returned_auth_token_ids() const;
+  // The ids the most recent child's returned tokens took in this frame.
+  AuthTokenIdRange get_returned_auth_tokens() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
-  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.

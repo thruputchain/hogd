@@ -27,7 +27,11 @@
 namespace {
 
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
-constexpr auto kShutdownTimeout = std::chrono::seconds(5);
+// Grace between SIGTERM and SIGKILL; hog_devnode_test.cc shares the default
+// and the HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS override.
+constexpr auto kDefaultShutdownTimeout = std::chrono::seconds(20);
+// After SIGKILL only the kernel is left to reap the child.
+constexpr auto kKillTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
 // Same caps as hog_devnode_test.cc; this is a launch test, not a capacity test.
 constexpr char kRamDbBytes[] = "2147483648";
@@ -49,15 +53,14 @@ json_string_field(std::string_view json, std::string_view field)
   return std::string(json.substr(start, end - start));
 }
 
-// Honor HOG_DEVNODE_STARTUP_TIMEOUT_SECS just like hog_devnode_test.cc, so slow
-// sanitizer schedules (e.g. TSAN, which sets it to 180) can give hog-devnode
-// enough time to reach readiness. Falls back to the default when unset.
+// Whole seconds from [name], or [fallback] when it is unset; the sanitizer
+// schedules raise these. Mirrors hog_devnode_test.cc.
 std::chrono::seconds
-startup_timeout()
+timeout_from_env(const char *name, std::chrono::seconds fallback)
 {
-  const char *value = std::getenv("HOG_DEVNODE_STARTUP_TIMEOUT_SECS");
+  const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
-    return kDefaultStartupTimeout;
+    return fallback;
   }
 
   errno = 0;
@@ -65,10 +68,24 @@ startup_timeout()
   std::uint64_t seconds = std::strtoull(value, &end, 10);
   if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
       seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    std::println(stderr, "invalid HOG_DEVNODE_STARTUP_TIMEOUT_SECS value");
+    std::println(stderr, "invalid {} value", name);
     std::exit(EXIT_FAILURE);
   }
   return std::chrono::seconds(static_cast<int>(seconds));
+}
+
+std::chrono::seconds
+startup_timeout()
+{
+  return timeout_from_env("HOG_DEVNODE_STARTUP_TIMEOUT_SECS",
+                          kDefaultStartupTimeout);
+}
+
+std::chrono::seconds
+shutdown_timeout()
+{
+  return timeout_from_env("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS",
+                          kDefaultShutdownTimeout);
 }
 
 // NOLINTBEGIN(misc-include-cleaner)
@@ -146,9 +163,14 @@ cleanup_child(pid_t pid)
 {
   kill(pid, SIGTERM);
   int status = 0;
-  if (!wait_for_exit(pid, kShutdownTimeout, status)) {
+  const std::chrono::seconds grace = shutdown_timeout();
+  if (!wait_for_exit(pid, grace, status)) {
+    std::println(stderr,
+                 "hog-devnode did not exit within {} s of SIGTERM; sending "
+                 "SIGKILL",
+                 grace.count());
     kill(pid, SIGKILL);
-    if (!wait_for_exit(pid, kShutdownTimeout, status)) {
+    if (!wait_for_exit(pid, kKillTimeout, status)) {
       std::println(stderr, "hog-devnode did not exit after SIGKILL");
     }
   }

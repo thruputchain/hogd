@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <format>
 #include <future>
 #include <gtest/gtest.h>
 #include <initializer_list>
@@ -1606,6 +1607,94 @@ TEST(Mempool, NominateCommit)
   auto res_commit =
       commit_block(server, get_tip.db_tip(), res_nominate.proposed_block());
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+TEST(Mempool, CommitRecordsLatencyHistograms)
+{
+  // The fixture clears the metrics registry, then commits the genesis
+  // ceremony through the ordinary commit path. Counts are absolute from there.
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+  MempoolMetrics &metrics = MempoolMetrics::instance();
+
+  // Every series exists before traffic, so rate() and alerts see 0, not
+  // absence. These names are what dashboards and alert rules query.
+  {
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    for (const char *name :
+         {"submit_unvetted_duration_seconds", "submit_vetted_duration_seconds",
+          "nomination_duration_seconds", "validation_duration_seconds",
+          "commit_interval_seconds", "block_period_seconds"}) {
+      EXPECT_NE(dump.find(std::format("mempool_{}_count 0\n", name)),
+                std::string::npos)
+          << name;
+    }
+    // The ceremony is a commit, but not a round.
+    EXPECT_NE(dump.find("mempool_commit_duration_seconds_count 1\n"),
+              std::string::npos);
+    // Its scheduler removal pass has already run, so only check presence.
+    EXPECT_NE(dump.find("mempool_scheduler_remove_duration_seconds_count "),
+              std::string::npos);
+  }
+
+  auto nominate_and_commit = [&] {
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), nomination.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+  };
+
+  // The first ordinary commit has no previous round to measure against.
+  const std::chrono::steady_clock::time_point rounds_started_at =
+      std::chrono::steady_clock::now();
+  nominate_and_commit();
+  EXPECT_EQ(metrics.nomination_duration_seconds.count(), 1UL);
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 2UL);
+  EXPECT_EQ(metrics.commit_interval_seconds.count(), 0UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 0UL);
+
+  nominate_and_commit();
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 3UL);
+  EXPECT_EQ(metrics.commit_interval_seconds.count(), 1UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
+  {
+    // Both round histograms hold exactly the round just driven, so each sum
+    // is that one sample. Bound it by the wall clock measured around the two
+    // commits rather than by a fixed bucket: a round takes milliseconds here
+    // but seconds under a sanitizer on a loaded host, and neither can outlast
+    // the test. A milliseconds-for-seconds unit bug records ~1000x the
+    // elapsed time and fails this.
+    const double elapsed_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      rounds_started_at)
+            .count();
+    EXPECT_GT(metrics.block_period_seconds.sum(), 0.0);
+    EXPECT_LE(metrics.block_period_seconds.sum(), elapsed_seconds);
+    EXPECT_GT(metrics.commit_interval_seconds.sum(), 0.0);
+    EXPECT_LE(metrics.commit_interval_seconds.sum(), elapsed_seconds);
+
+    // Which bucket the round lands in is a property of the host, but the
+    // sample must still be scraped out as a bucket series.
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    EXPECT_NE(dump.find("mempool_block_period_seconds_bucket{le=\"+Inf\"} 1\n"),
+              std::string::npos);
+    EXPECT_NE(dump.find(
+                  "mempool_commit_interval_seconds_bucket{le=\"+Inf\"} 1\n"),
+              std::string::npos);
+  }
+
+  // A failed commit returns at once and must not skew the duration quantiles.
+  ConsensusValue value{};
+  value.proposal_header.block_height = 100;
+  EXPECT_EQ(rpc.schedulercoord_commit_block(/*block_id=*/99,
+                                            std::move(value))(),
+            SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 3UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
 }
 
 TEST(Mempool, NewlyDeployedContractHogCount)

@@ -37,16 +37,13 @@ namespace {
 ForeignHostFnResult
 call_get_calldata(std::span<std::byte> output_buffer,
                   RuntimeMemoryLength &output_written_len,
-                  std::span<std::byte> output_auth_token_list,
-                  RuntimeMemoryLength &output_auth_token_written_len)
+                  uint32_t &output_auth_token_count)
 {
   return mock_syscall_entrypoint(
       std::to_underlying(SyscallNo::kGetCalldata),
       reinterpret_cast<uint64_t>(output_buffer.data()), output_buffer.size(),
       reinterpret_cast<uint64_t>(&output_written_len),
-      reinterpret_cast<uint64_t>(output_auth_token_list.data()),
-      output_auth_token_list.size(),
-      reinterpret_cast<uint64_t>(&output_auth_token_written_len), 0);
+      reinterpret_cast<uint64_t>(&output_auth_token_count), 0, 0, 0);
 }
 
 } // namespace
@@ -87,10 +84,8 @@ TEST(TestBindingsTest, TracedMockSyscallRunsTraceDiagnosticsWithoutCrashing)
 
   std::array<std::byte, 4096> output{};
   RuntimeMemoryLength written_len = 0;
-  std::array<std::byte, 4> auth_token_output{};
-  RuntimeMemoryLength auth_token_written_len = 0;
-  auto result = call_get_calldata(output, written_len, auth_token_output,
-                                  auth_token_written_len);
+  uint32_t auth_token_count = 0;
+  auto result = call_get_calldata(output, written_len, auth_token_count);
 
   // The syscall ran to completion through the trace-diagnostic paths.
   EXPECT_EQ(result.panic,
@@ -100,7 +95,7 @@ TEST(TestBindingsTest, TracedMockSyscallRunsTraceDiagnosticsWithoutCrashing)
   EXPECT_EQ(written_len, calldata.size());
   EXPECT_EQ(output[0], std::byte{0x42});
   EXPECT_EQ(output[1], std::byte{0x11});
-  EXPECT_EQ(auth_token_written_len, 0U);
+  EXPECT_EQ(auth_token_count, 0U);
 
   ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
   auto finish_res =

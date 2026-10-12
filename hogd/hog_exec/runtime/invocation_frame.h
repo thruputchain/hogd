@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <span>
@@ -24,7 +25,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_subtoken.h"
-#include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
@@ -43,12 +43,18 @@ namespace hogd {
 class PerTransactionDatabaseProxy;
 struct InvokeResult;
 
+// The consecutive auth token ids start..start+count-1 of one frame.
+struct AuthTokenIdRange {
+  uint32_t start = 0;
+  uint32_t count = 0;
+};
+
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {
 public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
-                  AuthTokenIdSet &&owned_auth_token_ids,
+                  std::vector<RegisteredAuthToken> &&forwarded_auth_tokens,
                   uint32_t inherited_try_invoke_depth,
                   NetworkConfigParams const &params);
 
@@ -65,7 +71,8 @@ public:
   // The value of the last _child_ call frame's return value.
   // Set to nullopt before any child call happens.
   std::optional<InvocationFrameOutput> child_return_output_ = std::nullopt;
-  std::vector<uint32_t> child_returned_auth_token_ids_;
+  // The ids the last child's returned tokens took in this frame.
+  AuthTokenIdRange child_returned_auth_tokens_;
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &&frame);
@@ -206,36 +213,66 @@ public:
     return committed_contracts;
   }
 
+  // Auth token ids are local to a frame: a token's id is its index in
+  // auth_tokens_. A frame's forwarded tokens are its ids 0..N-1, in the order
+  // its parent listed them, and every token minted, unwrapped or returned to
+  // the frame takes the next id.
   bool check_owns_auth_token(uint32_t token_id) const
   {
-    return owned_auth_token_ids_.contains(token_id);
+    return token_id < auth_tokens_.size() &&
+           static_cast<bool>(auth_tokens_[token_id].root_node);
   }
 
-  void mint_auth_token(uint32_t token_id)
+  // Null if this frame does not own token_id. Invalidated by add_auth_token.
+  RegisteredAuthToken const *lookup_auth_token(uint32_t token_id) const
   {
-    owned_auth_token_ids_.insert(token_id);
+    return check_owns_auth_token(token_id) ? &auth_tokens_[token_id] : nullptr;
+  }
+
+  // The id the next added token takes.
+  size_t next_auth_token_id() const { return auth_tokens_.size(); }
+
+  // Adds token under the next id and returns it, or nullopt once the ids are
+  // exhausted.
+  std::optional<uint32_t> add_auth_token(RegisteredAuthToken token)
+  {
+    if (auth_tokens_.size() >= std::numeric_limits<uint32_t>::max()) {
+      return std::nullopt;
+    }
+    auth_tokens_.push_back(std::move(token));
+    return static_cast<uint32_t>(auth_tokens_.size() - 1);
+  }
+
+  // Removes a token this frame owns, and returns it.
+  RegisteredAuthToken take_auth_token(uint32_t token_id)
+  {
+    assert(check_owns_auth_token(token_id));
+    return std::exchange(auth_tokens_[token_id], RegisteredAuthToken{});
   }
 
   void remove_auth_tokens(std::span<uint32_t const> token_ids)
   {
     for (auto token_id : token_ids) {
-      owned_auth_token_ids_.erase(token_id);
+      take_auth_token(token_id);
     }
+  }
+
+  // The number of tokens this frame's parent forwarded to it, which are its
+  // ids 0..N-1.
+  uint32_t forwarded_auth_token_count() const
+  {
+    return forwarded_auth_token_count_;
   }
 
   HashBuffers hash_buffers_;
 
-  // Ids stay in this frame's owned set until the child commits successfully.
+  // The forwarded tokens stay in this frame until the child commits
+  // successfully.
   void
   set_child_forwarded_auth_tokens(std::vector<uint32_t> &&token_ids) noexcept
   {
     assert(child_forwarded_auth_tokens_.empty());
     child_forwarded_auth_tokens_ = std::move(token_ids);
-  }
-
-  std::span<const uint32_t> get_child_forwarded_auth_tokens() const
-  {
-    return child_forwarded_auth_tokens_;
   }
 
   void
@@ -272,9 +309,13 @@ private:
   std::unordered_map<ContractAddress, DeployedContractHash, SipHash24Hasher>
       new_contract_deployments_;
 
-  AuthTokenIdSet owned_auth_token_ids_;
-  // Forwarded to the running child; leaves owned_auth_token_ids_ only when
-  // that child commits successfully.
+  // This frame's auth tokens, indexed by id. A token that has left the frame
+  // (consumed, or forwarded to a child that committed) leaves an empty entry,
+  // so ids are never reused.
+  std::vector<RegisteredAuthToken> auth_tokens_;
+  uint32_t forwarded_auth_token_count_;
+  // This frame's ids for the tokens forwarded to the running child; they leave
+  // auth_tokens_ only when that child commits successfully.
   std::vector<uint32_t> child_forwarded_auth_tokens_;
 };
 
@@ -371,11 +412,10 @@ public:
     return frame_stack_.back().child_return_output_;
   }
 
-  std::span<const uint32_t>
-  get_active_frame_child_returned_auth_token_ids() const
+  AuthTokenIdRange get_active_frame_child_returned_auth_tokens() const
   {
     assert(!frame_stack_.empty());
-    return frame_stack_.back().child_returned_auth_token_ids_;
+    return frame_stack_.back().child_returned_auth_tokens_;
   }
 
   const Calldata &get_active_frame_calldata() const
@@ -384,15 +424,11 @@ public:
     return frame_stack_.back().calldata();
   }
 
-  std::span<const uint32_t>
-  get_current_frame_parent_supplied_auth_tokens() const
+  // The active frame's forwarded tokens are its ids 0..N-1.
+  uint32_t get_current_frame_parent_supplied_auth_token_count() const
   {
     assert(!frame_stack_.empty());
-    if (frame_stack_.size() < 2) {
-      return std::span<const uint32_t>();
-    }
-    return frame_stack_[frame_stack_.size() - 2]
-        .get_child_forwarded_auth_tokens();
+    return frame_stack_.back().forwarded_auth_token_count();
   }
 
   void log_event(TxEmittedEvent event)
@@ -446,11 +482,9 @@ public:
   [[nodiscard]] SyscallStatus<uint32_t>
   mint_auth_token(RegisteredAuthToken token);
 
-  // payload and mint_address point into the registry, which keeps every token
-  // for the rest of the transaction.
+  // The consumed token, and the ids its children took in the consuming frame.
   struct ConsumeAuthTokenResult {
-    AuthTokenPayload const *payload;
-    ContractAddress const *mint_address;
+    RegisteredAuthToken token;
     uint32_t new_token_id_start;
     uint32_t new_token_id_count;
   };
@@ -458,7 +492,6 @@ public:
   consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
-  bool check_auth_tokens_owned(AuthTokenIdSet const &token_ids) const;
 
   size_t size() const { return frame_stack_.size(); }
 
@@ -467,7 +500,6 @@ private:
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;
   NetworkConfigParams const &config_params_;
-  AuthTokenRegistry auth_token_registry_;
 };
 
 } // namespace hogd

@@ -2,22 +2,35 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
+#include "built_contracts/authclaim_test.h"
+#include "built_contracts/default_wallet.h"
+#include "built_contracts/default_wallet.hh"
+#include "built_contracts/manual_revert_test.h"
 #include "built_contracts/view_gateway_test.h"
+#include "executor_to_db_rpc.hh"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -34,9 +47,11 @@
 #include "types.hh"
 #include "view.hh"
 #include "view_gateway.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {
@@ -112,6 +127,7 @@ TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
 {
   ContractAddress caller{};
   TransactionViewQuery query = make_query();
+  const auto claim = query.auth_claim;
   query.parent_address = caller;
   query.forwarded_tokens.push_back(x23::serialize(AuthToken{}));
   query.invoke_flags = std::to_underlying(InvokeFlag::TryInvoke) |
@@ -124,10 +140,17 @@ TEST(ViewGatewayRpc, NormalizesPublicViewSubset)
   EXPECT_EQ(*normalized.parent_address, caller);
   EXPECT_EQ(normalized.forwarded_tokens.size(), 1U);
   EXPECT_EQ(normalized.invoke_flags, std::to_underlying(InvokeFlag::None));
-  ASSERT_EQ(normalized.auth_claim.claim_type(),
-            AuthClaimType::kSourceAddressAuthData);
-  EXPECT_EQ(normalized.auth_claim.source_address_claim().allowed_keys, 0);
-  EXPECT_EQ(normalized.auth_claim.source_address_claim().required_weight, 0);
+  EXPECT_EQ(normalized.auth_claim, claim);
+}
+
+TEST(ViewGatewayRpc, PreservesSourceAddressClaimAndDefault)
+{
+  auto query = make_query();
+  query.auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData);
+  EXPECT_EQ(normalize_public_view_query(query).auth_claim, query.auth_claim);
+  query.auth_claim.source_address_claim() = {.allowed_keys = 5,
+                                             .required_weight = 3};
+  EXPECT_EQ(normalize_public_view_query(query).auth_claim, query.auth_claim);
 }
 
 // View queries are read-only simulations.  Public callers are intentionally
@@ -483,4 +506,539 @@ TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
 }
 
 } // namespace
+
+// Interpose on real database reads without adding callbacks to the executor.
+class ControlledViewDb : public rpc_client_t<DatabaseToExecutorInterfaceV1> {
+  using Client = rpc_client_t<DatabaseToExecutorInterfaceV1>;
+
+public:
+  using rpc_service = DatabaseToExecutorInterfaceV1;
+  explicit ControlledViewDb(std::uint16_t port)
+    : Client(make_rpc_client<DatabaseToExecutorInterfaceV1>(
+                 x23::HostPort{"localhost", port})()
+                 .value())
+  {}
+
+  std::function<void(BlockID, AddressAndKey const &)> before_read;
+  std::atomic<std::size_t> snapshots_opened{0};
+
+  x23::Async<ExpectedStorageItem> get_snapshot_item(BlockID id,
+                                                    AddressAndKey key)
+  {
+    if (before_read) {
+      co_await default_threadpool().async(before_read, id, std::cref(key));
+    }
+    co_return co_await Client::get_snapshot_item(id, key);
+  }
+
+  x23::Async<ExpectedViewingSnapshot> open_viewing_snapshot()
+  {
+    ++snapshots_opened;
+    co_return co_await Client::open_viewing_snapshot();
+  }
+};
+
+class ViewGatewayBatchTest : public ViewGatewayRefreshTest {
+public:
+  static void stop_refresh_worker(ViewGatewayRpc &gateway)
+  {
+    gateway.refresh_thread_.request_stop();
+    gateway.refresh_thread_.join();
+  }
+
+  static ViewGatewayBatchQuery batch()
+  {
+    auto first = normalize_public_view_query(make_read_query());
+    first.invocation.gas_limit = 10'000'000;
+    auto second = first;
+    ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
+    second.invocation = client.make_invocation<u8"read_value">(
+        10'000'000, NativeContractTestFramework::make_storage_key("other_key"));
+    return ViewGatewayBatchQuery{.calls = {first, second},
+                                 .min_height = {},
+                                 .budget_millis = 30'000,
+                                 .max_response_bytes = 1'048'576};
+  }
+
+  ViewGatewayBatchResult pinned_attempt(ViewGatewayRpc &gateway,
+                                        ViewGatewayBatchQuery const &query,
+                                        bool commit, bool expired)
+  {
+    auto *state = gateway.get_current_view_state()();
+    CHECK(static_cast<bool>(state));
+    const auto id = state->get().block_id;
+    if (commit) {
+      commit_bytestring("new-value");
+      framework_.advance_block();
+    }
+    auto deadline =
+        std::chrono::steady_clock::now() +
+        (expired ? std::chrono::seconds(-1) : std::chrono::seconds(30));
+    auto result = gateway.run_batch_attempt(query, state->get(), deadline)();
+    if (state->release_reference()) {
+      gateway.gc_view_state(id)();
+    }
+    return result;
+  }
+};
+
+TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
+{
+  const auto address = NativeContractTestFramework::make_contract_address(42);
+  auto contract = ContractTraitMeta<authclaim_test::AuthClaimTest>::load_rv32();
+  framework_.write_contract(contract);
+  framework_.write_deployment(address, contract);
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+
+  ContractTraitClient<authclaim_test::AuthClaimTest> ordinary(address);
+  auto default_claim = make_read_query();
+  default_claim.invocation =
+      ordinary.make_invocation<u8"test_get_auth_claim">(10'000'000);
+  auto nonzero = default_claim;
+  nonzero.auth_claim.source_address_claim() = {.allowed_keys = 5,
+                                               .required_weight = 3};
+  // This existing non-wallet fixture accepts only the zero/default claim.
+  EXPECT_EQ(
+      gateway.viewgateway_view(default_claim)().payload().output.status_code(),
+      InvocationFrameStatusCode::Return);
+  EXPECT_EQ(gateway.viewgateway_view(nonzero)().payload().output.status_code(),
+            InvocationFrameStatusCode::Fault);
+
+  auto wallet_query = make_query();
+  wallet_query.auth_claim.pubkey_preimage().pubkey.scheme(
+      CryptographicScheme::Ed25519);
+  wallet_query.auth_claim.pubkey_preimage().pubkey.ed25519().fill(42);
+  const auto owner =
+      pubkey_auth_address(wallet_query.auth_claim.pubkey_preimage());
+  if (!owner.has_value()) {
+    FAIL() << "Expected an Ed25519 authorization address";
+  }
+  ContractTraitClient<default_wallet::DefaultWallet> wallet(*owner);
+  const auto inner = make_read_query().invocation;
+  x23::Vec<default_wallet::WalletCall, 0xffffffff> calls{
+      {.target = inner.invoked_address,
+       .entrypoint = inner.entrypoint,
+       .gas_limit = 1'000'000,
+       .calldata = inner.calldata}};
+  wallet_query.invocation =
+      wallet.make_invocation<u8"execute">(10'000'000, calls);
+  EXPECT_EQ(
+      gateway.viewgateway_view(wallet_query)().payload().output.status_code(),
+      InvocationFrameStatusCode::Return);
+  auto wrong = wallet_query;
+  ++wrong.auth_claim.pubkey_preimage().nonce;
+  EXPECT_EQ(gateway.viewgateway_view(wrong)().payload().output.status_code(),
+            InvocationFrameStatusCode::Abort);
+  // Pubkey claims also reach the ordinary contract, which rejects that variant.
+  auto ordinary_pubkey = default_claim;
+  ordinary_pubkey.auth_claim = wallet_query.auth_claim;
+  EXPECT_EQ(gateway.viewgateway_view(ordinary_pubkey)()
+                .payload()
+                .output.status_code(),
+            InvocationFrameStatusCode::Fault);
+
+  auto nested = wallet_query;
+  calls[0].target = address;
+  calls[0].entrypoint = default_claim.invocation.entrypoint;
+  calls[0].calldata = default_claim.invocation.calldata;
+  nested.invocation = wallet.make_invocation<u8"execute">(10'000'000, calls);
+  const auto nested_result = gateway.viewgateway_view(nested)();
+  ASSERT_EQ(nested_result.payload().output.status_code(),
+            InvocationFrameStatusCode::Abort);
+  // The wallet accepts the claim; its ordinary child rejects the pubkey
+  // variant.
+  EXPECT_NE(nested_result.payload().output,
+            gateway.viewgateway_view(wrong)().payload().output);
+
+  auto query = batch();
+  query.calls = {wallet_query, wrong, default_claim, nonzero};
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  ASSERT_EQ(result.payload().results.size(), 4U);
+  EXPECT_EQ(result.payload().results[0].output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(result.payload().results[1].output.status_code(),
+            InvocationFrameStatusCode::Abort);
+  EXPECT_EQ(result.payload().results[2].output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(result.payload().results[3].output.status_code(),
+            InvocationFrameStatusCode::Fault);
+}
+
+TEST_F(ViewGatewayBatchTest, ReturnsOrderedResultsAtOneHeight)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  auto query = batch();
+  auto first = gateway.viewgateway_view(query.calls[0])();
+  auto second = gateway.viewgateway_view(query.calls[1])();
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  ASSERT_EQ(result.payload().results.size(), 2U);
+  EXPECT_EQ(result.payload().height, first.payload().height);
+  EXPECT_EQ(result.payload().results[0].output, first.payload().output);
+  EXPECT_EQ(result.payload().results[0].gas_consumed,
+            first.payload().gas_consumed);
+  EXPECT_GT(result.payload().results[0].gas_consumed, 0U);
+  EXPECT_EQ(result.payload().results[1].output, second.payload().output);
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, IsolatesWritesAndPreservesCallerAndMixedOutcomes)
+{
+  const auto address = NativeContractTestFramework::make_contract_address(42);
+  auto contract =
+      ContractTraitMeta<manual_revert_test::ManualRevertTest>::load_rv32();
+  framework_.write_contract(contract);
+  framework_.write_deployment(address, contract);
+  framework_.setup_grant_storage_token(address, 1'000'000'000);
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  ContractTraitClient<manual_revert_test::ManualRevertTest> client(address);
+  auto read = make_query();
+  read.invocation =
+      client.make_invocation<u8"check_storage_exists">(10'000'000);
+  auto baseline = gateway.viewgateway_view(read)();
+  ASSERT_EQ(baseline.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  ASSERT_EQ(baseline.payload().output.status_code(),
+            InvocationFrameStatusCode::Return);
+  auto write = read;
+  write.invocation =
+      client.make_invocation<u8"test_basic_manual_revert">(10'000'000, false);
+  ViewGatewayBatchQuery query{.calls = {write, read},
+                              .min_height = {},
+                              .budget_millis = 30'000,
+                              .max_response_bytes = 1'048'576};
+  for (uint32_t mode = 0; mode < 3; ++mode) {
+    auto call = read;
+    call.parent_address =
+        NativeContractTestFramework::make_contract_address(100 + mode);
+    call.invocation =
+        client.make_invocation<u8"test_initializer">(10'000'000,
+                                                     *call.parent_address, mode,
+                                                     mode);
+    query.calls.push_back(std::move(call));
+  }
+  query.calls.push_back(read);
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  auto const &results = result.payload().results;
+  ASSERT_EQ(results.size(), 6U);
+  EXPECT_EQ(results[0].output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_EQ(results[1].output, baseline.payload().output);
+  EXPECT_EQ(results[2].output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_EQ(results[3].output.status_code(), InvocationFrameStatusCode::Abort);
+  EXPECT_EQ(results[4].output.status_code(), InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(results[5].output, baseline.payload().output);
+  EXPECT_EQ(gateway.viewgateway_view(read)().payload().output,
+            baseline.payload().output);
+}
+
+TEST_F(ViewGatewayBatchTest, MinimumHeightUsesSharedRefreshWithoutRequestingOne)
+{
+  commit_bytestring("old-value");
+  framework_.advance_block();
+  RpcServer<ControlledViewDb> proxy(framework_.get_db_exec_port());
+  proxy.start_server(0);
+  ViewGatewayRpc gateway(std::format("localhost:{}", proxy.port()), "localhost",
+                         framework_.get_event_exec_port());
+  stop_refresh_worker(gateway);
+  auto warm = gateway.viewgateway_view(make_read_query())();
+  const auto height = warm.payload().height;
+  commit_bytestring("new-value");
+  framework_.advance_block();
+  auto query = batch();
+  query.min_height = height + 1;
+  for (int i = 0; i < 20; ++i) {
+    auto unavailable = gateway.viewgateway_view_batch(query)();
+    ASSERT_EQ(unavailable.outcome(),
+              ViewGatewayBatchOutcome::ViewGatewayBatchHeightUnavailable);
+    EXPECT_EQ(unavailable.height_unavailable().observed, height);
+  }
+  EXPECT_EQ(proxy.impl()->snapshots_opened.load(), 1U);
+  gateway.request_refresh();
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_GE(result.payload().height, height + 1);
+  EXPECT_NE(result.payload().results[0].output, warm.payload().output);
+  query.min_height = height + 100;
+  auto unavailable = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(unavailable.outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchHeightUnavailable);
+  EXPECT_EQ(unavailable.height_unavailable().requested, height + 100);
+  EXPECT_LT(unavailable.height_unavailable().observed, height + 100);
+  EXPECT_EQ(gateway.viewgateway_view_batch(batch())().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, RejectsInvalidBatchBeforeExecution)
+{
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  auto invalid = [&](ViewGatewayBatchQuery query) {
+    EXPECT_EQ(gateway.viewgateway_view_batch(std::move(query))().outcome(),
+              ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+  };
+  auto query = batch();
+  query.calls.clear();
+  invalid(query);
+  query = batch();
+  query.budget_millis = 0;
+  invalid(query);
+  query = batch();
+  query.max_response_bytes = 0;
+  invalid(query);
+  query = batch();
+  query.min_height = -1;
+  invalid(query);
+  query = batch();
+  query.calls[0].invocation.gas_limit = 0;
+  invalid(query);
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, InvalidCallRejectsTheWholeGroup)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  auto query = batch();
+  query.calls[1].parent_address = kAddr;
+  EXPECT_EQ(gateway.viewgateway_view_batch(query)().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+}
+
+TEST_F(ViewGatewayBatchTest, UsesGatewayBudgetsInsteadOfProtocolDefaults)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  auto query = batch();
+  query.calls.resize(17, query.calls[0]);
+  query.budget_millis = 60'000;
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_EQ(result.payload().results.size(), 17U);
+  query.max_response_bytes = 1;
+  EXPECT_EQ(gateway.viewgateway_view_batch(query)().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchResponseTooLarge);
+}
+
+TEST_F(ViewGatewayBatchTest, EachCallKeepsItsOwnGasLimit)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  auto query = batch();
+  query.calls[1] = query.calls[0];
+  query.calls[0].invocation.gas_limit = 1;
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  ASSERT_EQ(result.payload().results.size(), 2U);
+  EXPECT_EQ(result.payload().results[0].output.status_code(),
+            InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(result.payload().results[0].gas_consumed, 1U);
+  EXPECT_EQ(result.payload().results[1].output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_GT(result.payload().results[1].gas_consumed, 1U);
+  EXPECT_LE(result.payload().results[1].gas_consumed,
+            query.calls[1].invocation.gas_limit);
+}
+
+TEST_F(ViewGatewayBatchTest, IncludesEventsInTheAggregateResponseLimit)
+{
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
+  auto call = make_query();
+  call.invocation =
+      client.make_invocation<u8"emit_events">(10'000'000, uint32_t{64});
+  ViewGatewayBatchQuery query{.calls = {call},
+                              .min_height = {},
+                              .budget_millis = 30'000,
+                              .max_response_bytes = 1'048'576};
+  auto result = gateway.viewgateway_view_batch(query)();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  ASSERT_EQ(result.payload().results[0].output.status_code(),
+            InvocationFrameStatusCode::Return);
+  ASSERT_EQ(result.payload().results[0].events.size(), 64U);
+  EXPECT_EQ(result.payload().results[0].events[0].contract_address, kAddr);
+  query.calls.resize(16, call);
+  EXPECT_EQ(gateway.viewgateway_view_batch(query)().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchResponseTooLarge);
+  query.max_response_bytes = 2'097'152;
+  EXPECT_EQ(gateway.viewgateway_view_batch(query)().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+}
+
+TEST_F(ViewGatewayBatchTest, DiscardsPartialResultsFromAnAbandonedSnapshot)
+{
+  commit_bytestring("old-value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  auto warm = gateway.viewgateway_view(make_read_query())();
+  // The cached first read succeeds on the old state; the uncached second
+  // read sees its invalidation. Hold that state across the commit explicitly.
+  auto stale = pinned_attempt(gateway, batch(), true, false);
+  EXPECT_EQ(stale.outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchAbandoned);
+  auto fresh = gateway.viewgateway_view_batch(batch())();
+  ASSERT_EQ(fresh.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_GT(fresh.payload().height, warm.payload().height);
+  EXPECT_NE(fresh.payload().results[0].output, warm.payload().output);
+  EXPECT_EQ(fresh.payload().results.size(), 2U);
+  gateway.shut_down();
+}
+
+TEST_F(ViewGatewayBatchTest, DeadlineAndShutdownFailTheWholeGroup)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  EXPECT_EQ(pinned_attempt(gateway, batch(), false, true).outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchDeadlineExceeded);
+  gateway.shut_down();
+  EXPECT_EQ(gateway.viewgateway_view_batch(batch())().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchInternalError);
+}
+
+TEST_F(ViewGatewayBatchTest, PublicBatchRestartsEveryCallAfterAbandonment)
+{
+  commit_bytestring("old-value");
+  framework_.advance_block();
+  RpcServer<ControlledViewDb> proxy(framework_.get_db_exec_port());
+  proxy.start_server(0);
+  ViewGatewayRpc gateway(std::format("localhost:{}", proxy.port()), "localhost",
+                         framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  stop_refresh_worker(gateway);
+  std::vector<std::size_t> calls;
+  std::vector<BlockID> snapshots;
+  proxy.impl()->before_read = [&](BlockID id, AddressAndKey const &key) {
+    if (key ==
+        NativeContractTestFramework::make_contract_data_addrkey(kAddr,
+                                                                "test_key")) {
+      calls.push_back(0);
+      snapshots.push_back(id);
+    }
+    else if (key == NativeContractTestFramework::make_contract_data_addrkey(
+                        kAddr, "other_key")) {
+      calls.push_back(1);
+      if (snapshots.size() == 1) {
+        commit_bytestring("new-value");
+        framework_.advance_block();
+      }
+    }
+  };
+
+  auto result = gateway.viewgateway_view_batch(batch())();
+  ASSERT_EQ(result.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_EQ(calls, (std::vector<std::size_t>{0, 1, 0, 1}));
+  ASSERT_EQ(snapshots.size(), 2U);
+  EXPECT_NE(snapshots[0], snapshots[1]);
+  ASSERT_EQ(result.payload().results.size(), 2U);
+  auto fresh = gateway.viewgateway_view(make_read_query())();
+  EXPECT_EQ(result.payload().height, fresh.payload().height);
+  EXPECT_EQ(result.payload().results[0].output, fresh.payload().output);
+}
+
+TEST_F(ViewGatewayBatchTest, PublicBatchStopsAfterThreeAbandonedAttempts)
+{
+  commit_bytestring("value-0");
+  framework_.advance_block();
+  RpcServer<ControlledViewDb> proxy(framework_.get_db_exec_port());
+  proxy.start_server(0);
+  ViewGatewayRpc gateway(std::format("localhost:{}", proxy.port()), "localhost",
+                         framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  stop_refresh_worker(gateway);
+  std::vector<std::size_t> calls;
+  std::vector<BlockID> snapshots;
+  proxy.impl()->before_read = [&](BlockID id, AddressAndKey const &key) {
+    if (key ==
+        NativeContractTestFramework::make_contract_data_addrkey(kAddr,
+                                                                "test_key")) {
+      calls.push_back(0);
+      snapshots.push_back(id);
+    }
+    else if (key == NativeContractTestFramework::make_contract_data_addrkey(
+                        kAddr, "other_key")) {
+      calls.push_back(1);
+      commit_bytestring(std::format("value-{}", snapshots.size()));
+      framework_.advance_block();
+    }
+  };
+
+  auto result = gateway.viewgateway_view_batch(batch())();
+  EXPECT_EQ(result.outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchAbandoned);
+  EXPECT_EQ(calls, (std::vector<std::size_t>{0, 1, 0, 1, 0, 1}));
+  ASSERT_EQ(snapshots.size(), 3U);
+  EXPECT_NE(snapshots[1], snapshots[0]);
+  EXPECT_NE(snapshots[2], snapshots[1]);
+}
+
+TEST_F(ViewGatewayBatchTest, PublicBatchStopsWhenBudgetExpiresAfterFirstCall)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  RpcServer<ControlledViewDb> proxy(framework_.get_db_exec_port());
+  proxy.start_server(0);
+  ViewGatewayRpc gateway(std::format("localhost:{}", proxy.port()), "localhost",
+                         framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+  stop_refresh_worker(gateway);
+  std::vector<std::size_t> calls;
+  proxy.impl()->before_read = [&](BlockID, AddressAndKey const &key) {
+    if (key ==
+        NativeContractTestFramework::make_contract_data_addrkey(kAddr,
+                                                                "test_key")) {
+      calls.push_back(0);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    }
+    else if (key == NativeContractTestFramework::make_contract_data_addrkey(
+                        kAddr, "other_key")) {
+      calls.push_back(1);
+    }
+  };
+  auto query = batch();
+  query.budget_millis = 1000;
+  auto result = gateway.viewgateway_view_batch(query)();
+  EXPECT_EQ(result.outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchDeadlineExceeded);
+  EXPECT_EQ(calls, (std::vector<std::size_t>{0}));
+  proxy.impl()->before_read = {};
+  EXPECT_EQ(gateway.viewgateway_view_batch(batch())().outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+}
+
 } // namespace hogd
