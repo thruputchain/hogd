@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -104,6 +106,31 @@ wait_for_shutdown(const ShutdownSignals &signals)
 }
 // NOLINTEND(misc-include-cleaner)
 
+// HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS parks the process after it has logged
+// the shutdown request, standing in for a teardown that never finishes so that
+// hog_devnode_test can exercise its harness's SIGTERM-grace escalation.
+void
+hang_on_shutdown_for_test()
+{
+  const char *value = std::getenv("HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS");
+  if (value == nullptr || *value == '\0') {
+    return;
+  }
+  errno = 0;
+  char *end = nullptr;
+  const unsigned long long seconds = std::strtoull(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0') {
+    error("ignoring invalid HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS value '{}'",
+          value);
+    return;
+  }
+  info("hog-devnode holding shutdown for {} s "
+       "(HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS)",
+       seconds);
+  std::fflush(stderr);
+  std::this_thread::sleep_for(std::chrono::seconds(seconds));
+}
+
 void
 emit_readiness(const HogDevnodeNode &node, ReadinessSink sink,
                NetworkHash const &runtime_network_hash)
@@ -149,13 +176,25 @@ hog_devnode_init(std::string listen_host,
     return EXIT_FAILURE;
   }
 
-  HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      std::move(*directories), bootstrap_config, data_dir,
-                      runtime_network_hash, ramdb_bytes);
-  emit_readiness(node, readiness_sink, runtime_network_hash);
-  info("hog-devnode initialization complete.");
+  std::chrono::steady_clock::time_point teardown_started;
+  {
+    HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
+                        std::move(*directories), bootstrap_config, data_dir,
+                        runtime_network_hash, ramdb_bytes);
+    emit_readiness(node, readiness_sink, runtime_network_hash);
+    info("hog-devnode initialization complete.");
 
-  wait_for_shutdown(shutdown_signals);
+    wait_for_shutdown(shutdown_signals);
+    hang_on_shutdown_for_test();
+    teardown_started = std::chrono::steady_clock::now();
+  }
+  // ~HogDevnodeNode has run. All that is left is main() returning and the
+  // static destructors (x23's CoroPoll and thread pool among them), so a node
+  // whose stderr ends with this line got stuck there, not in its own teardown.
+  info("hog-devnode node torn down in {:.3f} s; exiting",
+       std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                     teardown_started)
+           .count());
   return EXIT_SUCCESS;
 }
 
