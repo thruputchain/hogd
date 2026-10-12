@@ -17,16 +17,24 @@ git submodule update --init --recursive
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 BUILD_SANITIZER_ARGS=()
+BUILD_JOBS=$(nproc)
 if [[ "${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-0}" == "1" ]]; then
   BUILD_SANITIZER_ARGS=(-f "-fsanitize=address" -x -DX23_CORO_TRACE=1)
   export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+  # Cap the asan build at 64 jobs, same as the sanitizer, tsan and mempool
+  # bench schedules: fanning it out to all 128 hyperthreads OOMs the host (the
+  # OOM killer took out the login session's sd-pam, dropping the SSH job about
+  # two minutes into the build with exit 255). hog11 fails first, and it also
+  # runs hog_lockd, so the same memory pressure can expire this schedule's
+  # lease and abandon the other hosts mid-build.
+  BUILD_JOBS=64
 fi
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
+cmake --build release --parallel "$BUILD_JOBS" > build2.log 2>&1 || (cat build2.log && exit 1)
 # These build scripts place the binaries in the current working directory, so we
 # [pushd release] so that the binaries are placed in the [release] directory.
 pushd release >/dev/null
@@ -95,16 +103,24 @@ git submodule update --init --recursive
 source ./scripts/ci/prepare_env.sh
 
 BUILD_SANITIZER_ARGS=()
+BUILD_JOBS=$(nproc)
 if [[ "${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-0}" == "1" ]]; then
   BUILD_SANITIZER_ARGS=(-f "-fsanitize=address" -x -DX23_CORO_TRACE=1)
   export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+  # Cap the asan build at 64 jobs, same as the sanitizer, tsan and mempool
+  # bench schedules: fanning it out to all 128 hyperthreads OOMs the host (the
+  # OOM killer took out the login session's sd-pam, dropping the SSH job about
+  # two minutes into the build with exit 255). hog11 fails first, and it also
+  # runs hog_lockd, so the same memory pressure can expire this schedule's
+  # lease and abandon the other hosts mid-build.
+  BUILD_JOBS=64
 fi
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc "${BUILD_SANITIZER_ARGS[@]}" -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
+cmake --build release --parallel "$BUILD_JOBS" > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
