@@ -188,9 +188,8 @@ hog_devnode_init(std::string listen_host,
     hang_on_shutdown_for_test();
     teardown_started = std::chrono::steady_clock::now();
   }
-  // ~HogDevnodeNode has run. All that is left is main() returning and the
-  // static destructors (x23's CoroPoll and thread pool among them), so a node
-  // whose stderr ends with this line got stuck there, not in its own teardown.
+  // ~HogDevnodeNode is done; only main() returning and the static destructors
+  // remain, so a node silent after this line stalled there.
   info("hog-devnode node torn down in {:.3f} s; exiting",
        std::chrono::duration<double>(std::chrono::steady_clock::now() -
                                      teardown_started)

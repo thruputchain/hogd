@@ -53,10 +53,8 @@ json_string_field(std::string_view json, std::string_view field)
   return std::string(json.substr(start, end - start));
 }
 
-// Honor HOG_DEVNODE_STARTUP_TIMEOUT_SECS and HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS
-// just like hog_devnode_test.cc, so slow sanitizer schedules (e.g. TSAN, which
-// sets the former to 180) can give hog-devnode enough time to reach readiness
-// and to shut down. Falls back to [fallback] when [name] is unset.
+// Whole seconds from [name], or [fallback] when it is unset; the sanitizer
+// schedules raise these. Mirrors hog_devnode_test.cc.
 std::chrono::seconds
 timeout_from_env(const char *name, std::chrono::seconds fallback)
 {

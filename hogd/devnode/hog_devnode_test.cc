@@ -112,13 +112,9 @@ namespace {
 
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
-// Grace [HogDevnodeProcess::terminate] gives SIGTERM before SIGKILL. It bounds
-// a node that will never exit; it is not a latency assertion. Startup already
-// gets 30 s, and both 2026-10 CI failures of [expect_clean_exit] (WIFEXITED
-// false, the node silent after "shutdown requested") hit nodes that had needed
-// ~9 s instead of ~1 s to reach readiness, so a teardown on a runner that
-// starved needs headroom over the former 5 s rather than a SIGKILL that also
-// destroys the evidence.
+// Grace [HogDevnodeProcess::terminate] gives SIGTERM before SIGKILL. Generous
+// on purpose: it bounds a node that will never exit, and a ~0.5 s teardown on a
+// starved CI runner must not be mistaken for one (hogd#4422).
 constexpr auto kDefaultShutdownTimeout = std::chrono::seconds(20);
 // After SIGKILL only the kernel is left to reap the child.
 constexpr auto kKillTimeout = std::chrono::seconds(5);
@@ -862,12 +858,10 @@ public:
       argv.push_back(nullptr);
 
 #if defined(__linux__) && defined(PR_SET_PTRACER)
-      // Under Yama's restricted ptrace scope only the declared tracer and its
-      // descendants may attach. Name the harness, so the gdb it spawns when a
-      // node outlives its SIGTERM grace ([collect_shutdown_diagnostics]) is
-      // allowed to. Best effort; the relation survives the execv below. The
-      // variadic prctl reads its arguments as unsigned long.
-      // NOLINTNEXTLINE(misc-include-cleaner,google-runtime-int)
+      // Yama restricted ptrace: name the harness as tracer so the gdb it
+      // spawns in [escalate_shutdown] may attach. Best effort; the relation
+      // survives execv. The variadic prctl reads its arguments as unsigned
+      // long. NOLINTNEXTLINE(misc-include-cleaner,google-runtime-int)
       prctl(PR_SET_PTRACER, static_cast<unsigned long>(getppid()), 0, 0, 0);
 #endif
 
@@ -1109,13 +1103,11 @@ private:
     }
   }
 
-  // The node outlived its SIGTERM grace. Gather evidence before the SIGKILL
-  // that destroys it: SIGUSR1 makes x23's thread pools dump their run queues
-  // onto the node's stderr, which the drain thread is still capturing (a node
-  // that instead dies of the SIGUSR1 had already torn those pools down, i.e.
-  // was in static destruction), and gdb, where it is installed and may attach,
-  // adds every thread's backtrace. Both are best effort: a failure here only
-  // leaves the test's failure message thinner. Returns the wait status.
+  // The node outlived its SIGTERM grace: collect evidence before SIGKILL.
+  // SIGUSR1 makes x23 dump its pools onto the node's stderr (dying of it means
+  // x23 was already torn down, i.e. static destruction); gdb, if it can
+  // attach, adds every thread's backtrace. Best effort; returns the wait
+  // status.
   int escalate_shutdown(std::chrono::seconds grace)
   {
     shutdown_diagnostics_ = std::format(
@@ -3410,11 +3402,8 @@ TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
   expect_clean_exit(first);
 }
 
-// A node that outlives its SIGTERM grace must still be killed, and the failure
-// must show what it was doing: the escalation sends SIGUSR1 so x23 dumps its
-// pools onto the node's stderr, and attaches gdb for every thread's backtrace.
-// HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS parks hog-devnode after it has logged
-// the shutdown request, standing in for a teardown that never finishes.
+// HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS parks hog-devnode after it logs the
+// shutdown request, standing in for a teardown that never finishes.
 TEST(HogDevnode, ShutdownGraceExpiryEscalatesToSigkillWithDiagnostics)
 {
   const char *pinned = std::getenv("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS");
