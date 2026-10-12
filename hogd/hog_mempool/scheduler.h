@@ -165,7 +165,12 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  using AccountLock = std::unique_lock<ThreadCheckedMutex<std::mutex>>;
+#ifdef NDEBUG
+  using account_mutex_type = std::mutex;
+#else
+  using account_mutex_type = ThreadCheckedMutex<std::mutex>;
+#endif
+  using AccountLock = std::unique_lock<account_mutex_type>;
 
   std::pair<HogAge *, AccountLock>
   get_cached_hog_age(const ContractAddress &address);
@@ -355,13 +360,13 @@ private:
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
   //
-  // The bucket locks are ThreadCheckedMutex so that holding one across a
-  // [co_await] that resumes on another thread panics instead of silently
-  // unlocking a std::mutex from a thread that does not own it.
+  // In debug builds the bucket locks are ThreadCheckedMutex so that holding
+  // one across a [co_await] that resumes on another thread panics instead of
+  // silently unlocking a std::mutex from a thread that does not own it.
   SynchronizedMap<
       ContractAddress, AccountState, SipHash24Hasher, std::equal_to<>,
       std::allocator<std::pair<const ContractAddress, AccountState>>,
-      ThreadCheckedMutex<std::mutex>>
+      account_mutex_type>
       accounts_;
 
   // The number of txs on the runqueue. [size_] is signed because it can
