@@ -118,7 +118,7 @@ hang_on_shutdown_for_test()
   }
   errno = 0;
   char *end = nullptr;
-  const unsigned long long seconds = std::strtoull(value, &end, 10);
+  const std::uint64_t seconds = std::strtoull(value, &end, 10);
   if (errno != 0 || end == value || *end != '\0') {
     error("ignoring invalid HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS value '{}'",
           value);
