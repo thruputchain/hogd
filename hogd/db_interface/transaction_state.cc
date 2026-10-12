@@ -9,6 +9,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/storage_item/storage_lock_util.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -121,7 +122,7 @@ TransactionState::extract_results()
   return result;
 }
 
-std::pair<TransactionState &, std::unique_lock<std::mutex>>
+std::pair<TransactionState &, std::unique_lock<synchronized_map_mutex>>
 TransactionStateManager::get(TransactionID txid)
 {
   {

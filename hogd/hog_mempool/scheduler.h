@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <functional>
 #include <list>
 #include <map>
 #include <memory>
@@ -13,7 +12,6 @@
 
 #include "db_sched.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
@@ -165,14 +163,7 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-#ifdef NDEBUG
-  using account_mutex_type = std::mutex;
-#else
-  using account_mutex_type = ThreadCheckedMutex<std::mutex>;
-#endif
-  using AccountLock = std::unique_lock<account_mutex_type>;
-
-  std::pair<HogAge *, AccountLock>
+  std::pair<HogAge *, std::unique_lock<synchronized_map_mutex>>
   get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void> write_all_average_hog_ages_to_db();
@@ -321,7 +312,7 @@ private:
                                          uint128_t &hogs_spent_by_this_account,
                                          BlockHeight block_height);
 
-  std::pair<AccountState *, AccountLock>
+  std::pair<AccountState *, std::unique_lock<synchronized_map_mutex>>
   get_account_state(const ContractAddress &address);
 
   void wait_for_pending_detached_coroutines()
@@ -359,15 +350,7 @@ private:
   SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
-  //
-  // In debug builds the bucket locks are ThreadCheckedMutex so that holding
-  // one across a [co_await] that resumes on another thread panics instead of
-  // silently unlocking a std::mutex from a thread that does not own it.
-  SynchronizedMap<
-      ContractAddress, AccountState, SipHash24Hasher, std::equal_to<>,
-      std::allocator<std::pair<const ContractAddress, AccountState>>,
-      account_mutex_type>
-      accounts_;
+  SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher> accounts_;
 
   // The number of txs on the runqueue. [size_] is signed because it can
   // temporarily go below 0 in the following scenario:

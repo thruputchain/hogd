@@ -7,6 +7,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -132,7 +133,7 @@ Scheduler::write_all_average_hog_ages_to_db()
   co_return;
 }
 
-std::pair<HogAge *, Scheduler::AccountLock>
+std::pair<HogAge *, std::unique_lock<synchronized_map_mutex>>
 Scheduler::get_cached_hog_age(const ContractAddress &address)
 {
   auto [account_state, lock] = get_account_state(address);
@@ -140,7 +141,7 @@ Scheduler::get_cached_hog_age(const ContractAddress &address)
   return {&account_state->hog_age, std::move(lock)};
 }
 
-std::pair<Scheduler::AccountState *, Scheduler::AccountLock>
+std::pair<Scheduler::AccountState *, std::unique_lock<synchronized_map_mutex>>
 Scheduler::get_account_state(const ContractAddress &address)
 {
   auto [value_ptr, lock] = accounts_.find(address);

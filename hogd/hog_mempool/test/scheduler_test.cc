@@ -189,8 +189,9 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
 //
 // Here a second thread keeps the outcome lock busy through the public
 // [lookup_transaction_outcome()] while [schedule()] drops many expired txs.
-// [accounts_] uses ThreadCheckedMutex, so a cross-thread unlock panics; under
-// TSAN it is also reported as an unlock by the wrong thread.
+// In debug builds SynchronizedMap bucket locks are ThreadCheckedMutex, so a
+// cross-thread unlock panics; under TSAN it is reported as an unlock by the
+// wrong thread.
 TEST(Scheduler, ScheduleDoesNotHoldAccountLockAcrossOutcomeLockWait)
 {
   constexpr size_t kTxsPerRound = 1000;

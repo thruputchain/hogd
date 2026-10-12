@@ -20,6 +20,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
+#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 
@@ -33,6 +34,16 @@ concept mutex_like = requires(Lock lock) {
 };
 
 static_assert(mutex_like<std::mutex>);
+
+// Default bucket lock. Debug builds check that each bucket lock is unlocked on
+// the thread that locked it, which catches a lock held across a co_await that
+// resumes on another thread.
+#ifdef NDEBUG
+using synchronized_map_mutex = std::mutex;
+#else
+using synchronized_map_mutex = ThreadCheckedMutex<std::mutex>;
+#endif
+static_assert(mutex_like<synchronized_map_mutex>);
 
 template<typename Lock>
 concept shared_mutex_like = requires(Lock lock) {
@@ -59,7 +70,7 @@ static_assert(shared_mutex_like<std::shared_mutex>);
 template<class Key, class T, class Hash = std::hash<Key>,
          class KeyEqual = std::equal_to<Key>,
          class Allocator = std::allocator<std::pair<const Key, T>>,
-         mutex_like Lock = std::mutex>
+         mutex_like Lock = synchronized_map_mutex>
 class SynchronizedMap {
 public:
   // type definitions

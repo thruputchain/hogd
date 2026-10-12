@@ -99,7 +99,7 @@ public:
   // Get the state associated with one transaction.
   // Returns a pointer to the state and a unique lock on the state.
   // If the state does not exist, it is created.
-  std::pair<TransactionState &, std::unique_lock<std::mutex>>
+  std::pair<TransactionState &, std::unique_lock<synchronized_map_mutex>>
   get(TransactionID txid);
 
   // Returns the number of new transactions created.
