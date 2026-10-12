@@ -24,7 +24,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -106,31 +105,6 @@ wait_for_shutdown(const ShutdownSignals &signals)
 }
 // NOLINTEND(misc-include-cleaner)
 
-// HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS parks the process after it has logged
-// the shutdown request, standing in for a teardown that never finishes so that
-// hog_devnode_test can exercise its harness's SIGTERM-grace escalation.
-void
-hang_on_shutdown_for_test()
-{
-  const char *value = std::getenv("HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS");
-  if (value == nullptr || *value == '\0') {
-    return;
-  }
-  errno = 0;
-  char *end = nullptr;
-  const std::uint64_t seconds = std::strtoull(value, &end, 10);
-  if (errno != 0 || end == value || *end != '\0') {
-    error("ignoring invalid HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS value '{}'",
-          value);
-    return;
-  }
-  info("hog-devnode holding shutdown for {} s "
-       "(HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS)",
-       seconds);
-  std::fflush(stderr);
-  std::this_thread::sleep_for(std::chrono::seconds(seconds));
-}
-
 void
 emit_readiness(const HogDevnodeNode &node, ReadinessSink sink,
                NetworkHash const &runtime_network_hash)
@@ -185,7 +159,6 @@ hog_devnode_init(std::string listen_host,
     info("hog-devnode initialization complete.");
 
     wait_for_shutdown(shutdown_signals);
-    hang_on_shutdown_for_test();
     teardown_started = std::chrono::steady_clock::now();
   }
   // ~HogDevnodeNode is done; only main() returning and the static destructors

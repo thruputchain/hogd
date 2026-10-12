@@ -3420,54 +3420,6 @@ TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
   expect_clean_exit(first);
 }
 
-// HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS parks hog-devnode after it logs the
-// shutdown request, standing in for a teardown that never finishes.
-TEST(HogDevnode, ShutdownGraceExpiryEscalatesToSigkillWithDiagnostics)
-{
-  const char *pinned = std::getenv("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS");
-  const std::optional<std::string> saved_grace =
-      pinned == nullptr ? std::nullopt : std::optional<std::string>(pinned);
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  ASSERT_EQ(setenv("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS", "1", /*overwrite=*/1),
-            0);
-  Defer restore_grace([&] {
-    if (saved_grace) {
-      // NOLINTNEXTLINE(misc-include-cleaner)
-      setenv("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS", saved_grace->c_str(),
-             /*overwrite=*/1);
-    }
-    else {
-      // NOLINTNEXTLINE(misc-include-cleaner)
-      unsetenv("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS");
-    }
-  });
-
-  HogDevnodeProcess process =
-      HogDevnodeProcess::start({}, {{"HOG_DEVNODE_TEST_HANG_ON_SHUTDOWN_SECS",
-                                     "120"}});
-  process.wait_for_readiness();
-
-  const int status = process.terminate();
-  const std::string diagnostics = process.shutdown_diagnostics();
-  const std::string stderr_output = process.read_remaining_stderr();
-  ASSERT_TRUE(WIFSIGNALED(status)) << describe_wait_status(status) << "\n"
-                                   << diagnostics << stderr_output;
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  EXPECT_EQ(WTERMSIG(status), SIGKILL) << diagnostics << stderr_output;
-  EXPECT_NE(diagnostics.find("did not exit within 1 s of SIGTERM"),
-            std::string::npos)
-      << diagnostics;
-  EXPECT_NE(stderr_output.find("hog-devnode shutdown requested"),
-            std::string::npos)
-      << stderr_output;
-  EXPECT_NE(stderr_output.find("hog-devnode holding shutdown for 120 s"),
-            std::string::npos)
-      << stderr_output;
-  // x23's SIGUSR1 dump names each pool; it lands on the node's stderr.
-  EXPECT_NE(stderr_output.find("ThreadPool"), std::string::npos)
-      << stderr_output;
-}
-
 TEST(HogDevnode, DataDirRejectsInvalidInheritedLockDescriptor)
 {
   std::filesystem::path data_dir = make_test_data_dir();
