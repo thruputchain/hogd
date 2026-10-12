@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <exception>
 #include <iterator>
 #include <limits>
 #include <list>
@@ -442,19 +441,8 @@ Scheduler::prune_transaction_outcomes()
       prune_transaction_outcomes_locked(shard, scheduler.current_block());
     }(*this, shard));
   }
-  // Drain all workers even if one fails: they still reference this scheduler.
-  std::exception_ptr first_exception;
   for (auto &handle : handles) {
-    try {
-      co_await handle;
-    } catch (...) {
-      if (!first_exception) {
-        first_exception = std::current_exception();
-      }
-    }
-  }
-  if (first_exception) {
-    std::rethrow_exception(first_exception);
+    co_await handle;
   }
 }
 
@@ -543,19 +531,8 @@ Scheduler::record_committed_transaction_outcomes(
           }
         }(*this, transaction_outcome_shards_[i], batches[i], outcome));
   }
-  // Drain every worker before releasing the batches referenced by workers.
-  std::exception_ptr first_exception;
   for (auto &handle : handles) {
-    try {
-      co_await handle;
-    } catch (...) {
-      if (!first_exception) {
-        first_exception = std::current_exception();
-      }
-    }
-  }
-  if (first_exception) {
-    std::rethrow_exception(first_exception);
+    co_await handle;
   }
 }
 
