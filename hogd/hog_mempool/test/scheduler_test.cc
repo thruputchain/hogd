@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -176,6 +178,53 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   EXPECT_EQ(scheduler->size(), 1UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
   EXPECT_TRUE(scheduler->find_tx(tx_hash));
+}
+
+// [schedule()] drops a tx the account cannot afford and records its outcome
+// with [record_transaction_outcome()], which waits on the scheduler's outcome
+// CoroLock. If that lock is held by someone else, [schedule()] suspends while
+// still holding the account's [accounts_] bucket lock, and CoroLock resumes it
+// inline on whichever thread releases the outcome lock. [schedule()] then
+// unlocks the bucket mutex from a thread that never locked it. [accounts_]
+// uses ThreadCheckedMutex, so this test panics until [schedule()] stops holding
+// account locks across that wait.
+TEST(Scheduler, ScheduleDoesNotHoldAccountLockAcrossOutcomeLockWait)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(scheduler->size(), 1UL);
+
+  // Hold the outcome lock so [schedule()] has to wait for it.
+  x23::CoroGuard outcomes_guard;
+  [](x23::CoroGuard &guard, x23::CoroLock &lock) -> x23::Async<void> {
+    co_await guard(lock);
+  }(outcomes_guard, scheduler->transaction_outcomes_lock_for_testing())();
+
+  // Async starts eagerly, so [schedule()] runs on this thread until it
+  // suspends waiting for the outcome lock.
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  x23::Async<void> scheduling =
+      scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+
+  // Releasing the outcome lock resumes [schedule()] on the releasing thread.
+  std::thread([&outcomes_guard] { outcomes_guard.reset(); }).join();
+  scheduling();
+
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_FALSE(scheduler->find_tx(sha256(txs[0].tx)));
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)

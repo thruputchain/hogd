@@ -133,7 +133,7 @@ Scheduler::write_all_average_hog_ages_to_db()
   co_return;
 }
 
-std::pair<HogAge *, std::unique_lock<std::mutex>>
+std::pair<HogAge *, Scheduler::AccountLock>
 Scheduler::get_cached_hog_age(const ContractAddress &address)
 {
   auto [account_state, lock] = get_account_state(address);
@@ -141,7 +141,7 @@ Scheduler::get_cached_hog_age(const ContractAddress &address)
   return {&account_state->hog_age, std::move(lock)};
 }
 
-std::pair<Scheduler::AccountState *, std::unique_lock<std::mutex>>
+std::pair<Scheduler::AccountState *, Scheduler::AccountLock>
 Scheduler::get_account_state(const ContractAddress &address)
 {
   auto [value_ptr, lock] = accounts_.find(address);
