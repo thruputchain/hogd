@@ -121,7 +121,9 @@ TransactionState::extract_results()
   return result;
 }
 
-std::pair<TransactionState &, std::unique_lock<std::mutex>>
+std::pair<
+    TransactionState &,
+    std::unique_lock<TransactionStateManager::TransactionStateMap::lock_type>>
 TransactionStateManager::get(TransactionID txid)
 {
   {

@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <limits>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -176,6 +178,74 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
   EXPECT_EQ(scheduler->size(), 1UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
   EXPECT_TRUE(scheduler->find_tx(tx_hash));
+}
+
+// [schedule()] drops expired txs while holding the account's [accounts_]
+// bucket lock, and records each drop with [record_transaction_outcome()],
+// which waits on the scheduler's outcome CoroLock. If another thread holds that
+// lock, [schedule()] suspends with the bucket lock still held, and CoroLock
+// resumes it inline on the thread that releases the outcome lock. [schedule()]
+// then unlocks the bucket mutex from a thread that never locked it.
+//
+// Here a second thread keeps the outcome lock busy through the public
+// [lookup_transaction_outcome()] while [schedule()] drops many expired txs.
+// In debug builds SynchronizedMap bucket locks are ThreadCheckedMutex, so a
+// cross-thread unlock panics; under TSAN it is reported as an unlock by the
+// wrong thread.
+TEST(Scheduler, ScheduleDoesNotHoldAccountLockAcrossOutcomeLockWait)
+{
+  constexpr size_t kTxsPerRound = 1000;
+  constexpr size_t kRounds = 20;
+  constexpr BlockHeight kExpiryHeight = 1;
+
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kTxsPerRound);
+  for (SignedTransaction &tx : txs) {
+    tx.tx.uniquifier.block_expiry_height = kExpiryHeight;
+  }
+  const TransactionHashBatch tx_hashes = hash_txs(txs);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->set_current_block(kExpiryHeight + 1);
+
+  std::atomic<bool> stop = false;
+  std::atomic<size_t> lookups = 0;
+  std::thread contender([&] {
+    while (!stop.load(std::memory_order_relaxed)) {
+      scheduler->lookup_transaction_outcome(tx_hashes[0])();
+      lookups.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+  while (lookups.load(std::memory_order_relaxed) == 0) {
+    std::this_thread::yield();
+  }
+
+  // Every tx is already expired, so each [schedule()] call drops all of them
+  // under one account lock, taking the outcome lock twice per tx. Re-adding
+  // the same expired txs gives another round.
+  for (size_t round = 0; round < kRounds; round++) {
+    scheduler->add_txs(txs, tx_hashes)();
+    EXPECT_EQ(scheduler->size(), kTxsPerRound);
+
+    x23::XdrVec<TransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+
+    EXPECT_TRUE(scheduled_hashes.empty());
+    EXPECT_EQ(scheduler->size(), 0UL);
+    EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  }
+
+  stop.store(true, std::memory_order_relaxed);
+  contender.join();
+
+  const SchedulerTransactionOutcome outcome =
+      scheduler->lookup_transaction_outcome(tx_hashes[0])();
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionDropped);
+  EXPECT_EQ(outcome.error_code,
+            static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
