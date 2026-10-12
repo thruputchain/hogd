@@ -121,8 +121,11 @@ constexpr auto kKillTimeout = std::chrono::seconds(5);
 // Bound on gdb attaching to a node that outlived its grace: symbol loading for
 // a debug build is slow, and the ctest timeout is still ticking.
 constexpr auto kBacktraceTimeout = std::chrono::seconds(20);
-// Time for x23's SIGUSR1 dump to reach the node's stderr before gdb stops it.
-constexpr auto kDumpSettleTime = std::chrono::milliseconds(250);
+// x23's SIGUSR1 dump opens with this line; [escalate_shutdown] waits for it to
+// reach the node's stderr before gdb stops the node, bounded because the
+// thread that writes it can be starved just like the node.
+constexpr std::string_view kPoolDumpMarker = "ThreadPool ";
+constexpr auto kPoolDumpTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
 // 2 GiB per node instead of the 15 GiB default; this suite boots ~85 nodes.
@@ -1103,6 +1106,15 @@ private:
     }
   }
 
+  bool stderr_contains(std::string_view needle) const
+  {
+    if (!stderr_sink_) {
+      return false;
+    }
+    const std::lock_guard<std::mutex> lock(stderr_sink_->mutex);
+    return stderr_sink_->data.find(needle) != std::string::npos;
+  }
+
   // The node outlived its SIGTERM grace: collect evidence before SIGKILL.
   // SIGUSR1 makes x23 dump its pools onto the node's stderr (dying of it means
   // x23 was already torn down, i.e. static destruction); gdb, if it can
@@ -1118,9 +1130,15 @@ private:
         pid_, grace.count());
     // NOLINTNEXTLINE(misc-include-cleaner)
     kill(pid_, SIGUSR1);
-    // Let the dump land before gdb freezes the node. A node that was merely
-    // slow may finish here instead, and then its status is the verdict.
-    std::optional<int> status = wait_for_exit(kDumpSettleTime);
+    // Wait for the dump to land before gdb freezes the node. A node that was
+    // merely slow may finish here instead, and then its status is the verdict.
+    const auto dump_deadline =
+        std::chrono::steady_clock::now() + kPoolDumpTimeout;
+    std::optional<int> status = wait_for_exit(std::chrono::milliseconds(10));
+    while (!status.has_value() && !stderr_contains(kPoolDumpMarker) &&
+           std::chrono::steady_clock::now() < dump_deadline) {
+      status = wait_for_exit(std::chrono::milliseconds(10));
+    }
     if (status.has_value()) {
       shutdown_diagnostics_ +=
           "(the node exited while the dump settled, before gdb ran)\n";
