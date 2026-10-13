@@ -56,7 +56,7 @@ stage_present_metrics() {
 # step that the rest depends on is checked by hand.
 prepare_metrics_commit() {
   if ! metrics_history_git fetch --depth=1 --filter=blob:none --quiet \
-      origin "$METRICS_HISTORY_BRANCH"; then
+    origin "$METRICS_HISTORY_BRANCH"; then
     echo "Could not fetch $METRICS_HISTORY_BRANCH from metrics_history." >&2
     return 2
   fi
@@ -83,9 +83,9 @@ while true; do
   prepare_status=0
   prepare_metrics_commit || prepare_status=$?
   case "$prepare_status" in
-    0) ;;
-    1) exit 0 ;;
-    *) exit 1 ;;
+  0) ;;
+  1) exit 0 ;;
+  *) exit 1 ;;
   esac
 
   if metrics_history_git push --quiet origin "HEAD:$METRICS_HISTORY_BRANCH"; then

@@ -19,7 +19,7 @@ expect_status() {
 
 expect_calls() {
   local label=$1 want=$2 log=$3 got
-  got=$(wc -l < "$log")
+  got=$(wc -l <"$log")
   if [[ "$got" -ne "$want" ]]; then
     echo "FAIL $label: git ran $got times, want $want"
     fail=1
@@ -45,7 +45,7 @@ trap 'rm -rf -- "$work"' EXIT
 # A git whose behaviour per call comes from GIT_FAKE_SCRIPT: one word per call,
 # [ok], [stall], or an exit status to report. Every call is recorded, so a test
 # can tell one attempt from a retry.
-cat > "$work/git" <<'FAKE'
+cat >"$work/git" <<'FAKE'
 #!/usr/bin/env bash
 echo "$*" >> "$GIT_FAKE_LOG"
 read -r -a behaviours <<< "$GIT_FAKE_SCRIPT"
@@ -62,7 +62,7 @@ chmod +x "$work/git"
 run_case() {
   local script=$1
   shift
-  : > "$work/log"
+  : >"$work/log"
   (
     PATH="$work:$PATH"
     GIT_FAKE_LOG="$work/log"
