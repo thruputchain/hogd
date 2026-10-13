@@ -1,10 +1,10 @@
-name = "hackathon_ci"
+name = "e2e_payment_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_bench_servers"
 script = """
 
-set -ex
+set -x
 
 echo 'cloning hogd'
 # Keep credentials out of tracing and the repository's stored remote URL.
@@ -35,7 +35,6 @@ git submodule update --init --recursive --quiet
 
 # Fetch Go dependencies before any lengthy Rust/C++ preparation or build.
 bash ./scripts/ci/fetch_go_modules.sh || exit 1
-GOWORK=off go -C scripts/hackathon/replay mod download
 
 source ./scripts/ci/prepare_env.sh
 
@@ -47,9 +46,6 @@ pushd release >/dev/null
 ../groundhog-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
 ../groundhog-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
 popd >/dev/null
-
-echo 'build standalone gateway replay client'
-GOWORK=off go -C scripts/hackathon/replay build -o "$PWD/release/hackathon-replay" .
 
 echo 'clear hog-db file directory'
 rm -r ./work_dir/ || true
@@ -64,9 +60,6 @@ echo 'run bench server'
 """
 
 [jobs.env]
-HACKATHON_GATEWAY_BINARY = "/home/hog12/jhumphri/hogd/.hackathon-ci-runtime/hog-gateway"
-HACKATHON_GATEWAY_SHA256 = "f6d528fb3e5d4bbed91af597661dfe837d044eadb3b07a3aa016031990244ce0"
-HACKATHON_GATEWAY_PROTOCOL = "hogp/2f5211766e8a878"
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
@@ -90,11 +83,10 @@ bench_7 = "hog4"
 
 
 [[jobs]]
-name = "{{ .hog_schedule }}_benchmark"
-file_out = ["work_dir/hackathon-results.tar.gz"]
+name = "{{ .hog_schedule }}_metrics"
 script = """
 
-set -ex
+set -x
 
 echo 'cloning hogd'
 # Keep credentials out of tracing and the repository's stored remote URL.
@@ -134,23 +126,19 @@ export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 export BUILD_DIR=release
 export WORK_DIR=work_dir/
 
-echo 'start local benchmark control server'
-mkdir -p work_dir/
-./release/hogd/hog_exec/bench/control_server -p "$CI_CONTROL_PORT" -w work_dir/ > work_dir/control.log 2>&1 &
-control_pid=$!
-cleanup_benchmark_job() {
-  local status=$?
-  trap - EXIT
-  timeout 30s ./release/hogd/hog_exec/bench/control_cli hog10 "$CI_CONTROL_PORT" shutdown || true
-  kill "$control_pid" 2>/dev/null || true
-  wait "$control_pid" 2>/dev/null || true
-  rm -f -- "$GIT_CONFIG_GLOBAL"
-  exit "$status"
-}
-trap cleanup_benchmark_job EXIT
+echo 'run mempool benchmarks'
+set +e
+./scripts/ci/mempool_bench.sh
+mempool_bench_exit=$?
+set -e
 
-echo 'run single-validator hackathon benchmark' 
-./scripts/ci/hackathon_bench.sh
+if [ "$mempool_bench_exit" -eq 0 ]; then
+    echo 'commit metrics'
+    ./scripts/commit_metrics.sh
+else
+    echo "mempool bench failed with status $mempool_bench_exit; skipping metrics commit"
+    exit "$mempool_bench_exit"
+fi
 
 """
 after = """
@@ -159,15 +147,17 @@ echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 echo 'cleanup control servers'
-source ./scripts/ci/bench_harness.sh
-ci_control_shutdown_hosts ./release/hogd/hog_exec/bench/control_cli "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog8 hog9 hog11
+./release/hogd/hog_exec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
 
 """
 
 [jobs.env]
-HACKATHON_GATEWAY_BINARY = "/home/hog12/jhumphri/hogd/.hackathon-ci-runtime/hog-gateway"
-HACKATHON_GATEWAY_SHA256 = "f6d528fb3e5d4bbed91af597661dfe837d044eadb3b07a3aa016031990244ce0"
-HACKATHON_GATEWAY_PROTOCOL = "hogp/2f5211766e8a878"
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
@@ -181,4 +171,4 @@ CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 [jobs.host]
-benchmark_1 = "hog10"
+metrics_1 = "hog10"
