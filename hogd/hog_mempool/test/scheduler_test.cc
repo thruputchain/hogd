@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <atomic>
+#include <cstring>
+#include <latch>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -373,6 +377,7 @@ TEST(Scheduler, BatchCommitWinsOverConcurrentRetryOutcomes)
   for (size_t i = 0; i < 8192; ++i) {
     TransactionHash hash{};
     hash[0] = static_cast<uint8_t>(i);
+    hash[1] = static_cast<uint8_t>(i >> 8);
     hashes.push_back(hash);
   }
   std::jthread retries([&] {
@@ -392,6 +397,88 @@ TEST(Scheduler, BatchCommitWinsOverConcurrentRetryOutcomes)
     EXPECT_EQ(outcome.status,
               SchedulerTransactionStatus::SchedulerTransactionSucceeded);
     EXPECT_EQ(outcome.height, 10);
+    EXPECT_EQ(outcome.error_code, 0);
+  }
+}
+
+TEST(Scheduler, BatchCommittedOutcomesCrossChunks)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  constexpr size_t kChunkSize = Scheduler::kTransactionOutcomeChunkSize;
+  TransactionHashBatch hashes;
+  // The scheduler adds at most [kChunkSize] txs to a shard before it needs to
+  // drop the shard lock and acquire it again. Thus, we create [2 * kChunkSize +
+  // 1] hashes so that the scheduler needs to split the txs across 3 groups,
+  // releasing/acquiring the shard lock each time.
+  for (size_t nonce = 0; hashes.size() < 2 * kChunkSize + 1; ++nonce) {
+    TransactionHash hash{};
+    std::memcpy(hash.data(), &nonce, sizeof(nonce));
+    if (Scheduler::transaction_outcome_shard_index(hash) == 0) {
+      hashes.push_back(hash);
+    }
+  }
+  for (const auto &hash : hashes) {
+    scheduler.record_transaction_outcome(
+        hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+        /*height=*/9,
+        SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+        /*error_code=*/123)();
+  }
+
+  const std::array<size_t, 5> probes{0, kChunkSize - 1, kChunkSize,
+                                     2 * kChunkSize - 1, 2 * kChunkSize};
+  std::latch reader_started(1);
+  std::atomic<bool> commit_finished = false;
+  std::jthread reader([&] {
+    std::array<bool, probes.size()> committed{};
+    const auto check_outcomes = [&] {
+      for (size_t i = 0; i < probes.size(); ++i) {
+        const auto outcome =
+            scheduler.lookup_transaction_outcome(hashes[probes[i]])();
+        if (outcome.status ==
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+          committed[i] = true;
+          EXPECT_EQ(outcome.height, 10);
+          EXPECT_EQ(
+              outcome.error_source,
+              SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+          EXPECT_EQ(outcome.error_code, 0);
+        }
+        else {
+          EXPECT_FALSE(committed[i]);
+          EXPECT_EQ(outcome.status,
+                    SchedulerTransactionStatus::SchedulerTransactionRetry);
+          EXPECT_EQ(outcome.height, 9);
+          EXPECT_EQ(outcome.error_source,
+                    SchedulerTransactionErrorSource::
+                        SchedulerTransactionErrorExecutor);
+          EXPECT_EQ(outcome.error_code, 123);
+        }
+      }
+    };
+    check_outcomes();
+    reader_started.count_down();
+    while (!commit_finished.load(std::memory_order_acquire)) {
+      check_outcomes();
+    }
+    check_outcomes();
+    for (bool observed : committed) {
+      EXPECT_TRUE(observed);
+    }
+  });
+  reader_started.wait();
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  commit_finished.store(true, std::memory_order_release);
+  reader.join();
+
+  for (const auto &hash : hashes) {
+    const auto outcome = scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+    EXPECT_EQ(outcome.error_source,
+              SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
     EXPECT_EQ(outcome.error_code, 0);
   }
 }
