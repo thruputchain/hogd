@@ -36,6 +36,8 @@ runs:
           thruput-integration-test-contracts
           scp
           thruput-sdk-rs
+          xdrs
+          xdr_rpc
         permission-contents: read
     - name: Configure job-local Git authentication
       shell: bash

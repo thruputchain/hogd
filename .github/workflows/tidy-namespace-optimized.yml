@@ -54,9 +54,7 @@ jobs:
             ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
             ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
