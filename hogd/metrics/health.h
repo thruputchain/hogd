@@ -8,6 +8,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "types.hh"
 #include "x23/async.h"
@@ -54,10 +55,7 @@ private:
     std::chrono::system_clock::time_point timestamp =
         std::chrono::system_clock::now();
 
-    std::string format() const
-    {
-      return std::format("{:%Y-%m-%dT%H:%M:%SZ}", timestamp);
-    }
+    std::string format() const { return UtcTime(timestamp).iso8601(); }
   };
 
   static constexpr std::chrono::seconds kDefaultWritePeriod =

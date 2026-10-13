@@ -27,7 +27,11 @@
 namespace {
 
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
-constexpr auto kShutdownTimeout = std::chrono::seconds(5);
+// Grace between SIGTERM and SIGKILL; hog_devnode_test.cc shares the default
+// and the HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS override.
+constexpr auto kDefaultShutdownTimeout = std::chrono::seconds(20);
+// After SIGKILL only the kernel is left to reap the child.
+constexpr auto kKillTimeout = std::chrono::seconds(5);
 constexpr std::size_t kMaxCapturedStderr = 256 * 1024;
 // Same caps as hog_devnode_test.cc; this is a launch test, not a capacity test.
 constexpr char kRamDbBytes[] = "2147483648";
@@ -49,15 +53,14 @@ json_string_field(std::string_view json, std::string_view field)
   return std::string(json.substr(start, end - start));
 }
 
-// Honor HOG_DEVNODE_STARTUP_TIMEOUT_SECS just like hog_devnode_test.cc, so slow
-// sanitizer schedules (e.g. TSAN, which sets it to 180) can give hog-devnode
-// enough time to reach readiness. Falls back to the default when unset.
+// Whole seconds from [name], or [fallback] when it is unset; the sanitizer
+// schedules raise these. Mirrors hog_devnode_test.cc.
 std::chrono::seconds
-startup_timeout()
+timeout_from_env(const char *name, std::chrono::seconds fallback)
 {
-  const char *value = std::getenv("HOG_DEVNODE_STARTUP_TIMEOUT_SECS");
+  const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
-    return kDefaultStartupTimeout;
+    return fallback;
   }
 
   errno = 0;
@@ -65,10 +68,24 @@ startup_timeout()
   std::uint64_t seconds = std::strtoull(value, &end, 10);
   if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
       seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    std::println(stderr, "invalid HOG_DEVNODE_STARTUP_TIMEOUT_SECS value");
+    std::println(stderr, "invalid {} value", name);
     std::exit(EXIT_FAILURE);
   }
   return std::chrono::seconds(static_cast<int>(seconds));
+}
+
+std::chrono::seconds
+startup_timeout()
+{
+  return timeout_from_env("HOG_DEVNODE_STARTUP_TIMEOUT_SECS",
+                          kDefaultStartupTimeout);
+}
+
+std::chrono::seconds
+shutdown_timeout()
+{
+  return timeout_from_env("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS",
+                          kDefaultShutdownTimeout);
 }
 
 // NOLINTBEGIN(misc-include-cleaner)
@@ -146,9 +163,14 @@ cleanup_child(pid_t pid)
 {
   kill(pid, SIGTERM);
   int status = 0;
-  if (!wait_for_exit(pid, kShutdownTimeout, status)) {
+  const std::chrono::seconds grace = shutdown_timeout();
+  if (!wait_for_exit(pid, grace, status)) {
+    std::println(stderr,
+                 "hog-devnode did not exit within {} s of SIGTERM; sending "
+                 "SIGKILL",
+                 grace.count());
     kill(pid, SIGKILL);
-    if (!wait_for_exit(pid, kShutdownTimeout, status)) {
+    if (!wait_for_exit(pid, kKillTimeout, status)) {
       std::println(stderr, "hog-devnode did not exit after SIGKILL");
     }
   }
@@ -158,6 +180,23 @@ cleanup_child(pid_t pid)
 int
 main() // NOLINT(bugprone-exception-escape)
 {
+  // The launcher owns this fixture. The runtime receives only public intent.
+  char bootstrap_path[] = "/tmp/hog-devnode-fresh-bootstrap-XXXXXX";
+  const int bootstrap_fd = mkstemp(bootstrap_path);
+  if (bootstrap_fd < 0) {
+    fail_with_errno("mkstemp bootstrap");
+  }
+  struct BootstrapCleanup {
+    char const *path;
+    ~BootstrapCleanup() { unlink(path); }
+  } bootstrap_cleanup{bootstrap_path};
+  constexpr std::string_view kBootstrap =
+      R"({"schemaVersion":4,"kind":"groundhog-bootstrap","networkHash":"0000000000000000000000000000000000000000000000000000000000000000","profile":"local-dev","bootstrapFaucet":{"publicKey":"0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","initialStorageTokens":"10000000000000"},"bootstrapAccounts":[],"storageCostModel":{"profile":"hogd-default"}})";
+  if (write(bootstrap_fd, kBootstrap.data(), kBootstrap.size()) !=
+      static_cast<ssize_t>(kBootstrap.size())) {
+    fail_with_errno("write bootstrap");
+  }
+  close(bootstrap_fd);
   int stdout_pipe[2];
   int stderr_pipe[2];
   if (pipe(stdout_pipe) != 0) {
@@ -187,6 +226,8 @@ main() // NOLINT(bugprone-exception-escape)
 
     char *argv[] = {
         const_cast<char *>(HOG_DEVNODE_BINARY),
+        const_cast<char *>("--bootstrap-manifest"),
+        bootstrap_path,
         const_cast<char *>("--listen-host"),
         const_cast<char *>("127.0.0.1"),
         const_cast<char *>("--scheduler-port"),

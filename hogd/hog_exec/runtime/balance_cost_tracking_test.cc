@@ -1696,6 +1696,202 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
                           ProposedTransaction{.signed_tx = handler_tx})());
 }
 
+// Regression for #4210: an underfunded read must fault before loading; a later
+// funded read of the same address still pays the cold price (it would run warm
+// if the starved read had loaded it for free).
+TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
+{
+  constexpr static ContractAddress kCallerAddr = make_contract_address(214);
+  constexpr static ContractAddress kFreshAddr = make_contract_address(215);
+  constexpr static GasAmount kTwoGas = 2;
+  constexpr static GasAmount kCappedCharge = kSyscallBaseCost + kTwoGas;
+  // The two reads of kFreshAddr, in order: starved then funded.
+  constexpr static std::array<GasAmount, 2> kGasLimits{kTwoGas, UINT64_MAX};
+
+  std::array<GasAmount, kGasLimits.size()> charges{};
+  std::array<InvocationFrameStatusCode, kGasLimits.size()> statuses{};
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        auto calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kFreshAddr);
+        for (size_t i = 0; i < kGasLimits.size(); ++i) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id =
+                  sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+              .gas_limit = kGasLimits[i],
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+
+          auto const before = ctx.total_gas_consumed();
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kNativeTokenContractAddress,
+              std::as_bytes(std::span(calldata.data(), calldata.size())),
+              std::span<const std::byte>{}, inputs, outputs);
+          charges[i] = ctx.total_gas_consumed() - before;
+
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "get_balance_of invoke " << i
+                          << " was rejected before its child frame ran";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          statuses[i] = outputs.frame_status;
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kCallerNativeId = 19;
+  contract_map.emplace(kCallerNativeId,
+                       std::make_unique<NativeContract>(std::move(fns)));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddr, caller_xdr);
+
+  auto tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kCallerAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, *runtime_context);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  // The starved read faulted, paying only the capped child allowance.
+  EXPECT_EQ(statuses[0], InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(charges[0], kCappedCharge);
+  EXPECT_LT(charges[0], kDBRPCCost);
+
+  // The funded read of the same address still pays the cold-load price, proving
+  // the starved read did not load the key for free.
+  EXPECT_EQ(statuses[1], InvocationFrameStatusCode::Return);
+  EXPECT_GE(charges[1], kDBRPCCost);
+}
+
+// Regression for #4374: a transfer that exhausts gas at the first balance
+// debit must refuse the write rather than stage deltas and fault later.
+TEST_F(BalanceCostTrackingTest,
+       NativeTokenTransferRefusesBalanceWriteAfterGasExhaustion)
+{
+  constexpr static ContractAddress kSenderAddr = make_contract_address(216);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(217);
+  constexpr static int128_t kSpendableBalance = 1'000'000;
+  constexpr static int128_t kTransferAmount = 1;
+  // transfer_impl(1) + GetMsgSender(kSyscallBaseCost) + the warm balance read
+  // (kStorageAccessCost, no cold load_gas) leave exactly zero gas for the first
+  // balance mutation, so its flat charge cannot be afforded.
+  constexpr static GasAmount kChildGas =
+      1 + kSyscallBaseCost + kStorageAccessCost;
+
+  setup_grant_storage_token(kSenderAddr,
+                            kSpendableBalance + replay_cache_cost_charged(1));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+        // Warm the sender's balance view so the attack transfer's read owes
+        // only kStorageAccessCost, landing the child budget right at the debit.
+        auto warm_calldata =
+            erc20_meta::make_calldata<u8"get_balance_of">(kSenderAddr);
+        CopyableInvokeInputs warm_inputs{
+            .entrypoint_id =
+                sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
+            .gas_limit = UINT64_MAX,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
+        CopyableInvokeOutputs warm_outputs{};
+        auto warm = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kNativeTokenContractAddress,
+            std::as_bytes(
+                std::span(warm_calldata.data(), warm_calldata.size())),
+            std::span<const std::byte>{}, warm_inputs, warm_outputs);
+        if (!warm.has_value() ||
+            warm.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            warm_outputs.frame_status != InvocationFrameStatusCode::Return) {
+          ADD_FAILURE() << "warming balance read failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto calldata = erc20_meta::make_calldata<u8"transfer">(
+            kReceiverAddr,
+            make_amount(static_cast<uint128_t>(kTransferAmount)));
+        CopyableInvokeInputs inputs{
+            .entrypoint_id =
+                sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
+            .gas_limit = kChildGas,
+            .flags = std::to_underlying(InvokeFlag::TryInvoke),
+        };
+        CopyableInvokeOutputs outputs{};
+        auto result = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kNativeTokenContractAddress,
+            std::as_bytes(std::span(calldata.data(), calldata.size())),
+            std::span<const std::byte>{}, inputs, outputs);
+        if (!result.has_value() ||
+            result.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "attack transfer invoke was rejected";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 20;
+  contract_map.emplace(kSenderNativeId,
+                       std::make_unique<NativeContract>(std::move(fns)));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_xdr);
+  write_deployment(kSenderAddr, sender_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = kSenderAddr,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
+  handler.enable_tracing();
+
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  auto const *root_trace = handler.get_trace();
+  ASSERT_NE(root_trace, nullptr);
+  // system_calls[0] warms the view; system_calls[1] is the attack transfer.
+  ASSERT_EQ(root_trace->system_calls.size(), 2U);
+  auto const &attack_invoke = root_trace->system_calls[1].body.invoke();
+  ASSERT_NE(attack_invoke.outputs, nullptr);
+  ASSERT_NE(attack_invoke.outputs->child_trace, nullptr);
+  auto const &child_trace = *attack_invoke.outputs->child_trace;
+
+  // Must fault at the unaffordable debit and stage no balance write.
+  ASSERT_EQ(child_trace.status.status_code(), InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(child_trace.storage_writes.size(), 0U);
+}
+
 // Regression for #4270: warm native-token balance reads skipped the flat
 // kStorageAccessCost once the view was loaded and load_gas dropped to zero.
 TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)

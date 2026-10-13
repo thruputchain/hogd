@@ -12,6 +12,7 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rc_bytes.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -42,12 +43,19 @@ class StorageSnapshotCache;
 // Representing the internal state of a bytestring item.
 class BytestringItem {
 public:
+  explicit BytestringItem(std::span<const uint8_t> bytes) : bytes_(bytes) {}
+
+  std::span<const uint8_t> bytes() const { return bytes_.span(); }
+
   StorageDelta get_delta() const;
   [[nodiscard]] SyscallStatus<void> validate() const;
 
   constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
 
-  Bytestring bytestring_;
+private:
+  // Frame copies share the bytes (#4303). Safe: they are never changed in
+  // place.
+  RcBytes bytes_;
 };
 
 // State of an item that is a nonnegative int

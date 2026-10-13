@@ -22,9 +22,7 @@ namespace hogd {
 // gateway (see protocol/db_gateway.x for the XDR).  Serves
 // committed-snapshot reads.
 //
-// The only method is dbgateway_get_items, a batch read.  Every
-// returned item is consistent with the same committed block height,
-// which is included in the response.
+// Item batches and configuration readings each carry their committed snapshot.
 class HogDbGatewayRpc {
 public:
   using rpc_service = DbGateway1;
@@ -44,6 +42,8 @@ public:
   // Own the decoded batch because RPC dispatch releases its arguments when
   // a handler suspends.
   x23::Async<DbGatewayResult> dbgateway_get_items(AddressAndKeyBatch batch);
+
+  x23::Async<DbGatewayConfigResult> dbgateway_get_config();
 
   void shut_down() { shutdown_flag_ = true; }
 

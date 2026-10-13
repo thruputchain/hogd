@@ -1,13 +1,16 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/base/chunk_position.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
@@ -42,24 +45,37 @@ public:
     co_return;
   }
 
-  x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
+  // Collects the run of chunks hog_db sends for a committed block and hands
+  // the scheduler the whole block once, so it keeps seeing one update per
+  // height. The chunks may arrive in any order; scheduler_lock_, held through
+  // [cg] until handle_transfer is done, serializes the assembler.
+  x23::Async<void> scheddb_hogs_transferred_chunk(HogsTransferredChunk chunk)
   {
     auto cg = std::make_unique<x23::CoroGuard>();
     co_await (*cg)(scheduler_lock_);
 
     if (scheduler_) {
-      // See the comment above if you change this.
-      handle_transfer(std::move(transfers), std::move(cg));
+      std::optional<TransferRunAssembler::Run> run =
+          run_assembler_.push(chunk.block,
+                              ChunkPosition{.index = chunk.chunk_index,
+                                            .count = chunk.chunk_count},
+                              std::move(chunk.deltas));
+      if (run.has_value()) {
+        // See the comment above if you change this.
+        handle_transfer(BlockTransfers{.block = run->key,
+                                       .deltas = std::move(run->parts)},
+                        std::move(cg));
+      }
     }
     else {
-      info("[MempoolDbRpc::scheddb_hogs_transferred] failed. This is ok and "
-           "expected if the mempool is shutting down, so only ignore this "
+      info("[MempoolDbRpc::scheddb_hogs_transferred_chunk] failed. This is ok "
+           "and expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
     }
     co_return;
   }
 
-  x23::Detached handle_transfer(HogsTransferred transfers,
+  x23::Detached handle_transfer(BlockTransfers transfers,
                                 std::unique_ptr<x23::CoroGuard> cg)
   {
     co_await x23::ThreadPool::get_thread_pool()->bg();
@@ -143,6 +159,7 @@ public:
 private:
   x23::CoroLock scheduler_lock_;
   std::shared_ptr<Scheduler> scheduler_;
+  TransferRunAssembler run_assembler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
 

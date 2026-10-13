@@ -38,6 +38,11 @@ public:
   viewgateway_intro(ProtocolCommit const &protocol);
 
   x23::Async<ViewGatewayResult> viewgateway_view(TransactionViewQuery query);
+  // The budget includes queue time and is checked between calls and retries.
+  // It does not interrupt a running VM or a pending database RPC. The public
+  // gateway must also enforce its response deadline.
+  x23::Async<ViewGatewayBatchResult>
+  viewgateway_view_batch(ViewGatewayBatchQuery query);
 
   void shut_down();
 
@@ -53,6 +58,8 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
+  friend class ViewGatewayBatchTest;
+  using ViewDeadline = std::chrono::steady_clock::time_point;
   static constexpr std::uint32_t kMaxViewAttempts = 3;
 
   // A view stands in for a hypothetical block on top of the tip: height is
@@ -90,6 +97,13 @@ private:
   x23::Async<ViewGatewayResult>
   run_view_attempt(TransactionViewQuery const &query, DbTip const &tip,
                    ViewState &view_state);
+
+  x23::Async<ViewGatewayBatchResult>
+  run_batch_with_retries(ViewGatewayBatchQuery const &query,
+                         ViewDeadline deadline);
+  x23::Async<ViewGatewayBatchResult>
+  run_batch_attempt(ViewGatewayBatchQuery const &query, ViewState &state,
+                    ViewDeadline deadline);
 
   // Returns a pointer to the current view state with a reference acquired,
   // or nullptr if shutdown is in progress. Lazy-initializes the first

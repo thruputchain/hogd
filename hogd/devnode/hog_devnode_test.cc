@@ -1,4 +1,6 @@
+#include <fcntl.h>
 #include <poll.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -6,7 +8,11 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdlib.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -51,6 +57,7 @@
 #include "header.hh"
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/cleanup.h"
+#include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -105,7 +112,20 @@ namespace {
 
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
-constexpr auto kShutdownTimeout = std::chrono::seconds(5);
+// Grace [HogDevnodeProcess::terminate] gives SIGTERM before SIGKILL. Generous
+// on purpose: it bounds a node that will never exit, and a ~0.5 s teardown on a
+// starved CI runner must not be mistaken for one (hogd#4422).
+constexpr auto kDefaultShutdownTimeout = std::chrono::seconds(20);
+// After SIGKILL only the kernel is left to reap the child.
+constexpr auto kKillTimeout = std::chrono::seconds(5);
+// Bound on gdb attaching to a node that outlived its grace: symbol loading for
+// a debug build is slow, and the ctest timeout is still ticking.
+constexpr auto kBacktraceTimeout = std::chrono::seconds(20);
+// x23's SIGUSR1 dump opens with this line; [escalate_shutdown] waits for it to
+// reach the node's stderr before gdb stops the node, bounded because the
+// thread that writes it can be starved just like the node.
+constexpr std::string_view kPoolDumpMarker = "ThreadPool ";
+constexpr auto kPoolDumpTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
 // 2 GiB per node instead of the 15 GiB default; this suite boots ~85 nodes.
@@ -137,12 +157,14 @@ load_legacy_dev_wallet_fixture()
   return load_rv32_contract("dev_wallet.rv32a");
 }
 
+// Whole seconds from the environment variable [name], or [fallback] when it is
+// unset or empty. The sanitizer schedules pin these well above the defaults.
 std::chrono::seconds
-startup_timeout()
+timeout_from_env(const char *name, std::chrono::seconds fallback)
 {
-  const char *value = std::getenv("HOG_DEVNODE_STARTUP_TIMEOUT_SECS");
+  const char *value = std::getenv(name);
   if (value == nullptr || *value == '\0') {
-    return kDefaultStartupTimeout;
+    return fallback;
   }
 
   errno = 0;
@@ -150,27 +172,29 @@ startup_timeout()
   std::uint64_t seconds = std::strtoull(value, &end, 10);
   if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
       seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    throw std::runtime_error("invalid HOG_DEVNODE_STARTUP_TIMEOUT_SECS value");
+    throw std::runtime_error(std::format("invalid {} value", name));
   }
   return std::chrono::seconds(static_cast<int>(seconds));
 }
 
 std::chrono::seconds
+startup_timeout()
+{
+  return timeout_from_env("HOG_DEVNODE_STARTUP_TIMEOUT_SECS",
+                          kDefaultStartupTimeout);
+}
+
+std::chrono::seconds
 exit_timeout()
 {
-  const char *value = std::getenv("HOG_DEVNODE_EXIT_TIMEOUT_SECS");
-  if (value == nullptr || *value == '\0') {
-    return kDefaultExitTimeout;
-  }
+  return timeout_from_env("HOG_DEVNODE_EXIT_TIMEOUT_SECS", kDefaultExitTimeout);
+}
 
-  errno = 0;
-  char *end = nullptr;
-  std::uint64_t seconds = std::strtoull(value, &end, 10);
-  if (errno != 0 || end == value || *end != '\0' || seconds == 0 ||
-      seconds > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
-    throw std::runtime_error("invalid HOG_DEVNODE_EXIT_TIMEOUT_SECS value");
-  }
-  return std::chrono::seconds(static_cast<int>(seconds));
+std::chrono::seconds
+shutdown_timeout()
+{
+  return timeout_from_env("HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS",
+                          kDefaultShutdownTimeout);
 }
 
 struct Readiness {
@@ -234,6 +258,94 @@ read_to_end(int fd)
     }
     throw std::runtime_error(errno_message("read", errno));
   }
+}
+
+// Runs [args] with its stdout and stderr merged into the returned string,
+// killing it once [timeout] passes. Diagnostics only: every failure is
+// reported in the string rather than thrown.
+std::string
+capture_command_output(std::vector<std::string> args,
+                       std::chrono::seconds timeout)
+{
+  int output_pipe[2];
+  if (pipe(output_pipe) != 0) {
+    return errno_message("pipe", errno) + "\n";
+  }
+  const auto pid = fork();
+  if (pid < 0) {
+    const int saved_errno = errno;
+    close(output_pipe[0]);
+    close(output_pipe[1]);
+    return errno_message("fork", saved_errno) + "\n";
+  }
+  if (pid == 0) {
+    close(output_pipe[0]);
+    if (dup2(output_pipe[1], STDOUT_FILENO) < 0 ||
+        dup2(output_pipe[1], STDERR_FILENO) < 0) {
+      _exit(127);
+    }
+    close(output_pipe[1]);
+    std::vector<char *> argv;
+    argv.reserve(args.size() + 1);
+    for (std::string &arg : args) {
+      argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+    execvp(argv[0], argv.data());
+    _exit(127);
+  }
+  close(output_pipe[1]);
+
+  std::string output;
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  for (;;) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      kill(pid, SIGKILL);
+      output += std::format("({} did not finish within {} s; killed)\n",
+                            args[0], timeout.count());
+      break;
+    }
+    const auto remaining =
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    pollfd poll_fd{.fd = output_pipe[0], .events = POLLIN, .revents = 0};
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    const int ready = poll(&poll_fd, 1, static_cast<int>(remaining.count()));
+    if (ready < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      output += errno_message("poll", errno) + "\n";
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      kill(pid, SIGKILL);
+      break;
+    }
+    if (ready == 0) {
+      continue;
+    }
+    char buffer[4096];
+    const auto count = read(output_pipe[0], buffer, sizeof(buffer));
+    if (count > 0) {
+      output.append(buffer, static_cast<std::size_t>(count));
+      continue;
+    }
+    if (count < 0 && errno == EINTR) {
+      continue;
+    }
+    break;
+  }
+  close(output_pipe[0]);
+
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
+    output +=
+        std::format("({} is not installed or could not be run)\n", args[0]);
+  }
+  return output;
 }
 
 std::string
@@ -385,13 +497,8 @@ parse_bootstrap_accounts(const json::Value &manifest, std::string_view line)
           std::format("manifest bootstrapAccounts entry is not an object: {}",
                       line));
     }
-    const std::int64_t index = require_integer_field(account, "index", line);
-    if (index < 0 ||
-        std::cmp_greater(index, std::numeric_limits<std::uint32_t>::max())) {
-      throw std::runtime_error(
-          std::format("unexpected bootstrapAccounts index in manifest: {}",
-                      line));
-    }
+    EXPECT_EQ(account.find("index"), nullptr);
+    const auto index = out.size();
     out.push_back(Readiness::BootstrapAccount{
         .index = static_cast<std::uint32_t>(index),
         .role = std::string(require_string_field(account, "role", line)),
@@ -463,7 +570,7 @@ parse_readiness(std::string line)
 
   const std::int64_t manifest_schema_version =
       require_integer_field(*manifest, "schemaVersion", manifest_bytes);
-  if (manifest_schema_version != 3) {
+  if (manifest_schema_version != 4) {
     throw std::runtime_error(std::format("unexpected manifest schemaVersion {}",
                                          manifest_schema_version));
   }
@@ -627,6 +734,28 @@ submit_and_commit(sched_coord_client_t &scheduler,
   return propose_and_commit(scheduler);
 }
 
+// Deterministic keys are owned by this harness. Only their public allocations
+// cross the hog-devnode process boundary.
+LocalBootstrapConfig
+fixture_config(std::uint32_t count = 0,
+               std::string_view seed = "groundhog-dev-accounts",
+               std::uint64_t tokens = kDefaultLocalUserStorageTokens)
+{
+  LocalBootstrapConfig config{
+      .faucet_public_key = derive_bootstrap_account_keypair(seed, 0).first};
+  for (std::uint32_t i = 1; i <= count; ++i) {
+    config.accounts.push_back(
+        {.public_key = derive_bootstrap_account_keypair(seed, i).first,
+         .storage_tokens = tokens});
+  }
+  return config;
+}
+
+std::string bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
+                                    std::string_view initial_storage_tokens,
+                                    bool include_protocol = false);
+std::filesystem::path write_test_bootstrap_manifest(std::string_view contents);
+
 class HogDevnodeProcess {
 public:
   static HogDevnodeProcess
@@ -634,6 +763,42 @@ public:
         const std::vector<std::pair<std::string, std::string>> &extra_env = {},
         bool include_default_args = true)
   {
+    std::optional<std::filesystem::path> fixture_manifest;
+    std::uint32_t fixture_count = 0;
+    std::string fixture_seed = "groundhog-dev-accounts";
+    std::string fixture_tokens = "1000000000";
+    for (std::size_t i = 0; i + 1 < extra_args.size();) {
+      auto const name = extra_args[i];
+      if (name != "--fixture-accounts" && name != "--fixture-seed" &&
+          name != "--fixture-tokens") {
+        ++i;
+        continue;
+      }
+      if (name == "--fixture-accounts") {
+        fixture_count =
+            static_cast<std::uint32_t>(std::stoul(extra_args[i + 1]));
+      }
+      if (name == "--fixture-seed") {
+        fixture_seed = extra_args[i + 1];
+      }
+      if (name == "--fixture-tokens") {
+        fixture_tokens = extra_args[i + 1];
+      }
+      extra_args.erase(extra_args.begin() + static_cast<std::ptrdiff_t>(i),
+                       extra_args.begin() + static_cast<std::ptrdiff_t>(i + 2));
+    }
+    if (include_default_args &&
+        std::ranges::find(extra_args, "--bootstrap-manifest") ==
+            extra_args.end()) {
+      auto intent =
+          bootstrap_manifest_json(fixture_count, fixture_seed, fixture_tokens);
+      const auto network_pos = intent.find(
+          "00000000000000000000000000000000000000000000000000000000000000aa");
+      intent.replace(network_pos, 64, std::string(64, '0'));
+      fixture_manifest = write_test_bootstrap_manifest(intent);
+      extra_args.insert(extra_args.end(),
+                        {"--bootstrap-manifest", fixture_manifest->string()});
+    }
     int stdout_pipe[2];
     int stderr_pipe[2];
     if (pipe(stdout_pipe) != 0) {
@@ -695,13 +860,22 @@ public:
       }
       argv.push_back(nullptr);
 
+#if defined(__linux__) && defined(PR_SET_PTRACER)
+      // Yama restricted ptrace: name the harness as tracer so the gdb it
+      // spawns in [escalate_shutdown] may attach. Best effort; the relation
+      // survives execv. The variadic prctl reads its arguments as unsigned
+      // long. NOLINTNEXTLINE(misc-include-cleaner,google-runtime-int)
+      prctl(PR_SET_PTRACER, static_cast<unsigned long>(getppid()), 0, 0, 0);
+#endif
+
       execv(HOG_DEVNODE_BINARY, argv.data());
       _exit(127);
     }
 
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
-    return HogDevnodeProcess(pid, stdout_pipe[0], stderr_pipe[0]);
+    return HogDevnodeProcess(pid, stdout_pipe[0], stderr_pipe[0],
+                             std::move(fixture_manifest));
   }
 
   HogDevnodeProcess(HogDevnodeProcess const &) = delete;
@@ -712,7 +886,9 @@ public:
       stderr_fd_(other.stderr_fd_),
       stdout_buffer_(std::move(other.stdout_buffer_)),
       stderr_sink_(std::move(other.stderr_sink_)),
-      stderr_reader_(std::move(other.stderr_reader_))
+      stderr_reader_(std::move(other.stderr_reader_)),
+      fixture_manifest_(std::exchange(other.fixture_manifest_, std::nullopt)),
+      shutdown_diagnostics_(std::move(other.shutdown_diagnostics_))
   {
     other.pid_ = -1;
     other.stdout_fd_ = -1;
@@ -735,6 +911,9 @@ public:
     }
     close_if_open(stdout_fd_);
     close_if_open(stderr_fd_);
+    if (fixture_manifest_) {
+      std::filesystem::remove(*fixture_manifest_);
+    }
   }
 
   Readiness wait_for_readiness()
@@ -756,15 +935,20 @@ public:
       throw std::runtime_error(errno_message("kill SIGTERM", errno));
     }
 
-    std::optional<int> status = wait_for_exit(kShutdownTimeout);
+    const std::chrono::seconds grace = shutdown_timeout();
+    std::optional<int> status = wait_for_exit(grace);
     if (!status.has_value()) {
-      kill(pid_, SIGKILL);
-      status = wait_for_exit(kShutdownTimeout);
-      if (!status.has_value()) {
-        throw std::runtime_error("hog-devnode did not exit after SIGKILL");
-      }
+      return escalate_shutdown(grace);
     }
     return *status;
+  }
+
+  // Empty unless [terminate] had to escalate to SIGKILL. Then it names the
+  // grace that ran out and carries what gdb saw of the stuck node; the x23
+  // pool dump the escalation also requests is on the node's stderr.
+  const std::string &shutdown_diagnostics() const
+  {
+    return shutdown_diagnostics_;
   }
 
   // Models a crash: the node gets no shutdown path at all, so whatever it
@@ -780,7 +964,7 @@ public:
     if (kill(pid_, SIGKILL) != 0 && errno != ESRCH) {
       throw std::runtime_error(errno_message("kill SIGKILL", errno));
     }
-    std::optional<int> status = wait_for_exit(kShutdownTimeout);
+    std::optional<int> status = wait_for_exit(kKillTimeout);
     if (!status.has_value()) {
       throw std::runtime_error("hog-devnode did not exit after SIGKILL");
     }
@@ -820,10 +1004,12 @@ private:
     std::string data;
   };
 
-  HogDevnodeProcess(int pid, int stdout_fd, int stderr_fd)
+  HogDevnodeProcess(int pid, int stdout_fd, int stderr_fd,
+                    std::optional<std::filesystem::path> fixture_manifest)
     : pid_(pid), stdout_fd_(stdout_fd), stderr_fd_(stderr_fd),
       stderr_sink_(std::make_shared<StderrSink>())
   {
+    fixture_manifest_ = std::move(fixture_manifest);
     // Drain continuously: hog-devnode logs several KiB per block, and a full
     // pipe blocks its write(2) inside ConsoleLogger with the logger's mutex
     // held, which wedges the whole node.
@@ -920,20 +1106,91 @@ private:
     }
   }
 
+  bool stderr_contains(std::string_view needle) const
+  {
+    if (!stderr_sink_) {
+      return false;
+    }
+    const std::lock_guard<std::mutex> lock(stderr_sink_->mutex);
+    return stderr_sink_->data.find(needle) != std::string::npos;
+  }
+
+  // The node outlived its SIGTERM grace: collect evidence before SIGKILL.
+  // SIGUSR1 makes x23 dump its pools onto the node's stderr (dying of it means
+  // x23 was already torn down, i.e. static destruction); gdb, if it can
+  // attach, adds every thread's backtrace. Best effort; returns the wait
+  // status.
+  int escalate_shutdown(std::chrono::seconds grace)
+  {
+    shutdown_diagnostics_ = std::format(
+        "hog-devnode (pid {}) did not exit within {} s of SIGTERM; the "
+        "harness sent SIGUSR1 (x23 pool dump, see the node's stderr below), "
+        "captured the backtraces that follow, then sent SIGKILL.\n--- gdb "
+        "---\n",
+        pid_, grace.count());
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    kill(pid_, SIGUSR1);
+    // Wait for the dump to land before gdb freezes the node. A node that was
+    // merely slow may finish here instead, and then its status is the verdict.
+    const auto dump_deadline =
+        std::chrono::steady_clock::now() + kPoolDumpTimeout;
+    std::optional<int> status = wait_for_exit(std::chrono::milliseconds(10));
+    while (!status.has_value() && !stderr_contains(kPoolDumpMarker) &&
+           std::chrono::steady_clock::now() < dump_deadline) {
+      status = wait_for_exit(std::chrono::milliseconds(10));
+    }
+    if (status.has_value()) {
+      shutdown_diagnostics_ +=
+          "(the node exited while the dump settled, before gdb ran)\n";
+      return *status;
+    }
+    // No debuginfod: a symbol server lookup could eat the whole budget.
+    shutdown_diagnostics_ += capture_command_output(
+        {"gdb", "-nx", "-batch", "-iex", "set debuginfod enabled off", "-ex",
+         "set pagination off", "-ex", "thread apply all bt", "-p",
+         std::to_string(pid_)},
+        kBacktraceTimeout);
+    kill(pid_, SIGKILL);
+    status = wait_for_exit(kKillTimeout);
+    if (!status.has_value()) {
+      throw std::runtime_error("hog-devnode did not exit after SIGKILL");
+    }
+    return *status;
+  }
+
   int pid_;
   int stdout_fd_;
   int stderr_fd_;
   std::string stdout_buffer_;
   std::shared_ptr<StderrSink> stderr_sink_;
   std::thread stderr_reader_;
+  std::optional<std::filesystem::path> fixture_manifest_;
+  std::string shutdown_diagnostics_;
 };
+
+std::string
+describe_wait_status(int status)
+{
+  if (WIFEXITED(status)) {
+    return std::format("hog-devnode exited with status {}",
+                       WEXITSTATUS(status));
+  }
+  if (WIFSIGNALED(status)) {
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    return std::format("hog-devnode was killed by signal {}", WTERMSIG(status));
+  }
+  return std::format("hog-devnode wait status {:#x}", status);
+}
 
 void
 expect_clean_exit(HogDevnodeProcess &process)
 {
   int status = process.terminate();
   std::string stderr_output = process.read_remaining_stderr();
-  ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
+  ASSERT_TRUE(WIFEXITED(status))
+      << describe_wait_status(status) << "\n"
+      << process.shutdown_diagnostics() << "--- hog-devnode stderr ---\n"
+      << stderr_output;
   EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
   EXPECT_TRUE(process.read_remaining_stdout().empty());
 }
@@ -951,11 +1208,11 @@ expect_killed_exit(HogDevnodeProcess &process)
 std::string
 bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
                         std::string_view initial_storage_tokens,
-                        bool include_protocol = false)
+                        bool include_protocol)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{3});
+    w.field("schemaVersion", std::int64_t{4});
     w.field("kind", "groundhog-bootstrap");
     w.field("networkHash",
             "00000000000000000000000000000000000000000000000000000000000000aa");
@@ -964,15 +1221,22 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
       w.field("protocol", protocol_text(version::kHogdProtocol()));
     }
     w.object_field("bootstrapFaucet", [&](json::Writer &w) {
-      w.field("index", std::int64_t{0});
+      w.field("publicKey",
+              hex_string(derive_bootstrap_account_keypair(seed, 0).first));
       w.field("initialStorageTokens",
               std::to_string(kLocalFaucetStorageTokens));
     });
-    w.object_field("bootstrapAccounts", [&](json::Writer &w) {
-      w.field("count", static_cast<std::int64_t>(count));
-      w.field("firstIndex", std::int64_t{1});
-      w.field("seed", seed);
-      w.field("initialStorageTokens", initial_storage_tokens);
+    w.array_field("bootstrapAccounts", [&](json::Writer &w) {
+      for (std::uint32_t i = 1; i <= count; ++i) {
+        w.object([&](json::Writer &w) {
+          w.field("publicKey",
+                  seed.empty()
+                      ? "invalid"
+                      : hex_string(
+                            derive_bootstrap_account_keypair(seed, i).first));
+          w.field("initialStorageTokens", initial_storage_tokens);
+        });
+      }
     });
     w.object_field("storageCostModel", [&](json::Writer &w) {
       w.field("profile", "hogd-default");
@@ -1040,11 +1304,11 @@ initialize_persistent_data_dir(std::filesystem::path const &data_dir,
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--data-dir",
       data_dir.string(),
-      "--dev-accounts",
+      "--fixture-accounts",
       std::to_string(dev_accounts),
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -1127,11 +1391,11 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--data-dir",
       data_dir.string(),
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -1173,7 +1437,7 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
 void
 write_test_data_dir_metadata(
     std::filesystem::path const &data_dir, LocalBootstrapConfig const &config,
-    std::int64_t schema_version = 3,
+    std::int64_t schema_version = 4,
     std::uint64_t faucet_tokens = kLocalFaucetStorageTokens)
 {
   std::string buffer;
@@ -1181,11 +1445,19 @@ write_test_data_dir_metadata(
     w.field("schemaVersion", schema_version);
     w.field("kind", "hog-devnode-data");
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
-      w.field("faucetTokens", std::to_string(faucet_tokens));
-      w.field("devAccounts",
-              static_cast<std::int64_t>(config.user_account_count));
-      w.field("devAccountSeed", config.seed);
-      w.field("devAccountTokens", std::to_string(config.user_storage_tokens));
+      w.object_field("bootstrapFaucet", [&](json::Writer &w) {
+        w.field("publicKey", hex_string(config.faucet_public_key));
+        w.field("initialStorageTokens", std::to_string(faucet_tokens));
+      });
+      w.array_field("bootstrapAccounts", [&](json::Writer &w) {
+        for (auto const &account : config.accounts) {
+          w.object([&](json::Writer &w) {
+            w.field("publicKey", hex_string(account.public_key));
+            w.field("initialStorageTokens",
+                    std::to_string(account.storage_tokens));
+          });
+        }
+      });
     });
   });
 
@@ -1555,7 +1827,8 @@ TEST(HogDevnode, DevAccountCountAboveMaximumPrintsFriendlyUsage)
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_TRUE(stdout_output.empty()) << stdout_output;
   EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
-  EXPECT_TRUE(stderr_output.contains("exceeds maximum")) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("dev-account shorthand was removed"))
+      << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
 
@@ -1577,8 +1850,7 @@ TEST(HogDevnode, BootstrapManifestConflictsWithShorthandPrintsFriendlyUsage)
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_TRUE(stdout_output.empty()) << stdout_output;
   EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
-  EXPECT_TRUE(
-      stderr_output.contains("--bootstrap-manifest conflicts with dev-account"))
+  EXPECT_TRUE(stderr_output.contains("dev-account shorthand was removed"))
       << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
 }
@@ -1689,13 +1961,12 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
       std::format("hog-devnode-test-manifest-{}.json", getpid());
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
   std::string manifest =
-      R"({"schemaVersion":3,"kind":"hogd-dev-runtime","chainState":"fresh",)"
+      R"({"schemaVersion":4,"kind":"hogd-dev-runtime","chainState":"fresh",)"
       R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
       R"("endpoints":{"scheduler":"[::1]:12345",)"
       R"("schedulerGateway":"[::1]:22345","indexer":"[::1]:23456",)"
       R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"
-      R"("bootstrapAccountDerivation":{"scheme":"groundhog-bootstrap-account-v1","seed":"test"},)"
       R"("bootstrapAccounts":[],"bootstrap":{)"
       R"("storageCostModel":{"hash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("baseDataItemCost":"12000","bytestringCostPerByte":"10",)"
@@ -1795,7 +2066,7 @@ TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
 
 TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 {
-  LocalBootstrapConfig config{.user_account_count = 3};
+  LocalBootstrapConfig config = fixture_config(3);
 
   BootstrapAccountArtifact first =
       build_local_bootstrap_account_artifact(config);
@@ -1817,7 +2088,7 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
                                           ? BootstrapAccountRole::kFaucet
                                           : BootstrapAccountRole::kLocalUser);
     const std::uint64_t expected_tokens =
-        i == 0 ? kLocalFaucetStorageTokens : config.user_storage_tokens;
+        i == 0 ? kLocalFaucetStorageTokens : config.accounts[0].storage_tokens;
     EXPECT_EQ(first.accounts[i].initial_storage_tokens, expected_tokens);
     EXPECT_EQ(first.accounts[i].storage_tokens, expected_tokens);
     EXPECT_EQ(first.accounts[i].address, second.accounts[i].address);
@@ -1827,8 +2098,8 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 
 TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
 {
-  LocalBootstrapConfig config{.user_account_count = 1};
-  EXPECT_EQ(config.user_storage_tokens, 1'000'000'000ULL);
+  LocalBootstrapConfig config = fixture_config(1);
+  EXPECT_EQ(config.accounts[0].storage_tokens, 1'000'000'000ULL);
 
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact(config);
@@ -1842,10 +2113,8 @@ TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
 {
   constexpr std::uint64_t kTokenSupply =
       kTotalHogSupply * std::uint64_t{kHogDivisibility};
-  LocalBootstrapConfig config{
-      .user_account_count = 1,
-      .user_storage_tokens = kTokenSupply,
-  };
+  LocalBootstrapConfig config =
+      fixture_config(1, "groundhog-dev-accounts", kTokenSupply);
 
   EXPECT_THROW(build_local_bootstrap_account_artifact(config),
                std::runtime_error);
@@ -1854,11 +2123,11 @@ TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
 TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "3",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -1866,11 +2135,7 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
   ASSERT_EQ(readiness.bootstrap_accounts.size(), 4UL);
   const json::Value *derivation =
       readiness.manifest.find("bootstrapAccountDerivation");
-  ASSERT_NE(derivation, nullptr);
-  EXPECT_EQ(require_string_field(*derivation, "scheme", ""),
-            "groundhog-bootstrap-account-v1");
-  EXPECT_EQ(require_string_field(*derivation, "seed", ""),
-            "groundhog-dev-accounts");
+  EXPECT_EQ(derivation, nullptr);
   for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", i);
@@ -1907,8 +2172,7 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
   ASSERT_EQ(readiness.bootstrap_accounts.size(), 3UL);
   const json::Value *derivation =
       readiness.manifest.find("bootstrapAccountDerivation");
-  ASSERT_NE(derivation, nullptr);
-  EXPECT_EQ(require_string_field(*derivation, "seed", ""), "manifest-seed");
+  EXPECT_EQ(derivation, nullptr);
   for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
     auto keypair = derive_bootstrap_account_keypair("manifest-seed", i);
     EXPECT_EQ(readiness.bootstrap_accounts[i].index, i);
@@ -1944,7 +2208,7 @@ TEST(HogDevnode, BootstrapManifestConflictsWithDevAccountShorthands)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find(
-                "--bootstrap-manifest conflicts with dev-account"),
+                "dev-account shorthand was removed"),
             std::string::npos);
 }
 
@@ -1965,7 +2229,7 @@ TEST(HogDevnode, BootstrapManifestConflictDetectedBeforeManifestRead)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find(
-                "--bootstrap-manifest conflicts with dev-account"),
+                "dev-account shorthand was removed"),
             std::string::npos);
 }
 
@@ -1986,14 +2250,14 @@ TEST(HogDevnode, BootstrapManifestConflictDetectedBeforeShorthandParsing)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find(
-                "--bootstrap-manifest conflicts with dev-account"),
+                "dev-account shorthand was removed"),
             std::string::npos);
 }
 
 TEST(HogDevnode, BootstrapManifestRejectsOversizedFile)
 {
   std::filesystem::path manifest_path =
-      write_test_bootstrap_manifest(std::string((64 * 1024) + 1, ' '));
+      write_test_bootstrap_manifest(std::string((256 * 1024) + 1, ' '));
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
   HogDevnodeProcess process = HogDevnodeProcess::start({
@@ -2011,7 +2275,7 @@ TEST(HogDevnode, BootstrapManifestRejectsOversizedFile)
             std::string::npos);
 }
 
-TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
+TEST(HogDevnode, BootstrapManifestRejectsInvalidPublicKey)
 {
   const std::string manifest = bootstrap_manifest_json(1, "", "42");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
@@ -2029,7 +2293,7 @@ TEST(HogDevnode, BootstrapManifestRejectsEmptyBootstrapAccountsSeed)
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
   EXPECT_NE(process.read_remaining_stderr().find(
-                "bootstrapAccounts.seed must not be empty"),
+                "bootstrapAccounts entry.publicKey"),
             std::string::npos);
 }
 
@@ -2051,15 +2315,16 @@ TEST(HogDevnode, BootstrapManifestRejectsWhitespaceInInitialStorageTokens)
   EXPECT_FALSE(WIFEXITED(wait_status) &&
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
-  EXPECT_NE(process.read_remaining_stderr().find(
-                "Invalid bootstrap manifest initialStorageTokens"),
-            std::string::npos);
+  EXPECT_NE(
+      process.read_remaining_stderr().find(
+          "initialStorageTokens must be a positive canonical decimal amount"),
+      std::string::npos);
 }
 
-TEST(HogDevnode, RejectsDevAccountCountAboveLimit)
+TEST(HogDevnode, RejectsBootstrapAccountCountAboveLimit)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1001",
   });
 
@@ -2069,7 +2334,8 @@ TEST(HogDevnode, RejectsDevAccountCountAboveLimit)
   EXPECT_FALSE(WIFEXITED(wait_status) &&
                WEXITSTATUS(wait_status) == EXIT_SUCCESS);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
-  EXPECT_NE(process.read_remaining_stderr().find("Invalid dev account count"),
+  EXPECT_NE(process.read_remaining_stderr().find(
+                "bootstrapAccounts exceeds maximum account count"),
             std::string::npos);
 }
 
@@ -2161,11 +2427,11 @@ TEST(HogDevnode, ViewGatewayEndpointAnswersIntro)
 TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -2182,7 +2448,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
 
     using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
+        build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[1]
             .address;
     EXPECT_EQ(hex_string(wallet_address),
@@ -2237,11 +2503,11 @@ TEST(HogDevnode, IndexerEndpointServesBlockExplorer)
 TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -2274,7 +2540,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
+        build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[1]
             .address;
 
@@ -2342,7 +2608,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
   std::optional<ProposedTransaction> expected_indexed_tx;
   std::optional<TxEventLog> expected_event_log;
   const ContractAddress wallet_address =
-      build_local_bootstrap_account_artifact({.user_account_count = 1})
+      build_local_bootstrap_account_artifact(fixture_config(1))
           .accounts[1]
           .address;
 
@@ -2380,11 +2646,11 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         {
             "--data-dir",
             data_dir.string(),
-            "--dev-accounts",
+            "--fixture-accounts",
             "1",
-            "--dev-account-seed",
+            "--fixture-seed",
             "groundhog-dev-accounts",
-            "--dev-account-tokens",
+            "--fixture-tokens",
             "1000000000",
         },
         {{"HOG_DEVNODE_TEST_WITHHOLD_INDEXER_PULL", "1"}});
@@ -2478,11 +2744,11 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     HogDevnodeProcess process = HogDevnodeProcess::start({
         "--data-dir",
         data_dir.string(),
-        "--dev-accounts",
+        "--fixture-accounts",
         "1",
-        "--dev-account-seed",
+        "--fixture-seed",
         "groundhog-dev-accounts",
-        "--dev-account-tokens",
+        "--fixture-tokens",
         "1000000000",
     });
     Readiness readiness = process.wait_for_readiness();
@@ -2516,11 +2782,11 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     HogDevnodeProcess process = HogDevnodeProcess::start({
         "--data-dir",
         data_dir.string(),
-        "--dev-accounts",
+        "--fixture-accounts",
         "1",
-        "--dev-account-seed",
+        "--fixture-seed",
         "groundhog-dev-accounts",
-        "--dev-account-tokens",
+        "--fixture-tokens",
         "1000000000",
     });
     Readiness readiness = process.wait_for_readiness();
@@ -2648,9 +2914,9 @@ TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
       data_dir / "events" / "indexer-outbox" /
       IndexerOutboxStore::current_epoch_origin_filename()));
 
-  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
-                          "0", "--dev-account-seed", "groundhog-dev-accounts",
-                          "--dev-account-tokens", "1000000000"},
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
+                          "0", "--fixture-seed", "groundhog-dev-accounts",
+                          "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
                          "required");
@@ -2669,9 +2935,9 @@ TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
       outbox_dir / IndexerOutboxStore::epoch_origin_filename(
                        protocol_from_text("hogp/archival")));
 
-  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
-                          "0", "--dev-account-seed", "groundhog-dev-accounts",
-                          "--dev-account-tokens", "1000000000"},
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
+                          "0", "--fixture-seed", "groundhog-dev-accounts",
+                          "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
                          "required");
@@ -2685,9 +2951,9 @@ TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyDurableOutbox)
   ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
             0UL);
 
-  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
-                          "1", "--dev-account-seed", "groundhog-dev-accounts",
-                          "--dev-account-tokens", "1000000000"},
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
+                          "1", "--fixture-seed", "groundhog-dev-accounts",
+                          "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
                          "required");
@@ -2719,8 +2985,8 @@ TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
                         std::filesystem::copy_options::recursive);
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -2793,8 +3059,8 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
   }
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -2834,11 +3100,11 @@ TEST(HogDevnode, DataDirRecoversAfterUncleanKill)
     HogDevnodeProcess process = HogDevnodeProcess::start({
         "--data-dir",
         data_dir.string(),
-        "--dev-accounts",
+        "--fixture-accounts",
         "1",
-        "--dev-account-seed",
+        "--fixture-seed",
         "groundhog-dev-accounts",
-        "--dev-account-tokens",
+        "--fixture-tokens",
         "1000000000",
     });
     Readiness readiness = process.wait_for_readiness();
@@ -2858,11 +3124,11 @@ TEST(HogDevnode, DataDirRecoversAfterUncleanKill)
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--data-dir",
       data_dir.string(),
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -2909,8 +3175,8 @@ TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)
   std::ignore = append_next_test_outbox_record(data_dir);
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -2946,8 +3212,8 @@ TEST(HogDevnode, DataDirRejectsIndexerAheadOfHogDb)
                         std::filesystem::copy_options::recursive);
 
   expect_startup_failure(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"},
       "recovered hog-devnode indexer is ahead of finalized event outbox: "
       "indexed height 2, finalized height 1");
@@ -2960,8 +3226,8 @@ TEST(HogDevnode, DataDirAcceptsMatchingOutboxIndexerAndHogDb)
   initialize_persistent_data_dir(data_dir);
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   EXPECT_EQ(readiness.chain_state, "recovered");
@@ -2991,11 +3257,11 @@ TEST(HogDevnode, DataDirRejectsUnreadableDbTip)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
       "failed to read recovered DbTip: Type Mismatch");
@@ -3020,11 +3286,11 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
       "recovered database storage hash does not match DbTip");
@@ -3036,7 +3302,7 @@ TEST(HogDevnode, NetworkOverridesSurviveRestartAndRejectChangedIntent)
   Defer cleanup([&] { std::filesystem::remove_all(data_dir); });
   for (const auto *expected_state : {"fresh", "recovered"}) {
     auto process = HogDevnodeProcess::start(
-        {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+        {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
          "--network-config", "max_bytestring_len=32768"});
     const auto readiness = process.wait_for_readiness();
     EXPECT_EQ(readiness.chain_state, expected_state);
@@ -3051,15 +3317,15 @@ TEST(HogDevnode, NetworkOverridesSurviveRestartAndRejectChangedIntent)
               32768U);
     expect_clean_exit(process);
   }
-  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
                           "1"},
                          "different --network-config");
-  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+  expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
                           "1", "--network-config", "max_bytestring_len=16384"},
                          "different --network-config");
 }
 
-TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountSeed)
+TEST(HogDevnode, DataDirRejectsRestartWithDifferentPublicKeys)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -3069,17 +3335,17 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountSeed)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "different-seed",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
-      "different --dev-account-seed");
+      "different bootstrap accounts");
 }
 
-TEST(HogDevnode, DataDirRejectsRestartWithOmittedDevAccounts)
+TEST(HogDevnode, DataDirRejectsRestartWithOmittedAllocations)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -3090,10 +3356,10 @@ TEST(HogDevnode, DataDirRejectsRestartWithOmittedDevAccounts)
           "--data-dir",
           data_dir.string(),
       },
-      "different --dev-accounts");
+      "different bootstrap accounts");
 }
 
-TEST(HogDevnode, DataDirRejectsRestartWithLargerDevAccountCount)
+TEST(HogDevnode, DataDirRejectsRestartWithAdditionalAllocations)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -3103,17 +3369,17 @@ TEST(HogDevnode, DataDirRejectsRestartWithLargerDevAccountCount)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "2",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
-      "different --dev-accounts");
+      "different bootstrap accounts");
 }
 
-TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountTokens)
+TEST(HogDevnode, DataDirRejectsRestartWithDifferentAllocations)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -3123,14 +3389,14 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountTokens)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "42",
       },
-      "different --dev-account-tokens");
+      "different bootstrap accounts");
 }
 
 TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
@@ -3154,6 +3420,57 @@ TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
   expect_clean_exit(first);
 }
 
+TEST(HogDevnode, DataDirRejectsInvalidInheritedLockDescriptor)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  for (const char *descriptor : {"0", "999999", "not-a-descriptor"}) {
+    HogDevnodeProcess process =
+        HogDevnodeProcess::start({"--data-dir", data_dir.string()},
+                                 {{"HOG_DEVNODE_DATA_DIR_LOCK_FD",
+                                   descriptor}});
+    auto status = process.wait_for_exit_for_test(startup_timeout());
+    if (!status.has_value()) {
+      FAIL() << "hog-devnode did not exit";
+      return;
+    }
+    const int exit_status = status.value();
+    EXPECT_TRUE(WIFEXITED(exit_status));
+    EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
+    EXPECT_NE(process.read_remaining_stderr().find(
+                  "inherited data-dir lock does not identify this chain"),
+              std::string::npos);
+  }
+}
+
+TEST(HogDevnode, DataDirRetainsInheritedLockAfterParentClosesDescriptor)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::create_directories(data_dir);
+  const int opened =
+      ::open((data_dir / ".hog-devnode.lock").c_str(), O_RDWR | O_CREAT, 0600);
+  ASSERT_GE(opened, 0);
+  const int descriptor = ::fcntl(opened, F_DUPFD, 100);
+  ::close(opened);
+  ASSERT_GE(descriptor, 100);
+  std::optional<File> parent_lock(std::in_place, descriptor);
+  ASSERT_EQ(::flock(descriptor, LOCK_EX | LOCK_NB), 0);
+  HogDevnodeProcess child =
+      HogDevnodeProcess::start({"--data-dir", data_dir.string()},
+                               {{"HOG_DEVNODE_DATA_DIR_LOCK_FD",
+                                 std::to_string(descriptor)}});
+  child.wait_for_readiness();
+  parent_lock.reset();
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "already locked by another process");
+  expect_clean_exit(child);
+  const int restored = ::open((data_dir / ".hog-devnode.lock").c_str(), O_RDWR);
+  ASSERT_GE(restored, 0);
+  File released_lock(restored);
+  EXPECT_EQ(::flock(restored, LOCK_EX | LOCK_NB), 0);
+}
+
 TEST(HogDevnode, DataDirRejectsCommittedChainWhenMetadataMissing)
 {
   std::filesystem::path data_dir = make_test_data_dir();
@@ -3165,11 +3482,11 @@ TEST(HogDevnode, DataDirRejectsCommittedChainWhenMetadataMissing)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
       "persisted state but no bootstrap metadata");
@@ -3179,19 +3496,16 @@ TEST(HogDevnode, DataDirResumesMetadataWithoutCommittedChain)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir,
-                               {.user_account_count = 1,
-                                .seed = "groundhog-dev-accounts",
-                                .user_storage_tokens = 1'000'000'000});
+  write_test_data_dir_metadata(data_dir, fixture_config(1));
 
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--data-dir",
       data_dir.string(),
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -3204,10 +3518,10 @@ TEST(HogDevnode, DataDirRejectsBootstrapGenesisWithoutInitializationBlock)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   const std::vector<std::string> args{
-      "--data-dir",           data_dir.string(),
-      "--dev-accounts",       "1",
-      "--dev-account-seed",   "groundhog-dev-accounts",
-      "--dev-account-tokens", "1000000000",
+      "--data-dir",         data_dir.string(),
+      "--fixture-accounts", "1",
+      "--fixture-seed",     "groundhog-dev-accounts",
+      "--fixture-tokens",   "1000000000",
   };
 
   {
@@ -3256,7 +3570,7 @@ TEST(HogDevnode, DataDirRejectsCorruptMetadataWithoutCommittedChain)
 
 TEST(HogDevnode, DataDirRejectsLegacyBootstrapMetadataWithoutChangingData)
 {
-  for (std::int64_t version : {1, 2}) {
+  for (std::int64_t version : {1, 2, 3}) {
     std::filesystem::path data_dir = make_test_data_dir();
     Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
     write_test_data_dir_metadata(data_dir, {}, version);
@@ -3315,11 +3629,11 @@ TEST(HogDevnode, DataDirRejectsCorruptMetadataOnRecovery)
       {
           "--data-dir",
           data_dir.string(),
-          "--dev-accounts",
+          "--fixture-accounts",
           "1",
-          "--dev-account-seed",
+          "--fixture-seed",
           "groundhog-dev-accounts",
-          "--dev-account-tokens",
+          "--fixture-tokens",
           "1000000000",
       },
       "hog-devnode data metadata JSON parse failed");
@@ -3328,11 +3642,11 @@ TEST(HogDevnode, DataDirRejectsCorruptMetadataOnRecovery)
 TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -3373,7 +3687,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
+        build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[1]
             .address;
     EXPECT_EQ(hex_string(wallet_address),
@@ -3464,11 +3778,11 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
 TEST(HogDevnode, NativeBootstrapAccountDeploysExplicitLegacyWalletFixture)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--dev-accounts",
+      "--fixture-accounts",
       "1",
-      "--dev-account-seed",
+      "--fixture-seed",
       "groundhog-dev-accounts",
-      "--dev-account-tokens",
+      "--fixture-tokens",
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
@@ -3510,7 +3824,7 @@ TEST(HogDevnode, NativeBootstrapAccountDeploysExplicitLegacyWalletFixture)
             .first;
     using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress sponsor_wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
+        build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[0]
             .address;
     EXPECT_EQ(hex_string(sponsor_wallet_address),
@@ -3703,7 +4017,7 @@ make_wallet_deploy_tx(Readiness const &readiness, std::uint64_t nonce)
       derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
   using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
   const ContractAddress wallet_address =
-      build_local_bootstrap_account_artifact({.user_account_count = 1})
+      build_local_bootstrap_account_artifact(fixture_config(1))
           .accounts[1]
           .address;
 
@@ -3805,10 +4119,10 @@ std::vector<std::string>
 persistent_data_dir_args(std::filesystem::path const &data_dir)
 {
   return {
-      "--data-dir",           data_dir.string(),
-      "--dev-accounts",       "1",
-      "--dev-account-seed",   "groundhog-dev-accounts",
-      "--dev-account-tokens", "1000000000",
+      "--data-dir",         data_dir.string(),
+      "--fixture-accounts", "1",
+      "--fixture-seed",     "groundhog-dev-accounts",
+      "--fixture-tokens",   "1000000000",
   };
 }
 
@@ -3816,7 +4130,7 @@ std::vector<ContractAddress>
 single_dev_account_addresses()
 {
   BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact({.user_account_count = 1});
+      build_local_bootstrap_account_artifact(fixture_config(1));
   return {artifact.accounts[0].address, artifact.accounts[1].address};
 }
 
@@ -4101,11 +4415,11 @@ TEST(HogDevnode, DataDirRejectsMetadataFromANewerSchemaVersion)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/4);
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/5);
 
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
-      "unsupported hog-devnode data metadata schemaVersion 4, expected 3");
+      "unsupported hog-devnode data metadata schemaVersion 5, expected 4");
 }
 
 TEST(HogDevnode, DataDirRejectsMetadataWithUnexpectedKind)
@@ -4113,7 +4427,7 @@ TEST(HogDevnode, DataDirRejectsMetadataWithUnexpectedKind)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   write_raw_test_data_dir_metadata(
-      data_dir, R"({"schemaVersion":3,"kind":"hog-hosted-data"})");
+      data_dir, R"({"schemaVersion":4,"kind":"hog-hosted-data"})");
 
   expect_startup_failure({"--data-dir", data_dir.string()},
                          "unsupported hog-devnode data metadata kind "
@@ -4125,7 +4439,7 @@ TEST(HogDevnode, DataDirRejectsMetadataWithoutBootstrapConfig)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   write_raw_test_data_dir_metadata(
-      data_dir, R"({"schemaVersion":3,"kind":"hog-devnode-data"})");
+      data_dir, R"({"schemaVersion":4,"kind":"hog-devnode-data"})");
 
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
@@ -4136,13 +4450,11 @@ TEST(HogDevnode, DataDirRejectsMetadataWithDevAccountsAboveMaximum)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {.user_account_count =
-                                              kMaxBootstrapAccounts + 1});
+  write_test_data_dir_metadata(data_dir,
+                               fixture_config(kMaxBootstrapAccounts + 1));
 
-  expect_startup_failure(
-      {"--data-dir", data_dir.string()},
-      std::format("hog-devnode data metadata devAccounts {} exceeds maximum {}",
-                  kMaxBootstrapAccounts + 1, kMaxBootstrapAccounts));
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "bootstrapAccounts exceeds maximum account count");
 }
 
 TEST(HogDevnode, DataDirRejectsMetadataWithForeignFaucetTokens)
@@ -4151,24 +4463,25 @@ TEST(HogDevnode, DataDirRejectsMetadataWithForeignFaucetTokens)
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   // The faucet allocation is fixed by the local bootstrap profile, so a data
   // dir claiming a different one was not written by this bootstrap.
-  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/3,
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/4,
                                /*faucet_tokens=*/1);
 
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
-      std::format("hog-devnode data metadata faucetTokens must be {}, got 1",
-                  kLocalFaucetStorageTokens));
+      "bootstrapFaucet.initialStorageTokens must be 10000000000000");
 }
 
-TEST(HogDevnode, DataDirRejectsMetadataWithEmptyDevAccountSeed)
+TEST(HogDevnode, DataDirRejectsMetadataWithDuplicatePublicKeys)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {.seed = ""});
+  write_test_data_dir_metadata(data_dir,
+                               LocalBootstrapConfig{
+                                   .accounts = {LocalAccountAllocation{},
+                                                LocalAccountAllocation{}}});
 
-  expect_startup_failure(
-      {"--data-dir", data_dir.string()},
-      "hog-devnode data metadata devAccountSeed must not be empty");
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "duplicate bootstrap public key");
 }
 
 // Replay protection is durable state, so a restart has to preserve exactly
@@ -4401,8 +4714,8 @@ TEST(HogDevnode, DataDirRejectsPreparedOriginWithoutCanonicalTipRecord)
   }
 
   expect_startup_failure(
-      {"--data-dir", data_dir.string(), "--dev-accounts", "0",
-       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+      {"--data-dir", data_dir.string(), "--fixture-accounts", "0",
+       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
        "1000000000"},
       "recovered event outbox is missing canonical HogDB tip height 1");
 }

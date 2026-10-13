@@ -440,13 +440,12 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
 
         ReturnBuffer buffer;
         RuntimeMemoryLength written_len = 0;
-        std::array<std::byte, 128> restored_auth_token_ids{};
-        RuntimeMemoryLength restored_auth_token_ids_written_len = 0;
+        uint32_t returned_auth_token_start = 0;
+        uint32_t returned_auth_token_count = 0;
 
         auto res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
             std::as_writable_bytes(std::span(buffer)), written_len,
-            std::span(restored_auth_token_ids),
-            restored_auth_token_ids_written_len);
+            returned_auth_token_start, returned_auth_token_count);
         if (!res.has_value()) {
           ADD_FAILURE()
               << "GetReturnBufferOnFault: Failed to get co_return buffer";

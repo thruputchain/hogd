@@ -5,7 +5,6 @@ add_xdr(
 add_dependencies(build_components_library_exception protocol)
 
 add_library(components_objects OBJECT
-  auth_token_registry.cc
   execution_mode.cc
   hash_buffers.cc
   new_contract_set.cc
@@ -23,7 +22,7 @@ target_link_libraries(components crypto hog_exec_common)
 # Own test executable (same pattern as runtime_test)
 add_library(components_test_objects OBJECT
   alias_guard_test.cc
-  auth_token_registry_test.cc
+  auth_subtoken_test.cc
   borrowed_contract_batch_test.cc
   contract_result_test.cc
   execution_mode_test.cc

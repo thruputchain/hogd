@@ -28,7 +28,7 @@ const UNWRITTEN_FRAME_STATUS: InvocationFrameStatusCode =
 fn seeded_outputs() -> sys::CopyableInvokeOutputs {
     sys::CopyableInvokeOutputs {
         return_buffer_len: u32::MAX,
-        returned_auth_token_len: u32::MAX,
+        returned_auth_token_count: u32::MAX,
         frame_status: UNWRITTEN_FRAME_STATUS,
     }
 }
@@ -52,7 +52,7 @@ fn expect_err(res: Result<(), sys::SysErr>, expected: SyscallErrorCode) {
 /// A rejected Invoke is a no-op: the caller's output struct is left as it was.
 fn assert_outputs_untouched(outputs: &sys::CopyableInvokeOutputs) {
     assert!(outputs.return_buffer_len == u32::MAX);
-    assert!(outputs.returned_auth_token_len == u32::MAX);
+    assert!(outputs.returned_auth_token_count == u32::MAX);
     assert!(outputs.frame_status == UNWRITTEN_FRAME_STATUS);
 }
 

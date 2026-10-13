@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -13,6 +14,7 @@
 // xdr types
 #include "consensus.hh"
 #include "db_gateway.hh"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -20,6 +22,7 @@
 #include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -98,6 +101,113 @@ TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(result.payload().items[0].item().nnint()),
             int128_t{12345});
+}
+
+TEST(HogDbGatewayRpcTest, ConfigPreservesStatedValuesAndResolvesDefaults)
+{
+  HogDbDAO dao = make_dao();
+  auto costs = StorageCostModel::default_cost_model().to_xdr();
+  costs.balance_cost = std::numeric_limits<uint64_t>::max();
+  costs.contract_deployment_cost_per_byte = 0;
+  ASSERT_TRUE(dao.write_cost_model(StorageCostModel(costs)));
+  RPCContext ctx(std::move(dao), nullptr);
+  DbTip tip{};
+  tip.value.proposal_header.block_height = BlockHeight{42};
+  tip.network_config.v(0);
+  NetworkConfigParams::set_param(tip.network_config,
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 7);
+  ctx.set_tip(tip);
+  HogDbGatewayRpc gateway(ctx);
+  auto result = gateway.dbgateway_get_config()();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.config().tip, tip);
+  EXPECT_EQ(result.config().storage_cost_model, costs);
+  EXPECT_EQ(result.config().tip.network_config.v0().params.size(), 1U);
+  EXPECT_EQ(NetworkConfigParams(result.config().effective_config.v0()),
+            NetworkConfigParams(tip.network_config.v0()));
+  EXPECT_EQ(result.config().effective_config.v0().params.size(),
+            static_cast<size_t>(std::to_underlying(kHighestConfigParamID)) + 1);
+
+  tip.value.proposal_header.block_height = BlockHeight{43};
+  NetworkConfigParams::set_param(tip.network_config,
+                                 ConfigParamID::kConfigParamMaxSHA256Buffers,
+                                 9);
+  ctx.set_tip(tip);
+  result = gateway.dbgateway_get_config()();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.config().tip, tip);
+  EXPECT_EQ(NetworkConfigParams(result.config().effective_config.v0())
+                .max_sha256_buffers,
+            9U);
+  EXPECT_EQ(result.config().storage_cost_model, costs);
+}
+
+TEST(HogDbGatewayRpcTest, ConfigPricesRemainFixedAfterGenesis)
+{
+  HogDbDAO dao = make_dao();
+  const auto costs = StorageCostModel::default_cost_model().to_xdr();
+  ASSERT_TRUE(dao.write_cost_model(StorageCostModel(costs)));
+  RPCContext ctx(std::move(dao), nullptr);
+  DbTip tip{};
+  tip.value.proposal_header.block_height = BlockHeight{42};
+  tip.network_config.v(0);
+  ctx.set_tip(tip);
+  HogDbGatewayRpc gateway(ctx);
+
+  auto replacement = costs;
+  replacement.balance_cost = std::numeric_limits<uint64_t>::max();
+  ASSERT_FALSE(ctx.get_db().write_cost_model(StorageCostModel(replacement)));
+  const auto result = gateway.dbgateway_get_config()();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.config().tip, tip);
+  EXPECT_EQ(result.config().storage_cost_model, costs);
+}
+
+TEST(HogDbGatewayRpcTest, ConfigDoesNotInventMissingPrices)
+{
+  RPCContext ctx(make_dao(), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  DbTip tip{};
+  tip.value.proposal_header.block_height = BlockHeight{-1};
+  ctx.set_tip(tip);
+  EXPECT_EQ(gateway.dbgateway_get_config()().error(), RPCError::kRPCNotFound);
+  tip.value.proposal_header.block_height = BlockHeight{0};
+  ctx.set_tip(tip);
+  EXPECT_EQ(gateway.dbgateway_get_config()().error(),
+            RPCError::kRPCUnrecoverable);
+}
+
+TEST(HogDbGatewayRpcTest, ConfigWaitsForPublishedTipAndPrices)
+{
+  RPCContext ctx(make_dao(), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  auto publication_guard =
+      std::make_unique<RPCContext::CommitPublicationGuard>(ctx, BlockTXID{0});
+
+  auto pending = gateway.dbgateway_get_config();
+  EXPECT_FALSE(pending.operator co_await().await_ready());
+
+  // Publish genesis while the read is suspended. Neither the pre-genesis tip
+  // nor the missing cost model may be returned before publication finishes.
+  const auto costs = StorageCostModel::default_cost_model();
+  EXPECT_TRUE(ctx.get_db().write_cost_model(costs));
+  DbTip tip{};
+  tip.id = BlockTXID{0};
+  tip.value.proposal_header.block_height = BlockHeight{0};
+  tip.value.proposal_header.config_hash[0] = 42;
+  tip.network_config.v(0);
+  ctx.set_tip(tip);
+  EXPECT_FALSE(pending.operator co_await().await_ready());
+  publication_guard.reset();
+
+  const auto result = pending();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.config().tip, tip);
+  EXPECT_EQ(result.config().storage_cost_model, costs.to_xdr());
+  EXPECT_TRUE(result.config().tip.network_config.v0().params.empty());
+  EXPECT_EQ(result.config().effective_config,
+            NetworkConfigParams::stated_defaults());
 }
 
 // Querying an address that was never written returns per-item

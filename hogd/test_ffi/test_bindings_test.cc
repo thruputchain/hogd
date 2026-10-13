@@ -1373,7 +1373,7 @@ test_ffi_invoke(const ContractAddress &input_address,
                 Calldata const &input_calldata, InvokeFlagSet input_flags,
                 std::span<uint32_t const> input_owned_auth_token_ids,
                 RuntimeMemoryLength &output_return_buffer_len,
-                RuntimeMemoryLength &output_returned_auth_token_len)
+                uint32_t &output_returned_auth_token_count)
 {
   CopyableInvokeInputs inputs{
       .entrypoint_id = input_entrypoint_id,
@@ -1392,7 +1392,7 @@ test_ffi_invoke(const ContractAddress &input_address,
       reinterpret_cast<uint64_t>(&outputs));
 
   output_return_buffer_len = outputs.return_buffer_len;
-  output_returned_auth_token_len = outputs.returned_auth_token_len;
+  output_returned_auth_token_count = outputs.returned_auth_token_count;
 
   if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable))
     return HostFnError{static_cast<HostFnErrorCode>(result.panic)};
@@ -1663,10 +1663,10 @@ mock_contract_nested_invoke(void *ctx, uint64_t /*method_number*/)
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
+                      output_returned_auth_token_count = 0;
   auto res = test_ffi_invoke(data->target, 0x1234, UINT64_MAX, calldata,
                              InvokeFlagSet{}, {}, output_return_buffer_len,
-                             output_returned_auth_token_len);
+                             output_returned_auth_token_count);
   if (!res.has_value() ||
       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
     return ForeignInvokeResult{
@@ -1773,11 +1773,11 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
   // Invoke the contract from within the mock frame
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
+                      output_returned_auth_token_count = 0;
 
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
                              InvokeFlagSet{}, {}, output_return_buffer_len,
-                             output_returned_auth_token_len);
+                             output_returned_auth_token_count);
 
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
@@ -1936,11 +1936,11 @@ TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
         });
         Calldata calldata;
         RuntimeMemoryLength output_return_buffer_len = 0,
-                            output_returned_auth_token_len = 0;
+                            output_returned_auth_token_count = 0;
         auto res =
             test_ffi_invoke(contract_addrs[t], 0x1234, UINT64_MAX, calldata,
                             InvokeFlagSet{}, {}, output_return_buffer_len,
-                            output_returned_auth_token_len);
+                            output_returned_auth_token_count);
         if (!res.has_value() ||
             *res != SyscallErrorCode::kSyscallErrorCodeNone ||
             !check_data[t].sender_check_passed ||
@@ -2069,10 +2069,10 @@ TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
     ASSERT_EQ(push_context(handler), kTestFFIErrorCodeNone);
     Calldata calldata;
     RuntimeMemoryLength output_return_buffer_len = 0,
-                        output_returned_auth_token_len = 0;
+                        output_returned_auth_token_count = 0;
     auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
                                InvokeFlagSet{}, {}, output_return_buffer_len,
-                               output_returned_auth_token_len);
+                               output_returned_auth_token_count);
     EXPECT_TRUE(res.has_value());
     EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
     EXPECT_TRUE(check_data.sender_check_passed);
@@ -2130,10 +2130,10 @@ TEST(TestBindingsTest, MockFrameGetCurrentAddressTest)
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
+                      output_returned_auth_token_count = 0;
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
                              InvokeFlagSet{}, {}, output_return_buffer_len,
-                             output_returned_auth_token_len);
+                             output_returned_auth_token_count);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -2287,10 +2287,10 @@ TEST(TestBindingsTest, MockFrameNestedInvokeTest)
   // Invoke contract B from the mock frame (A -> B -> C)
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
-  auto res =
-      test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata, InvokeFlagSet{}, {},
-                      output_return_buffer_len, output_returned_auth_token_len);
+                      output_returned_auth_token_count = 0;
+  auto res = test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, {}, output_return_buffer_len,
+                             output_returned_auth_token_count);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -2379,11 +2379,12 @@ TEST(TestBindingsTest, MockFrameForwardAndConsumeAuthTokenTest)
 
   std::array<uint32_t, 1> forwarded_ids{token_id};
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
+                      output_returned_auth_token_count = 0;
   auto invoke_res =
       test_ffi_invoke(child_addr, 0x1234, UINT64_MAX, calldata, InvokeFlagSet{},
                       std::span<uint32_t const>{forwarded_ids},
-                      output_return_buffer_len, output_returned_auth_token_len);
+                      output_return_buffer_len,
+                      output_returned_auth_token_count);
 
   ASSERT_TRUE(invoke_res.has_value());
   EXPECT_EQ(*invoke_res, SyscallErrorCode::kSyscallErrorCodeNone);
@@ -2440,10 +2441,10 @@ TEST(TestBindingsTest, MockFrameCalldataPassthroughTest)
   // Create specific calldata
   Calldata calldata = {0x01, 0x02, 0x03, 0xFF};
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
+                      output_returned_auth_token_count = 0;
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
                              InvokeFlagSet{}, {}, output_return_buffer_len,
-                             output_returned_auth_token_len);
+                             output_returned_auth_token_count);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -2496,10 +2497,10 @@ TEST(TestBindingsTest, MockFrameReturnBufferTest)
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
+                      output_returned_auth_token_count = 0;
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
                              InvokeFlagSet{}, {}, output_return_buffer_len,
-                             output_returned_auth_token_len);
+                             output_returned_auth_token_count);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -2560,10 +2561,10 @@ TEST(TestBindingsTest, MockFrameRevertedChildTest)
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
+                      output_returned_auth_token_count = 0;
   auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
                              InvokeFlagSet{}, {}, output_return_buffer_len,
-                             output_returned_auth_token_len);
+                             output_returned_auth_token_count);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -2639,10 +2640,10 @@ TEST(TestBindingsTest, MockFrameNestedInvokeWithTracingTest)
 
   Calldata calldata;
   RuntimeMemoryLength output_return_buffer_len = 0,
-                      output_returned_auth_token_len = 0;
-  auto res =
-      test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata, InvokeFlagSet{}, {},
-                      output_return_buffer_len, output_returned_auth_token_len);
+                      output_returned_auth_token_count = 0;
+  auto res = test_ffi_invoke(addr_b, 0x1234, UINT64_MAX, calldata,
+                             InvokeFlagSet{}, {}, output_return_buffer_len,
+                             output_returned_auth_token_count);
   EXPECT_TRUE(res.has_value());
   EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -3371,14 +3372,14 @@ trace_contract_fibonacci_call(void *foreign_context, uint64_t method_number)
     // Second call: invoke contract 2 with gas_limit=1000
     // Match trace line 65: kInvoke(syscall=5) with arg3=1000
     RuntimeMemoryLength output_return_buffer_len = 0,
-                        output_returned_auth_token_len = 0;
+                        output_returned_auth_token_count = 0;
     Calldata empty_calldata;
     auto invoke_res =
         test_ffi_invoke(*contract_2_addr, kTraceMethodFib,
                         1000, // gas_limit = 1000, matching the trace
                         empty_calldata, InvokeFlagSet{}, {},
                         output_return_buffer_len,
-                        output_returned_auth_token_len);
+                        output_returned_auth_token_count);
 
     // The inner call should have failed (out of gas).
     // Trace shows result_code=-1 here (line 70).
@@ -3411,12 +3412,12 @@ trace_contract_root(void *foreign_context, uint64_t /*method_number*/)
   // Step 1: kInvoke to contract 1, first call (trace lines 40-53)
   {
     RuntimeMemoryLength output_return_buffer_len = 0,
-                        output_returned_auth_token_len = 0;
+                        output_returned_auth_token_count = 0;
     Calldata empty_calldata;
     auto res = test_ffi_invoke(ctx->contract_1_addr, kTraceMethodFirst,
                                UINT64_MAX, empty_calldata, InvokeFlagSet{}, {},
                                output_return_buffer_len,
-                               output_returned_auth_token_len);
+                               output_returned_auth_token_count);
 
     if (!res.has_value()) {
       return ForeignInvokeResult{
@@ -3426,16 +3427,15 @@ trace_contract_root(void *foreign_context, uint64_t /*method_number*/)
 
   // Step 2: kGetReturnedBuffer (trace line 54)
   {
-    uint8_t return_buf[500] = {}, return_auth_token_buf[500] = {};
-    RuntimeMemoryLength return_len = 0, return_auth_token_len = 0;
-    mock_syscall_entrypoint(std::to_underlying(SyscallNo::kGetReturnedBuffer),
-                            reinterpret_cast<uint64_t>(return_buf),
-                            sizeof(return_buf),
-                            reinterpret_cast<uint64_t>(&return_len),
-                            reinterpret_cast<uint64_t>(return_auth_token_buf),
-                            sizeof(return_auth_token_buf),
-                            reinterpret_cast<uint64_t>(&return_auth_token_len),
-                            0);
+    uint8_t return_buf[500] = {};
+    RuntimeMemoryLength return_len = 0;
+    uint32_t returned_auth_token_start = 0, returned_auth_token_count = 0;
+    mock_syscall_entrypoint(
+        std::to_underlying(SyscallNo::kGetReturnedBuffer),
+        reinterpret_cast<uint64_t>(return_buf), sizeof(return_buf),
+        reinterpret_cast<uint64_t>(&return_len),
+        reinterpret_cast<uint64_t>(&returned_auth_token_start),
+        reinterpret_cast<uint64_t>(&returned_auth_token_count), 0, 0);
   }
 
   // Step 3: kInvoke to contract 1, second call (trace lines 56-70)
@@ -3443,12 +3443,12 @@ trace_contract_root(void *foreign_context, uint64_t /*method_number*/)
   // and contract 2 will run out of gas -> potential SIGABRT
   {
     RuntimeMemoryLength output_return_buffer_len = 0,
-                        output_returned_auth_token_len = 0;
+                        output_returned_auth_token_count = 0;
     Calldata empty_calldata;
     auto res = test_ffi_invoke(ctx->contract_1_addr, kTraceMethodSecond,
                                UINT64_MAX, empty_calldata, InvokeFlagSet{}, {},
                                output_return_buffer_len,
-                               output_returned_auth_token_len);
+                               output_returned_auth_token_count);
 
     if (!res.has_value()) {
       return ForeignInvokeResult{

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -11,7 +12,6 @@
 #include <variant>
 #include <vector>
 
-#include "auth_token.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
@@ -20,7 +20,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/auth_token_registry.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
@@ -38,17 +38,17 @@
 
 namespace hogd {
 
-InvocationFrame::InvocationFrame(ContractAddress const &address,
-                                 Calldata &&calldata, InvokeFlagSet flags,
-                                 size_t event_count,
-                                 AuthTokenIdSet &&owned_auth_token_ids,
-                                 uint32_t inherited_try_invoke_depth,
-                                 NetworkConfigParams const &params)
+InvocationFrame::InvocationFrame(
+    ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
+    size_t event_count,
+    std::vector<RegisteredAuthToken> &&forwarded_auth_tokens,
+    uint32_t inherited_try_invoke_depth, NetworkConfigParams const &params)
   : hash_buffers_(params.max_sha256_buffers), address_(address),
     calldata_(std::forward<Calldata>(calldata)), flags_(flags),
     event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
-    owned_auth_token_ids_(std::move(owned_auth_token_ids))
+    auth_tokens_(std::move(forwarded_auth_tokens)),
+    forwarded_auth_token_count_(static_cast<uint32_t>(auth_tokens_.size()))
 {}
 
 void
@@ -56,10 +56,10 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
 {
   assert(frame.should_revert());
   child_return_output_ = std::move(frame.to_return_output_);
-  child_returned_auth_token_ids_.clear();
+  child_returned_auth_tokens_ = {};
 
-  // The forwarded tokens never left this frame's owned set, so a reverted
-  // child has nothing to give back.
+  // The forwarded tokens never left this frame, so a reverted child has
+  // nothing to give back.
   child_forwarded_auth_tokens_.clear();
 }
 
@@ -93,15 +93,23 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   total_try_invoke_depth_ = frame.total_try_invoke_depth_;
 
   // The tokens forwarded to the child leave this frame now that the child has
-  // committed; whatever it returned via the Return syscall comes straight
-  // back. Remove before insert so a returned forwarded token stays owned.
+  // committed. The tokens it returned join this frame under consecutive new
+  // ids, in order.
   remove_auth_tokens(child_forwarded_auth_tokens_);
-  for (auto token_id : frame.returned_auth_token_ids_) {
-    owned_auth_token_ids_.insert(token_id);
-  }
-  child_returned_auth_token_ids_ = std::move(frame.returned_auth_token_ids_);
-
   child_forwarded_auth_tokens_.clear();
+  child_returned_auth_tokens_ = {.start = static_cast<uint32_t>(
+                                     next_auth_token_id()),
+                                 .count = 0};
+  for (auto child_token_id : frame.returned_auth_token_ids_) {
+    // Return ends the child, so it still owns every token it returned.
+    auto token_id = add_auth_token(frame.take_auth_token(child_token_id));
+    if (!token_id.has_value()) {
+      panic("a frame cannot hold 2^32 auth tokens within any gas limit");
+    }
+    assert(*token_id == child_returned_auth_tokens_.start +
+                            child_returned_auth_tokens_.count);
+    ++child_returned_auth_tokens_.count;
+  }
 }
 
 x23::Async<SystemStatus<void>>
@@ -122,9 +130,9 @@ InvocationFrame::commit_failed_child_frame()
 {
   child_return_output_ =
       InvocationFrameOutput{InvocationFrameStatusCode::Fault};
-  child_returned_auth_token_ids_.clear();
-  // The forwarded tokens never left this frame's owned set, so a failed child
-  // has nothing to give back.
+  child_returned_auth_tokens_ = {};
+  // The forwarded tokens never left this frame, so a failed child has nothing
+  // to give back.
   child_forwarded_auth_tokens_.clear();
 }
 
@@ -269,7 +277,7 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
                                   ValidatedAuthTokens &&owned_auth_tokens)
 {
   assert(frame_stack_.empty() ||
-         check_auth_tokens_owned(owned_auth_tokens.set()));
+         check_auth_tokens_owned(owned_auth_tokens.ids()));
 
   size_t event_count =
       frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
@@ -277,21 +285,32 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
       frame_stack_.empty() ? 0
                            : frame_stack_.back().get_total_try_invoke_depth();
 
-  auto [forwarded_ids, owned_set] = std::move(owned_auth_tokens).release();
+  auto forwarded_ids = std::move(owned_auth_tokens).release();
+  // A root frame has no parent to forward it tokens.
+  assert(!frame_stack_.empty() || forwarded_ids.empty());
 
-  // Only allocation here; emplace_back is strongly exception-safe (noexcept
+  // The only allocations; emplace_back is strongly exception-safe (noexcept
   // move ctor), so a throw leaves the stack unchanged (#3058).
   try {
+    // The child shares the parent's forwarded tokens, which it numbers 0..N-1
+    // in the order the parent listed them.
+    std::vector<RegisteredAuthToken> forwarded_tokens;
+    forwarded_tokens.reserve(forwarded_ids.size());
+    for (auto token_id : forwarded_ids) {
+      auto const *token = frame_stack_.back().lookup_auth_token(token_id);
+      CHECK_PTR(token);
+      forwarded_tokens.push_back(*token);
+    }
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
-                              event_count, std::move(owned_set), parent_depth,
-                              config_params_);
+                              event_count, std::move(forwarded_tokens),
+                              parent_depth, config_params_);
   } catch (...) {
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   if (frame_stack_.size() >= 2) {
     // Non-allocating, so it cannot throw: once here the frame is admitted. The
-    // forwarded ids leave the parent's set when the child commits.
+    // forwarded tokens leave the parent when the child commits.
     frame_stack_[frame_stack_.size() - 2].set_child_forwarded_auth_tokens(
         std::move(forwarded_ids));
   }
@@ -549,29 +568,23 @@ InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
   return get_item_view(frame_item_key(data_key));
 }
 
-AuthToken const *
+RegisteredAuthToken const *
 InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
 {
   assert(!frame_stack_.empty());
-  if (frame_stack_.back().check_owns_auth_token(token_id)) {
-    auto const *out = auth_token_registry_.lookup_auth_token(token_id);
-    CHECK_PTR(out);
-    return out;
-  }
-  return nullptr;
+  return frame_stack_.back().lookup_auth_token(token_id);
 }
 
 SyscallStatus<uint32_t>
-InvocationFrameStack::mint_auth_token(AuthToken const &auth_token)
+InvocationFrameStack::mint_auth_token(RegisteredAuthToken token)
 {
   if (frame_stack_.empty()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  auto token_id = auth_token_registry_.register_auth_token(auth_token);
+  auto token_id = frame_stack_.back().add_auth_token(std::move(token));
   if (!token_id.has_value()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  frame_stack_.back().mint_auth_token(token_id.value());
   return token_id.value();
 }
 
@@ -579,49 +592,49 @@ SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
 InvocationFrameStack::consume_auth_token(uint32_t token_id)
 {
   assert(!frame_stack_.empty());
-  if (!frame_stack_.back().check_owns_auth_token(token_id)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  auto const *token = auth_token_registry_.lookup_auth_token(token_id);
-  CHECK_PTR(token);
-
-  if (token->root_node.consumer_address != frame_stack_.back().address()) {
+  auto &frame = frame_stack_.back();
+  auto const *token = frame.lookup_auth_token(token_id);
+  if (token == nullptr) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  auto unwrap_result = auth_token_registry_.unwrap_auth_token(token_id);
-  if (!unwrap_result.has_value()) {
+  if (token->root_node->consumer_address != frame.address()) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  for (uint32_t i = 0; i < unwrap_result->new_token_id_count; i++) {
-    frame_stack_.back().mint_auth_token(unwrap_result->new_token_id_start + i);
+  // The children take the frame's next ids, which must all fit in a uint32_t.
+  size_t child_count = token->root_node->child_nodes.size();
+  if (child_count >
+      std::numeric_limits<uint32_t>::max() - frame.next_auth_token_id()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  frame_stack_.back().remove_auth_tokens(
-      std::span<uint32_t const>{&token_id, 1});
+  auto consumed = frame.take_auth_token(token_id);
+  if (child_count == 0) {
+    return ConsumeAuthTokenResult{.token = std::move(consumed),
+                                  .new_token_id_start = 0,
+                                  .new_token_id_count = 0};
+  }
 
-  return ConsumeAuthTokenResult{.payload = &token->root_node.payload,
-                                .mint_address = &token->mint_address,
-                                .new_token_id_start =
-                                    unwrap_result->new_token_id_start,
+  // Each child shares its node with the consumed token.
+  auto new_token_id_start = static_cast<uint32_t>(frame.next_auth_token_id());
+  for (auto const &child : consumed.root_node->child_nodes) {
+    auto child_id = frame.add_auth_token(
+        RegisteredAuthToken{.mint_address = consumed.mint_address,
+                            .expiry_height = consumed.expiry_height,
+                            .root_node = child});
+    // The ids were checked to fit above.
+    CHECK(child_id.has_value());
+  }
+  return ConsumeAuthTokenResult{.token = std::move(consumed),
+                                .new_token_id_start = new_token_id_start,
                                 .new_token_id_count =
-                                    unwrap_result->new_token_id_count};
+                                    static_cast<uint32_t>(child_count)};
 }
 
 bool
 InvocationFrameStack::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
-{
-  assert(!frame_stack_.empty());
-  return std::ranges::all_of(token_ids, [&](uint32_t token_id) {
-    return frame_stack_.back().check_owns_auth_token(token_id);
-  });
-}
-
-bool
-InvocationFrameStack::check_auth_tokens_owned(
-    AuthTokenIdSet const &token_ids) const
 {
   assert(!frame_stack_.empty());
   return std::ranges::all_of(token_ids, [&](uint32_t token_id) {

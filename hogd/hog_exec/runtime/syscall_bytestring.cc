@@ -44,24 +44,24 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                                                   load_gas}};
   }
 
-  auto const *bs = *result;
+  auto const bs = *result;
 
   output_written_len =
-      copy_to_guest_buffer(output_bytestring,
-                           std::as_bytes(std::span(bs->data(), bs->size())));
+      copy_to_guest_buffer(output_bytestring, std::as_bytes(bs));
 
   // The bytes copied, not the buffer offered: the SDK's zero-alloc read path
   // hands the syscall its whole scratch buffer, so pricing the buffer would
   // charge a 32-byte read out of a 4 KiB scratch for eight blocks.
   const WrappedGasAmount gas{
-      GasCost::bytestring_get(std::min(output_bytestring.size(), bs->size())) +
+      GasCost::bytestring_get(std::min(output_bytestring.size(), bs.size())) +
       load_gas};
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
     // The ceiling, not the limit in force: items outlive a lowered limit.
-    CHECK(bs->size() <= static_cast<size_t>(kBytestringCeilingLen));
-    trace_data->outputs.emplace(SyscallBytestringGetOutputs{.bytestring = *bs});
+    CHECK(bs.size() <= static_cast<size_t>(kBytestringCeilingLen));
+    trace_data->outputs.emplace(SyscallBytestringGetOutputs{
+        .bytestring = Bytestring(bs.begin(), bs.end())});
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, gas};
@@ -85,7 +85,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                                   load_gas}};
   }
 
-  output_length = (*result)->size();
+  output_length = result->size();
 
   if (auto *trace_data =
           syscall_handler

@@ -50,7 +50,7 @@ impl AuthWeightTest for AuthWeightTestContract {
         // helper's own assertion failed.
         let mut outputs = sys::CopyableInvokeOutputs {
             return_buffer_len: 0,
-            returned_auth_token_len: 0,
+            returned_auth_token_count: 0,
             frame_status: UNWRITTEN_FRAME_STATUS,
         };
         let res = sys::raw_Invoke(

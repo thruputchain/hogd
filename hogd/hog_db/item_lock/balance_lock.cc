@@ -154,7 +154,7 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
         //    transferred to this address.
         // 2. hog_db creates a new HogAge struct for address X and writes Y hogs
         //    to the [kHogAgeGroupToSchedule] group in the struct.
-        // 3. hog_db sends a [HogsTransferred] struct to the mempool which
+        // 3. hog_db sends a [HogsTransferredChunk] struct to the mempool which
         //    indicates that Y hogs were transferred to address X.
         // 4. In the mempool scheduler, Y hogs are added to the
         //    [kHogAgeGroupReceived] group for address X, so then address X's

@@ -606,7 +606,8 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_return_buffer_too_long">(
-                          UINT64_MAX, kTargetAddress),
+                          UINT64_MAX, kTargetAddress,
+                          NetworkConfigParams{}.max_return_buffer_len),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -615,11 +616,8 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// The Return length gate is strict (> kMaxReturnBufferLen): a child
-// returning exactly kMaxReturnBufferLen bytes finishes with frame status
-// Return, and the parent retrieves all kMaxReturnBufferLen bytes intact.
-// Pins the accept side of the boundary whose reject side is
-// TestReturnBufferTooLong.
+// Accept side of the Return length gate, which is strict: exactly the limit
+// in force succeeds. Reject side is TestReturnBufferTooLong.
 TEST_F(SyscallMiscTests, TestReturnBufferExactMax)
 {
   deploy_target();
@@ -627,7 +625,8 @@ TEST_F(SyscallMiscTests, TestReturnBufferExactMax)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_return_buffer_exact_max">(
-                          UINT64_MAX, kTargetAddress),
+                          UINT64_MAX, kTargetAddress,
+                          NetworkConfigParams{}.max_return_buffer_len),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -836,7 +835,7 @@ TEST_F(SyscallMiscTests, RcqReadCapPrecedence)
 
 // #38: with no child return buffer, a misaligned restored-auth-token span
 // still reports kNoReturnBufferAvailable: the buffer-availability check
-// precedes the alignment check (the opposite convention from GetCalldata).
+// precedes the alignment check.
 TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
 {
   auto handler = make_new_system_call_handler(

@@ -97,7 +97,9 @@ public:
     cv_.notify_all();
   }
 
-  static void scheddb_hogs_transferred(const HogsTransferred &hogs) {}
+  static void
+  scheddb_hogs_transferred_chunk(const HogsTransferredChunk & /*chunk*/)
+  {}
 
   x23::Vec<ShardCard> await_shard_cards(unsigned int num_cards)
   {

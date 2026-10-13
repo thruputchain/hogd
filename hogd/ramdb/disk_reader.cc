@@ -382,10 +382,17 @@ load_log_file(
 
     if (skip) {
       if (hdr.storage == ItemStorage::kCommit) {
-        // if we see a commit record that we plan to skip, dump the buffered
-        // records immediately.  It might be a good idea to check the crc on
-        // the commit record just in case one comes into existence via
-        // corruption.
+        // A commit below cur_lsn belongs to an already-recovered batch, so its
+        // records were skipped too and the buffer must be empty; a non-empty
+        // buffer means its LSN was tampered to drop durable rows without
+        // validation (#4320). (A commit >= target_lsn is a legitimate
+        // point-in-time truncation and still drops the buffer below.)
+        if (hdr.lsn < cur_lsn && buf.size() != 0) {
+          error("skipped commit marker in {} precedes cur_lsn {} with {} "
+                "buffered bytes; treating as corruption",
+                file.path_, cur_lsn, buf.size());
+          return DBError(DBCode::kCorruption);
+        }
         buf.take_buffer();
         uncommitted_records = false;
         uncommitted_off = r.offset();

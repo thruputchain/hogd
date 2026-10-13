@@ -63,7 +63,9 @@ using wallet_bytes_t = wallet_bytes_vec_t::value_type;
 
 // Reference constants (implementation.rs).
 constexpr size_t kMaxCalls = 16;
-constexpr size_t kMaxReturnDataBytes = kMaxReturnBufferLen; // 1024
+// Mirrors implementation.rs, which compiles its own limit in, so this
+// follows that contract rather than kConfigParamMaxReturnBufferLen.
+constexpr size_t kMaxReturnDataBytes = 1024;
 
 // Mirrors require_root_invocation(): GetMsgSender must fail with exactly
 // IsRootTransaction. Returns whether this is a root invocation; host-level
@@ -166,13 +168,14 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   }
 
   // Fetch the child's return or abort payload as the SDK does.
-  // No auth tokens are forwarded; returned token IDs are discarded.
+  // No auth tokens are forwarded; returned tokens are ignored.
   std::vector<uint8_t> return_buf(outputs.return_buffer_len);
   RuntimeMemoryLength return_written = 0;
-  RuntimeMemoryLength auth_written = 0;
+  uint32_t returned_auth_token_start = 0;
+  uint32_t returned_auth_token_count = 0;
   auto get = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
       std::as_writable_bytes(std::span(return_buf)), return_written,
-      std::span<std::byte>{}, auth_written);
+      returned_auth_token_start, returned_auth_token_count);
   if (!get.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(get.error());
   }

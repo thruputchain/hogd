@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <format>
 #include <future>
 #include <gtest/gtest.h>
 #include <initializer_list>
@@ -816,9 +817,10 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
 
   constexpr size_t kNumBlocks = 5;
   for (size_t i = 0; i < kNumBlocks; i++) {
-    // We submit each duplicate tx at a different block height so that hog_db is
-    // forced to reject duplicate uniquifiers rather than the mempool scheduler
-    // identifying duplicate txs.
+    // Change the hash while reusing the uniquifier so that hog_db rejects the
+    // replay and the previous successful commit does not override the failure
+    // outcome of this new (duplicate) tx.
+    txs[0].tx.invocation.gas_limit--;
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
         t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
     EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
@@ -874,6 +876,13 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
     auto res_commit =
         commit_block(server, db_tip, res_nominate.proposed_block());
     ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+    const SchedulerTransactionOutcome outcome =
+        server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+            {sha256(txs[0].tx)})()[0];
+    EXPECT_EQ(outcome.status,
+              i == 0 ? SchedulerTransactionStatus::SchedulerTransactionSucceeded
+                     : SchedulerTransactionStatus::SchedulerTransactionRetry);
+    EXPECT_EQ(outcome.height, proposal.header.block_height);
   }
 
   SchedulerGetTipResult get_tip =
@@ -1449,6 +1458,12 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   // [ready_accounts_].
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, db_tip.value.proposal_header.block_height + 1);
 }
 
 // [CommitOfExcludedAccountTxSucceeds] through the validated-block commit path,
@@ -1497,6 +1512,12 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, db_tip.value.proposal_header.block_height + 1);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
 
@@ -1586,6 +1607,94 @@ TEST(Mempool, NominateCommit)
   auto res_commit =
       commit_block(server, get_tip.db_tip(), res_nominate.proposed_block());
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+TEST(Mempool, CommitRecordsLatencyHistograms)
+{
+  // The fixture clears the metrics registry, then commits the genesis
+  // ceremony through the ordinary commit path. Counts are absolute from there.
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+  MempoolMetrics &metrics = MempoolMetrics::instance();
+
+  // Every series exists before traffic, so rate() and alerts see 0, not
+  // absence. These names are what dashboards and alert rules query.
+  {
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    for (const char *name :
+         {"submit_unvetted_duration_seconds", "submit_vetted_duration_seconds",
+          "nomination_duration_seconds", "validation_duration_seconds",
+          "commit_interval_seconds", "block_period_seconds"}) {
+      EXPECT_NE(dump.find(std::format("mempool_{}_count 0\n", name)),
+                std::string::npos)
+          << name;
+    }
+    // The ceremony is a commit, but not a round.
+    EXPECT_NE(dump.find("mempool_commit_duration_seconds_count 1\n"),
+              std::string::npos);
+    // Its scheduler removal pass has already run, so only check presence.
+    EXPECT_NE(dump.find("mempool_scheduler_remove_duration_seconds_count "),
+              std::string::npos);
+  }
+
+  auto nominate_and_commit = [&] {
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), nomination.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+  };
+
+  // The first ordinary commit has no previous round to measure against.
+  const std::chrono::steady_clock::time_point rounds_started_at =
+      std::chrono::steady_clock::now();
+  nominate_and_commit();
+  EXPECT_EQ(metrics.nomination_duration_seconds.count(), 1UL);
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 2UL);
+  EXPECT_EQ(metrics.commit_interval_seconds.count(), 0UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 0UL);
+
+  nominate_and_commit();
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 3UL);
+  EXPECT_EQ(metrics.commit_interval_seconds.count(), 1UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
+  {
+    // Both round histograms hold exactly the round just driven, so each sum
+    // is that one sample. Bound it by the wall clock measured around the two
+    // commits rather than by a fixed bucket: a round takes milliseconds here
+    // but seconds under a sanitizer on a loaded host, and neither can outlast
+    // the test. A milliseconds-for-seconds unit bug records ~1000x the
+    // elapsed time and fails this.
+    const double elapsed_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      rounds_started_at)
+            .count();
+    EXPECT_GT(metrics.block_period_seconds.sum(), 0.0);
+    EXPECT_LE(metrics.block_period_seconds.sum(), elapsed_seconds);
+    EXPECT_GT(metrics.commit_interval_seconds.sum(), 0.0);
+    EXPECT_LE(metrics.commit_interval_seconds.sum(), elapsed_seconds);
+
+    // Which bucket the round lands in is a property of the host, but the
+    // sample must still be scraped out as a bucket series.
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    EXPECT_NE(dump.find("mempool_block_period_seconds_bucket{le=\"+Inf\"} 1\n"),
+              std::string::npos);
+    EXPECT_NE(dump.find(
+                  "mempool_commit_interval_seconds_bucket{le=\"+Inf\"} 1\n"),
+              std::string::npos);
+  }
+
+  // A failed commit returns at once and must not skew the duration quantiles.
+  ConsensusValue value{};
+  value.proposal_header.block_height = 100;
+  EXPECT_EQ(rpc.schedulercoord_commit_block(/*block_id=*/99,
+                                            std::move(value))(),
+            SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  EXPECT_EQ(metrics.commit_duration_seconds.count(), 3UL);
+  EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
 }
 
 TEST(Mempool, NewlyDeployedContractHogCount)
@@ -3309,6 +3418,29 @@ unregistered_signer()
 }
 
 } // namespace
+
+TEST(Mempool, AuthenticationFailureIsNotRecorded)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  register_single_signer(server, txs[0].tx);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      server.mempool_coord_rpc().submit_unvetted_with_outcomes(
+          t_to_parallel_batch(txs)())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(
+      outcomes[0],
+      SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected);
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .scheduler()
+                ->lookup_transaction_outcome(tx_hash)()
+                .status,
+            SchedulerTransactionStatus::SchedulerTransactionNotFound);
+}
 
 // The property the whole design rests on: [TransactionHash] covers
 // [Transaction] and nothing else, so no manipulation of the signatures can

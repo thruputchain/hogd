@@ -18,7 +18,6 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
-#include "auth_token.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
@@ -33,6 +32,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -815,7 +815,7 @@ SystemCallHandler::validate_new_invocation(
   }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(
-          owned_auth_tokens.set())) {
+          owned_auth_tokens.ids())) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   return {};
@@ -1307,19 +1307,11 @@ SystemCallHandler::check_auth_tokens_owned(
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }
 
-bool
-SystemCallHandler::check_auth_tokens_owned(
-    AuthTokenIdSet const &token_ids) const
-{
-  return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
-}
-
-std::span<const uint32_t>
-SystemCallHandler::get_returned_auth_token_ids() const
+AuthTokenIdRange
+SystemCallHandler::get_returned_auth_tokens() const
 {
   assert(!invocation_frame_stack_.empty());
-  return invocation_frame_stack_
-      .get_active_frame_child_returned_auth_token_ids();
+  return invocation_frame_stack_.get_active_frame_child_returned_auth_tokens();
 }
 
 void
@@ -1446,11 +1438,11 @@ SystemCallHandler::get_calldata() const
   return invocation_frame_stack_.get_active_frame_calldata();
 }
 
-std::span<const uint32_t>
-SystemCallHandler::get_parent_supplied_auth_tokens() const
+uint32_t
+SystemCallHandler::get_parent_supplied_auth_token_count() const
 {
   return invocation_frame_stack_
-      .get_current_frame_parent_supplied_auth_tokens();
+      .get_current_frame_parent_supplied_auth_token_count();
 }
 
 NondeterministicProposalData const &
@@ -1642,10 +1634,10 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   co_return deploy_addr;
 }
 
-x23::Async<SystemStatus<StorageRead<const Bytestring *>>>
+x23::Async<SystemStatus<StorageRead<std::span<const uint8_t>>>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
-  using Read = StorageRead<const Bytestring *>;
+  using Read = StorageRead<std::span<const uint8_t>>;
 
   const FrameItemKey item_key =
       invocation_frame_stack_.frame_item_key(storage_key);
@@ -1655,7 +1647,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   // Everything up to the load below answers out of the frame stack, so it
   // reaches no database and costs no load gas.
   if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
-    co_return Read{&bytestring_item->bytestring_, 0};
+    co_return Read{bytestring_item->bytes(), 0};
   }
 
   if (item_view->get<DeletedItem>()) {
@@ -1687,7 +1679,7 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
           SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
           load_gas};
     }
-    co_return Read{&base_item.bytestring(), load_gas};
+    co_return Read{base_item.bytestring(), load_gas};
   }
 
   co_return Read{SyscallError{
@@ -1709,17 +1701,9 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
-  Bytestring new_string;
-  new_string.resize_uninitialized(input_bytestring.size());
-  if (!input_bytestring.empty()) {
-    assert(new_string.data() != nullptr);
-    assert(input_bytestring.data() != nullptr);
-    std::memcpy(new_string.data(),
-                reinterpret_cast<const uint8_t *>(input_bytestring.data()),
-                input_bytestring.size());
-  }
-
-  co_return item_view->set(BytestringItem(std::move(new_string)));
+  co_return item_view->set(BytestringItem(
+      {reinterpret_cast<const uint8_t *>(input_bytestring.data()),
+       input_bytestring.size()}));
 }
 
 GasAmount
@@ -2194,6 +2178,35 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
 
 // == Native token syscalls ==
 
+GasAmount
+SystemCallHandler::peek_native_token_balance_load_gas(
+    ContractAddress const &contract_address)
+{
+  AddressAndKey addrkey{.address = contract_address,
+                        .key =
+                            StorageKey(StorageKeyType::FreeNativeTokenBalance)};
+  const FrameItemKey item_key = FrameItemKey::from(addrkey);
+
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
+  assert(item_view);
+
+  // Mirrors get_native_token_balance()'s pricing but must not record the load:
+  // free unless this is a cold first touch, which pays kDBRPCCost.
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (unmodified_item->is_loaded()) {
+      return 0;
+    }
+  }
+  else {
+    auto const *balance_item = item_view->get<NativeTokenBalanceItem>();
+    assert(balance_item);
+    if (balance_item->base_value_.has_value()) {
+      return 0;
+    }
+  }
+  return loaded_keys_.contains(item_key) ? 0 : kDBRPCCost;
+}
+
 x23::Async<SystemStatus<StorageRead<int128_t>>>
 SystemCallHandler::get_native_token_balance(
     ContractAddress const &contract_address)
@@ -2441,9 +2454,9 @@ SystemCallHandler::get_block_timepoint() const
 // == Auth token syscalls ==
 
 SyscallStatus<uint32_t>
-SystemCallHandler::mint_auth_token(AuthToken const &auth_token)
+SystemCallHandler::mint_auth_token(RegisteredAuthToken token)
 {
-  return invocation_frame_stack_.mint_auth_token(auth_token);
+  return invocation_frame_stack_.mint_auth_token(std::move(token));
 }
 
 SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>

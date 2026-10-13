@@ -29,6 +29,11 @@ namespace hogd {
 // Multiple BlockTXes can be instantiated, but only one should be committed.
 class BlockTX {
 public:
+  struct LockResult {
+    ItemLock *lock;
+    int128_t storage_cost;
+  };
+
   BlockTX(HogDbDAO &db, const StorageCostModel &cost_model,
           BackgroundCommitWorker &background_commit_worker,
           BlockHeight block_height, BlockExecutionMode mode,
@@ -61,8 +66,11 @@ public:
 
   // lock reserves the right to apply change to an item.
   // Lock returns the amount of storage tokens at least as large as what will
-  // be needed to support the change, if committed.
-  HogDbStatus<int128_t>
+  // be needed to support the change, if committed, and its stable lock handle.
+  // The handle is borrowed from this block's append-only lock maps. The caller
+  // must retain its block reference and finish using the handle before the
+  // block is committed (which destroys the map entries).
+  HogDbStatus<LockResult>
   lock(const ItemKey &key, ItemChange &change,
        std::optional<DbConflictCode> *conflict_reason = nullptr);
   // modify_lock modifies an existing change to an item that was reserved with
@@ -70,16 +78,17 @@ public:
   // It returns an amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
   HogDbStatus<int128_t>
-  modify_lock(const ItemKey &key, const ItemChange &old_change,
+  modify_lock(ItemLock &lock, const ItemKey &key, const ItemChange &old_change,
               const ItemChange &new_change,
               std::optional<DbConflictCode> *conflict_reason = nullptr);
   // unlock unreserves the right to apply change to an item and reverts it.
-  void unlock(const ItemKey &key, ItemChange &change);
+  void unlock(ItemLock &lock, const ItemKey &key, ItemChange &change);
   // commit_change marks a change as committed.
   // returns the increase in committed storage cost.
   // Returns an error if the exclusive commit path reads a live DAO that was
   // mutated by a sibling block commit (stale block).
-  HogDbStatus<int128_t> commit_change(const ItemKey &key, ItemChange change);
+  HogDbStatus<int128_t> commit_change(ItemLock &lock, const ItemKey &key,
+                                      ItemChange change);
 
   void release_balance(const Address &addr, int128_t delta);
 

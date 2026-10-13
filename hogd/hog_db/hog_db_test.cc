@@ -3130,6 +3130,75 @@ TEST_F(HogDbTest, TwoInvokeTXsSameNNInt128Key)
   }
 }
 
+TEST_F(HogDbTest, CachedItemLocksSurviveSavepointsAndReuse)
+{
+  Address addr = make_address(kAddress);
+  ItemKey key = make_item_key(addr, 0);
+  setup_contract_address(addr);
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr unsigned int kDepth = 8;
+  StorageLongHash base_hash = db_.compute_full_db_hash();
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX tx(block_tx);
+    ASSERT_TRUE(tx.request_nnint128(key, 0, 10, kNoFlags));
+    ASSERT_TRUE(tx.sync_balance_locks());
+
+    // Grow both item and balance version vectors, carrying their handles
+    // through reallocations. Each child also introduces a new item lock.
+    for (unsigned int depth = 1; depth <= kDepth; ++depth) {
+      tx.create_savepoint();
+      ASSERT_TRUE(tx.request_nnint128(key, 0, 10 + depth, kNoFlags));
+      ASSERT_TRUE(
+          tx.request_nnint128(make_item_key(addr, depth), 0, depth, kNoFlags));
+      ASSERT_TRUE(tx.sync_balance_locks());
+    }
+
+    // Restore the root item's reservation and completely release each child
+    // item, including when rollback erases the version holding its handle.
+    tx.rollback_to_savepoint(0);
+    auto value = tx.read_nnint128(key);
+    ASSERT_TRUE(value.has_value());
+    EXPECT_EQ(*value, 10);
+    EXPECT_EQ(tx.change_entry_count_for_testing(), 2U); // item and balance
+    for (unsigned int depth = 1; depth <= kDepth; ++depth) {
+      auto missing = tx.read_nnint128(make_item_key(addr, depth));
+      ASSERT_FALSE(missing.has_value());
+      EXPECT_EQ(missing.error().code(), HogDbCode::kNotFound);
+    }
+
+    // Modify at the same depth, then abort using the retained handles.
+    ASSERT_TRUE(tx.request_nnint128(key, 0, 20, kNoFlags));
+    ASSERT_TRUE(tx.sync_balance_locks());
+    tx.abort();
+    EXPECT_EQ(tx.change_entry_count_for_testing(), 0U);
+
+    // Reacquire the same map entries after abort reset their lock contents,
+    // and commit through the newly retained handles.
+    ASSERT_TRUE(tx.request_nnint128(key, 0, 30, kNoFlags));
+    ASSERT_TRUE(tx.sync_balance_locks());
+    ASSERT_TRUE(tx.commit());
+  }
+
+  auto hash = block_tx.get().close(base_hash);
+  ASSERT_TRUE(hash.has_value());
+  ASSERT_TRUE(block_tx.get().commit());
+  EXPECT_EQ(*hash, db_.compute_full_db_hash());
+  auto value = db_.read_nnint128(key);
+  ASSERT_TRUE(value.has_value());
+  EXPECT_EQ(*value, 30);
+  for (unsigned int depth = 1; depth <= kDepth; ++depth) {
+    auto missing = db_.read_nnint128(make_item_key(addr, depth));
+    ASSERT_FALSE(missing.has_value());
+    EXPECT_EQ(missing.error().code(), HogDbCode::kNotFound);
+  }
+}
+
 // BugHunt: RCQ insert and partial current-block consume in the same block.
 // Entries are inserted AND some consumed via current_block_consumed.
 TEST_F(HogDbTest, RCQInsertAndCurrentBlockConsumeSameBlock)

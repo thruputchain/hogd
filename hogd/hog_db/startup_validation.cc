@@ -4,7 +4,9 @@
 
 #include "contract.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -42,6 +44,22 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
                                                     tip.default_wallet)) !=
       tip.value.proposal_header.config_hash) {
     critical("tip configuration does not hash to its committed config hash");
+    return false;
+  }
+  // The tip row is outside the state hash, so a CRC-valid, self-consistent
+  // rewrite can set max_savepoint_depth to a value genesis would reject. Every
+  // root commit pushes a savepoint, so a recovered zero bricks the first root
+  // push with kRPCUnrecoverable; reapply the genesis bounds here (#4336).
+  const NetworkConfigParams config_params(tip.network_config.v0());
+  if (config_params.max_savepoint_depth == 0) {
+    critical("recovered tip max_savepoint_depth must be at least 1 for root "
+             "commits");
+    return false;
+  }
+  if (config_params.max_savepoint_depth > kSavepointDepthCeiling) {
+    critical("recovered tip max_savepoint_depth {} exceeds the {} this build's "
+             "executor stacks sustain",
+             config_params.max_savepoint_depth, kSavepointDepthCeiling);
     return false;
   }
   // The tip row is outside the state hash, so a tampered type can pass the

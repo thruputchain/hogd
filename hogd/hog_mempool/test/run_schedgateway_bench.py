@@ -36,12 +36,15 @@ def main():
     parser.add_argument("--transactions", type=int, default=60000)
     parser.add_argument("--block-ms", type=int, default=500)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--accounts", type=int, default=100)
     args = parser.parse_args()
-    for key, limit in (("connections", 64), ("seconds", 60), ("warmup", 10),
-                       ("transactions", 1000000), ("block_ms", 10000),
-                       ("workers", 256)):
-        if not 1 <= getattr(args, key) <= limit:
-            parser.error(f"{key} must be between 1 and {limit}")
+    for key, low, limit in (("connections", 1, 64), ("seconds", 1, 60),
+                            ("warmup", 1, 10), ("transactions", 1, 1000000),
+                            ("block_ms", 1, 10000), ("workers", 1, 256),
+                            # A transfer needs a distinct sender and recipient.
+                            ("accounts", 2, 1000)):
+        if not low <= getattr(args, key) <= limit:
+            parser.error(f"{key} must be between {low} and {limit}")
     build = args.build.resolve()
     node_bin = build / "hogd/devnode/hog-devnode"
     bench_bin = build / "hogd/hog_mempool/test/schedgateway_client_bench"
@@ -57,15 +60,20 @@ def main():
     env["DEFAULT_THREADPOOL_SIZE_schedgateway_client_bench"] = "8"
     metadata = {"host": platform.node(), "platform": platform.platform(),
                 "cpuCount": os.cpu_count(), "backendWorkers": args.workers,
-                "accounts": 100, "ramdbBytes": 2147483648}
+                "accounts": args.accounts, "ramdbBytes": 2147483648}
     (output / "host.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    # Emit the public allocations hog-devnode bootstraps from; the benchmark
+    # re-derives the keys.
+    bootstrap = output / "bootstrap.json"
+    subprocess.run([str(bench_bin), "--emit-bootstrap-manifest",
+                    str(bootstrap), str(args.accounts)], env=env, check=True)
     with tempfile.TemporaryDirectory(prefix="schedgateway-bench-") as data, \
             (output / "node.log").open("w") as node_log, \
             (output / "readiness.json").open("w") as readiness, \
             (output / "client.log").open("w") as client_log:
         node = subprocess.Popen([
             str(node_bin), "--data-dir", data, "--listen-host", "127.0.0.1",
-            "--scheduler-port", "0", "--dev-accounts", "100",
+            "--scheduler-port", "0", "--bootstrap-manifest", str(bootstrap),
             "--ramdb-bytes", "2147483648", "--log-level", "error",
         ], env=env, stdout=readiness, stderr=node_log)
         try:

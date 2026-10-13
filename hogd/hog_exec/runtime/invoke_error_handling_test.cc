@@ -563,7 +563,7 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
         EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Abort);
         EXPECT_EQ(static_cast<size_t>(outputs.return_buffer_len),
                   kRevertPayload.size());
-        EXPECT_EQ(static_cast<size_t>(outputs.returned_auth_token_len), 0U);
+        EXPECT_EQ(outputs.returned_auth_token_count, 0U);
 
         auto status = ctx.handler().get_return_buffer();
         EXPECT_TRUE(status.has_value());
@@ -646,7 +646,7 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
         }
         EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Fault);
         EXPECT_EQ(static_cast<size_t>(outputs.return_buffer_len), 0U);
-        EXPECT_EQ(static_cast<size_t>(outputs.returned_auth_token_len), 0U);
+        EXPECT_EQ(outputs.returned_auth_token_count, 0U);
 
         auto status = ctx.handler().get_return_buffer();
         EXPECT_TRUE(status.has_value());

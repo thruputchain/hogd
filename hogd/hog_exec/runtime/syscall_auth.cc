@@ -1,6 +1,5 @@
 
 
-#include "auth_token.hh"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -14,6 +13,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
@@ -143,8 +143,9 @@ syscall_MintAuthToken_inner(
     std::span<const std::byte> input_serialized_auth_token,
     uint32_t &output_token_id)
 {
-  AuthToken auth_token{.mint_address = syscall_handler.get_current_address(),
-                       .expiry_height = input_expiry_height};
+  RegisteredAuthToken auth_token{.mint_address =
+                                     syscall_handler.get_current_address(),
+                                 .expiry_height = input_expiry_height};
 
   // Check expiry height is in the future
   if (input_expiry_height < syscall_handler.get_block_height()) {
@@ -165,7 +166,7 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
-  auto status = syscall_handler.mint_auth_token(auth_token);
+  auto status = syscall_handler.mint_auth_token(std::move(auth_token));
   if (!status) {
     return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }
@@ -198,11 +199,12 @@ syscall_ConsumeAuthToken_inner(
   }
 
   auto const &result = *status;
+  auto const &payload = result.token.root_node->payload;
 
-  output_token_minter = *result.mint_address;
+  output_token_minter = result.token.mint_address;
 
-  auto payload_bytes = std::as_bytes(
-      std::span<const uint8_t>{result.payload->data(), result.payload->size()});
+  auto payload_bytes =
+      std::as_bytes(std::span<const uint8_t>{payload.data(), payload.size()});
   output_auth_payload_written_len =
       copy_to_guest_buffer(output_auth_payload, payload_bytes);
 
@@ -213,8 +215,8 @@ syscall_ConsumeAuthToken_inner(
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kConsumeAuthToken>()) {
     trace_data->outputs.emplace(SyscallConsumeAuthTokenOutputs{
-        .payload = *result.payload,
-        .token_minter = *result.mint_address,
+        .payload = payload,
+        .token_minter = result.token.mint_address,
         .auth_payload_written_len = output_auth_payload_written_len,
         .unwrapped_token_id_start = result.new_token_id_start,
         .unwrapped_token_id_count = result.new_token_id_count});

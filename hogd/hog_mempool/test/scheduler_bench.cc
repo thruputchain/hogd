@@ -5,13 +5,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/log.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
@@ -77,15 +80,19 @@ bm_scheduler_process_transfers(benchmark::State &state)
       make_benchmark_accounts(static_cast<size_t>(state.range(0)));
   seed_benchmark_hog_ages(server, accounts);
 
-  HogsTransferred transfer;
-  transfer.block = 5;
-  transfer.deltas.reserve(state.range(0));
+  DeltaChunk deltas;
+  deltas.reserve(state.range(0));
   for (int i = 0; i < state.range(0); ++i) {
-    transfer.deltas.push_back(Delta{
+    deltas.push_back(Delta{
         .address = accounts[static_cast<size_t>(i)],
         .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000)),
     });
   }
+  std::vector<DeltaChunk> chunks;
+  chunks.push_back(std::move(deltas));
+  const BlockTransfers transfer{.block = 5,
+                                .deltas = ChunkedVector<DeltaChunk>(
+                                    std::move(chunks))};
 
   scheduler->read_average_hog_ages(transfer)();
 
