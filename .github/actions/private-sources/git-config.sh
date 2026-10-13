@@ -24,11 +24,15 @@ if [[ ! -s "$config_path" ]]; then
   done
 fi
 
-[[ -n "$token" && "$token" != '<no value>' ]] || exit 0
-
 # Full .git URLs prevent prefix collisions between protocol repositories.
 # Explicit .git entries win over no-suffix HTTPS entries (longest match).
 while read -r old new; do
+  if [[ -z "$token" || "$token" == '<no value>' ]]; then
+    target="git@github.com:thruputchain/${new}.git"
+    git config --file "$config_path" --add "url.${target}.insteadOf" "https://github.com/thruputchain/${new}.git"
+    git config --file "$config_path" --add "url.${target}.insteadOf" "https://github.com/thruputchain/${new}"
+    continue
+  fi
   target="https://x-access-token:${token}@github.com/thruputchain/${new}.git"
   for source in "groundhogchain/$old" "thruputchain/$new"; do
     git config --file "$config_path" --add "url.${target}.insteadOf" "git@github.com:${source}.git"

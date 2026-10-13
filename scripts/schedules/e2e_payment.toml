@@ -33,6 +33,9 @@ bash .github/actions/private-sources/git-config.sh "$git_token" "$GIT_CONFIG_GLO
 set -x
 git submodule update --init --recursive --quiet
 
+# Fetch Go dependencies before any lengthy Rust/C++ preparation or build.
+bash ./scripts/ci/fetch_go_modules.sh || exit 1
+
 source ./scripts/ci/prepare_env.sh
 
 echo 'build'

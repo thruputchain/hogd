@@ -33,9 +33,14 @@ bash .github/actions/private-sources/git-config.sh "$git_token" "$GIT_CONFIG_GLO
 set -x
 git submodule update --init --recursive --quiet
 
+# Fetch Go dependencies before any lengthy Rust/C++ preparation or build.
+bash ./scripts/ci/fetch_go_modules.sh || exit 1
+
+export HOGD_FETCH_HOGX=1
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
-./scripts/build-pkg.sh
+# prepare_env.sh fetched all three Rust workspaces before building tools.
+CARGO_NET_OFFLINE=true ./scripts/build-pkg.sh
 
 export HOGX=$(pwd)/build-pkg/pkg/hogx
 

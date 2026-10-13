@@ -1,11 +1,19 @@
 #!/bin/bash
 
+set -e
+
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 ROOT_DIR="$(realpath "${SCRIPT_DIR}/..")"
 
-cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std
-cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std --target riscv32im-unknown-none-elf
-cd "${ROOT_DIR}/hogd/rust" && cargo fetch
+cd "${ROOT_DIR}/built_contracts" && cargo fetch --locked -Zbuild-std
+cd "${ROOT_DIR}/built_contracts" && cargo fetch --locked -Zbuild-std --target riscv32im-unknown-none-elf
+cd "${ROOT_DIR}/hogd/rust" && cargo fetch --locked
+
+# loadgen_localhost builds this separate workspace after the C++ build.
+# Fetch it before installing tools, while the installation token is fresh.
+if [[ "${HOGD_FETCH_HOGX:-0}" == "1" ]]; then
+  cargo fetch --locked --manifest-path "${ROOT_DIR}/hogx/Cargo.toml"
+fi
 
 set -ex
 
