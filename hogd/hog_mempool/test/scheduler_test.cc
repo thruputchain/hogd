@@ -407,11 +407,11 @@ TEST(Scheduler, BatchCommittedOutcomesCrossChunks)
   constexpr size_t kChunkSize = Scheduler::kTransactionOutcomeChunkSize;
   TransactionHashBatch hashes;
   // The scheduler adds at most [kChunkSize] txs to a shard before it needs to
-  // drop the shard lock and acquire it again. Thus, we create [2 * kChunkSize +
-  // 1] hashes so that the scheduler needs to split the txs across 3 groups,
+  // drop the shard lock and acquire it again. Thus, we create [(2 * kChunkSize)
+  // + 1] hashes so that the scheduler needs to split the txs across 3 groups,
   // releasing/acquiring the shard lock each time.
-  static_assert(2 * kChunkSize + 1 < Scheduler::kMaxTransactionsPerShard);
-  for (size_t nonce = 0; hashes.size() < 2 * kChunkSize + 1; ++nonce) {
+  static_assert((2 * kChunkSize) + 1 < Scheduler::kMaxTransactionsPerShard);
+  for (size_t nonce = 0; hashes.size() < (2 * kChunkSize) + 1; ++nonce) {
     TransactionHash hash{};
     std::memcpy(hash.data(), &nonce, sizeof(nonce));
     if (Scheduler::transaction_outcome_shard_index(hash) == 0) {
@@ -427,7 +427,7 @@ TEST(Scheduler, BatchCommittedOutcomesCrossChunks)
   }
 
   const std::array<size_t, 5> probes{0, kChunkSize - 1, kChunkSize,
-                                     2 * kChunkSize - 1, 2 * kChunkSize};
+                                     (2 * kChunkSize) - 1, 2 * kChunkSize};
   std::latch reader_started(1);
   std::atomic<bool> commit_finished = false;
   std::jthread reader([&] {
