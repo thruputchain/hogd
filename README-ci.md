@@ -20,6 +20,12 @@ scope.
 The action maps legacy and canonical repository URLs to authenticated HTTPS.
 It creates a private config under `RUNNER_TEMP` and exports `GIT_CONFIG_GLOBAL`,
 so neither the App token nor its rewrites enter the runner's `~/.gitconfig`.
+The job-local config includes the existing XDG Git config and `~/.gitconfig`
+before adding token rewrites, preserving deploy-key rewrites for remaining repos.
+Git chooses the longest matching `insteadOf` prefix regardless of file order.
+Repository-specific token rules beat organization-wide deploy-key rules; an
+included rule with an identical or longer repository prefix can take precedence
+and must be removed or narrowed on the worker/runner for transferred repos.
 Each caller removes the config in an `always()` cleanup step; the token action
 revokes the installation token at job completion. Existing pre-checkout
 `.gitconfig` cleanup steps still remove stale runner configuration. Cargo uses
@@ -47,6 +53,11 @@ and runs `.github/actions/private-sources/git-config.sh` after checkout for
 the same legacy and canonical URL map as the composite. Stored remote URLs
 remain token-free. Worker EXIT traps remove the config; the existing SSH agent
 still serves groundhogchain repositories. Cargo uses the Git CLI on workers.
+
+For manual launches, set `GIT_TOKEN` to a private-source read token before running
+`scripts/schedules/launch.sh <xid> <schedule_toml>`. The launcher passes it as
+`git_token`. An unset/empty token or a missing template value (`<no value>`)
+skips token rewrites and uses the existing SSH authentication.
 
 Installation tokens expire after one hour (and are revoked when the runner job
 finishes). Long builds can delay subsequent Cargo/Go dependency fetches beyond

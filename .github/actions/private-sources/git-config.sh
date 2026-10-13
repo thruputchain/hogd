@@ -14,6 +14,18 @@ config_path="$2"
 touch "$config_path"
 chmod 600 "$config_path"
 
+# Resolve and include the original globals before the caller changes the override.
+# An existing bootstrap config already has its includes at the beginning.
+if [[ ! -s "$config_path" ]]; then
+  for original_config in "${XDG_CONFIG_HOME:-$HOME/.config}/git/config" "$HOME/.gitconfig"; do
+    if [[ -f "$original_config" ]]; then
+      git config --file "$config_path" --add include.path "$original_config"
+    fi
+  done
+fi
+
+[[ -n "$token" && "$token" != '<no value>' ]] || exit 0
+
 # Full .git URLs prevent prefix collisions between protocol repositories.
 # Explicit .git entries win over no-suffix HTTPS entries (longest match).
 while read -r old new; do
