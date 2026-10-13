@@ -1066,6 +1066,8 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 
   const auto expected_addr =
       SystemCallHandler::static_get_deploy_address(kAddr, kNonce, blob_hash);
+  constexpr static auto kAlreadyDeployed =
+      SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed;
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -1089,6 +1091,15 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
                 if (!d.has_value() ||
                     d.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
                     deployed != expected_addr) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+
+                // A redeploy is refused only after the address lookup, so it
+                // pays for that lookup too.
+                d = co_await ctx.syscall<SyscallNo::kDeployContract>(kNonce,
+                                                                     blob_hash,
+                                                                     deployed);
+                if (d != kAlreadyDeployed) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
                 co_return InvokeStatus<void>{};
@@ -1133,7 +1144,16 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
     body.deploy_contract().inputs.contract_hash = blob_hash;
     body.deploy_contract().outputs =
         SyscallDeployContractOutputs{.deployed_address = expected_addr};
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, kStorageAccessCost + kDBRPCCost,
+                                  std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kDeployContract);
+    body.deploy_contract().inputs.nonce = kNonce;
+    body.deploy_contract().inputs.contract_hash = blob_hash;
+    expected.push_back(step_entry(gas, kStorageAccessCost + kDBRPCCost,
+                                  std::move(body),
+                                  error_status(kAlreadyDeployed)));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
