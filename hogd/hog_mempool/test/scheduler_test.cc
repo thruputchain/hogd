@@ -410,6 +410,7 @@ TEST(Scheduler, BatchCommittedOutcomesCrossChunks)
   // drop the shard lock and acquire it again. Thus, we create [2 * kChunkSize +
   // 1] hashes so that the scheduler needs to split the txs across 3 groups,
   // releasing/acquiring the shard lock each time.
+  static_assert(2 * kChunkSize + 1 < Scheduler::kMaxTransactionsPerShard);
   for (size_t nonce = 0; hashes.size() < 2 * kChunkSize + 1; ++nonce) {
     TransactionHash hash{};
     std::memcpy(hash.data(), &nonce, sizeof(nonce));

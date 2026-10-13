@@ -517,13 +517,14 @@ Scheduler::record_committed_transaction_outcomes(
           co_await default_coropoll().pool_.bg();
           // Release the shard lock between chunks to let lookups and
           // admission make progress during a large commit.
-          constexpr size_t kChunkSize = 4096;
-          for (size_t start = 0; start < batch.size(); start += kChunkSize) {
+          for (size_t start = 0; start < batch.size();
+               start += kTransactionOutcomeChunkSize) {
             x23::CoroGuard cg;
             co_await cg(shard.lock);
             const BlockHeight processed_height = scheduler.current_block();
             prune_transaction_outcomes_locked(shard, processed_height);
-            const size_t end = std::min(start + kChunkSize, batch.size());
+            const size_t end =
+                std::min(start + kTransactionOutcomeChunkSize, batch.size());
             for (size_t j = start; j < end; ++j) {
               record_transaction_outcome_locked(shard, batch[j], outcome,
                                                 processed_height);
@@ -554,15 +555,12 @@ Scheduler::record_transaction_outcome_locked(
     erase_transaction_outcome_locked(shard, it->second);
   }
 
-  CHECK_LE(shard.outcomes.size(),
-           (kMaxTransactionOutcomes / kTransactionOutcomeShards));
-  if (shard.outcomes.size() ==
-      (kMaxTransactionOutcomes / kTransactionOutcomeShards)) {
+  CHECK_LE(shard.outcomes.size(), kMaxTransactionsPerShard);
+  if (shard.outcomes.size() == kMaxTransactionsPerShard) {
     // Evict the oldest outcome in this shard to keep total capacity bounded.
     erase_transaction_outcome_locked(shard, shard.order.begin());
   }
-  CHECK_LT(shard.outcomes.size(),
-           (kMaxTransactionOutcomes / kTransactionOutcomeShards));
+  CHECK_LT(shard.outcomes.size(), kMaxTransactionsPerShard);
 
   shard.order.push_back(TransactionOutcomeEntry{
       .key = key,

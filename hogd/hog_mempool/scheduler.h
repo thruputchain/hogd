@@ -236,6 +236,8 @@ public:
   x23::CoroLock global_lock_;
 
 private:
+  friend class Scheduler_BatchCommittedOutcomesCrossChunks_Test;
+
   // Reuse the keyed hash calculated for shard selection during map probes
   // and eviction. The cached value is internal; transaction identity remains
   // the original SHA-256 hash.
@@ -267,6 +269,9 @@ private:
 
   static constexpr size_t kTransactionOutcomeShards = 64;
   static_assert(kMaxTransactionOutcomes % kTransactionOutcomeShards == 0);
+  static constexpr size_t kMaxTransactionsPerShard =
+      kMaxTransactionOutcomes / kTransactionOutcomeShards;
+  static constexpr size_t kTransactionOutcomeChunkSize = 4096;
   struct TransactionOutcomeShard {
     x23::CoroLock lock;
     std::list<TransactionOutcomeEntry> order;
