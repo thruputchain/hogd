@@ -119,6 +119,14 @@ public:
   Metrics::Gauge last_scheduler_remove_duration_ms;
 
   // Full distributions, in seconds, for the gauges above.
+  Metrics::Histogram ingestion_commit_lock_wait_seconds;
+  Metrics::Histogram ingestion_commit_lock_hold_seconds;
+  Metrics::Histogram block_commit_lock_wait_seconds;
+  Metrics::Histogram block_commit_lock_hold_seconds;
+  Metrics::Histogram scheduler_global_lock_wait_seconds;
+  Metrics::Histogram scheduler_global_lock_hold_seconds;
+  Metrics::Histogram ingestion_auth_rpc_seconds;
+  Metrics::Counter ingestion_auth_retry_count;
   Metrics::Histogram submit_unvetted_duration_seconds;
   Metrics::Histogram submit_vetted_duration_seconds;
   Metrics::Histogram nomination_duration_seconds;
@@ -331,6 +339,44 @@ MempoolMetrics::init()
       kComponent, "commit_removed_tx_count",
       "Transactions removed from the scheduler after block commits.");
 
+  ingestion_commit_lock_wait_seconds =
+      metrics.histogram(kComponent, "ingestion_commit_lock_wait_seconds",
+                        "Opt-in ingestion diagnostics: ingestion commit lock "
+                        "wait seconds. Aggregate across callers.",
+                        latency_bounds(kMempoolWorkLatencyBounds));
+  ingestion_commit_lock_hold_seconds =
+      metrics.histogram(kComponent, "ingestion_commit_lock_hold_seconds",
+                        "Opt-in ingestion diagnostics: ingestion commit lock "
+                        "hold seconds. Aggregate across callers.",
+                        latency_bounds(kMempoolWorkLatencyBounds));
+  block_commit_lock_wait_seconds =
+      metrics.histogram(kComponent, "block_commit_lock_wait_seconds",
+                        "Opt-in ingestion diagnostics: block commit lock wait "
+                        "seconds. Aggregate across callers.",
+                        latency_bounds(kMempoolWorkLatencyBounds));
+  block_commit_lock_hold_seconds =
+      metrics.histogram(kComponent, "block_commit_lock_hold_seconds",
+                        "Opt-in ingestion diagnostics: block commit lock hold "
+                        "seconds. Aggregate across callers.",
+                        latency_bounds(kMempoolWorkLatencyBounds));
+  scheduler_global_lock_wait_seconds =
+      metrics.histogram(kComponent, "scheduler_global_lock_wait_seconds",
+                        "Opt-in ingestion diagnostics: scheduler global lock "
+                        "wait seconds. Aggregate across callers.",
+                        latency_bounds(kMempoolWorkLatencyBounds));
+  scheduler_global_lock_hold_seconds =
+      metrics.histogram(kComponent, "scheduler_global_lock_hold_seconds",
+                        "Opt-in ingestion diagnostics: scheduler global lock "
+                        "hold seconds. Aggregate across callers.",
+                        latency_bounds(kMempoolWorkLatencyBounds));
+  ingestion_auth_rpc_seconds =
+      metrics.histogram(kComponent, "ingestion_auth_rpc_seconds",
+                        "Opt-in ingestion diagnostics: ingestion auth rpc "
+                        "seconds. Aggregate across callers.",
+                        latency_bounds(kMempoolWorkLatencyBounds));
+  ingestion_auth_retry_count = metrics.per_thread_counter(
+      kComponent, "ingestion_auth_retry_count",
+      "Authentication RPC retries across block commits.");
   submit_unvetted_duration_seconds = metrics.histogram(
       kComponent, "submit_unvetted_duration_seconds",
       "Duration of unvetted transaction submission RPCs in seconds.",

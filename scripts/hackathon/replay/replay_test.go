@@ -1,0 +1,228 @@
+package main
+
+import (
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/groundhogchain/lib-go/libxdr"
+	proto "github.com/groundhogchain/protocol-go"
+)
+
+func fixture(t *testing.T, n int) (string, []Operation) {
+	t.Helper()
+	dir := t.TempDir()
+	ops := make([]Operation, n)
+	f, err := os.Create(filepath.Join(dir, "transactions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for i := range ops {
+		tx := proto.SignedTransaction{}
+		tx.Tx.Uniquifier.Nonce = uint64(i)
+		hash := hashTransaction(&tx)
+		raw := libxdr.NewXdrMarshaler().MarshalXdr(proto.XDR_SignedTransaction(&tx)).Bytes()
+		ops[i] = Operation{DueNs: int64(i) * int64(time.Millisecond), Phase: 1, Kind: "call", Dependency: -1, Hash: "0x" + hex.EncodeToString(hash[:]), Raw: "0x" + hex.EncodeToString(raw)}
+		if err = json.NewEncoder(f).Encode(ops[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, _ := json.Marshal(Manifest{SchemaVersion: 1, Operations: n, DurationSeconds: 1})
+	if err = os.WriteFile(filepath.Join(dir, "manifest.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	genesis := libxdr.NewXdrMarshaler().MarshalXdr(&proto.LoadgenSuccessResult{Genesis_configuration: proto.GenesisConfiguration{Root_contract: proto.Contract{Contract_type: proto.KRv32}}})
+	defer genesis.Recycle()
+	if err = os.WriteFile(filepath.Join(dir, "genesis.xdr"), genesis.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, ops
+}
+func TestCorpusValidation(t *testing.T) {
+	dir, _ := fixture(t, 3)
+	if _, ops, err := load(Config{Corpus: dir}); err != nil || len(ops) != 3 {
+		t.Fatalf("load: %v", err)
+	}
+	path := filepath.Join(dir, "transactions.jsonl")
+	data, _ := os.ReadFile(path)
+	var rows []Operation
+	for _, line := range bytesLines(data) {
+		var op Operation
+		json.Unmarshal(line, &op)
+		rows = append(rows, op)
+	}
+	rows[1].Hash = rows[0].Hash
+	file, _ := os.Create(path)
+	for _, op := range rows {
+		json.NewEncoder(file).Encode(op)
+	}
+	file.Close()
+	if _, _, err := load(Config{Corpus: dir}); err == nil {
+		t.Fatal("accepted mismatched transaction hash")
+	}
+}
+func bytesLines(data []byte) [][]byte {
+	var lines [][]byte
+	start := 0
+	for i, b := range data {
+		if b == '\n' {
+			lines = append(lines, data[start:i])
+			start = i + 1
+		}
+	}
+	return lines
+}
+
+func TestSlowRPCDoesNotThrottleOfferedArrivals(t *testing.T) {
+	dir, ops := fixture(t, 40)
+	var mu sync.Mutex
+	committed := map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body json.RawMessage
+		json.NewDecoder(r.Body).Decode(&body)
+		reply := func(req rpcRequest) rpcResponse {
+			if req.Method == "groundhog_sendRawTransaction" {
+				var hash string
+				for _, op := range ops {
+					if op.Raw == req.Params[0] {
+						hash = op.Hash
+						break
+					}
+				}
+				time.Sleep(80 * time.Millisecond)
+				mu.Lock()
+				committed[hash] = true
+				mu.Unlock()
+				data, _ := json.Marshal(hash)
+				return rpcResponse{ID: req.ID, Result: data}
+			}
+			mu.Lock()
+			ok := committed[req.Params[0]]
+			mu.Unlock()
+			data := json.RawMessage("null")
+			if ok {
+				data = json.RawMessage(fmt.Sprintf(`{"txHash":%q,"height":"2","status":{"result":"ok"},"gasUsed":"100"}`, req.Params[0]))
+			}
+			return rpcResponse{ID: req.ID, Result: data}
+		}
+		if len(body) > 0 && body[0] == '[' {
+			var requests []rpcRequest
+			json.Unmarshal(body, &requests)
+			responses := []rpcResponse{}
+			for _, req := range requests {
+				responses = append(responses, reply(req))
+			}
+			json.NewEncoder(w).Encode(responses)
+		} else {
+			var req rpcRequest
+			json.Unmarshal(body, &req)
+			json.NewEncoder(w).Encode(reply(req))
+		}
+	}))
+	defer server.Close()
+	out := filepath.Join(t.TempDir(), "run")
+	c := Config{Corpus: dir, Output: out, URL: server.URL, Outstanding: 1, Drain: time.Second, Timeout: time.Second, MaxLateness: time.Second}
+	if err := Run(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(out, "results.jsonl"))
+	blocked, admitted := 0, 0
+	for _, line := range bytesLines(data) {
+		var r Result
+		json.Unmarshal(line, &r)
+		if r.Outcome == "outstanding_limit" {
+			blocked++
+		}
+		if r.Outcome == "admitted" {
+			admitted++
+			if r.Execution != "ok" {
+				t.Fatal("receipt not reconciled")
+			}
+		}
+	}
+	if blocked == 0 || admitted == 0 || blocked+admitted != len(ops) {
+		t.Fatalf("incomplete accounting: %d blocked %d admitted", blocked, admitted)
+	}
+}
+func TestPreflightRejectsCommittedFault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":0,"result":{"txHash":"0x01","status":{"result":"deterministicError"}}}`)
+	}))
+	defer server.Close()
+	if err := preflight(context.Background(), server.Client(), server.URL, []string{"0x01"}, time.Second); err == nil {
+		t.Fatal("setup accepted committed fault")
+	}
+}
+func TestConfigurationRejectedBeforeCreatingOutput(t *testing.T) {
+	if err := Run(context.Background(), Config{}); err == nil {
+		t.Fatal("accepted invalid replay configuration")
+	}
+}
+
+func TestAmbiguousSubmissionIsReconciledByReceipt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `[{"id":0,"error":null,"result":{"txHash":"0x01","height":"3","status":{"result":"ok"},"gasUsed":"120"}}]`)
+	}))
+	defer server.Close()
+	results := []Result{{Operation: Operation{Hash: "0x01", Kind: "deploy", App: 7}, StartNs: 1, Outcome: "transport_error"}}
+	var mu sync.Mutex
+	deployed := map[int]bool{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		pollReceipts(ctx, server.Client(), server.URL, time.Now(), results, &mu, deployed)
+		close(done)
+	}()
+	for {
+		mu.Lock()
+		committed := deployed[7]
+		mu.Unlock()
+		if committed {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("receipt not reconciled")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
+	if results[0].Outcome != "transport_error" || results[0].Execution != "ok" {
+		t.Fatal("transport and execution outcomes must remain separate")
+	}
+}
+
+func TestDependencyBlockedArrivalsAreAccounted(t *testing.T) {
+	dir, ops := fixture(t, 1)
+	ops[0].Dependency = 77
+	file, err := os.Create(filepath.Join(dir, "transactions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	json.NewEncoder(file).Encode(ops[0])
+	file.Close()
+	out := filepath.Join(t.TempDir(), "run")
+	c := Config{Corpus: dir, Output: out, URL: "http://unused.invalid", Outstanding: 1, Drain: time.Second, Timeout: time.Second, MaxLateness: time.Second}
+	if err = Run(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(out, "results.jsonl"))
+	var result Result
+	if err = json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != "dependency_blocked" || result.StartNs != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
