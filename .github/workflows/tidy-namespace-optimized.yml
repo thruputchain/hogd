@@ -39,34 +39,25 @@ jobs:
         partition: [prod, exempt, other]
 
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
+          submodules: false # We handle submodules manually for selective init
+
+      - name: Configure private sources
+        uses: ./.github/actions/private-sources
+        with:
+          app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+          private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
             ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
             ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
             ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
             ${{ secrets.HOGD_TO_XDR_RPC }}
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
-      - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@v8
-        with:
-          submodules: false # We handle submodules manually for selective init
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -229,3 +220,10 @@ jobs:
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
+      - name: Remove job-local Git credentials
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+            rm -f -- "$GIT_CONFIG_GLOBAL"
+          fi
