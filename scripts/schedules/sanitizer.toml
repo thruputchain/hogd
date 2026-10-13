@@ -13,10 +13,21 @@ script = """
 set -x
 
 echo 'cloning hogd'
+# Keep credentials out of tracing and the repository's stored remote URL.
+set +x
+umask 077
+export GIT_CONFIG_GLOBAL="$(mktemp)"
+trap 'rm -f -- "$GIT_CONFIG_GLOBAL"' EXIT
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+git config --global --add "url.https://x-access-token:{{ .git_token }}@github.com/{{ .github_repo }}.git.insteadOf" "git@github.com:{{ .github_repo }}.git"
+set -x
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }}
 git checkout {{ .git_commit }}
+set +x
+bash .github/actions/private-sources/git-config.sh "{{ .git_token }}" "$GIT_CONFIG_GLOBAL"
+set -x
 git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
@@ -107,10 +118,21 @@ script = """
 set -x
 
 echo 'cloning hogd'
+# Keep credentials out of tracing and the repository's stored remote URL.
+set +x
+umask 077
+export GIT_CONFIG_GLOBAL="$(mktemp)"
+trap 'rm -f -- "$GIT_CONFIG_GLOBAL"' EXIT
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+git config --global --add "url.https://x-access-token:{{ .git_token }}@github.com/{{ .github_repo }}.git.insteadOf" "git@github.com:{{ .github_repo }}.git"
+set -x
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }}
 git checkout {{ .git_commit }}
+set +x
+bash .github/actions/private-sources/git-config.sh "{{ .git_token }}" "$GIT_CONFIG_GLOBAL"
+set -x
 git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh

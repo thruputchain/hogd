@@ -36,6 +36,7 @@ jobs:
           submodules: false
 
       - name: Configure private sources
+        id: private-sources
         uses: ./.github/actions/private-sources
         with:
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
@@ -76,6 +77,7 @@ jobs:
           hog_sched \
             --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
             --key=github_repo --value=${{ github.repository }} \
+            --key=git_token --value=${{ steps.private-sources.outputs.token }} \
             --key=git_commit --value=${{ github.sha }} \
             --key=git_branch --value="$BRANCH_NAME" \
             --key=hogd_ccache_warmup_jobs --value=${{ env.HOGD_CCACHE_WARMUP_JOBS }} \

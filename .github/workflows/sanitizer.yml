@@ -31,6 +31,7 @@ jobs:
                 persist-credentials: false
 
             - name: Configure private sources
+              id: private-sources
               uses: ./.github/actions/private-sources
               with:
                 app-id: ${{ vars.COMPONENT_READER_APP_ID }}
@@ -49,6 +50,7 @@ jobs:
                   hog_sched \
                   --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                   --key=github_repo --value=${{ github.repository }} \
+                  --key=git_token --value=${{ steps.private-sources.outputs.token }} \
                   --key=git_commit --value=${{ github.sha }} \
                   --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                   --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \

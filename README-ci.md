@@ -40,11 +40,19 @@ qualified.
 
 Release publication and protocol-rs workflow dispatch keep their existing
 write credentials. The read-only component token never rewrites metrics_history.
-The hog_sched lanes require qualification that worker processes inherit
-`GIT_CONFIG_GLOBAL` and can access its job-local file, alongside the existing
-SSH agent. Remote workers cannot use a runner-local path; do not copy tokens
-into persistent home configuration to accommodate them. Long-running fetches
-also need qualification against the installation token's expiry.
+The hog_sched workflows pass the minted token as the `git_token` template value
+using `--key=git_token`. Every fetching worker job creates its own private
+`GIT_CONFIG_GLOBAL` file, bootstraps the hogd checkout via an HTTPS rewrite,
+and runs `.github/actions/private-sources/git-config.sh` after checkout for
+the same legacy and canonical URL map as the composite. Stored remote URLs
+remain token-free. Worker EXIT traps remove the config; the existing SSH agent
+still serves groundhogchain repositories. Cargo uses the Git CLI on workers.
+
+Installation tokens expire after one hour (and are revoked when the runner job
+finishes). Long builds can delay subsequent Cargo/Go dependency fetches beyond
+that window, particularly sequential ccache warmup variants and Go service
+builds after C++ builds in the multi-node/combined metrics lanes. Those late
+fetches need qualification; workers do not renew tokens.
 
 ## Runner provisioning
 - Create the hogci home directory on the machine in question. You should create it at `/home/local/hogci` and then create a symlink from `/home/hogci` to `/home/local/hogci`: `ln -s /home/hogci /home/local/hogci`.
