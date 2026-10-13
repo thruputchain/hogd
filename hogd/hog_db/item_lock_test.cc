@@ -1581,6 +1581,7 @@ TEST(ItemLockTest, RCQConsumeAllocationFailureWithSiblingLeavesConsumerFree)
         lock.try_atomic_change_lock(nullptr, &sibling, ctx).has_value());
 
     ItemChange consume = make_consume();
+    bool threw = false;
     try {
       test::ScopedAllocationFailure fail_nth_allocation(nth);
       if (lock.try_atomic_change_lock(nullptr, &consume, ctx).has_value()) {
@@ -1588,7 +1589,9 @@ TEST(ItemLockTest, RCQConsumeAllocationFailureWithSiblingLeavesConsumerFree)
       }
       FAIL() << "allocation " << nth;
     } catch (const std::bad_alloc &) {
+      threw = true;
     }
+    EXPECT_TRUE(threw);
 
     ItemChange retry = make_consume();
     EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &retry, ctx).has_value())
