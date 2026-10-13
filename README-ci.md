@@ -36,7 +36,8 @@ Deploy-key inputs are retained only for repositories still in groundhogchain:
 abort_rs (`HOGD_TO_ABORT_RS_KEY`), bcs (`HOGD_TO_BCS_ACCESS_KEY`),
 metrics_history (`HOGD_TO_METRICS_HISTORY_KEY`), serde_arrays
 (`HOGD_TO_SERDE_ARRAYS`) and xdr_common (`HOGD_TO_XDR_COMMON_ACCESS_KEY`).
-xdrs and xdr_rpc moved to thruputchain and use the component token. metrics_history is fetched
+xdrs and xdr_rpc moved to thruputchain; hogd gets them from the registry, so it needs no
+key or token for them. metrics_history is fetched
 and written by the metrics scripts. The other four keys preserve access to
 nested private sources: their manifests are unavailable in an uninitialized
 checkout, so qualify their continued necessity in CI before deleting secrets.

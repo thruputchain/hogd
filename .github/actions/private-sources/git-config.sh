@@ -52,6 +52,4 @@ groundhog-go thruput-go
 integration_test_contracts thruput-integration-test-contracts
 scp scp
 sdk_rs thruput-sdk-rs
-xdrs xdrs
-xdr_rpc xdr_rpc
 REPOSITORIES
