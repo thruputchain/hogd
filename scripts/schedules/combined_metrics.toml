@@ -7,12 +7,35 @@ script = """
 set -x
 
 echo 'cloning hogd'
+# Keep credentials out of tracing and the repository's stored remote URL.
+set +x
+umask 077
+config_path="$(mktemp)"
+for original_config in "${XDG_CONFIG_HOME:-$HOME/.config}/git/config" "$HOME/.gitconfig"; do
+  if [ -f "$original_config" ]; then
+    git config --file "$config_path" --add include.path "$original_config"
+  fi
+done
+export GIT_CONFIG_GLOBAL="$config_path"
+trap 'rm -f -- "$GIT_CONFIG_GLOBAL"' EXIT
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+git_token="{{ .git_token }}"
+if [ -n "$git_token" ] && [ "$git_token" != '<no value>' ]; then
+  git config --global --add "url.https://x-access-token:${git_token}@github.com/{{ .github_repo }}.git.insteadOf" "git@github.com:{{ .github_repo }}.git"
+fi
+set -x
 git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
+set +x
+bash .github/actions/private-sources/git-config.sh "$git_token" "$GIT_CONFIG_GLOBAL"
+set -x
 git submodule update --init --recursive
+
+# Fetch Go dependencies before any lengthy Rust/C++ preparation or build.
+bash ./scripts/ci/fetch_go_modules.sh || exit 1
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
@@ -89,11 +112,31 @@ script = """
 set -x
 
 echo 'cloning hogd'
+# Keep credentials out of tracing and the repository's stored remote URL.
+set +x
+umask 077
+config_path="$(mktemp)"
+for original_config in "${XDG_CONFIG_HOME:-$HOME/.config}/git/config" "$HOME/.gitconfig"; do
+  if [ -f "$original_config" ]; then
+    git config --file "$config_path" --add include.path "$original_config"
+  fi
+done
+export GIT_CONFIG_GLOBAL="$config_path"
+trap 'rm -f -- "$GIT_CONFIG_GLOBAL"' EXIT
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+git_token="{{ .git_token }}"
+if [ -n "$git_token" ] && [ "$git_token" != '<no value>' ]; then
+  git config --global --add "url.https://x-access-token:${git_token}@github.com/{{ .github_repo }}.git.insteadOf" "git@github.com:{{ .github_repo }}.git"
+fi
+set -x
 git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
+set +x
+bash .github/actions/private-sources/git-config.sh "$git_token" "$GIT_CONFIG_GLOBAL"
+set -x
 git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
@@ -130,7 +173,7 @@ shutdown_bench_servers() {
   ci_enter_cleanup
   ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${ALL_BENCH_HOSTS[@]}"
 }
-trap shutdown_bench_servers EXIT
+trap 'shutdown_bench_servers; rm -f -- "$GIT_CONFIG_GLOBAL"' EXIT
 
 echo 'reap whatever is holding the control port'
 # A control_server from a previous run can still be alive and holding the

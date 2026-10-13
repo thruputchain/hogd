@@ -25,28 +25,24 @@ jobs:
                   echo "Cleaning up .gitconfig"
                   rm -f /home/hogci/.gitconfig
             - uses: actions/checkout@v6
-            - uses: webfactory/ssh-agent@v0.10.0
               with:
-                  ssh-private-key: |
-                      ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-                      ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-                      ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-                      ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-                      ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-                      ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-                      ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-                      ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-                      ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-                      ${{ secrets.HOGD_TO_SCP_KEY }}
-                      ${{ secrets.HOGD_TO_XDR_RPC }}
-                      ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-                      ${{ secrets.HOGD_TO_HOGX_KEY }}
+                persist-credentials: false
+
+            - name: Configure private sources
+              id: private-sources
+              uses: ./.github/actions/private-sources
+              with:
+                app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+                private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+                ssh-private-key: |
+                  ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+                  ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+                  ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_XDR_RPC }}
+                  ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+
             - name: Run hog schedule
               run: |
                   BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
@@ -54,6 +50,7 @@ jobs:
                   hog_sched \
                     --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                     --key=github_repo --value=${{ github.repository }} \
+                    --key=git_token --value=${{ steps.private-sources.outputs.token }} \
                     --key=git_commit --value=${{ github.sha }} \
                     --key=git_branch --value=$BRANCH_NAME \
                     --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
@@ -66,3 +63,10 @@ jobs:
             - name: File failure issue
               if: failure() && github.ref == 'refs/heads/main'
               uses: ./.github/actions/file-failure-issue
+            - name: Remove job-local Git credentials
+              if: always()
+              shell: bash
+              run: |
+                if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+                  rm -f -- "$GIT_CONFIG_GLOBAL"
+                fi

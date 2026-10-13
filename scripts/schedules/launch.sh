@@ -3,6 +3,7 @@ set -e
 
 if [ $# -ne 2 ]; then
   echo "Usage: $0 <xid> <schedule_toml>"
+  echo "Optional GIT_TOKEN: private-source read token; unset/empty uses existing SSH authentication."
   exit 1
 fi
 
@@ -52,8 +53,11 @@ git_current_branch() {
   printf '%s\n' "$branch"
 }
 
+# The caller may have enabled shell tracing; never trace the token argument.
+set +x
 hog_sched -x=$1 \
   --key=github_repo --value=$(github_repo $SCHED_DIR) \
   --key=git_commit --value=$(git_commit_sha $SCHED_DIR) \
   --key=git_branch --value=$(git_current_branch $SCHED_DIR) \
+  --key=git_token --value="${GIT_TOKEN:-}" \
   $2
