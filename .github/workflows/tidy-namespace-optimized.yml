@@ -149,6 +149,7 @@ jobs:
             external/crc32c \
             external/blake3 \
             external/corrosion \
+            external/mldsa-native \
             built_contracts/integration_test_contracts
 
       # REMOVED: Install Rust/Cargo - baked into base image
