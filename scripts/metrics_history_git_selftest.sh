@@ -54,6 +54,9 @@ behaviour=${behaviours[$((call - 1))]:-${behaviours[-1]}}
 case "$behaviour" in
   ok) exit 0 ;;
   stall) sleep 600 ;;
+  # A git wedged in a network call can sit through the SIGTERM; only the
+  # SIGKILL from --kill-after stops it, and that reports a different status.
+  deaf) trap '' TERM; sleep 600 ;;
   *) exit "$behaviour" ;;
 esac
 FAKE
@@ -72,6 +75,7 @@ run_case() {
     # that waits for it.
     METRICS_HISTORY_GIT_TIMEOUT_SEC=1
     METRICS_HISTORY_GIT_ATTEMPTS=2
+    METRICS_HISTORY_GIT_KILL_AFTER=1s
     # shellcheck source=/dev/null
     source "$HELPERS"
     metrics_history_git "$@"
@@ -94,6 +98,14 @@ status=0
 out=$(run_case 'stall ok' fetch --quiet origin main) || status=$?
 expect_status 'a stall that clears on the retry' 0 "$status"
 expect_calls 'a stall that clears on the retry' 2 "$work/log"
+
+# commit_metrics.sh reads the stall status to decide whether another round is
+# worth starting, so a git that had to be killed must not arrive wearing a
+# different number than one that stopped on the SIGTERM.
+status=0
+out=$(run_case 'deaf' fetch --quiet origin main) || status=$?
+expect_status 'a fetch killed after ignoring SIGTERM' 124 "$status"
+expect_calls 'a fetch killed after ignoring SIGTERM' 2 "$work/log"
 
 # A rejected push is the caller's to handle -- commit_metrics.sh answers it by
 # refreshing the parent -- so it must arrive unretried and with git's status.

@@ -17,6 +17,13 @@ METRICS_COMMIT_REPO=${METRICS_COMMIT_REPO:-hogd}
 # below is plenty; the point of the bound is that the loop ends at all. An
 # unbounded one is how a network that never recovers turns a best-effort
 # metrics commit into a job that runs until the schedule kills it.
+#
+# Rounds are cheap only because a stall never starts one: both the fetch and
+# the push below end the script the moment they stall, so at most one stall
+# happens here and the rounds that do repeat are a remote answering quickly
+# with "no". Without that, five rounds of a stalling push would be fifty
+# minutes of an hour-long job -- the very failure this script is being fixed
+# for, one loop further out.
 METRICS_COMMIT_ATTEMPTS=${METRICS_COMMIT_ATTEMPTS:-5}
 
 # Push metrics_history/ to groundhogchain/metrics_history.git
@@ -88,8 +95,19 @@ while true; do
   *) exit 1 ;;
   esac
 
-  if metrics_history_git push --quiet origin "HEAD:$METRICS_HISTORY_BRANCH"; then
+  push_status=0
+  metrics_history_git push --quiet origin "HEAD:$METRICS_HISTORY_BRANCH" ||
+    push_status=$?
+  if [ "$push_status" -eq 0 ]; then
     break
+  fi
+
+  # A stalled push ends the script, the way a stalled fetch does. Another
+  # round would spend the same bound again on the same silent remote, and the
+  # commit is best-effort; only a push the remote answered is worth retrying.
+  if [ "$push_status" -eq "$METRICS_HISTORY_GIT_STALLED" ]; then
+    echo "Push to metrics_history stalled; giving up." >&2
+    exit 1
   fi
 
   if [ "$attempt" -ge "$METRICS_COMMIT_ATTEMPTS" ]; then

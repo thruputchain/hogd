@@ -21,6 +21,15 @@ METRICS_HISTORY_GIT_TIMEOUT_SEC=${METRICS_HISTORY_GIT_TIMEOUT_SEC:-300}
 # A stalled attempt is retried once. A transfer that stalls twice is not going
 # to finish inside what is left of the job either.
 METRICS_HISTORY_GIT_ATTEMPTS=${METRICS_HISTORY_GIT_ATTEMPTS:-2}
+# How long a git that ignores SIGTERM while blocked on the network gets before
+# the SIGKILL. Configurable so the self-test need not wait out the default.
+METRICS_HISTORY_GIT_KILL_AFTER=${METRICS_HISTORY_GIT_KILL_AFTER:-30s}
+
+# What metrics_history_git returns when every attempt stalled, as opposed to a
+# git that ran and reported something. [timeout] exits 124 when its own
+# SIGTERM stopped the command and 137 when the SIGKILL that follows did; both
+# mean the same thing to a caller, so both arrive here as this one status.
+METRICS_HISTORY_GIT_STALLED=124
 
 # Run [git "$@"] under the per-attempt bound, retrying a stall and nothing
 # else. Any other failure is the caller's to interpret: commit_metrics.sh, for
@@ -32,9 +41,8 @@ metrics_history_git() {
 
   while true; do
     status=0
-    # --kill-after covers a git that ignores SIGTERM while blocked on the
-    # network; the SIGKILL that follows surfaces as 137.
-    timeout --kill-after=30s "$METRICS_HISTORY_GIT_TIMEOUT_SEC" git "$@" || status=$?
+    timeout --kill-after="$METRICS_HISTORY_GIT_KILL_AFTER" \
+      "$METRICS_HISTORY_GIT_TIMEOUT_SEC" git "$@" || status=$?
 
     if [ "$status" -eq 0 ]; then
       return 0
@@ -47,7 +55,7 @@ metrics_history_git() {
       "(attempt ${attempt}/${METRICS_HISTORY_GIT_ATTEMPTS})" >&2
 
     if [ "$attempt" -ge "$METRICS_HISTORY_GIT_ATTEMPTS" ]; then
-      return "$status"
+      return "$METRICS_HISTORY_GIT_STALLED"
     fi
     attempt=$((attempt + 1))
   done
