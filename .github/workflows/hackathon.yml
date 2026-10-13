@@ -1,0 +1,104 @@
+name: Hackathon workload (single validator)
+
+# Results remain in this run's logs and artifact archive. This workflow has no
+# metrics_history publishing step or deploy key.
+on:
+    workflow_dispatch:
+        inputs:
+            gateway_binary:
+                description: Absolute compatible hog-gateway binary path on hog4
+                required: true
+                type: string
+            gateway_sha256:
+                description: Expected SHA256 of that gateway binary
+                required: true
+                type: string
+            gateway_protocol:
+                description: Optional handshake token (only for verified wire-compatible bindings)
+                required: false
+                default: ''
+                type: string
+env:
+    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    # Published crates and pinned submodules retain the legacy registry identity.
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
+    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+
+jobs:
+    benchmark:
+        name: Gateway workload (one validator)
+        runs-on: self-hosted
+        permissions:
+            contents: read
+            actions: read
+
+        steps:
+            - name: Clean up .gitconfig
+              run: |
+                  echo "Cleaning up .gitconfig"
+                  rm -f /home/hogci/.gitconfig
+            - uses: actions/checkout@v6
+              with:
+                persist-credentials: false
+
+            - name: Configure private sources
+              id: private-sources
+              uses: ./.github/actions/private-sources
+              with:
+                app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+                private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+                ssh-private-key: |
+                  ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+                  ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_XDR_RPC }}
+                  ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+
+            - name: Run hog schedule
+              env:
+                  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+                  HACKATHON_GATEWAY_BINARY: ${{ inputs.gateway_binary }}
+                  HACKATHON_GATEWAY_SHA256: ${{ inputs.gateway_sha256 }}
+                  HACKATHON_GATEWAY_PROTOCOL: ${{ inputs.gateway_protocol }}
+              run: |
+                  if [[ "$HACKATHON_GATEWAY_BINARY" != /* ]]; then
+                    echo "gateway_binary must be an absolute path on hog4" >&2
+                    exit 1
+                  fi
+                  if [[ ! "$HACKATHON_GATEWAY_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+                    echo "gateway_sha256 must be a lowercase SHA256 digest" >&2
+                    exit 1
+                  fi
+                  hog_sched \
+                    --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
+                    --key=github_repo --value=${{ github.repository }} \
+                    --key=git_token --value=${{ steps.private-sources.outputs.token }} \
+                    --key=git_commit --value=${{ github.sha }} \
+                    --key=git_branch --value="$BRANCH_NAME" \
+                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
+                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
+                    --key=hackathon_gateway_binary --value="$HACKATHON_GATEWAY_BINARY" \
+                    --key=hackathon_gateway_sha256 --value="$HACKATHON_GATEWAY_SHA256" \
+                    --key=hackathon_gateway_protocol --value="$HACKATHON_GATEWAY_PROTOCOL" \
+                    ./scripts/schedules/hackathon.toml
+            - name: Upload benchmark results
+              if: always()
+              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+              with:
+                  name: hackathon-results-${{ github.run_attempt }}
+                  path: work_dir/hackathon-results.tar.gz
+                  if-no-files-found: warn
+                  compression-level: 0
+            - name: Print Log Download Instructions
+              if: always()
+              uses: ./.github/actions/print-log-instructions
+            - name: Remove job-local Git credentials
+              if: always()
+              shell: bash
+              run: |
+                if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+                  rm -f -- "$GIT_CONFIG_GLOBAL"
+                fi
