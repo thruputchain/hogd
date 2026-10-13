@@ -231,6 +231,23 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     co_return EventError{EventErrorCode::kBadBlockID};
   }
 
+  // A block whose streamed event/body pairs cannot be replayed through the
+  // indexer pull RPC is unservable: committed-reference publication rejects it
+  // at commit, which the scheduler treats as a mandatory-success invariant and
+  // aborts on. The cumulative pair size is final now that every executor has
+  // closed and is identical on every node that executed this transaction set,
+  // so reject the block here -- before it is finalized, nominated, or validated
+  // -- rather than let an unservable block reach that fatal invariant. The
+  // maximum-ConsensusValue bound keeps this at least as strict as the exact
+  // size check run at commit, so a block admitted here never fails there.
+  if (!events_file_fits_indexer_replay_record(
+          context->get().total_pair_bytes())) {
+    error("close_block: block {} event payload exceeds indexer replay limit",
+          block_id);
+    co_await finish_block_operation(block_id, context, false);
+    co_return EventError{EventErrorCode::kBlockTooLarge};
+  }
+
   {
     x23::CoroGuard g;
     co_await g(lock_);

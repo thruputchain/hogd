@@ -19,6 +19,8 @@ EventErrorCategory::message(int code) const
     return "Exists";
   case kInternal:
     return "Internal";
+  case kBlockTooLarge:
+    return "Block Too Large";
   }
   return "Unknown code: " + std::to_string(code);
 }

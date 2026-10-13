@@ -117,6 +117,14 @@ indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
                                              size_t event_logs_xdr_size,
                                              size_t tx_bodies_xdr_size);
 
+// True if a finalized events file of [events_file_size] bytes can be replayed
+// through the indexer pull RPC. Uses the maximum ConsensusValue encoding as a
+// conservative bound, matching candidate admission, so a block admitted here
+// can never fail the exact per-record check at committed-reference publication.
+// The two replay batch-count words (event + body) are the only reassembly
+// bytes not already in the file.
+bool events_file_fits_indexer_replay_record(size_t events_file_size);
+
 // The outbox directory is private, operator-owned state. open() requires an
 // existing 0700 directory. open_or_create_in() creates indexer-outbox beneath
 // its parent and syncs the parent on first creation. Both take a nonblocking
