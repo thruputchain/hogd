@@ -312,6 +312,9 @@ TEST(Scheduler, BatchCommittedOutcomesPreserveSuccessAndReplaceFailure)
   EXPECT_EQ(first_outcome.status,
             SchedulerTransactionStatus::SchedulerTransactionSucceeded);
   EXPECT_EQ(first_outcome.height, 7);
+  EXPECT_EQ(first_outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+  EXPECT_EQ(first_outcome.error_code, 0);
   const SchedulerTransactionOutcome second_outcome =
       scheduler.lookup_transaction_outcome(second)();
   EXPECT_EQ(second_outcome.status,
