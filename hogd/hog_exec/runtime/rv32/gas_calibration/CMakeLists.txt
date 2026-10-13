@@ -48,12 +48,29 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   ${HOGD_RV32_ENGINE_SOURCES})
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" HOGD_RV32_GAS_BUILD_TYPE_UPPER)
+set(HOGD_RV32_GAS_CXX_FLAGS
+  "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${HOGD_RV32_GAS_BUILD_TYPE_UPPER}}")
+# The interpreter's own options follow the global flags (see
+# rv32_runtime_objects); record them too, or a frame-pointer-free engine is
+# reported as built with -fno-omit-frame-pointer. The separator sits inside the
+# Release-only expression so other configurations record what they did before.
+if(HOGD_RV32_INTERPRETER_COMPILE_OPTIONS)
+  string(APPEND HOGD_RV32_GAS_CXX_FLAGS
+    "$<$<CONFIG:Release>: ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}>")
+endif()
 target_compile_definitions(
   rv32_gas_calibration
   PUBLIC
   RV32_GAS_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
   RV32_GAS_ENGINE_SOURCE_DIGEST="${HOGD_RV32_ENGINE_SOURCE_DIGEST}"
-  RV32_GAS_CXX_FLAGS="${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${HOGD_RV32_GAS_BUILD_TYPE_UPPER}}"
+  RV32_GAS_CXX_FLAGS="${HOGD_RV32_GAS_CXX_FLAGS}"
+)
+
+# Calibrate the interpreter as the node builds it.
+target_compile_options(
+  rv32_gas_calibration
+  PRIVATE
+  ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}
 )
 
 # Match the parent RV32 target's interprocedural optimization setting.
@@ -72,6 +89,12 @@ add_executable(
 target_link_libraries(
   rv32_gas_calibrate
   rv32_gas_calibration
+)
+
+target_compile_options(
+  rv32_gas_calibrate
+  PRIVATE
+  ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}
 )
 
 if(HOGD_RV32_ENABLE_LTO)
