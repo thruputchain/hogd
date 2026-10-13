@@ -1557,4 +1557,44 @@ TEST(ItemLockTest, FirstAdmissionAllocationFailureLeavesLockReusable)
 #endif
 }
 
+// Regression test for issue #4444.
+TEST(ItemLockTest, RCQConsumeAllocationFailureWithSiblingLeavesConsumerFree)
+{
+#if HOGD_SANITIZER_OWNS_OPERATOR_NEW
+  GTEST_SKIP() << "faulting an allocation means replacing the global operator "
+                  "new, which the sanitizer runtime already defines";
+#else
+  auto make_consume = [] {
+    RetrocausalQueueDelta delta;
+    delta.consume = x23::Ptr<RetrocausalQueueConsumeDelta>(
+        new RetrocausalQueueConsumeDelta{});
+    return ItemChange(RetrocausalQueueIt(std::move(delta)));
+  };
+
+  // A sibling's pending reservation keeps the RCQ subtype installed, so a
+  // failed consume admission must undo its own consumer bit.
+  for (int nth = 0;; nth++) {
+    ItemLock lock(0);
+    auto ctx = make_rcq_context();
+    ItemChange sibling(RetrocausalQueueIt(RetrocausalQueueDelta{}));
+    ASSERT_TRUE(
+        lock.try_atomic_change_lock(nullptr, &sibling, ctx).has_value());
+
+    ItemChange consume = make_consume();
+    try {
+      test::ScopedAllocationFailure fail_nth_allocation(nth);
+      if (lock.try_atomic_change_lock(nullptr, &consume, ctx).has_value()) {
+        break;
+      }
+      FAIL() << "allocation " << nth;
+    } catch (const std::bad_alloc &) {
+    }
+
+    ItemChange retry = make_consume();
+    EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &retry, ctx).has_value())
+        << "retry after faulting allocation " << nth;
+  }
+#endif
+}
+
 } // namespace hogd
