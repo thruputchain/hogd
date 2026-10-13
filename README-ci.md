@@ -96,7 +96,7 @@ hog4 and a concurrent replay client on hog7. Supply an absolute compatible
 explicit, pinned dependency from `groundhog-rpc`; protocol handshakes must pass.
 Use exclusively allocated benchmark hosts with matching control servers.
 Launch it from **Actions → Hackathon workload (single validator) → Run workflow**
-after publishing this branch. Set `gateway_binary` to the installed gateway path
+after the workflow has been added to the default branch. Set `gateway_binary` to the installed gateway path
 on hog4 and `gateway_sha256` to its lowercase SHA256 digest.
 The job prints reports in its logs and uploads a `hackathon-results-<attempt>`
 artifact to the GitHub Actions run. It contains `hackathon-results.tar.gz`, with

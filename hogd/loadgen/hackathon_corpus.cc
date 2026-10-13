@@ -145,10 +145,13 @@ generate(int argc, char **argv)
   set_contract_artifact_directories({artifacts});
   Corpus c{.seed = number("--seed", 1)};
   c.network.back() = 1;
-  GenesisConfigurationBuilder builder;
+  // Keep each wallet variant in its own ceremony batches: the protocol caps
+  // attached contracts per transaction below our five default wallet variants.
+  std::array<GenesisConfigurationBuilder, 5> builders;
   for (size_t i = 0; i < nusers; ++i) {
-    auto contract = load_rv32_contract(
-        "wallet_" + std::to_string(shared ? 0 : i % nwallets) + ".rv32a");
+    const size_t variant = shared ? 0 : i % nwallets;
+    auto contract =
+        load_rv32_contract("wallet_" + std::to_string(variant) + ".rv32a");
     User u;
     for (size_t k = 0; k < 2; ++k) {
       auto entropy = sha256(std::tuple(c.seed, uint64_t(i), uint64_t(k)));
@@ -161,7 +164,7 @@ generate(int argc, char **argv)
     u.address = calculate_genesis_deployment_address(sha256(*contract), nonce);
     const int128_t allocation =
         (int128_t{kTotalHogSupply} * kHogDivisibility) / (nusers + 2);
-    builder.add_distribution(
+    builders[variant].add_distribution(
         contract, nonce, Wallet::entrypoint<u8"initialize">(),
         Wallet::make_calldata<u8"initialize">(u.keys[0], u.keys[1], u.weight),
         allocation);
@@ -178,10 +181,21 @@ generate(int argc, char **argv)
   auto cost = StorageCostModel::default_cost_model();
   LoadgenSuccessResult init{};
   init.genesis_configuration =
-      builder.build(c.network, cost, *load_stock_genesis_root_contract(),
-                    stock_network_config());
-  init.genesis_ceremony_txs.append_range(
-      builder.make_genesis_ceremony_transactions(cost));
+      builders[0].build(c.network, cost, *load_stock_genesis_root_contract(),
+                        stock_network_config());
+  for (size_t variant = 0; variant < (shared ? 1 : std::min(nwallets, nusers));
+       ++variant) {
+    auto transactions =
+        builders[variant].try_make_genesis_ceremony_transactions(cost);
+    if (!transactions)
+      throw std::runtime_error("cannot generate wallet genesis ceremony");
+    for (auto &tx : *transactions) {
+      // Each builder starts at nonce zero. Preserve unique root invocations
+      // across the combined, unsigned genesis ceremony.
+      tx.tx.uniquifier.nonce = init.genesis_ceremony_txs.size();
+      init.genesis_ceremony_txs.push_back(std::move(tx));
+    }
+  }
   size_t predeployed = count * 4 / 5;
   // Limit each setup block's attached code volume. Each deployment still takes
   // the real ingestion/execution path after the wallet-only genesis ceremony.
