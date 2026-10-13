@@ -76,9 +76,10 @@ struct alignas(16) Slot {
 static_assert(sizeof(Slot) == 16);
 static_assert(alignof(Slot) == 16);
 // Immutable, decode-once form of a contract: the baked Slot handler array plus
-// the initial memory image (the contract's seeded bytes zero-padded out to
-// total_memory_size). Shared across ThreadedMachine instantiations -- each
-// machine copies the full image into its own memory_ at construction/reset.
+// the seeded initial bytes and their placement, kept sparse so a cached
+// contract does not retain a full declared-memory image (#4433). Shared across
+// ThreadedMachine instantiations -- each machine materializes the full
+// zero-padded image into its own memory_ at construction/reset.
 class ThreadedMachinePreInstantiation {
 public:
   // `memory` is the initial seeded image (e.g. an artifact's initial_memory);
@@ -111,14 +112,21 @@ public:
 
 private:
   ThreadedMachinePreInstantiation(std::vector<Slot> exec,
-                                  std::vector<uint8_t> initial_memory_image,
-                                  bool trace)
+                                  std::vector<uint8_t> initial_memory_seed,
+                                  uint32_t memory_start,
+                                  uint32_t total_memory_size, bool trace)
     : exec_(std::move(exec)),
-      initial_memory_image_(std::move(initial_memory_image)), trace_(trace)
+      initial_memory_seed_(std::move(initial_memory_seed)),
+      memory_start_(memory_start), total_memory_size_(total_memory_size),
+      trace_(trace)
   {}
 
   std::vector<Slot> exec_;
-  std::vector<uint8_t> initial_memory_image_;
+  // Seeded bytes laid at memory_start_ within an otherwise-zero image of
+  // total_memory_size_; kept sparse rather than materialized (#4433).
+  std::vector<uint8_t> initial_memory_seed_;
+  uint32_t memory_start_ = 0;
+  uint32_t total_memory_size_ = 0;
   bool trace_ = false;
 
   friend struct ThreadedMachinePreInstantiationTestPeer;
@@ -210,13 +218,14 @@ public:
     : pre_instantiation_(&pre_instantiation),
       exec_traced_(pre_instantiation.trace_)
   {
-    const auto &image = pre_instantiation.initial_memory_image_;
-    assert(image.size() <= kMemoryCeilingBytes);
+    assert(pre_instantiation.total_memory_size_ <= kMemoryCeilingBytes);
     // memory_ acquired its slot from the pool on construction. The recycled
-    // slot is dirty, but the image is full-size (zero-padded to
-    // total_memory_size), so this assign fully overwrites it -- and the
-    // reserved capacity means no allocation on a pool hit.
-    memory_.bytes().assign(image.begin(), image.end());
+    // slot is dirty, so size-and-zero the full image, then lay the sparse seed
+    // at its placement. Reserved capacity means no allocation on a pool hit.
+    auto &bytes = memory_.bytes();
+    bytes.assign(pre_instantiation.total_memory_size_, 0);
+    std::ranges::copy(pre_instantiation.initial_memory_seed_,
+                      bytes.begin() + pre_instantiation.memory_start_);
 
     regs_.fill(0);
     // Entry ABI v3: sp (x2) stays 0 from the fill above -- the guest owns
@@ -237,10 +246,12 @@ public:
   void reset(uint64_t gas)
   {
     regs_.fill(0);
-    // memory_ is sized to the (already zero-padded) image, so restoring it is a
-    // straight copy -- no separate tail zero-fill needed.
-    std::ranges::copy(pre_instantiation_->initial_memory_image_,
-                      memory_.bytes().begin());
+    // memory_ is already sized to total_memory_size; re-zero it and re-lay the
+    // sparse seed to restore the initial image.
+    auto &bytes = memory_.bytes();
+    std::ranges::fill(bytes, uint8_t{0});
+    std::ranges::copy(pre_instantiation_->initial_memory_seed_,
+                      bytes.begin() + pre_instantiation_->memory_start_);
     pc_ = 0;
     gas_remaining_ = gas;
     gas_deficit_ = 0;
@@ -1669,8 +1680,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     return std::unexpected(ProgramError::kMemoryTooLarge);
   }
 
-  std::vector<uint8_t> initial_memory_image(total_memory_size, 0);
-  std::ranges::copy(memory, initial_memory_image.begin() + memory_start);
+  // Keep the seed sparse; each machine materializes the full image (#4433).
+  std::vector<uint8_t> initial_memory_seed(memory.begin(), memory.end());
 
   std::vector<Slot> exec;
   size_t n = program->instruction_count();
@@ -1796,7 +1807,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   }
 
   return ThreadedMachinePreInstantiation(std::move(exec),
-                                         std::move(initial_memory_image),
+                                         std::move(initial_memory_seed),
+                                         memory_start, total_memory_size,
                                          trace);
 }
 
