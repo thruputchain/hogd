@@ -122,7 +122,7 @@ TEST_F(EventBlockContextTest, TotalPairBytesTracksFinalizedFileSize)
   // if that running sum equals the finalized events file's size. Verify the
   // invariant directly, and that add_event() feeds the counter.
   EventBlockContext context(temp_dir_, 1);
-  EXPECT_EQ(context.total_pair_bytes(), 0u);
+  EXPECT_EQ(context.total_pair_bytes(), 0U);
   context.executor_open_block();
   for (int i = 0; i < 3; ++i) {
     EXPECT_TRUE(context.add_event(
@@ -134,7 +134,7 @@ TEST_F(EventBlockContextTest, TotalPairBytesTracksFinalizedFileSize)
         ProposedTransaction{})());
   }
   context.executor_close_block();
-  EXPECT_GT(context.total_pair_bytes(), 0u);
+  EXPECT_GT(context.total_pair_bytes(), 0U);
 
   finish_file(context);
   auto hash = context.get_root_hash();
