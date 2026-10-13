@@ -1,7 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <atomic>
+#include <cstring>
+#include <latch>
 #include <limits>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -286,6 +291,236 @@ TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
   EXPECT_EQ(outcome.error_source,
             SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
   EXPECT_EQ(outcome.height, 42);
+}
+
+TEST(Scheduler, BatchCommittedOutcomesPreserveSuccessAndReplaceFailure)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHash first{};
+  TransactionHash second{};
+  second[0] = 1;
+  const TransactionHashBatch hashes{first, second, first};
+  scheduler.record_transaction_outcome(
+      first, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      /*height=*/7)();
+  scheduler.record_transaction_outcome(
+      second, SchedulerTransactionStatus::SchedulerTransactionRetry,
+      /*height=*/9,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+      /*error_code=*/123)();
+
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  const SchedulerTransactionOutcome first_outcome =
+      scheduler.lookup_transaction_outcome(first)();
+  EXPECT_EQ(first_outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(first_outcome.height, 7);
+  EXPECT_EQ(first_outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+  EXPECT_EQ(first_outcome.error_code, 0);
+  const SchedulerTransactionOutcome second_outcome =
+      scheduler.lookup_transaction_outcome(second)();
+  EXPECT_EQ(second_outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(second_outcome.height, 10);
+  EXPECT_EQ(second_outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+  EXPECT_EQ(second_outcome.error_code, 0);
+}
+
+TEST(Scheduler, BatchCommittedOutcomesExpireFromProcessingHeight)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  const TransactionHashBatch hashes{TransactionHash{}};
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/7)();
+  scheduler.set_current_block(10 + Scheduler::kTransactionOutcomeBlockLifetime -
+                              1);
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 7);
+  scheduler.increment_current_block()();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().status,
+            SchedulerTransactionStatus::SchedulerTransactionNotFound);
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/60)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 60);
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>{}, /*height=*/61)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 60);
+}
+
+TEST(Scheduler, BatchCommittedOutcomesRecordEveryTransaction)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHashBatch hashes;
+  for (size_t i = 0; i < 5000; ++i) {
+    TransactionHash hash{};
+    hash[0] = static_cast<uint8_t>(i);
+    hash[1] = static_cast<uint8_t>(i >> 8);
+    hashes.push_back(hash);
+  }
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  for (const TransactionHash &hash : hashes) {
+    const SchedulerTransactionOutcome outcome =
+        scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+  }
+}
+
+TEST(Scheduler, BatchCommitWinsOverConcurrentRetryOutcomes)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHashBatch hashes;
+  for (size_t i = 0; i < 8192; ++i) {
+    TransactionHash hash{};
+    hash[0] = static_cast<uint8_t>(i);
+    hash[1] = static_cast<uint8_t>(i >> 8);
+    hashes.push_back(hash);
+  }
+  std::jthread retries([&] {
+    for (const auto &hash : hashes) {
+      scheduler.record_transaction_outcome(
+          hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+          /*height=*/9,
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+          /*error_code=*/123)();
+    }
+  });
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  retries.join();
+  for (const auto &hash : hashes) {
+    const auto outcome = scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+    EXPECT_EQ(outcome.error_code, 0);
+  }
+}
+
+TEST(Scheduler, BatchCommittedOutcomesCrossChunks)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  constexpr size_t kChunkSize = Scheduler::kTransactionOutcomeChunkSize;
+  TransactionHashBatch hashes;
+  // The scheduler adds at most [kChunkSize] txs to a shard before it needs to
+  // drop the shard lock and acquire it again. Thus, we create [(2 * kChunkSize)
+  // + 1] hashes so that the scheduler needs to split the txs across 3 groups,
+  // releasing/acquiring the shard lock each time.
+  static_assert((2 * kChunkSize) + 1 < Scheduler::kMaxTransactionsPerShard);
+  for (size_t nonce = 0; hashes.size() < (2 * kChunkSize) + 1; ++nonce) {
+    TransactionHash hash{};
+    std::memcpy(hash.data(), &nonce, sizeof(nonce));
+    if (Scheduler::transaction_outcome_shard_index(hash) == 0) {
+      hashes.push_back(hash);
+    }
+  }
+  for (const auto &hash : hashes) {
+    scheduler.record_transaction_outcome(
+        hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+        /*height=*/9,
+        SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+        /*error_code=*/123)();
+  }
+
+  const std::array<size_t, 5> probes{0, kChunkSize - 1, kChunkSize,
+                                     (2 * kChunkSize) - 1, 2 * kChunkSize};
+  std::latch reader_started(1);
+  std::atomic<bool> commit_finished = false;
+  std::jthread reader([&] {
+    std::array<bool, probes.size()> committed{};
+    const auto check_outcomes = [&] {
+      for (size_t i = 0; i < probes.size(); ++i) {
+        const auto outcome =
+            scheduler.lookup_transaction_outcome(hashes[probes[i]])();
+        if (outcome.status ==
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+          committed[i] = true;
+          EXPECT_EQ(outcome.height, 10);
+          EXPECT_EQ(
+              outcome.error_source,
+              SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+          EXPECT_EQ(outcome.error_code, 0);
+        }
+        else {
+          EXPECT_FALSE(committed[i]);
+          EXPECT_EQ(outcome.status,
+                    SchedulerTransactionStatus::SchedulerTransactionRetry);
+          EXPECT_EQ(outcome.height, 9);
+          EXPECT_EQ(outcome.error_source,
+                    SchedulerTransactionErrorSource::
+                        SchedulerTransactionErrorExecutor);
+          EXPECT_EQ(outcome.error_code, 123);
+        }
+      }
+    };
+    check_outcomes();
+    reader_started.count_down();
+    while (!commit_finished.load(std::memory_order_acquire)) {
+      check_outcomes();
+    }
+    check_outcomes();
+    for (bool observed : committed) {
+      EXPECT_TRUE(observed);
+    }
+  });
+  reader_started.wait();
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  commit_finished.store(true, std::memory_order_release);
+  reader.join();
+
+  for (const auto &hash : hashes) {
+    const auto outcome = scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+    EXPECT_EQ(outcome.error_source,
+              SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+    EXPECT_EQ(outcome.error_code, 0);
+  }
+}
+
+TEST(Scheduler, ClearFailureAfterOutcomeReplacementAndExpiry)
+{
+  Scheduler scheduler(/*current_block=*/0, nullptr);
+  const TransactionHash hash{};
+  const auto record_failure = [&] {
+    scheduler.record_transaction_outcome(
+        hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+        scheduler.current_block(),
+        SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+        /*error_code=*/123)();
+  };
+  const auto clear_failure = [&] {
+    scheduler.clear_transaction_outcome_if_not_already_committed(hash)();
+    EXPECT_EQ(scheduler.lookup_transaction_outcome(hash)().status,
+              SchedulerTransactionStatus::SchedulerTransactionNotFound);
+  };
+  for (size_t i = 0; i < 2; ++i) {
+    record_failure();
+    clear_failure();
+  }
+  record_failure();
+  scheduler.record_transaction_outcome(
+      hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      /*height=*/0)();
+  scheduler.clear_transaction_outcome_if_not_already_committed(hash)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hash)().status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+
+  scheduler.set_current_block(Scheduler::kTransactionOutcomeBlockLifetime);
+  scheduler.increment_current_block()();
+  record_failure();
+  clear_failure();
+  record_failure();
+  scheduler.set_current_block(2 * Scheduler::kTransactionOutcomeBlockLifetime);
+  scheduler.increment_current_block()();
+  record_failure();
+  clear_failure();
 }
 
 TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)

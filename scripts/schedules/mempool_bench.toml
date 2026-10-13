@@ -95,6 +95,7 @@ source ./scripts/ci/prepare_env.sh
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c clang -f "-fsanitize=address" -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+export CI_MEMPOOL_METRIC_NAME=nightly_integration_mempool_asan
 
 echo 'build'
 # Cap build parallelism at 64, same as the sanitizer and tsan schedules: fanning
@@ -130,6 +131,9 @@ if [ "$mempool_bench_exit" -ne 0 ]; then
     echo "mempool bench failed"
     exit 1
 fi
+
+echo 'publish mempool benchmark metrics'
+METRICS_COMMIT_REPO=hogd-mempool-bench ./scripts/commit_metrics.sh
 
 """
 after = """

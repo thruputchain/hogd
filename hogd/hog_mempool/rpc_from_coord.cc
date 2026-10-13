@@ -3183,18 +3183,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         remove_from_scheduler_size = remove_from_scheduler->size();
         if (commit_plan.committed_nominated) {
           // We committed the block we nominated.
-          for (const TransactionHash &hash :
-               nominated_block_cache_.result_tx_hashes) {
-            co_await scheduler_->record_transaction_outcome(
-                hash,
-                /*status=*/
-                SchedulerTransactionStatus::SchedulerTransactionSucceeded,
-                /*height=*/
-                expected_value.proposal_header.block_height,
-                /*error_source=*/
-                SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
-                /*error_code=*/0);
-          }
+          co_await scheduler_->record_committed_transaction_outcomes(
+              x23::span<const TransactionHash>(
+                  nominated_block_cache_.result_tx_hashes),
+              expected_value.proposal_header.block_height);
           CHECK_EQ(nominated_block_cache_.failed_tx_hashes.size(),
                    nominated_block_cache_.failed_tx_results.size());
           for (size_t i = 0; i < nominated_block_cache_.failed_tx_hashes.size();
@@ -3213,17 +3205,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         }
         else {
           // We committed a block we validated.
-          for (const TransactionHash &hash : *remove_from_scheduler) {
-            co_await scheduler_->record_transaction_outcome(
-                hash,
-                /*status=*/
-                SchedulerTransactionStatus::SchedulerTransactionSucceeded,
-                /*height=*/
-                expected_value.proposal_header.block_height,
-                /*error_source=*/
-                SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
-                /*error_code=*/0);
-          }
+          co_await scheduler_->record_committed_transaction_outcomes(
+              x23::span<const TransactionHash>(*remove_from_scheduler),
+              expected_value.proposal_header.block_height);
         }
         co_await scheduler_->remove_from_scheduler(
             x23::span<const TransactionHash>(*remove_from_scheduler));
