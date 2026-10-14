@@ -107,6 +107,15 @@ endif()
 if(HOGD_FRAME_POINTERS)
   string(APPEND CMAKE_C_FLAGS_RELEASE " -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer")
   string(APPEND CMAKE_CXX_FLAGS_RELEASE " -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer")
+  # Except the rv32 threaded interpreter. Its handlers tail-call one another
+  # once per guest instruction, so a frame setup in a handler is paid on every
+  # dispatch of it. Targets that instantiate the dispatch chain add
+  # HOGD_RV32_INTERPRETER_COMPILE_OPTIONS; target options follow the global
+  # flags, so the later -fomit-frame-pointer wins, leaf frames included, under
+  # both GCC and Clang. Samples inside those targets still name the right
+  # function, but frame-pointer unwinding through them can stop short of the
+  # real callers.
+  set(HOGD_RV32_INTERPRETER_COMPILE_OPTIONS $<$<CONFIG:Release>:-fomit-frame-pointer>)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

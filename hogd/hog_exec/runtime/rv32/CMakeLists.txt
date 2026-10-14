@@ -265,6 +265,17 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}/hogd/xdr
 )
 
+# rv32_contract.cc is the node's only translation unit that instantiates the
+# threaded interpreter's dispatch chain: ThreadedMachinePreInstantiation::create
+# bakes the handlers, start() and resume_from_ecall() enter them. The handlers
+# are header templates, so another node TU calling those would emit its own copy
+# under the global flags, and the link would keep whichever copy it saw first.
+target_compile_options(
+  rv32_runtime_objects
+  PRIVATE
+  ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}
+)
+
 # LTO lets the final node link optimize across the interpreter, translation,
 # and syscall bridge, matching benchmark code generation. Top-level IPO checks
 # establish compiler support. This covers optimized single-config builds;
@@ -300,6 +311,13 @@ if(BUILD_BENCHMARKS)
     rv32_vm_bench
     PRIVATE
     ${CMAKE_BINARY_DIR}
+  )
+
+  # Measure the interpreter as the node builds it (see rv32_runtime_objects).
+  target_compile_options(
+    rv32_vm_bench
+    PRIVATE
+    ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}
   )
 
   if(HOGD_RV32_ENABLE_LTO)

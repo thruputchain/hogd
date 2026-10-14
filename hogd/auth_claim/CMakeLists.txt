@@ -24,6 +24,7 @@ target_link_libraries(
     auth_claim_tests
     auth_claim
     hogd
+    mldsa_signer
     GTest::gtest
 )
 hogd_discover_tests(auth_claim_tests)

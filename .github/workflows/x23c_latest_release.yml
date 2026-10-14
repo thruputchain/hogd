@@ -50,35 +50,24 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Configure private sources
+        uses: ./.github/actions/private-sources
+        with:
+          app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+          private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+          ssh-private-key: |
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -115,6 +104,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -164,6 +155,14 @@ jobs:
         if: always()
         uses: ./.github/actions/print-log-instructions
 
+      - name: Remove job-local Git credentials
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+            rm -f -- "$GIT_CONFIG_GLOBAL"
+          fi
+
   build-macos:
     if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
     runs-on: namespace-profile-hogd-arm64-macos
@@ -171,35 +170,24 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Configure private sources
+        uses: ./.github/actions/private-sources
+        with:
+          app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+          private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+          ssh-private-key: |
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -243,6 +231,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -286,6 +276,14 @@ jobs:
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
+
+      - name: Remove job-local Git credentials
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+            rm -f -- "$GIT_CONFIG_GLOBAL"
+          fi
 
   publish:
     needs: [build-linux, build-macos]
@@ -378,17 +376,19 @@ jobs:
 
       - name: Generate protocol synchronizer app token
         id: app-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.PROTOCOL_SYNCHRONIZER_APP_ID }}
           private-key: ${{ secrets.PROTOCOL_SYNCHRONIZER_SECRET_KEY }}
-          owner: groundhogchain
-          repositories: protocol-rs
+          owner: thruputchain
+          repositories: thruput-protocol-rs
+          permission-actions: write
 
       - name: Trigger protocol-rs auto-update
         run: |
           gh workflow run auto-update.yml \
-            --repo groundhogchain/protocol-rs
+            --repo thruputchain/thruput-protocol-rs \
+            --ref main
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 

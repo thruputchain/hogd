@@ -45,6 +45,10 @@ git submodule update --init --recursive --depth 1 --jobs 8 --quiet
 
 source ./scripts/ci/prepare_env.sh >prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
+# Both variants share this checkout and the prefetched Cargo cache. Neither
+# warm_ccache.sh nor build.sh clones again between builds.
+export CARGO_NET_OFFLINE=true
+
 for spec in "${WARMUP_SPECS[@]}"; do
   read -r warmup_compiler warmup_build_type warmup_variant <<<"$spec"
 

@@ -39,34 +39,23 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
+
+      - name: Configure private sources
+        uses: ./.github/actions/private-sources
+        with:
+          app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+          private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+          ssh-private-key: |
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -109,6 +98,14 @@ jobs:
         if: always()
         uses: ./.github/actions/print-log-instructions
 
+      - name: Remove job-local Git credentials
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+            rm -f -- "$GIT_CONFIG_GLOBAL"
+          fi
+
   # GCC Debug build + tests
   gcc-debug:
     # Each build job gets its own cache volume. Every job forks the volume at
@@ -121,34 +118,23 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
+
+      - name: Configure private sources
+        uses: ./.github/actions/private-sources
+        with:
+          app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+          private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+          ssh-private-key: |
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -190,6 +176,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -265,6 +253,14 @@ jobs:
         if: always()
         uses: ./.github/actions/print-log-instructions
 
+      - name: Remove job-local Git credentials
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+            rm -f -- "$GIT_CONFIG_GLOBAL"
+          fi
+
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
     runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-llvm-debug
@@ -272,34 +268,23 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
+
+      - name: Configure private sources
+        uses: ./.github/actions/private-sources
+        with:
+          app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+          private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+          ssh-private-key: |
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -341,6 +326,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -387,6 +374,14 @@ jobs:
         if: always()
         uses: ./.github/actions/print-log-instructions
 
+      - name: Remove job-local Git credentials
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+            rm -f -- "$GIT_CONFIG_GLOBAL"
+          fi
+
   # GCC Release build (parallel with debug builds)
   gcc-release:
     runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-gcc-release
@@ -394,34 +389,23 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
+
+      - name: Configure private sources
+        uses: ./.github/actions/private-sources
+        with:
+          app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+          private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+          ssh-private-key: |
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -463,6 +447,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -503,3 +489,10 @@ jobs:
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
+      - name: Remove job-local Git credentials
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+            rm -f -- "$GIT_CONFIG_GLOBAL"
+          fi

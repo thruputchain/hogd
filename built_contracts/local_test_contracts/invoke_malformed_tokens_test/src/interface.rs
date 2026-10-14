@@ -1,4 +1,4 @@
-use sdk::*;
+use thruput_sdk::*;
 
 /// Pins how the Invoke syscall treats a malformed owned-auth-token byte span
 /// (a length that is not a whole number of 4-byte ids) that arrives together

@@ -1,8 +1,8 @@
 use crate::interface::DripError;
 use crate::DripFaucet;
-use groundhog_erc20_if::ERC20Client;
-use sdk::storage::{CapacityConstraint, Keypath};
-use sdk::*;
+use thruput_erc20_if::ERC20Client;
+use thruput_sdk::storage::{CapacityConstraint, Keypath};
+use thruput_sdk::*;
 
 /// Blocks per budget window: a reset is allowed once this many blocks have
 /// passed since the last one.
@@ -56,7 +56,7 @@ impl DripFaucet for DripFaucetContract {
 
         let receiver = get_caller();
         let token =
-            ERC20Client::new(&sdk::precompiles::ADDRESS_PRECOMPILED_HOG_TOKEN);
+            ERC20Client::new(&thruput_sdk::precompiles::ADDRESS_PRECOMPILED_HOG_TOKEN);
         token.mint(&receiver, amount);
     }
 }

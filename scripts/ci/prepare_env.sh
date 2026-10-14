@@ -5,6 +5,10 @@ set -ex
 echo 'setting up cargo'
 source ./scripts/ci/setup_cargo.sh
 
+# Fetch private workspace sources before any potentially lengthy tool builds.
+echo 'cargo fetch'
+CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh || return $?
+
 echo 'setting up ccache'
 ln -s "$USER_HOME/.cache" "$HOME/.cache"
 
@@ -33,9 +37,6 @@ echo $PATH
 
 echo 'cargo version check'
 cargo --version
-
-echo 'cargo fetch'
-CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
 
 echo 'set gcc-15 in check'
 echo "GCC_CC=gcc-15 GCC_CXX=g++-15" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh

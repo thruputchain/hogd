@@ -89,12 +89,9 @@ protected:
 
   static PubkeyAccountPreimage make_preimage(uint8_t seed)
   {
-    PubkeyAccountPreimage p{};
-    p.pubkey.scheme(CryptographicScheme::Ed25519);
-    p.pubkey.ed25519() = Ed25519PublicKey{};
-    p.pubkey.ed25519().fill(seed);
-    p.nonce = seed;
-    return p;
+    PublicKey key(CryptographicScheme::Ed25519);
+    key.ed25519().fill(seed);
+    return make_pubkey_account_preimage(key, seed);
   }
 
   static AuthClaim make_pubkey_claim(PubkeyAccountPreimage const &preimage)
@@ -638,12 +635,9 @@ protected:
 
   static PubkeyAccountPreimage make_preimage(uint8_t seed)
   {
-    PubkeyAccountPreimage p{};
-    p.pubkey.scheme(CryptographicScheme::Ed25519);
-    p.pubkey.ed25519() = Ed25519PublicKey{};
-    p.pubkey.ed25519().fill(seed);
-    p.nonce = seed;
-    return p;
+    PublicKey key(CryptographicScheme::Ed25519);
+    key.ed25519().fill(seed);
+    return make_pubkey_account_preimage(key, seed);
   }
 
   static AuthClaim make_pubkey_claim(PubkeyAccountPreimage const &preimage)

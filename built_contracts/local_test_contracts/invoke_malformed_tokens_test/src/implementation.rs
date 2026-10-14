@@ -1,7 +1,7 @@
 use crate::InvokeMalformedTokensTest;
-use sdk::sys::{self, SyscallErrorCode};
-use sdk::transaction::InvocationFrameStatusCode;
-use sdk::*;
+use thruput_sdk::sys::{self, SyscallErrorCode};
+use thruput_sdk::transaction::InvocationFrameStatusCode;
+use thruput_sdk::*;
 
 pub struct InvokeMalformedTokensTestContract;
 
@@ -77,7 +77,7 @@ impl InvokeMalformedTokensTest for InvokeMalformedTokensTestContract {
     fn test_malformed_tokens_beat_reentrance() {
         // Self-invoke: admission would refuse this as kReentrance, so seeing
         // kInvalidSyscallInput instead pins the span check ahead of admission.
-        let addr = sdk::get_current_address();
+        let addr = thruput_sdk::get_current_address();
         invoke_with_malformed_tokens(&addr);
     }
 

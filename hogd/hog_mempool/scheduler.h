@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <list>
 #include <map>
@@ -96,6 +97,12 @@ public:
       SchedulerTransactionErrorSource error_source =
           SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
       int32_t error_code = 0);
+
+  // Records successful commits in bounded batches, sharing pruning and lock
+  // acquisition across transactions. Existing committed outcomes keep their
+  // original height, just as in [record_transaction_outcome].
+  x23::Async<void> record_committed_transaction_outcomes(
+      x23::span<const TransactionHash> tx_hashes, BlockHeight height);
 
   x23::Async<void> clear_transaction_outcome_if_not_already_committed(
       const TransactionHash &tx_hash);
@@ -229,13 +236,64 @@ public:
   x23::CoroLock global_lock_;
 
 private:
-  struct TransactionOutcomeEntry {
+  friend class Scheduler_BatchCommittedOutcomesCrossChunks_Test;
+
+  // Reuse the keyed hash calculated for shard selection during map probes
+  // and eviction. The cached value is internal; transaction identity remains
+  // the original SHA-256 hash.
+  struct TransactionOutcomeKey {
     TransactionHash tx_hash;
+    size_t cached_hash;
+
+    explicit TransactionOutcomeKey(const TransactionHash &hash)
+      : tx_hash(hash), cached_hash(SipHash24Hasher{}(hash))
+    {}
+    bool operator==(const TransactionOutcomeKey &other) const
+    {
+      return tx_hash == other.tx_hash;
+    }
+  };
+  struct TransactionOutcomeHasher {
+    size_t operator()(const TransactionOutcomeKey &key) const noexcept
+    {
+      return key.cached_hash;
+    }
+  };
+  struct TransactionOutcomeEntry {
+    TransactionOutcomeKey key;
     SchedulerTransactionOutcome outcome;
     // We record the height since we use the height to evict tx outcomes that
     // are at least [kTransactionOutcomeBlockLifetime] blocks old.
     BlockHeight processed_height;
   };
+
+  static constexpr size_t kTransactionOutcomeShards = 64;
+  static_assert(kMaxTransactionOutcomes % kTransactionOutcomeShards == 0);
+  static constexpr size_t kMaxTransactionsPerShard =
+      kMaxTransactionOutcomes / kTransactionOutcomeShards;
+  static constexpr size_t kTransactionOutcomeChunkSize = 4096;
+  struct TransactionOutcomeShard {
+    x23::CoroLock lock;
+    std::list<TransactionOutcomeEntry> order;
+    std::unordered_map<TransactionOutcomeKey,
+                       std::list<TransactionOutcomeEntry>::iterator,
+                       TransactionOutcomeHasher>
+        outcomes;
+    // Admission only clears failed outcomes. Most shards contain successes
+    // exclusively, so avoid locking and probing the large success cache in
+    // that case. Writers update this count while holding [lock].
+    std::atomic<size_t> failed_outcomes = 0;
+  };
+  static size_t transaction_outcome_shard_index(const TransactionHash &hash)
+  {
+    return SipHash24Hasher{}(hash) % kTransactionOutcomeShards;
+  }
+
+  static size_t
+  transaction_outcome_shard_index(const TransactionOutcomeKey &key)
+  {
+    return key.cached_hash % kTransactionOutcomeShards;
+  }
 
   struct TxKey {
     BlockHeight expiry_block_height;
@@ -298,8 +356,8 @@ private:
   x23::Async<bool> account_is_ready(const ContractAddress &account,
                                     bool remove_expired_txs);
 
-  x23::Async<bool> add_txs_helper(const SignedTransaction &tx,
-                                  const TransactionHash &tx_hash);
+  bool add_txs_helper(const SignedTransaction &tx,
+                      const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
   x23::Async<void> cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
@@ -340,6 +398,15 @@ private:
   bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
   x23::Async<void> prune_transaction_outcomes();
+  // These helpers require [shard.lock].
+  static void prune_transaction_outcomes_locked(TransactionOutcomeShard &shard,
+                                                BlockHeight height);
+  static void record_transaction_outcome_locked(
+      TransactionOutcomeShard &shard, const TransactionOutcomeKey &key,
+      const SchedulerTransactionOutcome &outcome, BlockHeight processed_height);
+  static void erase_transaction_outcome_locked(
+      TransactionOutcomeShard &shard,
+      std::list<TransactionOutcomeEntry>::iterator entry);
 
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
@@ -364,12 +431,10 @@ private:
   std::atomic<ssize_t> tx_cache_size_ = 0;
   std::atomic<BlockHeight> current_block_ = -1;
 
-  x23::CoroLock transaction_outcomes_lock_;
-  std::list<TransactionOutcomeEntry> transaction_outcomes_order_;
-  std::unordered_map<TransactionHash,
-                     std::list<TransactionOutcomeEntry>::iterator,
-                     SipHash24Hasher>
-      transaction_outcomes_;
+  // Each shard owns an equal share of the capacity and evicts its oldest
+  // outcomes at that limit. Keyed hashing distributes transaction hashes.
+  std::array<TransactionOutcomeShard, kTransactionOutcomeShards>
+      transaction_outcome_shards_;
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for

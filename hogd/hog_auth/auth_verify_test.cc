@@ -190,7 +190,7 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
 {
   auto [pk, sk] = make_key_pair();
-  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
 
   // No auth data is registered for the derived address.
   mock_db().compute_key_changes_for_current_height();
@@ -207,6 +207,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
 
   SignedTransaction stx{};
   stx.tx = tx;
+  stx.pubkey_claim_key = pk;
   stx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx};
@@ -222,6 +223,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
   auto [pk2, sk2] = make_key_pair();
   SignedTransaction bad_stx{};
   bad_stx.tx = tx;
+  bad_stx.pubkey_claim_key = pk;
   bad_stx.signatures.push_back(make_signature(sk2, tx, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> bad_vec{bad_stx};
@@ -234,7 +236,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
 TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 {
   auto [pk, sk] = make_key_pair();
-  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
   auto derived_address = pubkey_auth_address(preimage);
   ASSERT_TRUE(derived_address.has_value());
   ContractAddress address = *derived_address;
@@ -250,6 +252,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 
   SignedTransaction stx{};
   stx.tx = tx;
+  stx.pubkey_claim_key = pk;
   stx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx};
@@ -282,7 +285,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 {
   auto [pk, sk] = make_key_pair();
-  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
   auto derived_address = pubkey_auth_address(preimage);
   ASSERT_TRUE(derived_address.has_value());
   ContractAddress address = *derived_address;
@@ -301,6 +304,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
   pubkey_tx.auth_claim = make_pubkey_claim(preimage);
   SignedTransaction pubkey_stx{};
   pubkey_stx.tx = pubkey_tx;
+  pubkey_stx.pubkey_claim_key = pk;
   pubkey_stx.signatures.push_back(
       make_signature(sk, pubkey_tx, /*public_key_id=*/0));
 

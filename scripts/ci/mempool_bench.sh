@@ -184,8 +184,11 @@ if [[ $coordinator_status -ne 0 ]]; then
   exit "$coordinator_status"
 fi
 
+echo 'coordinator benchmark results'
+cat coordinator_output.txt
+
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
 
 echo 'log integration metrics'
-./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
+./scripts/log_metric.sh "${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool}" coordinator_output.txt

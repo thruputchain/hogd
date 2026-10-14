@@ -586,6 +586,16 @@ template<is_xdr_cat<XdrCategory::kPtr> X> struct CxsSerializer<X> {
   }
 };
 
+// A Box of a non-struct, non-union type encodes as its contents (see
+// is_boxed_leaf). Boxed structs and unions take the struct and union paths.
+template<typename T> requires is_boxed_leaf<Box<T>>
+struct CxsSerializer<Box<T>> {
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const Box<T> &value)
+  {
+    return CxsSerializer<T>::store(buf, *value);
+  }
+};
+
 // float and double are special cased because they are not integral types
 template<typename T>
 requires (is_xdr_cat<T, XdrCategory::kPrimitive> && !std::is_integral_v<T>)
@@ -656,7 +666,9 @@ cxs_size(const T &x)
 {
   using X = std::remove_cvref_t<T>;
   using enum XdrCategory;
-  if constexpr (std::same_as<X, bool>)
+  if constexpr (is_boxed_leaf<X>)
+    return cxs_size(*x);
+  else if constexpr (std::same_as<X, bool>)
     return 1;
   else if constexpr (std::signed_integral<X>)
     return cxs_integral_encoded_size(cxs_int_get_function_index(x));
@@ -834,6 +846,12 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
       std::memcpy(value.data(), data.data(), value.size());
     data = data.subspan(value.size());
     return {};
+  }
+
+  template<typename T> requires is_boxed_leaf<Box<T>>
+  CxsStatus<void> go(Box<T> &value)
+  {
+    return go(*value);
   }
 
   template<is_xdr_struct T> CxsStatus<void> go(T &value)

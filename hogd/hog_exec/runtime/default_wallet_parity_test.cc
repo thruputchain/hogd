@@ -115,12 +115,9 @@ protected:
 
   static PubkeyAccountPreimage make_preimage(uint8_t seed)
   {
-    PubkeyAccountPreimage p{};
-    p.pubkey.scheme(CryptographicScheme::Ed25519);
-    p.pubkey.ed25519() = Ed25519PublicKey{};
-    p.pubkey.ed25519().fill(seed);
-    p.nonce = seed;
-    return p;
+    PublicKey key(CryptographicScheme::Ed25519);
+    key.ed25519().fill(seed);
+    return make_pubkey_account_preimage(key, seed);
   }
 
   // Builds the multiplexed context; `extra` lets tests add driver contracts.
