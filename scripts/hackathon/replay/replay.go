@@ -173,7 +173,10 @@ func Run(ctx context.Context, c Config) error {
 	if err = os.WriteFile(filepath.Join(c.Output, "config.json"), configFile, 0644); err != nil {
 		return err
 	}
-	transport := &http.Transport{MaxIdleConns: c.Outstanding + 32, MaxIdleConnsPerHost: c.Outstanding + 32, MaxConnsPerHost: c.Outstanding + 32}
+	// Receipt workers and telemetry must retain connections even when every
+	// submission slot is occupied, including runs configured with many pollers.
+	connections := c.Outstanding + c.ReceiptWorkers + 32
+	transport := &http.Transport{MaxIdleConns: connections, MaxIdleConnsPerHost: connections, MaxConnsPerHost: connections}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: c.Timeout}
 	// Setup uses the same gateway as measured submissions and completes before
