@@ -16,7 +16,7 @@ env:
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.4"
+  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.6"
 
 permissions:
   contents: write
@@ -61,9 +61,7 @@ jobs:
             ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
             ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
@@ -101,6 +99,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -271,9 +271,7 @@ jobs:
             ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
             ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
@@ -318,6 +316,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive

@@ -9,6 +9,8 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/lthash16.h"
+#include "hogd/crypto/mldsa.h"
+#include "hogd/crypto/mldsa_signer.h"
 #include "hogd/init.h"
 
 namespace hogd {
@@ -89,6 +91,27 @@ bm_ed25519_sign_and_verify(benchmark::State &state)
 }
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 BENCHMARK(bm_ed25519_sign_and_verify)->RangeMultiplier(2)->Range(kMin, kMax);
+
+void
+bm_mldsa65_verify(benchmark::State &state)
+{
+  auto key = MlDsa65SigningKey::generate();
+  std::vector<std::byte> msg(state.range(0));
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  auto sig = key.sign(msg).value();
+  // NOLINTEND(bugprone-unchecked-optional-access)
+  if (!mldsa65_verify(key.public_key(), sig, msg)) {
+    state.SkipWithError("signature does not verify");
+    return;
+  }
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(mldsa65_verify(key.public_key(), sig, msg));
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(state.range(0)));
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_mldsa65_verify)->RangeMultiplier(2)->Range(kMin, kMax);
 
 void
 bm_lthash16_add(benchmark::State &state)

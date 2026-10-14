@@ -49,9 +49,7 @@ jobs:
             ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
             ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
             ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
             ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
@@ -114,6 +112,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
