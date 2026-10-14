@@ -44,6 +44,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_mempool/config_hash.h"
+#include "hogd/hog_mempool/ingestion_diagnostics.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "parallel.hh"

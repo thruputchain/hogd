@@ -62,7 +62,7 @@ public:
   // on every lock acquisition when diagnostics are disabled.
   AwaitAcquire operator()(x23::CoroLock &lock)
   {
-    return {guard_(lock), *this, std::nullopt};
+    return {.inner = guard_(lock), .owner = *this, .timer = std::nullopt};
   }
   void reset()
   {
