@@ -951,7 +951,7 @@ TEST_F(IndexDBTest, GetEventsCursorSeeksDirectlyWithinDenseBlock)
       q.cursor = page->cursor;
     }
     std::vector<uint8_t> expected(kTxCount);
-    std::iota(expected.begin(), expected.end(), 1);
+    std::ranges::iota(expected, 1);
     if (order == IterationOrder::IterationOrderDescending) {
       std::ranges::reverse(expected);
     }
