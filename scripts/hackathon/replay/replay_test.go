@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -168,12 +169,44 @@ func TestConfigurationRejectedBeforeCreatingOutput(t *testing.T) {
 	}
 }
 
+func TestHTTPRejectionsAndAmbiguousFailures(t *testing.T) {
+	for _, code := range []int{429, 408, 500} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(code)
+			}))
+			defer server.Close()
+			outcome, err := submit(context.Background(), server.Client(), server.URL, Operation{}, 0)
+			var status httpStatusError
+			if outcome != "http_error" || !errors.As(err, &status) || status.code != code {
+				t.Fatalf("HTTP failure misclassified: %s %v", outcome, err)
+			}
+			result := Result{StartNs: 1, Outcome: outcome, HTTPStatus: status.code}
+			if got, want := needsReceipt(result), code != 429; got != want {
+				t.Fatalf("receipt eligibility: got %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestAmbiguousSubmissionIsReconciledByReceipt(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var requests []rpcRequest
+		if err := json.NewDecoder(r.Body).Decode(&requests); err != nil {
+			t.Error(err)
+		}
+		for _, req := range requests {
+			if req.ID != 0 {
+				t.Error("polled a transaction rejected with HTTP 429")
+			}
+		}
 		fmt.Fprint(w, `[{"id":0,"error":null,"result":{"txHash":"0x01","height":"3","status":{"result":"ok"},"gasUsed":"120"}}]`)
 	}))
 	defer server.Close()
-	results := []Result{{Operation: Operation{Hash: "0x01", Kind: "deploy", App: 7}, StartNs: 1, Outcome: "transport_error"}}
+	results := []Result{
+		{Operation: Operation{Hash: "0x01", Kind: "deploy", App: 7}, StartNs: 1, Outcome: "transport_error"},
+		{Operation: Operation{Hash: "0x02", Kind: "call"}, StartNs: 1, Outcome: "http_error", HTTPStatus: 429},
+	}
 	var mu sync.Mutex
 	deployed := map[int]bool{}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

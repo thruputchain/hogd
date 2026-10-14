@@ -189,7 +189,12 @@ class Cluster:
         self.wait_log("coordinator", "waiting for work tx batch 0 to arrive from loadgen")
         for name in ("exec0", "exec1", "indexer", "mempool", "db", "auth"):
             self.wait_log(name, {"exec0": "hog_exec", "exec1": "hog_exec", "db": "hog_db", "auth": "auth server"}.get(name, name) + " initialization complete")
-        gateway_prefix = [a.gateway]
+        # Match the gateway's connection budget to the replay client instead
+        # of benchmarking its small default TCP connection cap.
+        gateway_config = d / "gateway.toml"
+        gateway_config.write_text(f"max_connections = {a.outstanding + a.receipt_workers + 128}\n")
+        self.stage(gateway_config, self.hosts["gateway"], gateway_config)
+        gateway_prefix = [a.gateway, "--config", gateway_config]
         if a.gateway_protocol:
             gateway_prefix += ["--hogd-protocol", a.gateway_protocol]
         self.start("gateway", [*gateway_prefix, "--network-hash", network, "--listen", addr("gateway",9546), "--observability-listen", addr("gateway",9547), "--scheduler", addr("mempool",8076), "--indexer", addr("indexer",8061), "--db-gateway", addr("db",8084), "--view-gateway", addr("exec0",8044), "--health-required-backends", "scheduler,indexer,db_gateway,view_gateway"])
