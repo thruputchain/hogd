@@ -5,8 +5,8 @@
 #include <cstdint> // NOLINT(misc-include-cleaner)
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <initializer_list>
+#include <numeric>
 #include <span>
 #include <utility>
 #include <vector>
@@ -950,10 +950,12 @@ TEST_F(IndexDBTest, GetEventsCursorSeeksDirectlyWithinDenseBlock)
       }
       q.cursor = page->cursor;
     }
-    ASSERT_EQ(seen.size(), kTxCount);
-    EXPECT_TRUE(order == IterationOrder::IterationOrderAscending
-                    ? std::ranges::is_sorted(seen, std::less{})
-                    : std::ranges::is_sorted(seen, std::greater{}));
+    std::vector<uint8_t> expected(kTxCount);
+    std::iota(expected.begin(), expected.end(), 1);
+    if (order == IterationOrder::IterationOrderDescending) {
+      std::ranges::reverse(expected);
+    }
+    EXPECT_EQ(seen, expected);
   }
 
   EventCursorPayload payload;
